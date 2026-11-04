@@ -28,11 +28,11 @@ jobs:
         run: |
           # GitHub에 하위 폴더로 올라가 있는 경우에도 자동 감지하여 루트로 복사
           if [ ! -f "lib/screens/pdf_and_image_viewer.dart" ]; then
-            FOUND_PUBSPEC=$(find . -maxdepth 3 -name "pubspec.yaml" | grep -v "^\./pubspec\.yaml$" | head -n 1)
-            if [ -n "$FOUND_PUBSPEC" ]; then
+            FOUND_PUBSPEC=$(find . -maxdepth 3 -name "pubspec.yaml" \vert{} grep -v "^\./pubspec\.yaml$" | head -n 1)
+            if [ -n "\$FOUND_PUBSPEC" ]; then
               SUBDIR=$(dirname "$FOUND_PUBSPEC")
-              echo "Found v6 project inside subdirectory: $SUBDIR. Moving to root..."
-              cp -rf "$SUBDIR"/* .
+              echo "Found v6 project inside subdirectory: \$SUBDIR. Moving to root..."
+              cp -rf "\$SUBDIR"/* .
             fi
           fi
 
@@ -47,10 +47,10 @@ jobs:
           cp -f pubspec.yaml /tmp/v6_backup/
           cp -rf android_override /tmp/v6_backup/
 
-          # Android 플랫폼 파일 생성 (v3와 동일 방식)
+          # Android 플랫폼 파일 생성
           flutter create . --project-name my_ebook_reader --org com.example
 
-          # flutter create가 생성한 기본 카운터 앱(Flutter Demo Home Page)을 지우고 백업해둔 v6 e북 리더기 코드로 100% 복원!
+          # flutter create가 생성한 기본 카운터 앱을 지우고 백업해둔 v6 e북 리더기 코드로 100% 복원
           rm -rf lib test
           cp -rf /tmp/v6_backup/lib .
           cp -f /tmp/v6_backup/pubspec.yaml .
@@ -94,8 +94,9 @@ jobs:
             fi
           fi
 
-          # 2. Force all plugin subprojects to compile against SDK 36
+          # 2. Force all plugin subprojects to compile against SDK 36 (evaluationDependsOn(":app") 순서 충돌 방지)
           if [ -f android/build.gradle ]; then
+            sed -i '/evaluationDependsOn/d' android/build.gradle
             cat << 'SUBGRAD' >> android/build.gradle
 
           subprojects {
@@ -107,10 +108,14 @@ jobs:
                   }
               }
           }
+          subprojects {
+              project.evaluationDependsOn(":app")
+          }
           SUBGRAD
           fi
 
           if [ -f android/build.gradle.kts ]; then
+            sed -i '/evaluationDependsOn/d' android/build.gradle.kts
             cat << 'SUBKTS' >> android/build.gradle.kts
 
           subprojects {
@@ -119,28 +124,3 @@ jobs:
                       extensions.configure<com.android.build.gradle.BaseExtension>("android") {
                           compileSdkVersion(36)
                       }
-                  }
-              }
-          }
-          SUBKTS
-          fi
-
-          # 3. AndroidManifest.xml 인터넷 권한 및 앱 이름 설정
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST" ]; then
-            if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
-              sed -i 's/<manifest[^>]*>/&\n    <uses-permission android:name="android.permission.INTERNET"\/>/' "$MANIFEST"
-            fi
-            sed -i 's/android:label="[^"]*"/android:label="올인원 모바일 리더기"/' "$MANIFEST"
-          fi
-
-      - name: 5. Install Dependencies & Build Release APK
-        run: |
-          flutter pub get
-          flutter build apk --release --no-tree-shake-icons
-
-      - name: 6. Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: my-ebook-reader-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
