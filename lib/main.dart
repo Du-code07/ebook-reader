@@ -808,17 +808,40 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                     icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
                                     tooltip: '영구 삭제',
                                     onPressed: () async {
-                                      final appDir = await getApplicationDocumentsDirectory();
-                                      await StorageService.removeBookMetadata('${appDir.path}/$fileName');
-                                      if (await tf.exists()) {
-                                        await tf.delete();
-                                      }
-                                      await _loadLibrary();
-                                      setModalState(() {});
-                                      if (mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text('"$fileName" 파일이 영구 삭제되었습니다.')),
-                                        );
+                                      final confirmDelete = await showDialog<bool>(
+                                        context: ctx,
+                                        builder: (dCtx) => AlertDialog(
+                                          title: const Text('영구 삭제'),
+                                          content: Text('"$fileName" 파일을 영구 삭제할까요?'),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(dCtx, false),
+                                              child: const Text('취소'),
+                                            ),
+                                            ElevatedButton(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.redAccent,
+                                                foregroundColor: Colors.white,
+                                              ),
+                                              onPressed: () => Navigator.pop(dCtx, true),
+                                              child: const Text('영구 삭제'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      if (confirmDelete == true) {
+                                        final appDir = await getApplicationDocumentsDirectory();
+                                        await StorageService.removeBookMetadata('${appDir.path}/$fileName');
+                                        if (await tf.exists()) {
+                                          await tf.delete();
+                                        }
+                                        await _loadLibrary();
+                                        setModalState(() {});
+                                        if (mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text('"$fileName" 파일이 영구 삭제되었습니다.')),
+                                          );
+                                        }
                                       }
                                     },
                                   ),

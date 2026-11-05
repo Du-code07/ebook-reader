@@ -10,7 +10,9 @@ class VolumeKeyService {
   Future<void> startListening({
     required VoidCallback onVolumeUp,
     required VoidCallback onVolumeDown,
-    VoidCallback? onScreenLockButton,
+    VoidCallback? onVolumeBothUnlock,
+    VoidCallback? onSpenSinglePress,
+    VoidCallback? onSpenDoublePress,
   }) async {
     await _methodChannel.invokeMethod('setIntercept', {'enabled': true});
     _subscription?.cancel();
@@ -19,8 +21,12 @@ class VolumeKeyService {
         onVolumeUp();
       } else if (event == 'DOWN') {
         onVolumeDown();
-      } else if (event == 'SCREEN_LOCK_BTN') {
-        onScreenLockButton?.call();
+      } else if (event == 'VOL_BOTH_UNLOCK') {
+        onVolumeBothUnlock?.call();
+      } else if (event == 'SPEN_SINGLE') {
+        onSpenSinglePress?.call();
+      } else if (event == 'SPEN_DOUBLE') {
+        onSpenDoublePress?.call();
       }
     });
   }

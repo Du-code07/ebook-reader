@@ -1,14 +1,14 @@
 package com.example.my_ebook_reader
 
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -23,28 +23,21 @@ class MainActivity: FlutterActivity() {
 
     private var eventSink: EventChannel.EventSink? = null
     private var isVolumeInterceptEnabled = false
-    private var screenOffReceiver: BroadcastReceiver? = null
+
+    // 음량 버튼 2개(UP + DOWN) 동시 누름 감지용 상태
+    private var isVolUpPressed = false
+    private var isVolDownPressed = false
+    private var comboTriggered = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingVolUpRunnable: Runnable? = null
+    private var pendingVolDownRunnable: Runnable? = null
+
+    // 갤럭시 S펜 버튼 1번 클릭(다음 페이지) / 2번 연속 클릭(이전 페이지) 감지용 상태
+    private var spenClickCount = 0
+    private var pendingSpenRunnable: Runnable? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-
-        // 물리적인 화면 잠금(전원) 버튼을 누를 때(ACTION_SCREEN_OFF / ACTION_USER_PRESENT) 터치 잠금 해제 이벤트 전달
-        screenOffReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                val action = intent?.action
-                if (action == Intent.ACTION_SCREEN_OFF ||
-                    action == Intent.ACTION_SCREEN_ON ||
-                    action == Intent.ACTION_USER_PRESENT) {
-                    eventSink?.success("SCREEN_LOCK_BTN")
-                }
-            }
-        }
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_OFF)
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_USER_PRESENT)
-        }
-        registerReceiver(screenOffReceiver, filter)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -113,35 +106,131 @@ class MainActivity: FlutterActivity() {
             }
     }
 
-    override fun onDestroy() {
-        screenOffReceiver?.let {
-            try {
-                unregisterReceiver(it)
-            } catch (_: Exception) {}
+    private fun triggerSpenButtonPress() {
+        spenClickCount++
+        pendingSpenRunnable?.let { mainHandler.removeCallbacks(it) }
+        if (spenClickCount >= 2) {
+            spenClickCount = 0
+            eventSink?.success("SPEN_DOUBLE")
+        } else {
+            val r = Runnable {
+                if (spenClickCount == 1) {
+                    eventSink?.success("SPEN_SINGLE")
+                }
+                spenClickCount = 0
+            }
+            pendingSpenRunnable = r
+            mainHandler.postDelayed(r, 320L)
         }
-        super.onDestroy()
+    }
+
+    // 갤럭시 S펜 호버 상태에서 펜 옆면 버튼을 누를 때 발생하는 스타일러스 버튼 이벤트 감지
+    private var wasStylusButtonPressed = false
+    override fun dispatchGenericMotionEvent(ev: MotionEvent?): Boolean {
+        if (ev != null && (ev.isFromSource(InputDevice.SOURCE_STYLUS) || ev.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS)) {
+            val isPressed = (ev.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0 ||
+                            (ev.buttonState and MotionEvent.BUTTON_SECONDARY) != 0
+            if (isPressed && !wasStylusButtonPressed) {
+                wasStylusButtonPressed = true
+                triggerSpenButtonPress()
+                return true
+            } else if (!isPressed) {
+                wasStylusButtonPressed = false
+            }
+        }
+        return super.dispatchGenericMotionEvent(ev)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (isVolumeInterceptEnabled) {
-            when (keyCode) {
-                KeyEvent.KEYCODE_VOLUME_UP -> {
-                    eventSink?.success("UP")
-                    return true
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                if (event?.repeatCount == 0) {
+                    isVolUpPressed = true
+                    if (isVolDownPressed) {
+                        comboTriggered = true
+                        pendingVolDownRunnable?.let { mainHandler.removeCallbacks(it) }
+                        pendingVolUpRunnable?.let { mainHandler.removeCallbacks(it) }
+                        eventSink?.success("VOL_BOTH_UNLOCK")
+                        return true
+                    }
+                    val r = Runnable {
+                        if (!comboTriggered) {
+                            eventSink?.success("UP")
+                        }
+                    }
+                    pendingVolUpRunnable = r
+                    mainHandler.postDelayed(r, 95L)
                 }
-                KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                    eventSink?.success("DOWN")
-                    return true
+                return true
+            }
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                if (event?.repeatCount == 0) {
+                    isVolDownPressed = true
+                    if (isVolUpPressed) {
+                        comboTriggered = true
+                        pendingVolUpRunnable?.let { mainHandler.removeCallbacks(it) }
+                        pendingVolDownRunnable?.let { mainHandler.removeCallbacks(it) }
+                        eventSink?.success("VOL_BOTH_UNLOCK")
+                        return true
+                    }
+                    val r = Runnable {
+                        if (!comboTriggered) {
+                            eventSink?.success("DOWN")
+                        }
+                    }
+                    pendingVolDownRunnable = r
+                    mainHandler.postDelayed(r, 95L)
                 }
+                return true
+            }
+
+            // 갤럭시 태블릿 S펜 에어 액션(Air Actions) 원격 버튼 키코드 지원 (1번 클릭 / 2번 클릭)
+            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN ||
+                keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+                keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
+                keyCode == KeyEvent.KEYCODE_SPACE ||
+                keyCode == KeyEvent.KEYCODE_ENTER ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_NEXT) {
+                if (event?.repeatCount == 0) {
+                    triggerSpenButtonPress()
+                }
+                return true
+            }
+            if (keyCode == KeyEvent.KEYCODE_PAGE_UP ||
+                keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+                keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
+                if (event?.repeatCount == 0) {
+                    eventSink?.success("SPEN_DOUBLE")
+                }
+                return true
             }
         }
         return super.onKeyDown(keyCode, event)
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-        if (isVolumeInterceptEnabled &&
-            (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
-            return true
+        if (isVolumeInterceptEnabled) {
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                isVolUpPressed = false
+                if (!isVolDownPressed) comboTriggered = false
+                return true
+            }
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                isVolDownPressed = false
+                if (!isVolUpPressed) comboTriggered = false
+                return true
+            }
+            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN ||
+                keyCode == KeyEvent.KEYCODE_PAGE_UP ||
+                keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+                keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+                keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
+                keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+                keyCode == KeyEvent.KEYCODE_SPACE ||
+                keyCode == KeyEvent.KEYCODE_ENTER) {
+                return true
+            }
         }
         return super.onKeyUp(keyCode, event)
     }

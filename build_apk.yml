@@ -41,6 +41,9 @@ jobs:
           fi
 
           # Dart 3.x / Flutter 3.47+ 에서 .clamp() 반환 타입(num)이 Positioned(double?)에 전달될 때 발생하는 타입 오류 자동 보정
+          if [ -f "lib/services/storage_service.dart" ]; then
+            sed -i 's/jsonEncode(bubbles.map((e) => e.toJson())).toList()/jsonEncode(bubbles.map((e) => e.toJson()).toList())/g' lib/services/storage_service.dart
+          fi
           if [ -f "lib/screens/pdf_and_image_viewer.dart" ]; then
             sed -i 's/left: boxLeft,/left: boxLeft.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
             sed -i 's/math.max<int>(1, b.translatedText.length \* 1.8)/math.max<double>(1.0, b.translatedText.length * 1.8)/g' lib/screens/pdf_and_image_viewer.dart
@@ -51,6 +54,7 @@ jobs:
             sed -i 's/bottom: math.max(bottomInset + 26, 28),/bottom: math.max<double>(bottomInset + 26.0, 28.0),/g' lib/screens/pdf_and_image_viewer.dart
           fi
 
+          rm -f sample_japanese_test_book.epub
           mkdir -p /tmp/v7_backup
           cp -rf lib /tmp/v7_backup/
           cp -f pubspec.yaml /tmp/v7_backup/

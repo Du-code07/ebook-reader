@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
@@ -35,13 +36,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   String? _selectedCfiRange;
   bool _isLoading = true;
   bool _isDarkMode = false;
-  bool _useVolumeKeys = true;
   bool _enableTwoPageInLandscape = true;
   int _fontSize = 18;
   List<EpubChapter> _chapters = [];
 
   bool _showControls = false;
   bool _isTouchLocked = false;
+  bool _useVolumeTurn = true;
+  bool _useQuickNavTurn = false;
+  bool _useSpenTurn = true;
+  String _bookMemoNote = '';
+
   String _footerInfoMode = 'both';
   String _progressBarPos = 'right';
   double _progress = 0.0;
@@ -59,25 +64,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _initReader();
   }
 
-  /// 물리적인 화면 잠금(전원) 버튼을 누르면 화면 터치 잠금 자동 해제!
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_isTouchLocked &&
-        (state == AppLifecycleState.paused ||
-            state == AppLifecycleState.inactive ||
-            state == AppLifecycleState.resumed)) {
-      _unlockTouchScreen();
-    }
-  }
-
-  void _unlockTouchScreen() {
+  void _unlockTouchScreenByVolumeCombo() {
     if (!_isTouchLocked || !mounted) return;
     setState(() {
       _isTouchLocked = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('화면 터치 잠금이 해제되었습니다.'),
+        content: Text('음량 버튼 동시 입력으로 화면 터치 잠금이 해제되었습니다.'),
         duration: Duration(seconds: 1),
       ),
     );
@@ -90,7 +84,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('화면 터치가 잠겼습니다. (음량 버튼으로 페이지 이동 / 물리 화면 잠금 버튼을 누르면 잠금 해제)'),
+        content: Text('화면 터치가 잠겼습니다. (음량 버튼 2개를 동시에 누르면 잠금 해제)'),
         duration: Duration(seconds: 2),
       ),
     );
@@ -104,10 +98,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final isDark = await StorageService.getDarkMode();
     final footerMode = await StorageService.getFooterInfoMode();
     final barPos = await StorageService.getProgressBarPosition();
+    final volTurn = await StorageService.getUseVolumeTurn();
+    final quickTurn = await StorageService.getUseQuickNavTurn();
+    final spenTurn = await StorageService.getUseSpenTurn();
+    final memo = await StorageService.getPageMemoNote(widget.filePath, 0);
 
-    if (_useVolumeKeys) {
-      _enableVolumeNavigation();
-    }
+    _bindHardwareButtons();
+
     setState(() {
       _initialCfi = savedCfi;
       _currentCfi = savedCfi;
@@ -117,21 +114,66 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _isDarkMode = isDark;
       _footerInfoMode = footerMode;
       _progressBarPos = barPos;
+      _useVolumeTurn = volTurn;
+      _useQuickNavTurn = quickTurn;
+      _useSpenTurn = spenTurn;
+      _bookMemoNote = memo;
       _isLoading = false;
     });
   }
 
-  void _enableVolumeNavigation() {
+  void _bindHardwareButtons() {
     _volumeKeyService.startListening(
-      onVolumeUp: () => _epubController.prev(),
-      onVolumeDown: () => _epubController.next(),
-      onScreenLockButton: _unlockTouchScreen,
+      onVolumeUp: () {
+        if (_useVolumeTurn) _epubController.prev();
+      },
+      onVolumeDown: () {
+        if (_useVolumeTurn) _epubController.next();
+      },
+      onVolumeBothUnlock: _unlockTouchScreenByVolumeCombo,
+      onSpenSinglePress: () {
+        if (_useSpenTurn) _epubController.next();
+      },
+      onSpenDoublePress: () {
+        if (_useSpenTurn) _epubController.prev();
+      },
+    );
+  }
+
+  Future<void> _showEpubMemoDialog() async {
+    final ctrl = TextEditingController(text: _bookMemoNote);
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('S펜 간단 메모'),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            hintText: 'S펜이나 키보드로 메모를 남겨보세요.',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () async {
+              final text = ctrl.text.trim();
+              await StorageService.savePageMemoNote(widget.filePath, 0, text);
+              setState(() => _bookMemoNote = text);
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('저장'),
+          ),
+        ],
+      ),
     );
   }
 
   Future<void> _showViewerSettingsSheet() async {
     await showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => SafeArea(
           child: SingleChildScrollView(
@@ -142,10 +184,47 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               children: [
                 const Text('뷰어 표시 설정', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
+                const Text('페이지 전환 설정 (동시 사용 가능)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    FilterChip(
+                      label: const Text('음량 버튼'),
+                      selected: _useVolumeTurn,
+                      onSelected: (val) async {
+                        await StorageService.setUseVolumeTurn(val);
+                        setState(() => _useVolumeTurn = val);
+                        setModalState(() {});
+                      },
+                    ),
+                    FilterChip(
+                      label: const Text('화면 이동 버튼'),
+                      selected: _useQuickNavTurn,
+                      onSelected: (val) async {
+                        await StorageService.setUseQuickNavTurn(val);
+                        setState(() => _useQuickNavTurn = val);
+                        setModalState(() {});
+                      },
+                    ),
+                    FilterChip(
+                      label: const Text('S펜 버튼'),
+                      selected: _useSpenTurn,
+                      onSelected: (val) async {
+                        await StorageService.setUseSpenTurn(val);
+                        setState(() => _useSpenTurn = val);
+                        setModalState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const Divider(height: 24),
                 const Text('진행도 UI 위치', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
+                  runSpacing: 6,
                   children: [
                     ChoiceChip(
                       label: const Text('오른쪽'),
@@ -171,6 +250,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('bottom');
                         setState(() => _progressBarPos = 'bottom');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('숨김'),
+                      selected: _progressBarPos == 'hidden',
+                      onSelected: (_) async {
+                        await StorageService.setProgressBarPosition('hidden');
+                        setState(() => _progressBarPos = 'hidden');
                         setModalState(() {});
                       },
                     ),
@@ -457,12 +545,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Widget _buildEpubProgressBar(Color barColor, Color iconColor) {
+    if (_progressBarPos == 'hidden') return const SizedBox.shrink();
+
     final double val = _progress.clamp(0.0, 1.0).toDouble();
 
     if (_progressBarPos == 'bottom') {
       return Positioned(
         left: 16.0,
-        right: 16.0,
+        right: _useQuickNavTurn ? 116.0 : 16.0,
         bottom: 28.0,
         child: Material(
           elevation: 6,
@@ -507,7 +597,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
     return Positioned(
       top: 72.0,
-      bottom: 48.0,
+      bottom: _useQuickNavTurn && _progressBarPos == 'right' ? 84.0 : 48.0,
       left: _progressBarPos == 'left' ? 8.0 : null,
       right: _progressBarPos == 'right' ? 8.0 : null,
       width: 52.0,
@@ -550,6 +640,41 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 icon: Icon(Icons.expand_more, color: iconColor, size: 22),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                onPressed: () => _epubController.next(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickNavButtons(double bottomInset, Color barColor, Color iconColor) {
+    return Positioned(
+      right: 12.0,
+      bottom: math.max<double>(bottomInset + 24.0, 28.0),
+      child: Material(
+        color: barColor,
+        borderRadius: BorderRadius.circular(24),
+        elevation: 6,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: Icon(Icons.arrow_upward, color: iconColor, size: 22),
+                tooltip: '이전 페이지',
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                padding: EdgeInsets.zero,
+                onPressed: () => _epubController.prev(),
+              ),
+              Container(width: 1, height: 22, color: iconColor.withOpacity(0.24)),
+              IconButton(
+                icon: Icon(Icons.arrow_downward, color: iconColor, size: 22),
+                tooltip: '다음 페이지',
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                padding: EdgeInsets.zero,
                 onPressed: () => _epubController.next(),
               ),
             ],
@@ -766,6 +891,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         onPressed: _lockTouchScreen,
                       ),
                       IconButton(
+                        icon: Icon(
+                          Icons.draw_outlined,
+                          color: _bookMemoNote.isNotEmpty ? Colors.amber[800] : iconColor,
+                          size: 20,
+                        ),
+                        tooltip: 'S펜 메모',
+                        onPressed: _showEpubMemoDialog,
+                      ),
+                      IconButton(
                         icon: Icon(Icons.text_decrease, color: iconColor, size: 20),
                         tooltip: '글자 작게',
                         onPressed: () => _changeFontSize(-2),
@@ -820,6 +954,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
           if (_showControls && !_isTouchLocked)
             _buildEpubProgressBar(barColor, iconColor),
+
+          if (_useQuickNavTurn && !_isTouchLocked)
+            _buildQuickNavButtons(bottomPadding, barColor, iconColor),
         ],
       ),
     );

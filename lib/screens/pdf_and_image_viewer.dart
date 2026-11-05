@@ -11,6 +11,59 @@ import '../services/batch_translation_service.dart';
 import '../services/storage_service.dart';
 import '../services/volume_key_service.dart';
 
+class _MemoCanvasPainter extends CustomPainter {
+  final List<MemoStroke> strokes;
+  final List<Offset> currentPoints;
+  final Color currentColor;
+  final double currentWidth;
+
+  _MemoCanvasPainter({
+    required this.strokes,
+    required this.currentPoints,
+    required this.currentColor,
+    required this.currentWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final s in strokes) {
+      if (s.dxList.isEmpty) continue;
+      final paint = Paint()
+        ..color = Color(s.colorValue)
+        ..strokeWidth = s.strokeWidth
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+
+      final path = Path();
+      path.moveTo(s.dxList.first * size.width, s.dyList.first * size.height);
+      for (int i = 1; i < s.dxList.length; i++) {
+        path.lineTo(s.dxList[i] * size.width, s.dyList[i] * size.height);
+      }
+      canvas.drawPath(path, paint);
+    }
+
+    if (currentPoints.isNotEmpty) {
+      final paint = Paint()
+        ..color = currentColor
+        ..strokeWidth = currentWidth
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+
+      final path = Path();
+      path.moveTo(currentPoints.first.dx, currentPoints.first.dy);
+      for (int i = 1; i < currentPoints.length; i++) {
+        path.lineTo(currentPoints[i].dx, currentPoints[i].dy);
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MemoCanvasPainter oldDelegate) => true;
+}
+
 class UniversalMediaReaderScreen extends StatefulWidget {
   final List<File> files;
   final String title;
@@ -29,7 +82,7 @@ class UniversalMediaReaderScreen extends StatefulWidget {
   State<UniversalMediaReaderScreen> createState() => _UniversalMediaReaderScreenState();
 }
 
-class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen> with WidgetsBindingObserver {
+class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen> {
   static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
   PageController? _pageController;
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
@@ -46,13 +99,24 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _enableTwoPageInLandscape = true;
   bool _lastIsSpreadMode = false;
 
-  // 1. 화면 터치 잠금 상태 (물리적 화면 잠금/전원 버튼을 누르면 자동 해제됨)
+  // 화면 터치 잠금 (음량 버튼 2개 동시 누름 시 해제)
   bool _isTouchLocked = false;
 
-  // 2. 뷰어 하단 정보 표시 설정 ('progress', 'page', 'both', 'none')
-  String _footerInfoMode = 'both';
+  // 페이지 전환 설정 3가지 (동시 사용 가능)
+  bool _useVolumeTurn = true;
+  bool _useQuickNavTurn = false;
+  bool _useSpenTurn = true;
 
-  // 7. 진행도 UI 위치 설정 ('right', 'left', 'bottom')
+  // S펜 간단 메모 모드 상태
+  bool _isMemoMode = false;
+  final Map<int, List<MemoStroke>> _memoStrokesByPage = {};
+  final Map<int, String> _memoNotesByPage = {};
+  final List<Offset> _activeStrokePoints = [];
+  Color _penColor = Colors.amber;
+  final double _penWidth = 3.2;
+
+  // 하단 정보 표시 설정 & 진행도 UI 위치 설정 ('right', 'left', 'bottom', 'hidden')
+  String _footerInfoMode = 'both';
   String _progressBarPos = 'right';
 
   TextRecognitionScript _selectedScript = TextRecognitionScript.japanese;
@@ -64,30 +128,18 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _initMedia();
   }
 
-  /// 물리적인 화면 잠금(전원) 버튼을 눌러 화면이 꺼지거나 잠금 해제될 때 터치 잠금 자동 해제!
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_isTouchLocked &&
-        (state == AppLifecycleState.paused ||
-            state == AppLifecycleState.inactive ||
-            state == AppLifecycleState.resumed)) {
-      _unlockTouchScreen();
-    }
-  }
-
-  void _unlockTouchScreen() {
+  void _unlockTouchScreenByVolumeCombo() {
     if (!_isTouchLocked || !mounted) return;
     setState(() {
       _isTouchLocked = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('화면 터치 잠금이 해제되었습니다.'),
+        content: Text('음량 버튼 동시 입력으로 화면 터치 잠금이 해제되었습니다.'),
         duration: Duration(seconds: 1),
       ),
     );
@@ -97,10 +149,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     setState(() {
       _isTouchLocked = true;
       _showControls = false;
+      _isMemoMode = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('화면 터치가 잠겼습니다. (음량 버튼으로 페이지 이동 / 물리 화면 잠금 버튼을 누르면 잠금 해제)'),
+        content: Text('화면 터치가 잠겼습니다. (음량 버튼 2개를 동시에 누르면 잠금 해제)'),
         duration: Duration(seconds: 2),
       ),
     );
@@ -129,6 +182,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   Future<void> _initMedia() async {
     _enableTwoPageInLandscape = await StorageService.getTwoPageLandscape();
+    _isMangaRtlMode = await StorageService.getReadingDirectionRtl();
+    _useVolumeTurn = await StorageService.getUseVolumeTurn();
+    _useQuickNavTurn = await StorageService.getUseQuickNavTurn();
+    _useSpenTurn = await StorageService.getUseSpenTurn();
     _footerInfoMode = await StorageService.getFooterInfoMode();
     _progressBarPos = await StorageService.getProgressBarPosition();
 
@@ -190,16 +247,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       if (cached != null) {
         _bubblesByPage[i] = cached;
       }
+      final strokes = await StorageService.getPageMemoStrokes(_bookKey, i);
+      if (strokes.isNotEmpty) {
+        _memoStrokesByPage[i] = strokes;
+      }
+      final note = await StorageService.getPageMemoNote(_bookKey, i);
+      if (note.isNotEmpty) {
+        _memoNotesByPage[i] = note;
+      }
     }
     if (_bubblesByPage.isNotEmpty) {
       _showTranslatedBubbles = true;
     }
 
-    _volumeKeyService.startListening(
-      onVolumeUp: () => _stepPage(-1),
-      onVolumeDown: () => _stepPage(1),
-      onScreenLockButton: _unlockTouchScreen,
-    );
+    _bindHardwareButtons();
 
     if (mounted) {
       setState(() => _isPreparingPages = false);
@@ -207,6 +268,24 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         _syncControllerToCurrentPage(animate: false);
       });
     }
+  }
+
+  void _bindHardwareButtons() {
+    _volumeKeyService.startListening(
+      onVolumeUp: () {
+        if (_useVolumeTurn) _stepPage(-1);
+      },
+      onVolumeDown: () {
+        if (_useVolumeTurn) _stepPage(1);
+      },
+      onVolumeBothUnlock: _unlockTouchScreenByVolumeCombo,
+      onSpenSinglePress: () {
+        if (_useSpenTurn) _stepPage(1); // S펜 버튼 1번 클릭 -> 다음 페이지
+      },
+      onSpenDoublePress: () {
+        if (_useSpenTurn) _stepPage(-1); // S펜 버튼 2번 클릭 -> 이전 페이지
+      },
+    );
   }
 
   bool _isSpreadActive(BuildContext context) {
@@ -269,58 +348,101 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   void _toggleControls() {
-    if (_isTouchLocked) return;
+    if (_isTouchLocked || _isMemoMode) return;
     setState(() => _showControls = !_showControls);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
-  /// 4. 오른쪽·왼쪽 화살표를 위아래로 합친 커스텀 아이콘:
-  /// 왼쪽->오른쪽(!_isMangaRtlMode)이면 오른쪽 화살표만 주황색으로 빛나고,
-  /// 오른쪽->왼쪽(_isMangaRtlMode)이면 왼쪽 화살표만 주황색으로 빛남!
+  /// 3. 두 화살표 간격을 좁히고, 색상은 왼쪽 아이콘과 동일한 Colors.amber로 맞춘 방향 아이콘
   Widget _buildDualDirectionIcon() {
     final bool isRightActive = !_isMangaRtlMode;
-    final Color activeColor = Colors.orangeAccent;
-    final Color inactiveColor = Colors.white38;
+    const Color activeColor = Colors.amber;
+    const Color inactiveColor = Colors.white38;
 
     return SizedBox(
-      width: 28,
-      height: 28,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
+      width: 24,
+      height: 22,
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          Icon(
-            Icons.east,
-            size: 14,
-            color: isRightActive ? activeColor : inactiveColor,
-            shadows: isRightActive
-                ? const [
-                    Shadow(color: Colors.orange, blurRadius: 8),
-                    Shadow(color: Colors.deepOrangeAccent, blurRadius: 12),
-                  ]
-                : null,
+          Positioned(
+            top: 1,
+            child: Icon(
+              Icons.east,
+              size: 14,
+              color: isRightActive ? activeColor : inactiveColor,
+            ),
           ),
-          const SizedBox(height: 1),
-          Icon(
-            Icons.west,
-            size: 14,
-            color: !isRightActive ? activeColor : inactiveColor,
-            shadows: !isRightActive
-                ? const [
-                    Shadow(color: Colors.orange, blurRadius: 8),
-                    Shadow(color: Colors.deepOrangeAccent, blurRadius: 12),
-                  ]
-                : null,
+          Positioned(
+            bottom: 1,
+            child: Icon(
+              Icons.west,
+              size: 14,
+              color: !isRightActive ? activeColor : inactiveColor,
+            ),
           ),
         ],
       ),
     );
   }
 
-  /// 2 & 7. 뷰어 하단 정보 표시 방식 및 진행도 UI 위치(오른쪽/왼쪽/하단) 설정 시트
+  /// 6. S펜 간단 텍스트 메모 다이얼로그 및 펜 지우개 옵션
+  Future<void> _showMemoTextDialog() async {
+    final currentNote = _memoNotesByPage[_currentPage] ?? '';
+    final ctrl = TextEditingController(text: currentNote);
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${_currentPage + 1}페이지 메모'),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            hintText: 'S펜이나 키보드로 간단한 메모를 남겨보세요.',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          if ((_memoStrokesByPage[_currentPage]?.isNotEmpty ?? false) || currentNote.isNotEmpty)
+            TextButton(
+              onPressed: () async {
+                await StorageService.savePageMemoStrokes(_bookKey, _currentPage, []);
+                await StorageService.savePageMemoNote(_bookKey, _currentPage, '');
+                setState(() {
+                  _memoStrokesByPage.remove(_currentPage);
+                  _memoNotesByPage.remove(_currentPage);
+                });
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('메모/필기 모두 지우기', style: TextStyle(color: Colors.redAccent)),
+            ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () async {
+              final text = ctrl.text.trim();
+              await StorageService.savePageMemoNote(_bookKey, _currentPage, text);
+              setState(() {
+                if (text.isEmpty) {
+                  _memoNotesByPage.remove(_currentPage);
+                } else {
+                  _memoNotesByPage[_currentPage] = text;
+                }
+              });
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 7 & 8. 뷰어 표시 설정 (페이지 전환 설정 3가지 동시 선택 + 진행도 UI 위치 숨김 포함 + 하단 정보 표시)
   Future<void> _showViewerSettingsSheet() async {
     await showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => SafeArea(
           child: SingleChildScrollView(
@@ -331,10 +453,47 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               children: [
                 const Text('뷰어 표시 설정', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
+                const Text('페이지 전환 설정 (동시 사용 가능)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    FilterChip(
+                      label: const Text('음량 버튼'),
+                      selected: _useVolumeTurn,
+                      onSelected: (val) async {
+                        await StorageService.setUseVolumeTurn(val);
+                        setState(() => _useVolumeTurn = val);
+                        setModalState(() {});
+                      },
+                    ),
+                    FilterChip(
+                      label: const Text('화면 이동 버튼'),
+                      selected: _useQuickNavTurn,
+                      onSelected: (val) async {
+                        await StorageService.setUseQuickNavTurn(val);
+                        setState(() => _useQuickNavTurn = val);
+                        setModalState(() {});
+                      },
+                    ),
+                    FilterChip(
+                      label: const Text('S펜 버튼'),
+                      selected: _useSpenTurn,
+                      onSelected: (val) async {
+                        await StorageService.setUseSpenTurn(val);
+                        setState(() => _useSpenTurn = val);
+                        setModalState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const Divider(height: 24),
                 const Text('진행도 UI 위치', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
+                  runSpacing: 6,
                   children: [
                     ChoiceChip(
                       label: const Text('오른쪽'),
@@ -360,6 +519,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('bottom');
                         setState(() => _progressBarPos = 'bottom');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('숨김'),
+                      selected: _progressBarPos == 'hidden',
+                      onSelected: (_) async {
+                        await StorageService.setProgressBarPosition('hidden');
+                        setState(() => _progressBarPos = 'hidden');
                         setModalState(() {});
                       },
                     ),
@@ -437,7 +605,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 5. '(기본값: 일본어):' 삭제 반영
                 const Text('원문 언어를 선택하세요', style: TextStyle(fontSize: 13)),
                 const SizedBox(height: 8),
                 DropdownButton<String>(
@@ -576,79 +743,18 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
-  Widget _buildVerticalKoreanText(BubbleTranslation b, double boxW, double boxH) {
-    String clean = b.translatedText
-        .replaceAll('\n', ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    if (clean.isEmpty) return const SizedBox.shrink();
-
-    clean = clean
-        .replaceAll('(', '︵')
-        .replaceAll(')', '︶')
-        .replaceAll('[', '︹')
-        .replaceAll(']', '︺')
-        .replaceAll('~', '≀')
-        .replaceAll('—', '︱')
-        .replaceAll('-', '︱');
-
-    final chars = clean.runes.map((r) => String.fromCharCode(r)).toList();
-    final int charCount = chars.length;
-
+  /// 5. 세로로 된 일본어 말풍선도 말풍선 크기에 맞춰 가로로 한글을 조판하며,
+  /// 배경이 검은색(b.isDarkBg)이면 흰색 글씨로 표시!
+  Widget _buildFittedHorizontalKoreanText(BubbleTranslation b, double boxW, double boxH) {
     final double safeW = math.max<double>(14.0, boxW - 3.0);
-    final double safeH = math.max<double>(18.0, boxH - 3.0);
-    final double aspect = safeH / safeW;
-
-    int numCols = math.sqrt(charCount / math.max<double>(1.2, aspect * 0.85)).round();
-    numCols = numCols.clamp(1, math.max<int>(1, charCount)).toInt();
-    int charsPerCol = (charCount / numCols).ceil();
-    if (charsPerCol < 2) charsPerCol = 2;
-    numCols = (charCount / charsPerCol).ceil();
-
-    final List<String> columns = [];
-    for (int i = 0; i < charCount; i += charsPerCol) {
-      final end = (i + charsPerCol < charCount) ? i + charsPerCol : charCount;
-      columns.add(chars.sublist(i, end).join('\n'));
-    }
-
-    final double colW = safeW / columns.length;
-    final double rowH = safeH / charsPerCol;
-    final double fontSize = math.min<double>(colW * 0.82, rowH * 0.78).clamp(6.0, 20.0).toDouble();
-
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.center,
-      child: Directionality(
-        textDirection: TextDirection.rtl,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: columns.map((colStr) {
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 1.2),
-              child: Text(
-                colStr,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: const Color(0xFF111111),
-                  fontSize: fontSize,
-                  fontWeight: b.isBold ? FontWeight.w800 : FontWeight.w600,
-                  fontFamily: b.isSerif ? 'serif' : 'sans-serif',
-                  height: 1.05,
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHorizontalKoreanText(BubbleTranslation b, double boxW, double boxH) {
-    final double safeW = math.max<double>(16.0, boxW - 3.0);
     final double safeH = math.max<double>(12.0, boxH - 2.0);
     final double area = safeW * safeH;
-    final double estFont = math.sqrt(area / math.max<double>(1.0, b.translatedText.length * 1.8)).clamp(6.5, 20.0).toDouble();
+    final double estFont = math
+        .sqrt(area / math.max<double>(1.0, b.translatedText.length * 1.55))
+        .clamp(6.5, 22.0)
+        .toDouble();
+
+    final Color textColor = b.isDarkBg ? Colors.white : const Color(0xFF111111);
 
     return FittedBox(
       fit: BoxFit.scaleDown,
@@ -660,11 +766,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           textAlign: TextAlign.center,
           softWrap: true,
           style: TextStyle(
-            color: const Color(0xFF111111),
+            color: textColor,
             fontSize: estFont,
             fontWeight: b.isBold ? FontWeight.w800 : FontWeight.w600,
             fontFamily: b.isSerif ? 'serif' : 'sans-serif',
-            height: 1.15,
+            height: 1.18,
             letterSpacing: -0.2,
           ),
         ),
@@ -678,6 +784,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     final bubbles = _bubblesByPage[pageIndex] ?? [];
+    final strokes = _memoStrokesByPage[pageIndex] ?? [];
+    final memoNote = _memoNotesByPage[pageIndex] ?? '';
     final imgSize = _pageImageSizes[pageIndex];
 
     return LayoutBuilder(
@@ -719,7 +827,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   math.max<double>(drawTop, drawTop + drawHeight - boxH),
                 ).toDouble();
 
-                final bool renderVertically = b.isVertical && (boxH >= boxW * 1.05);
+                final Color bgColor = b.isDarkBg
+                    ? const Color(0xFF121212).withOpacity(0.95)
+                    : Colors.white.withOpacity(0.96);
 
                 return Positioned(
                   left: boxLeft,
@@ -727,21 +837,110 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   width: boxW,
                   height: boxH,
                   child: Container(
-                    padding: const EdgeInsets.all(1.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 1.0),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.96),
-                      borderRadius: BorderRadius.circular(
-                        renderVertically ? math.min<double>(boxW, boxH) * 0.15 : 4.0,
-                      ),
+                      color: bgColor,
+                      borderRadius: BorderRadius.circular(4.0),
                     ),
                     alignment: Alignment.center,
                     clipBehavior: Clip.hardEdge,
-                    child: renderVertically
-                        ? _buildVerticalKoreanText(b, boxW, boxH)
-                        : _buildHorizontalKoreanText(b, boxW, boxH),
+                    child: _buildFittedHorizontalKoreanText(b, boxW, boxH),
                   ),
                 );
               }),
+
+            // 6. S펜 필기 레이어 표시 및 드로잉 입력
+            if (strokes.isNotEmpty || (_isMemoMode && pageIndex == _currentPage))
+              Positioned(
+                left: drawLeft,
+                top: drawTop,
+                width: drawWidth,
+                height: drawHeight,
+                child: GestureDetector(
+                  behavior: _isMemoMode ? HitTestBehavior.opaque : HitTestBehavior.translucent,
+                  onPanStart: _isMemoMode
+                      ? (details) {
+                          setState(() {
+                            _activeStrokePoints
+                              ..clear()
+                              ..add(details.localPosition);
+                          });
+                        }
+                      : null,
+                  onPanUpdate: _isMemoMode
+                      ? (details) {
+                          setState(() {
+                            _activeStrokePoints.add(details.localPosition);
+                          });
+                        }
+                      : null,
+                  onPanEnd: _isMemoMode
+                      ? (_) async {
+                          if (_activeStrokePoints.isNotEmpty && drawWidth > 0 && drawHeight > 0) {
+                            final stroke = MemoStroke(
+                              dxList: _activeStrokePoints
+                                  .map((p) => (p.dx / drawWidth).clamp(0.0, 1.0).toDouble())
+                                  .toList(),
+                              dyList: _activeStrokePoints
+                                  .map((p) => (p.dy / drawHeight).clamp(0.0, 1.0).toDouble())
+                                  .toList(),
+                              colorValue: _penColor.value,
+                              strokeWidth: _penWidth,
+                            );
+                            final list = List<MemoStroke>.from(_memoStrokesByPage[pageIndex] ?? [])
+                              ..add(stroke);
+                            setState(() {
+                              _memoStrokesByPage[pageIndex] = list;
+                              _activeStrokePoints.clear();
+                            });
+                            await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
+                          }
+                        }
+                      : null,
+                  child: CustomPaint(
+                    painter: _MemoCanvasPainter(
+                      strokes: strokes,
+                      currentPoints: pageIndex == _currentPage ? _activeStrokePoints : const [],
+                      currentColor: _penColor,
+                      currentWidth: _penWidth,
+                    ),
+                  ),
+                ),
+              ),
+
+            // 페이지에 저장된 텍스트 메모 스티커 표시
+            if (memoNote.isNotEmpty)
+              Positioned(
+                left: drawLeft + 12.0,
+                top: drawTop + 12.0,
+                child: GestureDetector(
+                  onTap: _showMemoTextDialog,
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 220),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade200.withOpacity(0.95),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.edit_note, size: 16, color: Colors.black87),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            memoNote,
+                            style: const TextStyle(color: Colors.black87, fontSize: 12),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         );
       },
@@ -836,13 +1035,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Widget _buildProgressControlBar() {
+    if (_progressBarPos == 'hidden') return const SizedBox.shrink();
+
     final double sliderVal = _currentPage.toDouble().clamp(0.0, math.max<double>(0.0, (_totalPages - 1).toDouble())).toDouble();
     final double sliderMax = math.max<double>(1.0, (_totalPages - 1).toDouble());
 
     if (_progressBarPos == 'bottom') {
       return Positioned(
         left: 16.0,
-        right: 16.0,
+        right: _useQuickNavTurn ? 116.0 : 16.0,
         bottom: 28.0,
         child: Material(
           color: Colors.black87,
@@ -881,7 +1082,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
     return Positioned(
       top: 72.0,
-      bottom: 48.0,
+      bottom: _useQuickNavTurn && _progressBarPos == 'right' ? 84.0 : 48.0,
       left: _progressBarPos == 'left' ? 8.0 : null,
       right: _progressBarPos == 'right' ? 8.0 : null,
       width: 52.0,
@@ -927,9 +1128,44 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
+  /// 7. 화면 이동 버튼 (오른쪽 하단에 위·아래 화살표가 양옆으로 나란히 붙어 있는 버튼)
+  Widget _buildQuickNavButtons(double bottomInset) {
+    return Positioned(
+      right: 12.0,
+      bottom: math.max<double>(bottomInset + 24.0, 28.0),
+      child: Material(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(24),
+        elevation: 6,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_upward, color: Colors.amber, size: 22),
+                tooltip: '이전 페이지',
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                padding: EdgeInsets.zero,
+                onPressed: () => _stepPage(-1),
+              ),
+              Container(width: 1, height: 22, color: Colors.white24),
+              IconButton(
+                icon: const Icon(Icons.arrow_downward, color: Colors.amber, size: 22),
+                tooltip: '다음 페이지',
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                padding: EdgeInsets.zero,
+                onPressed: () => _stepPage(1),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _volumeKeyService.stopListening();
     _pageController?.dispose();
     SystemChrome.setEnabledSystemUIMode(
@@ -968,7 +1204,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // 1. 터치 잠금 시 모든 화면 터치/스와이프를 차단하고 음량 버튼으로만 넘기도록 AbsorbPointer 적용
           Positioned.fill(
             child: AbsorbPointer(
               absorbing: _isTouchLocked,
@@ -978,7 +1213,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   key: ValueKey('pageview_spread_$isSpread'),
                   controller: _pageController,
                   reverse: _isMangaRtlMode,
-                  physics: _isTouchLocked
+                  physics: (_isTouchLocked || _isMemoMode)
                       ? const NeverScrollableScrollPhysics()
                       : const BouncingScrollPhysics(),
                   itemCount: viewItemCount,
@@ -993,6 +1228,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   itemBuilder: (context, viewIdx) {
                     if (!isSpread) {
                       return InteractiveViewer(
+                        panEnabled: !_isMemoMode,
+                        scaleEnabled: !_isMemoMode,
                         minScale: 1.0,
                         maxScale: 3.5,
                         child: _buildSinglePagePanel(viewIdx),
@@ -1009,6 +1246,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         : (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand());
 
                     return InteractiveViewer(
+                      panEnabled: !_isMemoMode,
+                      scaleEnabled: !_isMemoMode,
                       minScale: 1.0,
                       maxScale: 3.5,
                       child: Row(
@@ -1025,7 +1264,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ),
           ),
 
-          // 2. 최하단 우측 정보 표시줄 (진행률 / 페이지 번호 / 진행률 및 페이지 번호 / 정보 표시 없음)
           if (footerText.isNotEmpty)
             Positioned(
               left: 20,
@@ -1046,7 +1284,70 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
             ),
 
-          // 3. 상단 컨트롤 바
+          // S펜 필기 모드 상단 미니 툴바
+          if (_isMemoMode && !_isTouchLocked)
+            Positioned(
+              top: 12,
+              left: 16,
+              right: 16,
+              child: Center(
+                child: Material(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(24),
+                  elevation: 6,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.draw, color: Colors.amber, size: 18),
+                        const SizedBox(width: 6),
+                        const Text('S펜 필기 모드', style: TextStyle(color: Colors.white, fontSize: 12)),
+                        const SizedBox(width: 8),
+                        ...[Colors.amber, Colors.redAccent, Colors.lightBlueAccent, Colors.greenAccent]
+                            .map((c) => GestureDetector(
+                                  onTap: () => setState(() => _penColor = c),
+                                  child: Container(
+                                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                                    width: 18,
+                                    height: 18,
+                                    decoration: BoxDecoration(
+                                      color: c,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: _penColor == c ? Colors.white : Colors.transparent,
+                                        width: 2,
+                                      ),
+                                    ),
+                                  ),
+                                )),
+                        IconButton(
+                          icon: const Icon(Icons.note_alt_outlined, color: Colors.white, size: 18),
+                          tooltip: '텍스트 메모 입력',
+                          onPressed: _showMemoTextDialog,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.undo, color: Colors.white, size: 18),
+                          tooltip: '한 획 취소',
+                          onPressed: () async {
+                            final list = _memoStrokesByPage[_currentPage];
+                            if (list != null && list.isNotEmpty) {
+                              setState(() => list.removeLast());
+                              await StorageService.savePageMemoStrokes(_bookKey, _currentPage, list);
+                            }
+                          },
+                        ),
+                        TextButton(
+                          onPressed: () => setState(() => _isMemoMode = false),
+                          child: const Text('완료', style: TextStyle(color: Colors.amber)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
           if (_showControls && !_isTouchLocked)
             Positioned(
               top: 0,
@@ -1079,11 +1380,26 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             _goToPage(target, recordHistory: false, smoothAnimation: true);
                           },
                         ),
-                      // 1. 화면 터치 잠금 버튼 (물리적 화면 잠금 버튼을 누르면 자동 해제됨)
+                      // 1 & 2. 화면 터치 잠금 버튼 (음량 버튼 2개 동시 누름으로 해제)
                       IconButton(
                         icon: const Icon(Icons.screen_lock_portrait, color: Colors.white, size: 20),
                         tooltip: '화면 터치 잠금',
                         onPressed: _lockTouchScreen,
+                      ),
+                      // 6. S펜 필기/메모 버튼
+                      IconButton(
+                        icon: Icon(
+                          Icons.draw_outlined,
+                          color: _isMemoMode ? Colors.amber : Colors.white,
+                          size: 20,
+                        ),
+                        tooltip: 'S펜 메모',
+                        onPressed: () {
+                          setState(() {
+                            _isMemoMode = !_isMemoMode;
+                            if (_isMemoMode) _showControls = false;
+                          });
+                        },
                       ),
                       IconButton(
                         icon: Icon(
@@ -1098,18 +1414,22 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                           setState(() => _enableTwoPageInLandscape = nextVal);
                         },
                       ),
-                      // 4. 방향 전환 버튼: 위아래 화살표 중 활성 방향만 주황색으로 빛나며 문구도 '방향(왼쪽 -> 오른쪽)' / '(오른쪽 -> 왼쪽)' 표시
+                      // 3. 방향 전환 버튼 (방향 상태 영구 기억 + 간격 축소 + 왼쪽 아이콘과 동일한 Colors.amber 색상)
                       IconButton(
                         icon: _buildDualDirectionIcon(),
                         tooltip: _isMangaRtlMode ? '(오른쪽 -> 왼쪽)' : '방향(왼쪽 -> 오른쪽)',
-                        onPressed: () {
-                          setState(() => _isMangaRtlMode = !_isMangaRtlMode);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(_isMangaRtlMode ? '(오른쪽 -> 왼쪽)' : '방향(왼쪽 -> 오른쪽)'),
-                              duration: const Duration(milliseconds: 900),
-                            ),
-                          );
+                        onPressed: () async {
+                          final nextRtl = !_isMangaRtlMode;
+                          await StorageService.setReadingDirectionRtl(nextRtl);
+                          setState(() => _isMangaRtlMode = nextRtl);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(nextRtl ? '(오른쪽 -> 왼쪽)' : '방향(왼쪽 -> 오른쪽)'),
+                                duration: const Duration(milliseconds: 900),
+                              ),
+                            );
+                          }
                         },
                       ),
                       GestureDetector(
@@ -1141,7 +1461,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         tooltip: '북마크',
                         onPressed: _showBookmarkSheet,
                       ),
-                      // 2 & 7. 뷰어 설정 버튼 (진행도 UI 오른쪽/왼쪽/하단 & 하단 정보 표시 설정)
                       IconButton(
                         icon: const Icon(Icons.tune, color: Colors.white, size: 20),
                         tooltip: '뷰어 표시 설정',
@@ -1153,9 +1472,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
             ),
 
-          // 7. 진행도 UI 바 (오른쪽 / 왼쪽 / 하단 선택 반영)
           if (_showControls && !_isTouchLocked && _totalPages > 1)
             _buildProgressControlBar(),
+
+          // 7. 오른쪽 하단 화면 이동 버튼 (위·아래 화살표 양옆 배치, 페이지 전환 설정에서 켜면 상시 작동)
+          if (_useQuickNavTurn && !_isTouchLocked && _totalPages > 1)
+            _buildQuickNavButtons(bottomInset),
         ],
       ),
     );
