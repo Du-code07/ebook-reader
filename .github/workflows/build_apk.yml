@@ -55,6 +55,9 @@ jobs:
           cp -f /tmp/v6_backup/android_override/MainActivity.kt android/app/src/main/kotlin/com/example/my_ebook_reader/MainActivity.kt
           rm -f android/app/src/main/java/com/example/my_ebook_reader/MainActivity.java
 
+          echo "-keep class com.google.mlkit.** { *; }" > android/app/proguard-rules.pro
+          echo "-dontwarn com.google.mlkit.**" >> android/app/proguard-rules.pro
+
           if [ -f android/app/build.gradle ]; then
             sed -i 's/compileSdk .*/compileSdk 36/g' android/app/build.gradle
             sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' android/app/build.gradle
@@ -62,9 +65,12 @@ jobs:
             sed -i 's/minSdk = .*/minSdk = 24/g' android/app/build.gradle
             sed -i 's/minSdk .*/minSdk 24/g' android/app/build.gradle
             echo "" >> android/app/build.gradle
+            echo "android { buildTypes { release { minifyEnabled false; shrinkResources false; proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro' } } }" >> android/app/build.gradle
             echo "dependencies {" >> android/app/build.gradle
             echo "    implementation 'com.google.mlkit:text-recognition-japanese:16.0.1'" >> android/app/build.gradle
             echo "    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'" >> android/app/build.gradle
+            echo "    implementation 'com.google.mlkit:text-recognition-korean:16.0.1'" >> android/app/build.gradle
+            echo "    implementation 'com.google.mlkit:text-recognition-devanagari:16.0.1'" >> android/app/build.gradle
             echo "}" >> android/app/build.gradle
           fi
 
@@ -72,9 +78,12 @@ jobs:
             sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts
             sed -i 's/minSdk = .*/minSdk = 24/g' android/app/build.gradle.kts
             echo "" >> android/app/build.gradle.kts
+            echo 'android { buildTypes { getByName("release") { isMinifyEnabled = false; isShrinkResources = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } } }' >> android/app/build.gradle.kts
             echo "dependencies {" >> android/app/build.gradle.kts
             echo '    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")' >> android/app/build.gradle.kts
             echo '    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")' >> android/app/build.gradle.kts
+            echo '    implementation("com.google.mlkit:text-recognition-korean:16.0.1")' >> android/app/build.gradle.kts
+            echo '    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")' >> android/app/build.gradle.kts
             echo "}" >> android/app/build.gradle.kts
           fi
 
