@@ -26,12 +26,29 @@ class _TextColUnit {
 class BatchTranslationService {
   static final GoogleTranslator _translator = GoogleTranslator();
 
-  /// 한국어 띄어쓰기 및 맞춤법 자동 교정기 (번역 결과물의 어색한 붙여쓰기·맞춤법·문장부호 보정)
+  // 업로드해주신 Google 번역 Chrome 확장 프로그램(v2.0.18, bubble_compiled.js)의 공식 OnePlatform API 키 및 엔드포인트
+  static const String _chromeExtOnePlatformUrl = 'https://translate-pa.googleapis.com/v1/translate';
+  static const String _chromeExtAjaxSingleUrl = 'https://translate.googleapis.com/translate_a/single';
+  static const String _chromeExtApiKey = 'AIzaSyDLEeFI5OtFBwYBIoK_jj5m32rZK5CkCXA';
+
+  /// OCR 오인식 노이즈 정리 (일본어 세로쓰기 만화에서 자주 섞이는 특수기호 노이즈 제거)
+  static String cleanOcrSourceText(String raw, String sourceLang) {
+    String s = raw.trim();
+    if (s.isEmpty) return '';
+    if (sourceLang == 'ja' || sourceLang == 'zh-cn') {
+      s = s
+          .replaceAll(RegExp(r'[|｜¦]'), '')
+          .replaceAll('ـ', 'ー')
+          .replaceAll(RegExp(r'\s+'), '');
+    }
+    return s.trim();
+  }
+
+  /// 한국어 띄어쓰기 및 맞춤법 자동 교정기
   static String polishKoreanSpacingAndSpelling(String raw) {
     if (raw.trim().isEmpty) return '';
     String s = raw.trim();
 
-    // 1. 일본어/번역기 특유의 불필요한 기호 및 공백 정규화
     s = s
         .replaceAll('</끝>', '')
         .replaceAll(RegExp(r'###.*'), '')
@@ -42,7 +59,7 @@ class BatchTranslationService {
         .replaceAll('…', '...')
         .replaceAll(RegExp(r'[ \t]+'), ' ');
 
-    // 2. 문장부호 뒤 자동 띄어쓰기 보정 (마침표, 쉼표, 느낌표, 물음표 뒤에 한글이 바로 붙은 경우 띄어쓰기 추가)
+    // 문장부호 뒤 자동 띄어쓰기 보정
     s = s.replaceAllMapped(
       RegExp(r'([,!?])[가-힣]'),
       (m) => '${m.group(0)!.substring(0, 1)} ${m.group(0)!.substring(1)}',
@@ -52,7 +69,7 @@ class BatchTranslationService {
       (m) => '${m.group(1)} ${m.group(2)}',
     );
 
-    // 3. 자주 틀리는 한국어 맞춤법 및 의존명사 띄어쓰기 교정 규칙
+    // 자주 틀리는 한국어 맞춤법 및 의존명사 띄어쓰기 교정 규칙
     final Map<RegExp, String> spellingRules = {
       RegExp(r'안되([요네고지])'): '안 돼\$1',
       RegExp(r'안된다'): '안 된다',
@@ -71,12 +88,7 @@ class BatchTranslationService {
       RegExp(r'인것같'): '인 것 같',
       RegExp(r'한것같'): '한 것 같',
       RegExp(r'할것같'): '할 것 같',
-      RegExp(r'같은데'): '같은데',
-      RegExp(r'모르겠어([요]?)'): '모르겠어\$1',
-      RegExp(r'괜찮아([요]?)'): '괜찮아\$1',
       RegExp(r'거에요'): '거예요',
-      RegExp(r'건가요'): '건가요',
-      RegExp(r'뭐야'): '뭐야',
     };
 
     spellingRules.forEach((pattern, replacement) {
@@ -89,114 +101,111 @@ class BatchTranslationService {
       });
     });
 
-    // 4. 조사 앞 불필요한 공백 제거 (예: "나 는" -> "나는", "그 것 은" -> "그것은")
+    // 조사 앞 불필요한 공백 제거
     s = s.replaceAllMapped(
       RegExp(r'([가-힣])\s+(은|는|이|가|을|를|에|에서|에게|으로|로|과|와|도|만|까지|부터)(?=\s|[,.!?]|$)'),
       (m) => '${m.group(1)}${m.group(2)}',
     );
 
-    // 5. 중복 공백 정리
     s = s.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
     return s;
   }
 
-  /// Gugugo 오픈소스 모델(squarelike/Gugugo-koja-1.3B-V0.95 및 Gugugo-koen-7B-V1.1) 프로토콜 기반 번역 + 한국어 띄어쓰기/맞춤법 보정
-  static Future<String> translateWithGugugoPipeline(
+  /// Google 번역 Chrome 확장 프로그램(bubble_compiled.js)의 OnePlatform(/v1/translate) 및 GTX(/translate_a/single) 엔진 탑재
+  static Future<String> translateWithGoogleChromeExtensionEngine(
     String text, {
     required String sourceLang,
     required String targetLang,
   }) async {
-    final cleaned = text.trim();
+    final cleaned = cleanOcrSourceText(text, sourceLang);
     if (cleaned.isEmpty) return '';
 
-    final gugugoUrl = await StorageService.getGugugoServerUrl();
-    final hfToken = await StorageService.getGugugoHfToken();
-
-    if (gugugoUrl.isNotEmpty) {
-      try {
-        final base = gugugoUrl.endsWith('/') ? gugugoUrl.substring(0, gugugoUrl.length - 1) : gugugoUrl;
-        final trType = sourceLang == 'ja' ? 'JA->KO' : 'EN->KO';
-        for (final endpoint in ['$base/api/predict', '$base/run/predict']) {
-          final resp = await http
-              .post(
-                Uri.parse(endpoint),
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode({
-                  'data': [cleaned, trType]
-                }),
-              )
-              .timeout(const Duration(seconds: 8));
-          if (resp.statusCode == 200) {
-            final decoded = jsonDecode(utf8.decode(resp.bodyBytes));
-            final dataList = decoded['data'];
-            if (dataList is List && dataList.isNotEmpty) {
-              var out = dataList.first.toString().trim();
-              if (out.contains('</끝>')) {
-                out = out.substring(0, out.indexOf('</끝>')).trim();
-              }
-              if (out.isNotEmpty) return polishKoreanSpacingAndSpelling(out);
-            }
-          }
-        }
-      } catch (_) {}
-    }
-
-    if (sourceLang == 'ja' || sourceLang == 'en') {
-      try {
-        final modelId = sourceLang == 'ja'
-            ? 'squarelike/Gugugo-koja-1.3B-V0.95'
-            : 'squarelike/Gugugo-koen-1.3B-V1.0';
-        final langLabel = sourceLang == 'ja' ? '일본어' : '영어';
-        final prompt = '### $langLabel: $cleaned</끝>\n### 한국어:';
-
-        final headers = <String, String>{'Content-Type': 'application/json'};
-        if (hfToken.isNotEmpty) {
-          headers['Authorization'] = 'Bearer $hfToken';
-        }
-
-        final resp = await http
-            .post(
-              Uri.parse('https://api-inference.huggingface.co/models/$modelId'),
-              headers: headers,
-              body: jsonEncode({
-                'inputs': prompt,
-                'parameters': {
-                  'max_new_tokens': 256,
-                  'temperature': 0.3,
-                  'return_full_text': false,
-                },
-              }),
-            )
-            .timeout(const Duration(seconds: 5));
-
-        if (resp.statusCode == 200) {
-          final decoded = jsonDecode(utf8.decode(resp.bodyBytes));
-          if (decoded is List && decoded.isNotEmpty) {
-            var gen = (decoded.first['generated_text'] ?? '').toString();
-            if (gen.startsWith(prompt)) {
-              gen = gen.substring(prompt.length);
-            }
-            if (gen.contains('</끝>')) {
-              gen = gen.substring(0, gen.indexOf('</끝>'));
-            }
-            gen = gen.replaceAll(RegExp(r'###.*'), '').trim();
-            if (gen.isNotEmpty) return polishKoreanSpacingAndSpelling(gen);
-          }
-        }
-      } catch (_) {}
-    }
-
-    // 내장 신경망 번역 (dj=1 옵션으로 문장 세그먼트별 정확한 띄어쓰기 결합)
+    // 1순위: Google 번역 Chrome 확장 프로그램의 OnePlatform API (translate-pa.googleapis.com/v1/translate)
     try {
-      final uri = Uri.https('translate.googleapis.com', '/translate_a/single', {
+      final queryParams = <String, dynamic>{
+        'params.client': 'gtx',
+        'query.source_language': sourceLang,
+        'query.target_language': targetLang,
+        'query.display_language': 'ko',
+        'query.text': cleaned,
+        'key': _chromeExtApiKey,
+        'data_types': [
+          'TRANSLATION',
+          'SENTENCE_SPLITS',
+          'QUERY_CORRECTION_AUTOCORRECT',
+        ],
+      };
+
+      final uri = Uri.parse(_chromeExtOnePlatformUrl).replace(queryParameters: queryParams);
+      final resp = await http.get(
+        uri,
+        headers: {
+          'Accept': 'application/json, text/plain, */*',
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        },
+      ).timeout(const Duration(seconds: 6));
+
+      if (resp.statusCode == 200) {
+        final bodyStr = utf8.decode(resp.bodyBytes).trim();
+        final decoded = jsonDecode(bodyStr);
+        if (decoded is Map) {
+          if (decoded['translation'] != null && decoded['translation'].toString().trim().isNotEmpty) {
+            return polishKoreanSpacingAndSpelling(decoded['translation'].toString());
+          }
+          if (decoded['sentences'] is List) {
+            final parts = <String>[];
+            for (final s in decoded['sentences']) {
+              if (s is Map && s['trans'] != null) {
+                parts.add(s['trans'].toString().trim());
+              }
+            }
+            if (parts.isNotEmpty) {
+              return polishKoreanSpacingAndSpelling(parts.join(' '));
+            }
+          }
+        } else if (decoded is List && decoded.isNotEmpty) {
+          // JSPB 배열 형태로 반환될 때 첫 번째 필드(1: translation) 또는 두 번째 필드(2: sentences) 추출
+          if (decoded[0] is String && (decoded[0] as String).trim().isNotEmpty) {
+            return polishKoreanSpacingAndSpelling(decoded[0] as String);
+          }
+          if (decoded.length > 1 && decoded[1] is List) {
+            final parts = <String>[];
+            for (final s in decoded[1]) {
+              if (s is List && s.isNotEmpty && s[0] != null) {
+                parts.add(s[0].toString().trim());
+              }
+            }
+            if (parts.isNotEmpty) {
+              return polishKoreanSpacingAndSpelling(parts.join(' '));
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2순위: Google 번역 Chrome 확장 프로그램의 GTX Single API (자동 오타 교정 dt=qc & 문장 분리 dt=t & dj=1 포함)
+    try {
+      final uri = Uri.parse(_chromeExtAjaxSingleUrl).replace(queryParameters: {
         'client': 'gtx',
         'sl': sourceLang,
         'tl': targetLang,
-        'dt': 't',
+        'hl': 'ko',
+        'dt': ['t', 'qc', 'bd'],
         'dj': '1',
+        'ie': 'UTF-8',
+        'oe': 'UTF-8',
+        'source': 'bubble',
         'q': cleaned,
       });
-      final resp = await http.get(uri).timeout(const Duration(seconds: 6));
+      final resp = await http.get(
+        uri,
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        },
+      ).timeout(const Duration(seconds: 6));
+
       if (resp.statusCode == 200) {
         final data = jsonDecode(utf8.decode(resp.bodyBytes));
         if (data is Map && data['sentences'] is List) {
@@ -218,6 +227,49 @@ class BatchTranslationService {
     } catch (_) {
       return cleaned;
     }
+  }
+
+  /// 한 페이지 안의 모든 말풍선 문장들을 문맥이 이어지도록 한꺼번에 Google Chrome 확장 번역기로 번역!
+  /// (문맥 단절로 인해 반말/존댓말이나 대명사가 엉망이 되는 현상을 막아줍니다)
+  static Future<List<String>> translatePageSentencesWithContext(
+    List<String> sentences, {
+    required String sourceLang,
+    required String targetLang,
+  }) async {
+    if (sentences.isEmpty) return [];
+    final cleanedList = sentences.map((s) => cleanOcrSourceText(s, sourceLang)).toList();
+
+    // 여러 말풍선을 줄바꿈으로 묶어서 한 번에 번역 요청 후 다시 줄 단위로 분리하면 앞뒤 대사 문맥이 유지됨!
+    try {
+      final joined = cleanedList.join('\n');
+      final translatedBlock = await translateWithGoogleChromeExtensionEngine(
+        joined,
+        sourceLang: sourceLang,
+        targetLang: targetLang,
+      );
+      final lines = translatedBlock
+          .split('\n')
+          .map((l) => polishKoreanSpacingAndSpelling(l))
+          .where((l) => l.isNotEmpty)
+          .toList();
+      if (lines.length == sentences.length) {
+        return lines;
+      }
+    } catch (_) {}
+
+    // 줄 개수가 다를 경우 각 말풍선별로 정확하게 개별 번역
+    final List<String> results = List.from(sentences);
+    for (int i = 0; i < sentences.length; i++) {
+      final tr = await translateWithGoogleChromeExtensionEngine(
+        sentences[i],
+        sourceLang: sourceLang,
+        targetLang: targetLang,
+      );
+      if (tr.isNotEmpty) {
+        results[i] = tr;
+      }
+    }
+    return results;
   }
 
   static Future<File> preTranslateWholeEpub({
@@ -297,13 +349,30 @@ class BatchTranslationService {
     }
 
     final List<String> translatedList = List.filled(plainTexts.length, '');
-    for (int i = 0; i < plainTexts.length; i++) {
-      if (plainTexts[i].isNotEmpty) {
-        translatedList[i] = await translateWithGugugoPipeline(
-          plainTexts[i],
+    const int chunkSize = 15;
+    for (int i = 0; i < plainTexts.length; i += chunkSize) {
+      final end = (i + chunkSize < plainTexts.length) ? i + chunkSize : plainTexts.length;
+      final slice = plainTexts.sublist(i, end);
+      final nonEmptyIndices = <int>[];
+      final nonEmptyTexts = <String>[];
+
+      for (int j = 0; j < slice.length; j++) {
+        if (slice[j].isNotEmpty) {
+          nonEmptyIndices.add(i + j);
+          nonEmptyTexts.add(slice[j]);
+        }
+      }
+
+      if (nonEmptyTexts.isNotEmpty) {
+        final batchOut = await translatePageSentencesWithContext(
+          nonEmptyTexts,
           sourceLang: sourceLang,
           targetLang: targetLang,
         );
+        for (int k = 0; k < nonEmptyIndices.length; k++) {
+          translatedList[nonEmptyIndices[k]] =
+              (k < batchOut.length) ? batchOut[k] : nonEmptyTexts[k];
+        }
       }
     }
 
@@ -381,8 +450,6 @@ class BatchTranslationService {
     return false;
   }
 
-  /// 5. 말풍선/텍스트 영역의 원본 이미지 픽셀 밝기를 샘플링하여 검은색 배경인지 자동 판별!
-  /// 배경 픽셀들의 평균 밝기(Luminance)가 115 미만이면 검은색/어두운 배경으로 판정 -> 검은 배경 + 흰색 글씨로 렌더링!
   static bool _detectDarkBackground(
       ByteData? rgbaBytes, int imgW, int imgH, ui.Rect rect) {
     if (rgbaBytes == null || imgW <= 0 || imgH <= 0) return false;
@@ -416,11 +483,9 @@ class BatchTranslationService {
     }
 
     if (totalSamples == 0) return false;
-    // 글자 획(약 20~35%)을 제외하고도 영역의 58% 이상이 어두우면 검은색 배경 말풍선/박스로 판정
     return (darkCount / totalSamples) >= 0.58;
   }
 
-  /// 2. 만화 말풍선 + 일반 PDF/사진 문구 통합 번역 (세로 일본어도 말풍선 크기에 맞춰 가로 한글로 조판 + 검은 배경 자동 감지)
   static Future<void> preTranslateAllImages({
     required String bookKey,
     required List<File> imageFiles,
@@ -533,7 +598,6 @@ class BatchTranslationService {
           final bool clusterIsVertical = cluster.first.isVerticalLine;
 
           if (clusterIsVertical) {
-            // 세로쓰기 일본어 대사: 오른쪽 열부터 왼쪽 열 순서로 문장 결합
             cluster.sort((a, b) {
               final double xDiff = b.rect.center.dx - a.rect.center.dx;
               if (xDiff.abs() > medianSize * 0.45) {
@@ -570,7 +634,6 @@ class BatchTranslationService {
           }
           if (combinedText.isEmpty) continue;
 
-          // 원문 말풍선 크기를 넘지 않도록 바운딩 박스 고정
           final strictRect = ui.Rect.fromLTRB(
             minL.clamp(0.0, imgWidth).toDouble(),
             minT.clamp(0.0, imgHeight).toDouble(),
@@ -597,17 +660,12 @@ class BatchTranslationService {
           isDarkBgFlags.add(darkBg);
         }
 
-        final List<String> translatedSentences = List.from(mergedSentences);
-        for (int k = 0; k < mergedSentences.length; k++) {
-          final tr = await translateWithGugugoPipeline(
-            mergedSentences[k],
-            sourceLang: sourceLang,
-            targetLang: targetLang,
-          );
-          if (tr.isNotEmpty) {
-            translatedSentences[k] = tr;
-          }
-        }
+        // Google 번역 Chrome 확장 프로그램 엔진으로 페이지 내 대사들을 문맥 유지 번역
+        final List<String> translatedSentences = await translatePageSentencesWithContext(
+          mergedSentences,
+          sourceLang: sourceLang,
+          targetLang: targetLang,
+        );
 
         final List<BubbleTranslation> bubbles = [];
         for (int k = 0; k < exactRects.length; k++) {
@@ -619,7 +677,7 @@ class BatchTranslationService {
               widthRatio: (rect.width / imgWidth).clamp(0.015, 0.99).toDouble(),
               heightRatio: (rect.height / imgHeight).clamp(0.015, 0.99).toDouble(),
               originalText: mergedSentences[k],
-              translatedText: translatedSentences[k],
+              translatedText: k < translatedSentences.length ? translatedSentences[k] : mergedSentences[k],
               isSerif: isSerifFlags[k],
               isBold: isBoldFlags[k],
               isDarkBg: isDarkBgFlags[k],

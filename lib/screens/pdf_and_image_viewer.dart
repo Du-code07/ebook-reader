@@ -3,13 +3,59 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:archive/archive.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/batch_translation_service.dart';
 import '../services/storage_service.dart';
 import '../services/volume_key_service.dart';
+
+/// S펜 전용 터치 필터 위젯:
+/// S펜(stylus / invertedStylus) 입력만 자식(필기/지우개 레이어)으로 전달하고,
+/// 일반 손가락 터치(touch)는 무시하여 아래쪽 PageView가 평소처럼 손가락 스와이프로 페이지를 넘길 수 있게 해줍니다!
+class StylusOnlyHitTestWrapper extends SingleChildRenderObjectWidget {
+  final bool enabled;
+
+  const StylusOnlyHitTestWrapper({
+    super.key,
+    required this.enabled,
+    required super.child,
+  });
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    return _RenderStylusOnlyHitTestBox(enabled: enabled);
+  }
+
+  @override
+  void updateRenderObject(BuildContext context, RenderObject renderObject) {
+    (renderObject as _RenderStylusOnlyHitTestBox).enabled = enabled;
+  }
+}
+
+class _RenderStylusOnlyHitTestBox extends RenderProxyBox {
+  bool enabled;
+  _RenderStylusOnlyHitTestBox({required this.enabled});
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    if (!enabled) return false;
+    return super.hitTest(result, position: position);
+  }
+
+  @override
+  void handleEvent(PointerEvent event, BoxHitTestEntry entry) {
+    // 손가락 터치일 때는 이벤트를 가로채지 않고 패스합니다.
+    if (event.kind != PointerDeviceKind.stylus &&
+        event.kind != PointerDeviceKind.invertedStylus) {
+      return;
+    }
+    super.handleEvent(event, entry);
+  }
+}
 
 class _MemoCanvasPainter extends CustomPainter {
   final List<MemoStroke> strokes;
@@ -99,23 +145,23 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _enableTwoPageInLandscape = true;
   bool _lastIsSpreadMode = false;
 
-  // 화면 터치 잠금 (음량 버튼 2개 동시 누름 시 해제)
   bool _isTouchLocked = false;
 
-  // 페이지 전환 설정 3가지 (동시 사용 가능)
+  // 페이지 전환 설정 3가지 (음량 버튼, 페이지 이동 버튼, S펜 버튼 - 3개 동시 사용 가능)
   bool _useVolumeTurn = true;
   bool _useQuickNavTurn = false;
   bool _useSpenTurn = true;
 
-  // S펜 간단 메모 모드 상태
+  // 4. S펜 필기 및 지우개 모드 상태 (손가락 터치는 페이지 넘기기만 되고, 글씨 쓰기/지우기는 S펜으로만 작동)
   bool _isMemoMode = false;
+  bool _isEraserMode = false;
+  int? _activeStylusPointerId;
   final Map<int, List<MemoStroke>> _memoStrokesByPage = {};
   final Map<int, String> _memoNotesByPage = {};
   final List<Offset> _activeStrokePoints = [];
   Color _penColor = Colors.amber;
   final double _penWidth = 3.2;
 
-  // 하단 정보 표시 설정 & 진행도 UI 위치 설정 ('right', 'left', 'bottom', 'hidden')
   String _footerInfoMode = 'both';
   String _progressBarPos = 'right';
 
@@ -348,12 +394,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   void _toggleControls() {
-    if (_isTouchLocked || _isMemoMode) return;
+    if (_isTouchLocked) return;
     setState(() => _showControls = !_showControls);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
-  /// 3. 두 화살표 간격을 좁히고, 색상은 왼쪽 아이콘과 동일한 Colors.amber로 맞춘 방향 아이콘
   Widget _buildDualDirectionIcon() {
     final bool isRightActive = !_isMangaRtlMode;
     const Color activeColor = Colors.amber;
@@ -386,7 +431,40 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  /// 6. S펜 간단 텍스트 메모 다이얼로그 및 펜 지우개 옵션
+  /// S펜 지우개 기능: S펜 끝이 닿은 위치(localPos) 주변의 필기 선들을 즉시 삭제!
+  Future<void> _eraseStrokeAt(int pageIndex, Offset localPos, double drawWidth, double drawHeight) async {
+    final strokes = _memoStrokesByPage[pageIndex];
+    if (strokes == null || strokes.isEmpty || drawWidth <= 0 || drawHeight <= 0) return;
+
+    const double hitRadius = 22.0;
+    bool removedAny = false;
+    final remaining = <MemoStroke>[];
+
+    for (final s in strokes) {
+      bool hit = false;
+      for (int i = 0; i < s.dxList.length; i++) {
+        final px = s.dxList[i] * drawWidth;
+        final py = s.dyList[i] * drawHeight;
+        if ((Offset(px, py) - localPos).distance <= hitRadius) {
+          hit = true;
+          break;
+        }
+      }
+      if (hit) {
+        removedAny = true;
+      } else {
+        remaining.add(s);
+      }
+    }
+
+    if (removedAny) {
+      setState(() {
+        _memoStrokesByPage[pageIndex] = remaining;
+      });
+      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, remaining);
+    }
+  }
+
   Future<void> _showMemoTextDialog() async {
     final currentNote = _memoNotesByPage[_currentPage] ?? '';
     final ctrl = TextEditingController(text: currentNote);
@@ -438,7 +516,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  /// 7 & 8. 뷰어 표시 설정 (페이지 전환 설정 3가지 동시 선택 + 진행도 UI 위치 숨김 포함 + 하단 정보 표시)
+  /// 뷰어 표시 설정 ('화면 이동 버튼' -> '페이지 이동 버튼' 문구 수정 반영)
   Future<void> _showViewerSettingsSheet() async {
     await showModalBottomSheet(
       context: context,
@@ -469,7 +547,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     FilterChip(
-                      label: const Text('화면 이동 버튼'),
+                      label: const Text('페이지 이동 버튼'),
                       selected: _useQuickNavTurn,
                       onSelected: (val) async {
                         await StorageService.setUseQuickNavTurn(val);
@@ -588,12 +666,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Future<void> _showLanguageAndTranslateDialog({bool forceRetranslate = false}) async {
-    final currentGugugoUrl = await StorageService.getGugugoServerUrl();
-    final currentHfToken = await StorageService.getGugugoHfToken();
-    final urlCtrl = TextEditingController(text: currentGugugoUrl);
-    final tokenCtrl = TextEditingController(text: currentHfToken);
-    bool showAdvanced = currentGugugoUrl.isNotEmpty || currentHfToken.isNotEmpty;
-
     if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -629,50 +701,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     });
                   },
                 ),
-                const SizedBox(height: 4),
-                TextButton.icon(
-                  style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                  icon: Icon(showAdvanced ? Icons.expand_less : Icons.expand_more, size: 18),
-                  label: const Text('Gugugo 서버 / HuggingFace 토큰 설정 (선택사항)', style: TextStyle(fontSize: 12)),
-                  onPressed: () => setModalState(() => showAdvanced = !showAdvanced),
-                ),
-                if (showAdvanced) ...[
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: urlCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Gugugo Gradio 서버 주소 (선택)',
-                      hintText: '예: https://xxxx.gradio.live',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: tokenCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'HuggingFace API 토큰 (선택)',
-                      hintText: 'hf_...',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ],
               ],
             ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
             ElevatedButton(
-              onPressed: () async {
-                await StorageService.setGugugoApiConfig(
-                  serverUrl: urlCtrl.text,
-                  hfToken: tokenCtrl.text,
-                );
-                if (ctx.mounted) Navigator.pop(ctx, true);
-              },
+              onPressed: () => Navigator.pop(ctx, true),
               child: const Text('번역 시작'),
             ),
           ],
@@ -743,8 +778,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
-  /// 5. 세로로 된 일본어 말풍선도 말풍선 크기에 맞춰 가로로 한글을 조판하며,
-  /// 배경이 검은색(b.isDarkBg)이면 흰색 글씨로 표시!
   Widget _buildFittedHorizontalKoreanText(BubbleTranslation b, double boxW, double boxH) {
     final double safeW = math.max<double>(14.0, boxW - 3.0);
     final double safeH = math.max<double>(12.0, boxH - 2.0);
@@ -849,66 +882,102 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 );
               }),
 
-            // 6. S펜 필기 레이어 표시 및 드로잉 입력
+            // 4. S펜 전용 필기 및 지우개 레이어:
+            // StylusOnlyHitTestWrapper를 통해 손가락 터치는 PageView(페이지 넘기기)로 그대로 통과시키고,
+            // 오직 S펜(stylus / invertedStylus)으로 터치할 때만 글씨 쓰기 또는 지우개가 작동합니다!
             if (strokes.isNotEmpty || (_isMemoMode && pageIndex == _currentPage))
               Positioned(
                 left: drawLeft,
                 top: drawTop,
                 width: drawWidth,
                 height: drawHeight,
-                child: GestureDetector(
-                  behavior: _isMemoMode ? HitTestBehavior.opaque : HitTestBehavior.translucent,
-                  onPanStart: _isMemoMode
-                      ? (details) {
-                          setState(() {
-                            _activeStrokePoints
-                              ..clear()
-                              ..add(details.localPosition);
-                          });
-                        }
-                      : null,
-                  onPanUpdate: _isMemoMode
-                      ? (details) {
-                          setState(() {
-                            _activeStrokePoints.add(details.localPosition);
-                          });
-                        }
-                      : null,
-                  onPanEnd: _isMemoMode
-                      ? (_) async {
-                          if (_activeStrokePoints.isNotEmpty && drawWidth > 0 && drawHeight > 0) {
-                            final stroke = MemoStroke(
-                              dxList: _activeStrokePoints
-                                  .map((p) => (p.dx / drawWidth).clamp(0.0, 1.0).toDouble())
-                                  .toList(),
-                              dyList: _activeStrokePoints
-                                  .map((p) => (p.dy / drawHeight).clamp(0.0, 1.0).toDouble())
-                                  .toList(),
-                              colorValue: _penColor.value,
-                              strokeWidth: _penWidth,
-                            );
-                            final list = List<MemoStroke>.from(_memoStrokesByPage[pageIndex] ?? [])
-                              ..add(stroke);
-                            setState(() {
-                              _memoStrokesByPage[pageIndex] = list;
-                              _activeStrokePoints.clear();
-                            });
-                            await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
-                          }
-                        }
-                      : null,
-                  child: CustomPaint(
-                    painter: _MemoCanvasPainter(
-                      strokes: strokes,
-                      currentPoints: pageIndex == _currentPage ? _activeStrokePoints : const [],
-                      currentColor: _penColor,
-                      currentWidth: _penWidth,
+                child: StylusOnlyHitTestWrapper(
+                  enabled: _isMemoMode && pageIndex == _currentPage,
+                  child: Listener(
+                    behavior: HitTestBehavior.opaque,
+                    onPointerDown: (event) {
+                      if (!_isMemoMode || pageIndex != _currentPage) return;
+                      if (event.kind != PointerDeviceKind.stylus &&
+                          event.kind != PointerDeviceKind.invertedStylus) {
+                        return;
+                      }
+                      _activeStylusPointerId = event.pointer;
+                      final bool useEraser =
+                          _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
+                      if (useEraser) {
+                        _eraseStrokeAt(pageIndex, event.localPosition, drawWidth, drawHeight);
+                      } else {
+                        setState(() {
+                          _activeStrokePoints
+                            ..clear()
+                            ..add(event.localPosition);
+                        });
+                      }
+                    },
+                    onPointerMove: (event) {
+                      if (!_isMemoMode ||
+                          pageIndex != _currentPage ||
+                          event.pointer != _activeStylusPointerId) {
+                        return;
+                      }
+                      final bool useEraser =
+                          _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
+                      if (useEraser) {
+                        _eraseStrokeAt(pageIndex, event.localPosition, drawWidth, drawHeight);
+                      } else {
+                        setState(() {
+                          _activeStrokePoints.add(event.localPosition);
+                        });
+                      }
+                    },
+                    onPointerUp: (event) async {
+                      if (!_isMemoMode ||
+                          pageIndex != _currentPage ||
+                          event.pointer != _activeStylusPointerId) {
+                        return;
+                      }
+                      _activeStylusPointerId = null;
+                      final bool useEraser =
+                          _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
+                      if (!useEraser &&
+                          _activeStrokePoints.isNotEmpty &&
+                          drawWidth > 0 &&
+                          drawHeight > 0) {
+                        final stroke = MemoStroke(
+                          dxList: _activeStrokePoints
+                              .map((p) => (p.dx / drawWidth).clamp(0.0, 1.0).toDouble())
+                              .toList(),
+                          dyList: _activeStrokePoints
+                              .map((p) => (p.dy / drawHeight).clamp(0.0, 1.0).toDouble())
+                              .toList(),
+                          colorValue: _penColor.value,
+                          strokeWidth: _penWidth,
+                        );
+                        final list = List<MemoStroke>.from(_memoStrokesByPage[pageIndex] ?? [])
+                          ..add(stroke);
+                        setState(() {
+                          _memoStrokesByPage[pageIndex] = list;
+                          _activeStrokePoints.clear();
+                        });
+                        await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
+                      }
+                    },
+                    onPointerCancel: (_) {
+                      _activeStylusPointerId = null;
+                      setState(() => _activeStrokePoints.clear());
+                    },
+                    child: CustomPaint(
+                      painter: _MemoCanvasPainter(
+                        strokes: strokes,
+                        currentPoints: pageIndex == _currentPage ? _activeStrokePoints : const [],
+                        currentColor: _penColor,
+                        currentWidth: _penWidth,
+                      ),
                     ),
                   ),
                 ),
               ),
 
-            // 페이지에 저장된 텍스트 메모 스티커 표시
             if (memoNote.isNotEmpty)
               Positioned(
                 left: drawLeft + 12.0,
@@ -1035,12 +1104,23 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Widget _buildProgressControlBar() {
+    if (!_showControls || _isTouchLocked || _totalPages <= 1 || _progressBarPos == 'hidden') {
+      return const Positioned(
+        key: ValueKey('progress_bar_hidden'),
+        left: 0,
+        bottom: 0,
+        width: 0,
+        height: 0,
+        child: SizedBox.shrink(),
+      );
+    }
 
     final double sliderVal = _currentPage.toDouble().clamp(0.0, math.max<double>(0.0, (_totalPages - 1).toDouble())).toDouble();
     final double sliderMax = math.max<double>(1.0, (_totalPages - 1).toDouble());
 
     if (_progressBarPos == 'bottom') {
       return Positioned(
+        key: const ValueKey('progress_bar_bottom'),
         left: 16.0,
         right: _useQuickNavTurn ? 116.0 : 16.0,
         bottom: 28.0,
@@ -1080,6 +1160,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     return Positioned(
+      key: ValueKey('progress_bar_$_progressBarPos'),
       top: 72.0,
       bottom: _useQuickNavTurn && _progressBarPos == 'right' ? 84.0 : 48.0,
       left: _progressBarPos == 'left' ? 8.0 : null,
@@ -1127,7 +1208,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  /// 7. 화면 이동 버튼 (오른쪽 하단에 위·아래 화살표가 양옆으로 나란히 붙어 있는 버튼)
   Widget _buildQuickNavButtons(double bottomInset) {
     return Positioned(
       right: 12.0,
@@ -1212,7 +1292,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   key: ValueKey('pageview_spread_$isSpread'),
                   controller: _pageController,
                   reverse: _isMangaRtlMode,
-                  physics: (_isTouchLocked || _isMemoMode)
+                  // 4. S펜 필기 모드(_isMemoMode)가 켜져 있어도 손가락 스와이프로는 페이지를 넘길 수 있도록 BouncingScrollPhysics 유지!
+                  physics: _isTouchLocked
                       ? const NeverScrollableScrollPhysics()
                       : const BouncingScrollPhysics(),
                   itemCount: viewItemCount,
@@ -1283,64 +1364,90 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
             ),
 
-          // S펜 필기 모드 상단 미니 툴바
+          // 4. S펜 필기 모드 상단 미니 툴바 (펜 색상 선택 + 지우개 버튼 추가!)
           if (_isMemoMode && !_isTouchLocked)
             Positioned(
-              top: 12,
-              left: 16,
-              right: 16,
+              top: _showControls ? 58 : 12,
+              left: 12,
+              right: 12,
               child: Center(
                 child: Material(
                   color: Colors.black87,
                   borderRadius: BorderRadius.circular(24),
                   elevation: 6,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.draw, color: Colors.amber, size: 18),
-                        const SizedBox(width: 6),
-                        const Text('S펜 필기 모드', style: TextStyle(color: Colors.white, fontSize: 12)),
-                        const SizedBox(width: 8),
-                        ...[Colors.amber, Colors.redAccent, Colors.lightBlueAccent, Colors.greenAccent]
-                            .map((c) => GestureDetector(
-                                  onTap: () => setState(() => _penColor = c),
-                                  child: Container(
-                                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                                    width: 18,
-                                    height: 18,
-                                    decoration: BoxDecoration(
-                                      color: c,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: _penColor == c ? Colors.white : Colors.transparent,
-                                        width: 2,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _isEraserMode ? Icons.auto_fix_normal : Icons.draw,
+                            color: Colors.amber,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _isEraserMode ? 'S펜 지우개' : 'S펜 필기 (손터치: 페이지 이동)',
+                            style: const TextStyle(color: Colors.white, fontSize: 11),
+                          ),
+                          const SizedBox(width: 8),
+                          ...[Colors.amber, Colors.redAccent, Colors.lightBlueAccent, Colors.greenAccent]
+                              .map((c) => GestureDetector(
+                                    onTap: () => setState(() {
+                                      _penColor = c;
+                                      _isEraserMode = false;
+                                    }),
+                                    child: Container(
+                                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                                      width: 18,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        color: c,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: (!_isEraserMode && _penColor == c)
+                                              ? Colors.white
+                                              : Colors.transparent,
+                                          width: 2,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                )),
-                        IconButton(
-                          icon: const Icon(Icons.note_alt_outlined, color: Colors.white, size: 18),
-                          tooltip: '텍스트 메모 입력',
-                          onPressed: _showMemoTextDialog,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.undo, color: Colors.white, size: 18),
-                          tooltip: '한 획 취소',
-                          onPressed: () async {
-                            final list = _memoStrokesByPage[_currentPage];
-                            if (list != null && list.isNotEmpty) {
-                              setState(() => list.removeLast());
-                              await StorageService.savePageMemoStrokes(_bookKey, _currentPage, list);
-                            }
-                          },
-                        ),
-                        TextButton(
-                          onPressed: () => setState(() => _isMemoMode = false),
-                          child: const Text('완료', style: TextStyle(color: Colors.amber)),
-                        ),
-                      ],
+                                  )),
+                          const SizedBox(width: 4),
+                          // 지우개 토글 버튼
+                          IconButton(
+                            icon: Icon(
+                              Icons.cleaning_services_outlined,
+                              color: _isEraserMode ? Colors.amber : Colors.white,
+                              size: 18,
+                            ),
+                            tooltip: 'S펜 지우개',
+                            onPressed: () => setState(() => _isEraserMode = !_isEraserMode),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.note_alt_outlined, color: Colors.white, size: 18),
+                            tooltip: '텍스트 메모 입력',
+                            onPressed: _showMemoTextDialog,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_sweep_outlined, color: Colors.redAccent, size: 18),
+                            tooltip: '현재 페이지 필기 전체 지우기',
+                            onPressed: () async {
+                              setState(() => _memoStrokesByPage.remove(_currentPage));
+                              await StorageService.savePageMemoStrokes(_bookKey, _currentPage, []);
+                            },
+                          ),
+                          TextButton(
+                            onPressed: () => setState(() {
+                              _isMemoMode = false;
+                              _isEraserMode = false;
+                            }),
+                            child: const Text('완료', style: TextStyle(color: Colors.amber)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1379,13 +1486,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             _goToPage(target, recordHistory: false, smoothAnimation: true);
                           },
                         ),
-                      // 1 & 2. 화면 터치 잠금 버튼 (음량 버튼 2개 동시 누름으로 해제)
                       IconButton(
                         icon: const Icon(Icons.screen_lock_portrait, color: Colors.white, size: 20),
                         tooltip: '화면 터치 잠금',
                         onPressed: _lockTouchScreen,
                       ),
-                      // 6. S펜 필기/메모 버튼
                       IconButton(
                         icon: Icon(
                           Icons.draw_outlined,
@@ -1396,7 +1501,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         onPressed: () {
                           setState(() {
                             _isMemoMode = !_isMemoMode;
-                            if (_isMemoMode) _showControls = false;
+                            _isEraserMode = false;
                           });
                         },
                       ),
@@ -1413,7 +1518,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                           setState(() => _enableTwoPageInLandscape = nextVal);
                         },
                       ),
-                      // 3. 방향 전환 버튼 (방향 상태 영구 기억 + 간격 축소 + 왼쪽 아이콘과 동일한 Colors.amber 색상)
                       IconButton(
                         icon: _buildDualDirectionIcon(),
                         tooltip: _isMangaRtlMode ? '(오른쪽 -> 왼쪽)' : '방향(왼쪽 -> 오른쪽)',
@@ -1471,10 +1575,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
             ),
 
-          if (_showControls && !_isTouchLocked && _totalPages > 1 && _progressBarPos != 'hidden')
-            _buildProgressControlBar(),
+          _buildProgressControlBar(),
 
-          // 7. 오른쪽 하단 화면 이동 버튼 (위·아래 화살표 양옆 배치, 페이지 전환 설정에서 켜면 상시 작동)
           if (_useQuickNavTurn && !_isTouchLocked && _totalPages > 1)
             _buildQuickNavButtons(bottomInset),
         ],

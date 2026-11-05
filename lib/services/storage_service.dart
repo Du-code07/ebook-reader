@@ -145,6 +145,17 @@ class StorageService {
     return prefs.getBool('app_dark_mode') ?? false;
   }
 
+  // EPUB 배경 테마 설정: 'white' (흰색), 'sepia' (종이색), 'dark' (다크)
+  static Future<void> setEpubBgTheme(String theme) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('epub_bg_theme', theme);
+  }
+
+  static Future<String> getEpubBgTheme() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('epub_bg_theme') ?? 'white';
+  }
+
   static Future<void> setTwoPageLandscape(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('two_page_landscape', enabled);

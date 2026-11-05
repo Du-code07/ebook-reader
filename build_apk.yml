@@ -40,19 +40,12 @@ jobs:
             exit 1
           fi
 
-          # Dart 3.x / Flutter 3.47+ 에서 .clamp() 반환 타입(num)이 Positioned(double?)에 전달될 때 발생하는 타입 오류 자동 보정
+          # Dart 컴파일 전 자동 오타/타입 및 진행도 UI 숨김(Stack Positioned) 완벽 보정
           if [ -f "lib/services/storage_service.dart" ]; then
             sed -i 's/jsonEncode(bubbles.map((e) => e.toJson())).toList()/jsonEncode(bubbles.map((e) => e.toJson()).toList())/g' lib/services/storage_service.dart
           fi
           if [ -f "lib/screens/pdf_and_image_viewer.dart" ]; then
-            sed -i "/if (_progressBarPos == 'hidden') return const SizedBox.shrink();/d" lib/screens/pdf_and_image_viewer.dart
-            sed -i "s/if (_showControls && !_isTouchLocked && _totalPages > 1)/if (_showControls \&\& !_isTouchLocked \&\& _totalPages > 1 \&\& _progressBarPos != 'hidden')/g" lib/screens/pdf_and_image_viewer.dart
-          fi
-          if [ -f "lib/screens/reader_screen.dart" ]; then
-            sed -i "/if (_progressBarPos == 'hidden') return const SizedBox.shrink();/d" lib/screens/reader_screen.dart
-            sed -i "s/if (_showControls && !_isTouchLocked)$/if (_showControls \&\& !_isTouchLocked \&\& _progressBarPos != 'hidden')/g" lib/screens/reader_screen.dart
-          fi
-          if [ -f "lib/screens/pdf_and_image_viewer.dart" ]; then
+            sed -i "s/if (_progressBarPos == 'hidden') return const SizedBox.shrink();/if (_progressBarPos == 'hidden') return const Positioned(left: 0, bottom: 0, width: 0, height: 0, child: SizedBox.shrink());/g" lib/screens/pdf_and_image_viewer.dart
             sed -i 's/left: boxLeft,/left: boxLeft.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
             sed -i 's/math.max<int>(1, b.translatedText.length \* 1.8)/math.max<double>(1.0, b.translatedText.length * 1.8)/g' lib/screens/pdf_and_image_viewer.dart
             sed -i 's/top: boxTop,/top: boxTop.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
@@ -60,6 +53,9 @@ jobs:
             sed -i 's/height: boxH,/height: boxH.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
             sed -i 's/bottom: math.max(bottomInset + 4, 8),/bottom: math.max<double>(bottomInset + 4.0, 8.0),/g' lib/screens/pdf_and_image_viewer.dart
             sed -i 's/bottom: math.max(bottomInset + 26, 28),/bottom: math.max<double>(bottomInset + 26.0, 28.0),/g' lib/screens/pdf_and_image_viewer.dart
+          fi
+          if [ -f "lib/screens/reader_screen.dart" ]; then
+            sed -i "s/if (_progressBarPos == 'hidden') return const SizedBox.shrink();/if (_progressBarPos == 'hidden') return const Positioned(left: 0, bottom: 0, width: 0, height: 0, child: SizedBox.shrink());/g" lib/screens/reader_screen.dart
           fi
 
           rm -f sample_japanese_test_book.epub
