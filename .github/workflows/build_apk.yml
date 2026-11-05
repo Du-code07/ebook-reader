@@ -54,6 +54,7 @@ jobs:
             sed -i 's/bottom: math.max(bottomInset + 26, 28),/bottom: math.max<double>(bottomInset + 26.0, 28.0),/g' lib/screens/pdf_and_image_viewer.dart
           fi
 
+          rm -f sample_japanese_test_book.epub
           mkdir -p /tmp/v7_backup
           cp -rf lib /tmp/v7_backup/
           cp -f pubspec.yaml /tmp/v7_backup/
