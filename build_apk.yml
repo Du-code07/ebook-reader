@@ -45,6 +45,14 @@ jobs:
             sed -i 's/jsonEncode(bubbles.map((e) => e.toJson())).toList()/jsonEncode(bubbles.map((e) => e.toJson()).toList())/g' lib/services/storage_service.dart
           fi
           if [ -f "lib/screens/pdf_and_image_viewer.dart" ]; then
+            sed -i "/if (_progressBarPos == 'hidden') return const SizedBox.shrink();/d" lib/screens/pdf_and_image_viewer.dart
+            sed -i "s/if (_showControls && !_isTouchLocked && _totalPages > 1)/if (_showControls \&\& !_isTouchLocked \&\& _totalPages > 1 \&\& _progressBarPos != 'hidden')/g" lib/screens/pdf_and_image_viewer.dart
+          fi
+          if [ -f "lib/screens/reader_screen.dart" ]; then
+            sed -i "/if (_progressBarPos == 'hidden') return const SizedBox.shrink();/d" lib/screens/reader_screen.dart
+            sed -i "s/if (_showControls && !_isTouchLocked)$/if (_showControls \&\& !_isTouchLocked \&\& _progressBarPos != 'hidden')/g" lib/screens/reader_screen.dart
+          fi
+          if [ -f "lib/screens/pdf_and_image_viewer.dart" ]; then
             sed -i 's/left: boxLeft,/left: boxLeft.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
             sed -i 's/math.max<int>(1, b.translatedText.length \* 1.8)/math.max<double>(1.0, b.translatedText.length * 1.8)/g' lib/screens/pdf_and_image_viewer.dart
             sed -i 's/top: boxTop,/top: boxTop.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart

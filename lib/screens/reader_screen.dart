@@ -545,7 +545,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Widget _buildEpubProgressBar(Color barColor, Color iconColor) {
-    if (_progressBarPos == 'hidden') return const SizedBox.shrink();
 
     final double val = _progress.clamp(0.0, 1.0).toDouble();
 
@@ -952,7 +951,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               ),
             ),
 
-          if (_showControls && !_isTouchLocked)
+          if (_showControls && !_isTouchLocked && _progressBarPos != 'hidden')
             _buildEpubProgressBar(barColor, iconColor),
 
           if (_useQuickNavTurn && !_isTouchLocked)

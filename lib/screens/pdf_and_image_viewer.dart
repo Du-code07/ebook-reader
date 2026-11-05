@@ -1035,7 +1035,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Widget _buildProgressControlBar() {
-    if (_progressBarPos == 'hidden') return const SizedBox.shrink();
 
     final double sliderVal = _currentPage.toDouble().clamp(0.0, math.max<double>(0.0, (_totalPages - 1).toDouble())).toDouble();
     final double sliderMax = math.max<double>(1.0, (_totalPages - 1).toDouble());
@@ -1472,7 +1471,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
             ),
 
-          if (_showControls && !_isTouchLocked && _totalPages > 1)
+          if (_showControls && !_isTouchLocked && _totalPages > 1 && _progressBarPos != 'hidden')
             _buildProgressControlBar(),
 
           // 7. 오른쪽 하단 화면 이동 버튼 (위·아래 화살표 양옆 배치, 페이지 전환 설정에서 켜면 상시 작동)
