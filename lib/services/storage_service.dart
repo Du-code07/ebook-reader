@@ -38,6 +38,7 @@ class BubbleTranslation {
   final String translatedText;
   final bool isSerif;
   final bool isBold;
+  final bool isVertical;
 
   BubbleTranslation({
     required this.leftRatio,
@@ -48,6 +49,7 @@ class BubbleTranslation {
     required this.translatedText,
     this.isSerif = true,
     this.isBold = false,
+    this.isVertical = true,
   });
 
   Map<String, dynamic> toJson() => {
@@ -59,6 +61,7 @@ class BubbleTranslation {
         'tr': translatedText,
         's': isSerif,
         'b': isBold,
+        'v': isVertical,
       };
 
   factory BubbleTranslation.fromJson(Map<String, dynamic> json) => BubbleTranslation(
@@ -70,6 +73,7 @@ class BubbleTranslation {
         translatedText: json['tr'] ?? '',
         isSerif: json['s'] ?? true,
         isBold: json['b'] ?? false,
+        isVertical: json['v'] ?? true,
       );
 }
 
@@ -105,31 +109,35 @@ class StorageService {
     return prefs.getDouble('prog_$bookPath') ?? 0.0;
   }
 
-  // 3. 누적 읽은 시간(초) 저장 및 포맷팅
-  static Future<void> addReadingSeconds(String bookPath, int deltaSeconds) async {
+  // 3. 가로 모드 2페이지 보기(양면 보기) 설정 저장/조회
+  static Future<void> setTwoPageLandscape(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
-    final current = prefs.getInt('time_$bookPath') ?? 0;
-    await prefs.setInt('time_$bookPath', current + deltaSeconds);
+    await prefs.setBool('two_page_landscape', enabled);
   }
 
-  static Future<int> getReadingSeconds(String bookPath) async {
+  static Future<bool> getTwoPageLandscape() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt('time_$bookPath') ?? 0;
+    return prefs.getBool('two_page_landscape') ?? true;
   }
 
-  static String formatReadingTime(int totalSeconds) {
-    final hours = totalSeconds ~/ 3600;
-    final minutes = (totalSeconds % 3600) ~/ 60;
-    final seconds = totalSeconds % 60;
-    if (hours > 0) {
-      return '${hours}시간 ${minutes}분';
-    } else if (minutes > 0) {
-      return '${minutes}분 ${seconds}초';
-    }
-    return '${seconds}초';
+  // 4. Gugugo 오픈소스 번역 서버(Gradio / HuggingFace API) 설정 저장/조회
+  static Future<void> setGugugoApiConfig({required String serverUrl, required String hfToken}) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('gugugo_server_url', serverUrl.trim());
+    await prefs.setString('gugugo_hf_token', hfToken.trim());
   }
 
-  // 4. 북마크 관리 (추가 / 조회 / 삭제)
+  static Future<String> getGugugoServerUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('gugugo_server_url') ?? '';
+  }
+
+  static Future<String> getGugugoHfToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('gugugo_hf_token') ?? '';
+  }
+
+  // 5. 북마크 관리 (추가 / 조회 / 삭제)
   static Future<List<BookmarkItem>> getBookmarks(String bookPath) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList('bm_$bookPath') ?? [];
@@ -156,7 +164,7 @@ class StorageService {
     );
   }
 
-  // 5. 파일 그룹화 (카테고리/폴더 추가 및 꾹 눌러서 삭제)
+  // 6. 파일 그룹화 (카테고리/폴더 추가 및 꾹 눌러서 삭제)
   static Future<List<String>> getGroups() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getStringList('book_groups') ?? ['전체', '소설/문학', '만화/웹툰', 'PDF/문서'];
@@ -199,22 +207,23 @@ class StorageService {
     await prefs.remove('pos_$bookPath');
     await prefs.remove('prev_pos_$bookPath');
     await prefs.remove('prog_$bookPath');
-    await prefs.remove('time_$bookPath');
     await prefs.remove('bm_$bookPath');
     await prefs.remove('grp_$bookPath');
     for (final key in prefs.getKeys().toList()) {
-      if (key.startsWith('bubbles_v2_${bookPath}_') || key.startsWith('bubbles_${bookPath}_')) {
+      if (key.startsWith('bubbles_v3_${bookPath}_') ||
+          key.startsWith('bubbles_v2_${bookPath}_') ||
+          key.startsWith('bubbles_${bookPath}_')) {
         await prefs.remove(key);
       }
     }
   }
 
-  // 6. 사전 전체 번역(Pre-translation) 통합 말풍선 캐시 저장 (v2 클러스터링 캐시 키 적용)
+  // 7. 사전 전체 번역(Pre-translation) 세로/가로 말풍선 캐시 저장 (v3 키 적용)
   static Future<void> saveImageBubbleCache(
       String bookKey, int pageIndex, List<BubbleTranslation> bubbles) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-      'bubbles_v2_${bookKey}_$pageIndex',
+      'bubbles_v3_${bookKey}_$pageIndex',
       jsonEncode(bubbles.map((e) => e.toJson()).toList()),
     );
   }
@@ -222,7 +231,7 @@ class StorageService {
   static Future<List<BubbleTranslation>?> getImageBubbleCache(
       String bookKey, int pageIndex) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('bubbles_v2_${bookKey}_$pageIndex');
+    final raw = prefs.getString('bubbles_v3_${bookKey}_$pageIndex');
     if (raw == null) return null;
     final List decoded = jsonDecode(raw);
     return decoded.map((e) => BubbleTranslation.fromJson(e)).toList();
@@ -231,7 +240,9 @@ class StorageService {
   static Future<void> clearImageBubbleCacheForBook(String bookKey) async {
     final prefs = await SharedPreferences.getInstance();
     for (final key in prefs.getKeys().toList()) {
-      if (key.startsWith('bubbles_v2_${bookKey}_') || key.startsWith('bubbles_${bookKey}_')) {
+      if (key.startsWith('bubbles_v3_${bookKey}_') ||
+          key.startsWith('bubbles_v2_${bookKey}_') ||
+          key.startsWith('bubbles_${bookKey}_')) {
         await prefs.remove(key);
       }
     }

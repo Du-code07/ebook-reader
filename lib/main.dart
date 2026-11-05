@@ -29,7 +29,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   List<String> _groups = ['전체', '소설/문학', '만화/웹툰', 'PDF/문서'];
   String _selectedGroup = '전체';
   Map<String, String> _bookGroupMap = {};
-  Map<String, int> _bookReadingTimeMap = {};
   Map<String, double> _bookProgressMap = {};
 
   static const _supportedExts = ['epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz', 'zip'];
@@ -41,7 +40,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     _loadLibrary();
   }
 
-  /// 파일 이름 자연 정렬 (1.jpg, 2.jpg, ..., 10.jpg 순서 보장)
   int _naturalCompare(String a, String b) {
     final reg = RegExp(r'(\d+)|(\D+)');
     final matchesA = reg.allMatches(a.toLowerCase()).toList();
@@ -86,12 +84,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     final groups = await StorageService.getGroups();
     final grpMap = <String, String>{};
-    final timeMap = <String, int>{};
     final progMap = <String, double>{};
 
     for (final f in files) {
       grpMap[f.path] = await StorageService.getBookGroup(f.path);
-      timeMap[f.path] = await StorageService.getReadingSeconds(f.path);
       progMap[f.path] = await StorageService.getProgress(f.path);
     }
 
@@ -103,13 +99,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           _selectedGroup = '전체';
         }
         _bookGroupMap = grpMap;
-        _bookReadingTimeMap = timeMap;
         _bookProgressMap = progMap;
       });
     }
   }
 
-  /// 여러 파일 동시 추가 지원 + 여러 장의 JPG/PNG 선택 시 만화책(.cbz) 한 권으로 바로 묶기 지원
   Future<void> _pickAndImportFiles() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
@@ -138,7 +132,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       return _imageExts.contains(ext);
     }).toList();
 
-    // 여러 장의 이미지(JPG/PNG 등)를 한 번에 추가할 때 만화책 1권(.cbz)으로 통합할지 물어보기
     if (imagePicked.length >= 2 && imagePicked.length == validPicked.length && mounted) {
       final action = await showDialog<String>(
         context: context,
@@ -188,7 +181,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
   }
 
-  /// 여러 장의 JPG/PNG 파일을 일본 만화책처럼 넘겨볼 수 있는 단일 만화책(.cbz) 파일로 통합 생성
+  /// 여러 장의 JPG/PNG 파일을 만화책(.cbz)으로 통합할 때 번역 기능처럼 실시간 진행도(LinearProgressIndicator) UI 표시!
   Future<void> _createMangaBookFromImages(List<File> sourceImages, {bool deleteSourceAfter = false}) async {
     final titleController = TextEditingController(
       text: '만화책_${DateTime.now().month}월${DateTime.now().day}일_${DateTime.now().hour}${DateTime.now().minute}',
@@ -237,7 +230,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
 
     final bookTitle = titleController.text.trim().isEmpty ? '새_만화책' : titleController.text.trim();
     sourceImages.sort((a, b) => _naturalCompare(
@@ -245,14 +238,62 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           b.path.split(Platform.pathSeparator).last,
         ));
 
+    int currentStep = 0;
+    final int totalSteps = sourceImages.length + 1;
+    String progressStatus = '이미지 정렬 및 만화책 통합 준비 중...';
+    StateSetter? progressSetState;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          progressSetState = setDialogState;
+          final double ratio = totalSteps > 0 ? (currentStep / totalSteps).clamp(0.0, 1.0).toDouble() : 0.0;
+          return AlertDialog(
+            title: const Text('JPG 만화책 통합 파일 생성 중'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(value: ratio),
+                const SizedBox(height: 12),
+                Text(
+                  '${(ratio * 100).toStringAsFixed(0)}% 완료 ($currentStep / ${sourceImages.length}장)',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 6),
+                Text(progressStatus, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    await Future.delayed(const Duration(milliseconds: 50));
+
     final archive = Archive();
     for (int i = 0; i < sourceImages.length; i++) {
       final img = sourceImages[i];
+      final fileName = img.path.split(Platform.pathSeparator).last;
       final ext = img.path.split('.').last.toLowerCase();
+
+      progressSetState?.call(() {
+        currentStep = i + 1;
+        progressStatus = '페이지 병합 중 (${i + 1}/${sourceImages.length}): $fileName';
+      });
+      await Future.delayed(const Duration(milliseconds: 15));
+
       final bytes = await img.readAsBytes();
       final entryName = 'page_${i.toString().padLeft(4, '0')}.$ext';
       archive.addFile(ArchiveFile(entryName, bytes.length, bytes));
     }
+
+    progressSetState?.call(() {
+      currentStep = totalSteps;
+      progressStatus = 'CBZ 만화책 아카이브 압축 및 파일 저장 중...';
+    });
+    await Future.delayed(const Duration(milliseconds: 50));
 
     final appDir = await getApplicationDocumentsDirectory();
     final safeTitle = bookTitle.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
@@ -272,6 +313,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       }
     }
 
+    if (mounted) {
+      Navigator.pop(context); // 진행도 다이얼로그 닫기
+    }
+
     await _loadLibrary();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -281,7 +326,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
   }
 
-  /// 서재에 이미 등록된 JPG/PNG 이미지들을 선택해서 만화책으로 합치는 다이얼로그
   Future<void> _showMergeExistingImagesDialog() async {
     final existingImages = _allBooks.where((f) {
       final ext = f.path.split('.').last.toLowerCase();
@@ -415,7 +459,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         ),
       );
     } else if (_imageExts.contains(ext)) {
-      // 개별 JPG/PNG 클릭 시에도 같은 그룹 내의 연속된 이미지들을 함께 묶어 만화책처럼 바로 넘겨볼 수 있게 지원
       final currentGroup = _bookGroupMap[file.path];
       final siblingImages = _allBooks.where((f) {
         final fExt = f.path.split('.').last.toLowerCase();
@@ -423,11 +466,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       }).toList();
 
       final targetList = siblingImages.length > 1 ? siblingImages : [file];
-      final initIdx = targetList.indexWhere((f) => f.path == file.path);
-      if (initIdx > 0) {
-        await StorageService.saveLastPosition(targetList.first.path, initIdx.toString());
+      final String bookKey = targetList.first.path;
+      final savedPos = await StorageService.getLastPosition(bookKey);
+      final clickedIdx = targetList.indexWhere((f) => f.path == file.path);
+
+      // 만약 첫 번째 이미지를 눌렀고 이미 저장된 읽던 페이지(예: 14페이지)가 있다면 덮어쓰지 않고 그대로 유지!
+      // 사용자가 명시적으로 다른 낱장(예: 5번째 파일)을 직접 눌렀을 때만 그 파일 위치로 시작
+      if (clickedIdx > 0 || savedPos == null) {
+        await StorageService.saveLastPosition(bookKey, clickedIdx.clamp(0, targetList.length - 1).toString());
       }
 
+      if (!mounted) return;
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -435,11 +484,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             files: targetList,
             title: targetList.length > 1 ? '$name 외 ${targetList.length - 1}장' : name,
             isPdf: false,
+            customBookKey: bookKey,
           ),
         ),
       );
     } else {
-      // CBZ, ZIP 만화책 열람
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -483,7 +532,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     );
   }
 
-  /// 그룹을 꾹 누르면 삭제할 수 있는 다이얼로그
   Future<void> _confirmDeleteGroup(String groupName) async {
     if (groupName == '전체') {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -589,7 +637,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // 상단 그룹(카테고리) 필터 칩 바 (꾹 누르면 그룹 삭제 가능)
             SizedBox(
               height: 54,
               child: ListView.separated(
@@ -644,10 +691,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         final file = filteredBooks[index];
                         final fileName = file.path.split(Platform.pathSeparator).last;
                         final grp = _bookGroupMap[file.path] ?? '미분류';
-                        final secs = _bookReadingTimeMap[file.path] ?? 0;
                         final prog = (_bookProgressMap[file.path] ?? 0.0) * 100;
 
-                        // 왼쪽으로 밀어서(Swipe Left) 파일 삭제 지원
                         return Dismissible(
                           key: ValueKey(file.path),
                           direction: DismissDirection.endToStart,
@@ -704,7 +749,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                             ),
                             title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
                             subtitle: Text(
-                              '[$grp]  •  진행률 ${prog.toStringAsFixed(1)}%  •  읽은 시간 ${StorageService.formatReadingTime(secs)}',
+                              '[$grp]  •  진행률 ${prog.toStringAsFixed(1)}%',
                               style: const TextStyle(fontSize: 12),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,

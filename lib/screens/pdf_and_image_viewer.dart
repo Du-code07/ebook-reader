@@ -15,12 +15,14 @@ class UniversalMediaReaderScreen extends StatefulWidget {
   final List<File> files;
   final String title;
   final bool isPdf;
+  final String? customBookKey;
 
   const UniversalMediaReaderScreen({
     super.key,
     required this.files,
     required this.title,
     required this.isPdf,
+    this.customBookKey,
   });
 
   @override
@@ -29,8 +31,7 @@ class UniversalMediaReaderScreen extends StatefulWidget {
 
 class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen> {
   static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
-  static const MethodChannel _sumiChannel = MethodChannel('ebook_reader/sumi_launcher');
-  final PageController _pageController = PageController();
+  PageController? _pageController;
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
 
   List<File> _imagePages = [];
@@ -42,14 +43,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _showControls = true;
   bool _showTranslatedBubbles = false;
   bool _isMangaRtlMode = false;
+  bool _enableTwoPageInLandscape = true;
+  bool _lastIsSpreadMode = false;
+
   TextRecognitionScript _selectedScript = TextRecognitionScript.japanese;
   String _sourceLangCode = 'ja';
   final Map<int, List<BubbleTranslation>> _bubblesByPage = {};
 
-  int _totalReadingSeconds = 0;
-  Timer? _readingTimer;
-
-  String get _bookKey => widget.files.first.path;
+  String get _bookKey => widget.customBookKey ?? widget.files.first.path;
 
   @override
   void initState() {
@@ -79,7 +80,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Future<void> _initMedia() async {
-    _totalReadingSeconds = await StorageService.getReadingSeconds(_bookKey);
+    _enableTwoPageInLandscape = await StorageService.getTwoPageLandscape();
     final tempDir = await getTemporaryDirectory();
     final first = widget.files.first;
     final lower = first.path.toLowerCase();
@@ -118,16 +119,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
     _totalPages = _imagePages.isNotEmpty ? _imagePages.length : 1;
 
+    // 핵심 수정: 저장된 마지막 페이지 번호를 읽어 PageController의 initialPage에 직접 주입하여
+    // 다시 열었을 때 1페이지가 아닌 읽던 페이지(예: 14페이지) 화면이 즉시 렌더링되도록 보장!
     final savedPos = await StorageService.getLastPosition(_bookKey);
     if (savedPos != null) {
       final savedPage = int.tryParse(savedPos) ?? 0;
-      _currentPage = savedPage.clamp(0, _totalPages - 1);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_pageController.hasClients) {
-          _pageController.jumpToPage(_currentPage);
-        }
-      });
+      _currentPage = savedPage.clamp(0, _totalPages - 1).toInt();
     }
+
+    _pageController = PageController(initialPage: _currentPage);
 
     if (_imagePages.isNotEmpty) {
       _pageImageSizes[_currentPage] = await _getImageDimension(_imagePages[_currentPage]);
@@ -146,29 +146,52 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _showTranslatedBubbles = true;
     }
 
-    // 음량 버튼으로 넘길 때 손으로 밀어 넘기는 것처럼 부드러운 슬라이드 애니메이션 적용
     _volumeKeyService.startListening(
-      onVolumeUp: () => _goToPage(_currentPage - 1, smoothAnimation: true),
-      onVolumeDown: () => _goToPage(_currentPage + 1, smoothAnimation: true),
+      onVolumeUp: () => _stepPage(-1),
+      onVolumeDown: () => _stepPage(1),
     );
-
-    _readingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) {
-        setState(() => _totalReadingSeconds++);
-        if (_totalReadingSeconds % 5 == 0) {
-          StorageService.addReadingSeconds(_bookKey, 5);
-        }
-      }
-    });
 
     if (mounted) {
       setState(() => _isPreparingPages = false);
+      // 레이아웃 직후에도 혹시 모를 컨트롤러 오차를 한 번 더 동기화
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _syncControllerToCurrentPage(animate: false);
+      });
     }
+  }
+
+  bool _isSpreadActive(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    return _enableTwoPageInLandscape && size.width > size.height && _totalPages > 1;
+  }
+
+  void _syncControllerToCurrentPage({bool animate = true}) {
+    final ctrl = _pageController;
+    if (ctrl == null || !ctrl.hasClients) return;
+    final int targetViewIdx = _lastIsSpreadMode ? (_currentPage ~/ 2) : _currentPage;
+    final int currentViewIdx = (ctrl.page?.round() ?? targetViewIdx);
+    if (currentViewIdx == targetViewIdx) return;
+
+    if (animate && (targetViewIdx - currentViewIdx).abs() <= 2) {
+      ctrl.animateToPage(
+        targetViewIdx,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      ctrl.jumpToPage(targetViewIdx);
+    }
+  }
+
+  void _stepPage(int direction) {
+    final int step = _lastIsSpreadMode ? 2 : 1;
+    final int target = (_currentPage + direction * step).clamp(0, _totalPages - 1).toInt();
+    _goToPage(target, recordHistory: false, smoothAnimation: true);
   }
 
   void _goToPage(int page, {bool recordHistory = true, bool smoothAnimation = true}) {
     if (page < 0 || page >= _totalPages) return;
-    if (recordHistory && (page - _currentPage).abs() > 1) {
+    if (recordHistory && (page - _currentPage).abs() > 2) {
       _previousJumpPage = _currentPage;
     }
     setState(() => _currentPage = page);
@@ -180,25 +203,35 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       StorageService.saveProgress(_bookKey, (page + 1) / _totalPages);
     }
 
-    if (_pageController.hasClients) {
-      if (smoothAnimation && (page - _currentPage).abs() <= 2) {
-        _pageController.animateToPage(
-          page,
+    final ctrl = _pageController;
+    if (ctrl != null && ctrl.hasClients) {
+      final int targetViewIdx = _lastIsSpreadMode ? (page ~/ 2) : page;
+      final int currentViewIdx = ctrl.page?.round() ?? targetViewIdx;
+      if (smoothAnimation && (targetViewIdx - currentViewIdx).abs() <= 2) {
+        ctrl.animateToPage(
+          targetViewIdx,
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOutCubic,
         );
       } else {
-        _pageController.jumpToPage(page);
+        ctrl.jumpToPage(targetViewIdx);
       }
     }
   }
 
   Future<void> _showLanguageAndTranslateDialog({bool forceRetranslate = false}) async {
+    final currentGugugoUrl = await StorageService.getGugugoServerUrl();
+    final currentHfToken = await StorageService.getGugugoHfToken();
+    final urlCtrl = TextEditingController(text: currentGugugoUrl);
+    final tokenCtrl = TextEditingController(text: currentHfToken);
+    bool showAdvanced = currentGugugoUrl.isNotEmpty || currentHfToken.isNotEmpty;
+
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('만화/문서 말풍선 번역 설정'),
+          title: const Text('Gugugo 한일 만화 말풍선 번역'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -210,8 +243,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   isExpanded: true,
                   value: _sourceLangCode,
                   items: const [
-                    DropdownMenuItem(value: 'ja', child: Text('일본어 (세로쓰기 말풍선 통합 인식)')),
-                    DropdownMenuItem(value: 'en', child: Text('영어 (English)')),
+                    DropdownMenuItem(value: 'ja', child: Text('일본어 (Gugugo-koja 세로 말풍선 번역)')),
+                    DropdownMenuItem(value: 'en', child: Text('영어 (Gugugo-koen 가로 말풍선 번역)')),
                     DropdownMenuItem(value: 'zh-cn', child: Text('중국어 (Chinese)')),
                   ],
                   onChanged: (val) {
@@ -230,25 +263,54 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  '• 낱글자가 아닌 말풍선 전체 문장을 하나로 묶어 번역하고, 원본 대사 자리에 만화책 서체로 자연스럽게 덮어씌웁니다.',
+                  '• 세로 말풍선은 한국어도 만화책처럼 세로쓰기(위→아래, 우→좌)로 조판하며, 기존 말풍선 크기를 절대 넘지 않습니다.',
                   style: TextStyle(fontSize: 12, color: Colors.black54),
                 ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                  icon: Icon(showAdvanced ? Icons.expand_less : Icons.expand_more, size: 18),
+                  label: const Text('Gugugo 서버 / HuggingFace 토큰 설정 (선택사항)', style: TextStyle(fontSize: 12)),
+                  onPressed: () => setModalState(() => showAdvanced = !showAdvanced),
+                ),
+                if (showAdvanced) ...[
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: urlCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Gugugo Gradio 서버 주소 (선택)',
+                      hintText: '예: https://xxxx.gradio.live',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: tokenCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'HuggingFace API 토큰 (선택)',
+                      hintText: 'hf_... (Gugugo-koja-1.3B 추론 가속)',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
               ],
             ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.open_in_new, size: 16),
-              label: const Text('Sumi 앱/웹 열기'),
-              onPressed: () async {
-                Navigator.pop(ctx, false);
-                await _sumiChannel.invokeMethod('openSumiApp', {'fallback': 'web'});
-              },
-            ),
             ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('앱 내 말풍선 통합 번역'),
+              onPressed: () async {
+                await StorageService.setGugugoApiConfig(
+                  serverUrl: urlCtrl.text,
+                  hfToken: tokenCtrl.text,
+                );
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              },
+              child: const Text('말풍선 번역 시작'),
             ),
           ],
         ),
@@ -263,7 +325,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   Future<void> _runWholeFileBatchTranslation({bool forceRetranslate = false}) async {
     int current = 0;
     int total = _imagePages.length;
-    String status = '말풍선 영역 통합 스캔 및 번역 준비 중...';
+    String status = 'Gugugo 번역 파이프라인 및 말풍선 분석 준비 중...';
     StateSetter? dialogSetState;
 
     showDialog(
@@ -273,7 +335,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         builder: (ctx, setDialogState) {
           dialogSetState = setDialogState;
           return AlertDialog(
-            title: const Text('말풍선 통째로 사전 번역 중'),
+            title: const Text('만화 말풍선 사전 번역 중'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -313,17 +375,187 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       Navigator.pop(context);
       setState(() => _showTranslatedBubbles = true);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('말풍선 통합 번역 완료! (번역 아이콘을 길게 누르면 다시 번역할 수 있습니다)')),
+        const SnackBar(content: Text('말풍선 세로/가로 맞춤 번역이 완료되었습니다!')),
       );
     }
   }
 
-  /// 말풍선 크기에 맞춰 가장 읽기 좋은 글자 크기를 자동 계산 (세로줄 찌그러짐 방지)
-  double _computeOptimalFontSize(String text, double boxW, double boxH) {
-    if (text.isEmpty || boxW <= 0 || boxH <= 0) return 12.0;
-    final area = boxW * boxH;
-    final est = math.sqrt(area / (text.length * 1.45));
-    return est.clamp(9.5, 22.0);
+  /// 세로 말풍선용 한국어 세로쓰기(위→아래, 오른쪽 열→왼쪽 열) 위젯 생성
+  /// 만화책의 원래 말풍선 크기(boxW x boxH) 안에 정확히 들어가도록 열 개수와 글자 크기를 자동 계산합니다.
+  Widget _buildVerticalKoreanText(BubbleTranslation b, double boxW, double boxH) {
+    String clean = b.translatedText
+        .replaceAll('\n', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (clean.isEmpty) return const SizedBox.shrink();
+
+    // 세로쓰기 시 가로 괄호/장음 기호를 세로 기호로 치환
+    clean = clean
+        .replaceAll('(', '︵')
+        .replaceAll(')', '︶')
+        .replaceAll('[', '︹')
+        .replaceAll(']', '︺')
+        .replaceAll('~', '≀')
+        .replaceAll('—', '︱')
+        .replaceAll('-', '︱');
+
+    final chars = clean.runes.map((r) => String.fromCharCode(r)).toList();
+    final int charCount = chars.length;
+
+    // 말풍선 비율(boxH / boxW)에 맞춰 최적의 세로열 개수와 한 열당 글자 수 계산
+    final double safeW = math.max<double>(16.0, boxW - 4.0);
+    final double safeH = math.max<double>(20.0, boxH - 4.0);
+    final double aspect = safeH / safeW;
+
+    int numCols = math.sqrt(charCount / math.max<double>(1.2, aspect * 0.85)).round();
+    numCols = numCols.clamp(1, math.max<int>(1, charCount)).toInt();
+    int charsPerCol = (charCount / numCols).ceil();
+    if (charsPerCol < 2) charsPerCol = 2;
+    numCols = (charCount / charsPerCol).ceil();
+
+    final List<String> columns = [];
+    for (int i = 0; i < charCount; i += charsPerCol) {
+      final end = (i + charsPerCol < charCount) ? i + charsPerCol : charCount;
+      columns.add(chars.sublist(i, end).join('\n'));
+    }
+
+    final double colW = safeW / columns.length;
+    final double rowH = safeH / charsPerCol;
+    final double fontSize = math.min<double>(colW * 0.82, rowH * 0.78).clamp(6.5, 20.0).toDouble();
+
+    // 일본 만화 세로쓰기 전통 방식대로 오른쪽 열부터 왼쪽 열 순서(TextDirection.rtl)로 배치
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.center,
+      child: Directionality(
+        textDirection: TextDirection.rtl,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: columns.map((colStr) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 1.5),
+              child: Text(
+                colStr,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: const Color(0xFF111111),
+                  fontSize: fontSize,
+                  fontWeight: b.isBold ? FontWeight.w800 : FontWeight.w600,
+                  fontFamily: b.isSerif ? 'serif' : 'sans-serif',
+                  height: 1.05,
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  /// 가로 말풍선용 한국어 가로쓰기 위젯 생성 (기존 말풍선 크기 내 자동 축소)
+  Widget _buildHorizontalKoreanText(BubbleTranslation b, double boxW, double boxH) {
+    final double safeW = math.max<double>(20.0, boxW - 4.0);
+    final double safeH = math.max<double>(16.0, boxH - 4.0);
+    final double area = safeW * safeH;
+    final double estFont = math.sqrt(area / math.max<int>(1, b.translatedText.length * 2)).clamp(7.0, 20.0).toDouble();
+
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.center,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: safeW),
+        child: Text(
+          b.translatedText,
+          textAlign: TextAlign.center,
+          softWrap: true,
+          style: TextStyle(
+            color: const Color(0xFF111111),
+            fontSize: estFont,
+            fontWeight: b.isBold ? FontWeight.w800 : FontWeight.w600,
+            fontFamily: b.isSerif ? 'serif' : 'sans-serif',
+            height: 1.18,
+            letterSpacing: -0.2,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 단일 만화 페이지(이미지 + 기존 말풍선 크기를 절대 넘지 않는 번역 오버레이) 렌더링
+  Widget _buildSinglePagePanel(int pageIndex) {
+    if (pageIndex < 0 || pageIndex >= _imagePages.length) {
+      return const SizedBox.expand();
+    }
+
+    final bubbles = _bubblesByPage[pageIndex] ?? [];
+    final imgSize = _pageImageSizes[pageIndex];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        double drawLeft = 0.0;
+        double drawTop = 0.0;
+        double drawWidth = constraints.maxWidth;
+        double drawHeight = constraints.maxHeight;
+
+        if (imgSize != null && imgSize.width > 0 && imgSize.height > 0) {
+          final fitted = applyBoxFit(BoxFit.contain, imgSize, constraints.biggest);
+          drawWidth = fitted.destination.width;
+          drawHeight = fitted.destination.height;
+          drawLeft = (constraints.maxWidth - drawWidth) / 2.0;
+          drawTop = (constraints.maxHeight - drawHeight) / 2.0;
+        } else {
+          _ensurePageDimensionLoaded(pageIndex);
+        }
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.file(
+              _imagePages[pageIndex],
+              fit: BoxFit.contain,
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
+            ),
+            if (_showTranslatedBubbles && bubbles.isNotEmpty)
+              ...bubbles.map((b) {
+                // 핵심: 만화책에 있는 기존 말풍선(원문 텍스트 영역) 크기를 절대 넘지 않도록 원본 비율 그대로 제한!
+                final double boxW = (b.widthRatio * drawWidth).clamp(14.0, drawWidth).toDouble();
+                final double boxH = (b.heightRatio * drawHeight).clamp(14.0, drawHeight).toDouble();
+                final double boxLeft = (drawLeft + b.leftRatio * drawWidth).clamp(
+                  drawLeft,
+                  math.max<double>(drawLeft, drawLeft + drawWidth - boxW),
+                ).toDouble();
+                final double boxTop = (drawTop + b.topRatio * drawHeight).clamp(
+                  drawTop,
+                  math.max<double>(drawTop, drawTop + drawHeight - boxH),
+                ).toDouble();
+
+                final bool renderVertically = b.isVertical || (boxH > boxW * 1.15);
+
+                return Positioned(
+                  left: boxLeft,
+                  top: boxTop,
+                  width: boxW,
+                  height: boxH,
+                  child: Container(
+                    padding: const EdgeInsets.all(1.5),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(math.min<double>(boxW, boxH) * 0.15),
+                    ),
+                    alignment: Alignment.center,
+                    clipBehavior: Clip.hardEdge,
+                    child: renderVertically
+                        ? _buildVerticalKoreanText(b, boxW, boxH)
+                        : _buildHorizontalKoreanText(b, boxW, boxH),
+                  ),
+                );
+              }),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _showBookmarkSheet() async {
@@ -398,14 +630,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   void dispose() {
-    _readingTimer?.cancel();
     _volumeKeyService.stopListening();
+    _pageController?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isPreparingPages) {
+    if (_isPreparingPages || _pageController == null) {
       return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(
@@ -415,7 +647,21 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     final mediaQuery = MediaQuery.of(context);
-    final bottomInset = mediaQuery.viewPadding.bottom;
+    final double bottomInset = mediaQuery.viewPadding.bottom;
+    final bool isSpread = _isSpreadActive(context);
+
+    // 화면 회전(세로 <-> 가로 2페이지 모드) 전환 시 현재 읽던 페이지 위치를 유지하도록 PageController 재동기화
+    if (isSpread != _lastIsSpreadMode) {
+      _lastIsSpreadMode = isSpread;
+      final int targetViewIdx = isSpread ? (_currentPage ~/ 2) : _currentPage;
+      _pageController?.dispose();
+      _pageController = PageController(initialPage: targetViewIdx);
+    }
+
+    final int viewItemCount = isSpread ? ((_totalPages + 1) ~/ 2) : _totalPages;
+    final String pageIndicatorText = isSpread && (_currentPage + 1 < _totalPages)
+        ? '${_currentPage + 1}-${_currentPage + 2} / $_totalPages 페이지'
+        : '${_currentPage + 1} / $_totalPages 페이지';
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -425,138 +671,70 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             child: GestureDetector(
               onTap: () => setState(() => _showControls = !_showControls),
               child: PageView.builder(
+                key: ValueKey('pageview_spread_$isSpread'),
                 controller: _pageController,
                 reverse: _isMangaRtlMode,
                 physics: const BouncingScrollPhysics(),
-                itemCount: _imagePages.length,
-                onPageChanged: (idx) {
-                  setState(() => _currentPage = idx);
-                  _ensurePageDimensionLoaded(idx);
-                  if (idx + 1 < _totalPages) _ensurePageDimensionLoaded(idx + 1);
-                  StorageService.saveLastPosition(_bookKey, idx.toString());
-                  StorageService.saveProgress(_bookKey, (idx + 1) / _totalPages);
+                itemCount: viewItemCount,
+                onPageChanged: (viewIdx) {
+                  final int actualPage = isSpread ? (viewIdx * 2) : viewIdx;
+                  setState(() => _currentPage = actualPage);
+                  _ensurePageDimensionLoaded(actualPage);
+                  if (actualPage + 1 < _totalPages) _ensurePageDimensionLoaded(actualPage + 1);
+                  StorageService.saveLastPosition(_bookKey, actualPage.toString());
+                  StorageService.saveProgress(_bookKey, (actualPage + 1) / _totalPages);
                 },
-                itemBuilder: (context, index) {
-                  final bubbles = _bubblesByPage[index] ?? [];
-                  final imgSize = _pageImageSizes[index];
+                itemBuilder: (context, viewIdx) {
+                  if (!isSpread) {
+                    return InteractiveViewer(
+                      minScale: 1.0,
+                      maxScale: 3.5,
+                      child: _buildSinglePagePanel(viewIdx),
+                    );
+                  }
 
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      // 태블릿 및 다양한 화면 비율에서 이미지가 실제로 그려지는 영역(Rect)을 정확히 계산하여 UI 잘림 및 말풍선 위치 어긋남 완벽 해결!
-                      double drawLeft = 0;
-                      double drawTop = 0;
-                      double drawWidth = constraints.maxWidth;
-                      double drawHeight = constraints.maxHeight;
+                  // 가로 모드 2페이지(양면) 보기: 일본 만화 모드(우→좌)면 오른쪽에 첫 페이지, 왼쪽에 다음 페이지 배치
+                  final int firstPage = viewIdx * 2;
+                  final int secondPage = firstPage + 1;
+                  final Widget leftPanel = _isMangaRtlMode
+                      ? (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand())
+                      : _buildSinglePagePanel(firstPage);
+                  final Widget rightPanel = _isMangaRtlMode
+                      ? _buildSinglePagePanel(firstPage)
+                      : (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand());
 
-                      if (imgSize != null && imgSize.width > 0 && imgSize.height > 0) {
-                        final fitted = applyBoxFit(BoxFit.contain, imgSize, constraints.biggest);
-                        drawWidth = fitted.destination.width;
-                        drawHeight = fitted.destination.height;
-                        drawLeft = (constraints.maxWidth - drawWidth) / 2.0;
-                        drawTop = (constraints.maxHeight - drawHeight) / 2.0;
-                      } else {
-                        _ensurePageDimensionLoaded(index);
-                      }
-
-                      return InteractiveViewer(
-                        minScale: 1.0,
-                        maxScale: 3.5,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Image.file(
-                              _imagePages[index],
-                              fit: BoxFit.contain,
-                              width: constraints.maxWidth,
-                              height: constraints.maxHeight,
-                            ),
-                            if (_showTranslatedBubbles && bubbles.isNotEmpty)
-                              ...bubbles.map((b) {
-                                final rawW = b.widthRatio * drawWidth;
-                                final rawH = b.heightRatio * drawHeight;
-                                // 세로로 좁은 일본어 대사 영역이라도 한국어 가로 문장이 자연스럽게 들어가도록 최소 가로 폭 보정
-                                final minReadableW = math.max(rawW, math.min(drawWidth * 0.42, rawH * 0.82));
-                                final centerX = drawLeft + (b.leftRatio + b.widthRatio / 2.0) * drawWidth;
-                                final boxW = minReadableW.clamp(44.0, drawWidth * 0.92);
-                                final boxH = rawH.clamp(28.0, drawHeight * 0.92);
-                                final boxLeft = (centerX - boxW / 2.0).clamp(
-                                  drawLeft,
-                                  math.max(drawLeft, drawLeft + drawWidth - boxW),
-                                );
-                                final boxTop = (drawTop + b.topRatio * drawHeight).clamp(
-                                  drawTop,
-                                  math.max(drawTop, drawTop + drawHeight - boxH),
-                                );
-
-                                final fontSize = _computeOptimalFontSize(b.translatedText, boxW - 8, boxH - 6);
-
-                                return Positioned(
-                                  left: boxLeft,
-                                  top: boxTop,
-                                  width: boxW,
-                                  height: boxH,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      // 테두리 선을 없애고 원본 말풍선 내부를 깨끗한 흰색으로 덮어 실제 식자(Typesetting)처럼 표현
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(boxW * 0.18),
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: Center(
-                                      child: Text(
-                                        b.translatedText,
-                                        textAlign: TextAlign.center,
-                                        softWrap: true,
-                                        style: TextStyle(
-                                          color: const Color(0xFF141414),
-                                          fontSize: fontSize,
-                                          fontWeight: b.isBold ? FontWeight.w800 : FontWeight.w600,
-                                          fontFamily: b.isSerif ? 'serif' : 'sans-serif',
-                                          height: 1.22,
-                                          letterSpacing: -0.3,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }),
-                          ],
-                        ),
-                      );
-                    },
+                  return InteractiveViewer(
+                    minScale: 1.0,
+                    maxScale: 3.5,
+                    child: Row(
+                      children: [
+                        Expanded(child: leftPanel),
+                        Container(width: 1, color: Colors.white12),
+                        Expanded(child: rightPanel),
+                      ],
+                    ),
                   );
                 },
               ),
             ),
           ),
 
-          // 최하단 상시 미니 상태줄 (태블릿 하단 네비게이션 바 잘림 방지 SafeArea 반영)
+          // 최하단 페이지 표시줄 (읽은 시간 완전 삭제, 페이지 정보만 깔끔하게 표시)
           Positioned(
             left: 20,
             right: 20,
-            bottom: math.max(bottomInset + 4, 8),
+            bottom: math.max<double>(bottomInset + 4.0, 8.0),
             child: IgnorePointer(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '읽은 시간: ${StorageService.formatReadingTime(_totalReadingSeconds)}',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                      shadows: [Shadow(color: Colors.black, blurRadius: 4)],
-                    ),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  pageIndicatorText,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    shadows: [Shadow(color: Colors.black, blurRadius: 4)],
                   ),
-                  Text(
-                    '${_currentPage + 1} / $_totalPages 페이지',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                      shadows: [Shadow(color: Colors.black, blurRadius: 4)],
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -596,6 +774,29 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               _goToPage(target, recordHistory: false, smoothAnimation: true);
                             },
                           ),
+                        // 가로 모드 시 2페이지씩 보기(양면 보기) 켜기/끄기 설정 버튼
+                        IconButton(
+                          icon: Icon(
+                            _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
+                            color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
+                          ),
+                          tooltip: '가로 모드에서 2페이지씩 보기 켜기/끄기',
+                          onPressed: () async {
+                            final nextVal = !_enableTwoPageInLandscape;
+                            await StorageService.setTwoPageLandscape(nextVal);
+                            setState(() => _enableTwoPageInLandscape = nextVal);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(nextVal
+                                      ? '가로 모드 2페이지(양면) 보기가 켜졌습니다.'
+                                      : '가로 모드 1페이지 보기로 변경되었습니다.'),
+                                  duration: const Duration(seconds: 1),
+                                ),
+                              );
+                            }
+                          },
+                        ),
                         IconButton(
                           icon: Icon(
                             Icons.swap_horiz,
@@ -651,7 +852,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
           if (_showControls && _totalPages > 1)
             Positioned(
-              bottom: math.max(bottomInset + 26, 28),
+              bottom: math.max<double>(bottomInset + 26.0, 28.0),
               left: 0,
               right: 0,
               child: Material(
@@ -665,19 +866,19 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       children: [
                         IconButton(
                           icon: const Icon(Icons.chevron_left, color: Colors.white),
-                          onPressed: () => _goToPage(_currentPage - 1, smoothAnimation: true),
+                          onPressed: () => _stepPage(-1),
                         ),
                         Expanded(
                           child: Slider(
-                            value: _currentPage.toDouble().clamp(0, (_totalPages - 1).toDouble()),
-                            min: 0,
-                            max: (_totalPages - 1).toDouble(),
+                            value: _currentPage.toDouble().clamp(0.0, math.max<double>(0.0, (_totalPages - 1).toDouble())).toDouble(),
+                            min: 0.0,
+                            max: math.max<double>(1.0, (_totalPages - 1).toDouble()),
                             onChanged: (v) => _goToPage(v.round(), smoothAnimation: false),
                           ),
                         ),
                         IconButton(
                           icon: const Icon(Icons.chevron_right, color: Colors.white),
-                          onPressed: () => _goToPage(_currentPage + 1, smoothAnimation: true),
+                          onPressed: () => _stepPage(1),
                         ),
                       ],
                     ),

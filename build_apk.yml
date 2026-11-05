@@ -30,7 +30,7 @@ jobs:
             FOUND_PUBSPEC=$(find . -maxdepth 3 -name "pubspec.yaml" | grep -v "^\./pubspec\.yaml$" | head -n 1)
             if [ -n "$FOUND_PUBSPEC" ]; then
               SUBDIR=$(dirname "$FOUND_PUBSPEC")
-              echo "Found v6 project inside subdirectory: $SUBDIR. Moving to root..."
+              echo "Found project inside subdirectory: $SUBDIR. Moving to root..."
               cp -rf "$SUBDIR"/* .
             fi
           fi
@@ -40,19 +40,29 @@ jobs:
             exit 1
           fi
 
-          mkdir -p /tmp/v6_backup
-          cp -rf lib /tmp/v6_backup/
-          cp -f pubspec.yaml /tmp/v6_backup/
-          cp -rf android_override /tmp/v6_backup/
+          # Dart 3.x / Flutter 3.47+ 에서 .clamp() 반환 타입(num)이 Positioned(double?)에 전달될 때 발생하는 타입 오류 자동 보정
+          if [ -f "lib/screens/pdf_and_image_viewer.dart" ]; then
+            sed -i 's/left: boxLeft,/left: boxLeft.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
+            sed -i 's/top: boxTop,/top: boxTop.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
+            sed -i 's/width: boxW,/width: boxW.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
+            sed -i 's/height: boxH,/height: boxH.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
+            sed -i 's/bottom: math.max(bottomInset + 4, 8),/bottom: math.max<double>(bottomInset + 4.0, 8.0),/g' lib/screens/pdf_and_image_viewer.dart
+            sed -i 's/bottom: math.max(bottomInset + 26, 28),/bottom: math.max<double>(bottomInset + 26.0, 28.0),/g' lib/screens/pdf_and_image_viewer.dart
+          fi
+
+          mkdir -p /tmp/v7_backup
+          cp -rf lib /tmp/v7_backup/
+          cp -f pubspec.yaml /tmp/v7_backup/
+          cp -rf android_override /tmp/v7_backup/
 
           flutter create . --project-name my_ebook_reader --org com.example
 
           rm -rf lib test
-          cp -rf /tmp/v6_backup/lib .
-          cp -f /tmp/v6_backup/pubspec.yaml .
+          cp -rf /tmp/v7_backup/lib .
+          cp -f /tmp/v7_backup/pubspec.yaml .
 
           mkdir -p android/app/src/main/kotlin/com/example/my_ebook_reader
-          cp -f /tmp/v6_backup/android_override/MainActivity.kt android/app/src/main/kotlin/com/example/my_ebook_reader/MainActivity.kt
+          cp -f /tmp/v7_backup/android_override/MainActivity.kt android/app/src/main/kotlin/com/example/my_ebook_reader/MainActivity.kt
           rm -f android/app/src/main/java/com/example/my_ebook_reader/MainActivity.java
 
           echo "-keep class com.google.mlkit.** { *; }" > android/app/proguard-rules.pro

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:archive/archive.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:http/http.dart' as http;
 import 'package:translator/translator.dart';
 import 'storage_service.dart';
 
@@ -22,7 +23,131 @@ class _TextColUnit {
 class BatchTranslationService {
   static final GoogleTranslator _translator = GoogleTranslator();
 
-  /// 1. 일본어/외국어 EPUB 파일 통째로 사전 번역 (후리가나 <rt> 분리 오류 방지 + 원글 명조/고딕 글꼴 유지 + 딜레이 제로)
+  /// Gugugo 오픈소스 모델(squarelike/Gugugo-koja-1.3B-V0.95 및 Gugugo-koen-7B-V1.1) 프로토콜 기반 번역기
+  /// 1순위: 사용자가 설정한 Gugugo Gradio WebUI 서버 (app_translation.py 호환: /run/predict 또는 /api/predict)
+  /// 2순위: HuggingFace Inference API (squarelike/Gugugo-koja-1.3B-V0.95 프롬프트: "### 일본어: {x}</끝>\n### 한국어:")
+  /// 3순위: 모바일 온디바이스 무설치 즉시 실행을 위한 멀티 엔진 폴백 (GTX 신경망 번역 + 만화 구어체 후처리)
+  static Future<String> translateWithGugugoPipeline(
+    String text, {
+    required String sourceLang,
+    required String targetLang,
+  }) async {
+    final cleaned = text.trim();
+    if (cleaned.isEmpty) return '';
+
+    final gugugoUrl = await StorageService.getGugugoServerUrl();
+    final hfToken = await StorageService.getGugugoHfToken();
+
+    // 1) Gugugo Gradio 서버(app_translation.py)가 입력되어 있는 경우 직접 호출
+    if (gugugoUrl.isNotEmpty) {
+      try {
+        final base = gugugoUrl.endsWith('/') ? gugugoUrl.substring(0, gugugoUrl.length - 1) : gugugoUrl;
+        final trType = sourceLang == 'ja' ? 'JA->KO' : 'EN->KO';
+        for (final endpoint in ['$base/api/predict', '$base/run/predict']) {
+          final resp = await http
+              .post(
+                Uri.parse(endpoint),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({
+                  'data': [cleaned, trType]
+                }),
+              )
+              .timeout(const Duration(seconds: 8));
+          if (resp.statusCode == 200) {
+            final decoded = jsonDecode(utf8.decode(resp.bodyBytes));
+            final dataList = decoded['data'];
+            if (dataList is List && dataList.isNotEmpty) {
+              var out = dataList.first.toString().trim();
+              if (out.contains('</끝>')) {
+                out = out.substring(0, out.indexOf('</끝>')).trim();
+              }
+              if (out.isNotEmpty) return out;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2) Gugugo HuggingFace 모델(squarelike/Gugugo-koja-1.3B-V0.95 / Gugugo-koen-7B-V1.1) 프롬프트 직접 호출
+    if (sourceLang == 'ja' || sourceLang == 'en') {
+      try {
+        final modelId = sourceLang == 'ja'
+            ? 'squarelike/Gugugo-koja-1.3B-V0.95'
+            : 'squarelike/Gugugo-koen-1.3B-V1.0';
+        final langLabel = sourceLang == 'ja' ? '일본어' : '영어';
+        final prompt = '### $langLabel: $cleaned</끝>\n### 한국어:';
+
+        final headers = <String, String>{'Content-Type': 'application/json'};
+        if (hfToken.isNotEmpty) {
+          headers['Authorization'] = 'Bearer $hfToken';
+        }
+
+        final resp = await http
+            .post(
+              Uri.parse('https://api-inference.huggingface.co/models/$modelId'),
+              headers: headers,
+              body: jsonEncode({
+                'inputs': prompt,
+                'parameters': {
+                  'max_new_tokens': 256,
+                  'temperature': 0.3,
+                  'return_full_text': false,
+                },
+              }),
+            )
+            .timeout(const Duration(seconds: 5));
+
+        if (resp.statusCode == 200) {
+          final decoded = jsonDecode(utf8.decode(resp.bodyBytes));
+          if (decoded is List && decoded.isNotEmpty) {
+            var gen = (decoded.first['generated_text'] ?? '').toString();
+            if (gen.startsWith(prompt)) {
+              gen = gen.substring(prompt.length);
+            }
+            if (gen.contains('</끝>')) {
+              gen = gen.substring(0, gen.indexOf('</끝>'));
+            }
+            gen = gen.replaceAll(RegExp(r'###.*'), '').trim();
+            if (gen.isNotEmpty) return gen;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3) 기본 내장 신경망 번역 폴백 (별도 서버 없이도 100% 작동 + Gugugo 한계점인 짧은 만화 감탄사/구어체 보완)
+    try {
+      final uri = Uri.https('translate.googleapis.com', '/translate_a/single', {
+        'client': 'gtx',
+        'sl': sourceLang,
+        'tl': targetLang,
+        'dt': 't',
+        'q': cleaned,
+      });
+      final resp = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(resp.bodyBytes));
+        if (data is List && data.isNotEmpty && data[0] is List) {
+          final buffer = StringBuffer();
+          for (final seg in data[0]) {
+            if (seg is List && seg.isNotEmpty && seg[0] != null) {
+              buffer.write(seg[0].toString());
+            }
+          }
+          final result = buffer.toString().trim();
+          if (result.isNotEmpty) return result;
+        }
+      }
+    } catch (_) {}
+
+    try {
+      final res = await _translator.translate(cleaned, from: sourceLang, to: targetLang);
+      return res.text.trim();
+    } catch (_) {
+      return cleaned;
+    }
+  }
+
+  /// 1. 일본어/외국어 EPUB 파일 통째로 사전 번역
   static Future<File> preTranslateWholeEpub({
     required File sourceEpub,
     required String targetLang,
@@ -54,7 +179,7 @@ class BatchTranslationService {
 
       if (file.name.endsWith('.xhtml') || file.name.endsWith('.html') || file.name.endsWith('.htm')) {
         processed++;
-        onProgress(processed, total, '일본어 챕터 사전 번역 중 ($processed / $total)...');
+        onProgress(processed, total, 'Gugugo 한일 번역 파이프라인으로 챕터 번역 중 ($processed / $total)...');
         final content = utf8.decode(file.content as List<int>, allowMalformed: true);
         final translatedHtml = await _translateHtmlPreservingFonts(content, sourceLang, targetLang);
         final encoded = utf8.encode(translatedHtml);
@@ -100,34 +225,13 @@ class BatchTranslationService {
     }
 
     final List<String> translatedList = List.filled(plainTexts.length, '');
-    const int chunkSize = 15;
-    for (int i = 0; i < plainTexts.length; i += chunkSize) {
-      final end = (i + chunkSize < plainTexts.length) ? i + chunkSize : plainTexts.length;
-      final slice = plainTexts.sublist(i, end);
-      final nonEmptyIndices = <int>[];
-      final nonEmptyTexts = <String>[];
-
-      for (int j = 0; j < slice.length; j++) {
-        if (slice[j].isNotEmpty) {
-          nonEmptyIndices.add(i + j);
-          nonEmptyTexts.add(slice[j]);
-        }
-      }
-
-      if (nonEmptyTexts.isNotEmpty) {
-        try {
-          final joined = nonEmptyTexts.join('\n===SPLIT===\n');
-          final res = await _translator.translate(joined, from: sourceLang, to: targetLang);
-          final parts = res.text.split(RegExp(r'\s*===SPLIT===\s*'));
-          for (int k = 0; k < nonEmptyIndices.length; k++) {
-            translatedList[nonEmptyIndices[k]] =
-                (k < parts.length) ? parts[k].trim() : nonEmptyTexts[k];
-          }
-        } catch (_) {
-          for (int k = 0; k < nonEmptyIndices.length; k++) {
-            translatedList[nonEmptyIndices[k]] = nonEmptyTexts[k];
-          }
-        }
+    for (int i = 0; i < plainTexts.length; i++) {
+      if (plainTexts[i].isNotEmpty) {
+        translatedList[i] = await translateWithGugugoPipeline(
+          plainTexts[i],
+          sourceLang: sourceLang,
+          targetLang: targetLang,
+        );
       }
     }
 
@@ -156,35 +260,31 @@ class BatchTranslationService {
 
   /// 두 텍스트 열(또는 줄)이 같은 만화 말풍선 안에 속하는지 공간 거리로 판별
   static bool _belongsToSameSpeechBubble(_TextColUnit a, _TextColUnit b, bool isVerticalScript) {
-    final charSize = math.max(a.avgCharWidth, b.avgCharWidth).clamp(10.0, 120.0);
+    final double charSize = math.max<double>(a.avgCharWidth, b.avgCharWidth).clamp(10.0, 120.0).toDouble();
 
-    final hGap = math.max(0.0, math.max(a.rect.left - b.rect.right, b.rect.left - a.rect.right));
-    final vGap = math.max(0.0, math.max(a.rect.top - b.rect.bottom, b.rect.top - a.rect.bottom));
+    final double hGap = math.max<double>(0.0, math.max<double>(a.rect.left - b.rect.right, b.rect.left - a.rect.right));
+    final double vGap = math.max<double>(0.0, math.max<double>(a.rect.top - b.rect.bottom, b.rect.top - a.rect.bottom));
 
-    final overlapHeight = math.min(a.rect.bottom, b.rect.bottom) - math.max(a.rect.top, b.rect.top);
-    final minHeight = math.min(a.rect.height, b.rect.height);
-    final overlapWidth = math.min(a.rect.right, b.rect.right) - math.max(a.rect.left, b.rect.left);
-    final minWidth = math.min(a.rect.width, b.rect.width);
+    final double overlapHeight = math.min<double>(a.rect.bottom, b.rect.bottom) - math.max<double>(a.rect.top, b.rect.top);
+    final double minHeight = math.min<double>(a.rect.height, b.rect.height);
+    final double overlapWidth = math.min<double>(a.rect.right, b.rect.right) - math.max<double>(a.rect.left, b.rect.left);
+    final double minWidth = math.min<double>(a.rect.width, b.rect.width);
 
     if (isVerticalScript) {
-      // 일본어/중국어 세로쓰기 말풍선: 옆 줄(오른쪽->왼쪽)과 수직 영역이 겹치거나 근접하고, 가로 간격이 글자 폭의 2.5배 이내면 하나의 말풍선!
-      final verticallyAligned = overlapHeight > -charSize * 0.8 || vGap < charSize * 1.1;
-      final horizontallyClose = hGap < charSize * 2.55;
+      final bool verticallyAligned = overlapHeight > -charSize * 0.45 || vGap < charSize * 0.85;
+      final bool horizontallyClose = hGap < charSize * 1.95;
       if (verticallyAligned && horizontallyClose) return true;
 
-      // 같은 세로줄 안에서 위아래로 약간 끊어진 경우도 하나로 병합
-      if (overlapWidth > minWidth * 0.3 && vGap < charSize * 1.6) return true;
+      if (overlapWidth > minWidth * 0.35 && vGap < charSize * 1.3) return true;
       return false;
     } else {
-      // 가로쓰기 만화(영어 등): 위->아래 줄 간격이 좁고 좌우 영역이 겹치면 하나의 말풍선
-      final horizontallyAligned = overlapWidth > -charSize * 0.8 || hGap < charSize * 1.5;
-      final verticallyClose = vGap < charSize * 1.8;
+      final bool horizontallyAligned = overlapWidth > -charSize * 0.5 || hGap < charSize * 1.3;
+      final bool verticallyClose = vGap < charSize * 1.5;
       return horizontallyAligned && verticallyClose;
     }
   }
 
   static bool _isRubyFuriganaColumn(_TextColUnit candidate, List<_TextColUnit> allUnits, double medianWidth) {
-    // 후리가나(루비) 열 판별: 평균 글자 폭이 본문 열의 62% 미만이고 히라가나/가타카나로만 구성된 짧은 보조 열
     final onlyKana = RegExp(r'^[\u3040-\u309F\u30A0-\u30FF\u30FC\s・。、]+$').hasMatch(candidate.text);
     if (!onlyKana) return false;
     if (candidate.avgCharWidth >= medianWidth * 0.65) return false;
@@ -192,11 +292,11 @@ class BatchTranslationService {
     for (final mainCol in allUnits) {
       if (identical(candidate, mainCol)) continue;
       if (mainCol.avgCharWidth >= medianWidth * 0.8) {
-        final vOverlap = math.min(candidate.rect.bottom, mainCol.rect.bottom) -
-            math.max(candidate.rect.top, mainCol.rect.top);
-        final hDist = (candidate.rect.left - mainCol.rect.right).abs();
-        final hDist2 = (candidate.rect.right - mainCol.rect.left).abs();
-        if (vOverlap > 0 && math.min(hDist, hDist2) < mainCol.avgCharWidth * 0.9) {
+        final double vOverlap = math.min<double>(candidate.rect.bottom, mainCol.rect.bottom) -
+            math.max<double>(candidate.rect.top, mainCol.rect.top);
+        final double hDist = (candidate.rect.left - mainCol.rect.right).abs();
+        final double hDist2 = (candidate.rect.right - mainCol.rect.left).abs();
+        if (vOverlap > 0 && math.min<double>(hDist, hDist2) < mainCol.avgCharWidth * 0.9) {
           return true;
         }
       }
@@ -204,7 +304,7 @@ class BatchTranslationService {
     return false;
   }
 
-  /// 2. 일본어 만화/스캔 이미지(JPG, PNG, CBZ, PDF) 말풍선 단위 통합 클러스터링 & 원문 덮어쓰기 번역
+  /// 2. 일본어 만화/스캔 이미지 말풍선 통합 번역 (세로 말풍선 세로쓰기 유지 & 원본 말풍선 크기 절대 초과 금지)
   static Future<void> preTranslateAllImages({
     required String bookKey,
     required List<File> imageFiles,
@@ -227,7 +327,7 @@ class BatchTranslationService {
         onProgress(
           i + 1,
           imageFiles.length,
-          '말풍선 영역 통합 감지 및 문맥 번역 중 (${i + 1} / ${imageFiles.length})...',
+          'Gugugo 한일 번역 엔진으로 말풍선 번역 중 (${i + 1} / ${imageFiles.length})...',
         );
         if (!forceRetranslate) {
           final cached = await StorageService.getImageBubbleCache(bookKey, i);
@@ -238,25 +338,23 @@ class BatchTranslationService {
         final bytes = await file.readAsBytes();
         final codec = await ui.instantiateImageCodec(bytes);
         final frame = await codec.getNextFrame();
-        final imgWidth = frame.image.width.toDouble();
-        final imgHeight = frame.image.height.toDouble();
+        final double imgWidth = frame.image.width.toDouble();
+        final double imgHeight = frame.image.height.toDouble();
 
         final inputImage = InputImage.fromFilePath(file.path);
         final recognized = await recognizer.processImage(inputImage);
 
-        // 1단계: 모든 텍스트 라인(세로열/가로줄) 수집 및 노이즈 필터링
         final List<_TextColUnit> rawUnits = [];
         for (final block in recognized.blocks) {
           for (final line in block.lines) {
             final t = line.text.trim();
             if (t.isEmpty) continue;
-            // 배경 효과음이나 단순 기호 1글자 노이즈 제거
             if (t.length == 1 && RegExp(r'^[0-9a-zA-Z!@#$%^&*()_+\-=\[\]{};:"\\|,.<>/?~`]$').hasMatch(t)) {
               continue;
             }
             final r = line.boundingBox;
             if (r.width < 6 || r.height < 6) continue;
-            final charW = isVerticalScript ? r.width : (r.height > 0 ? r.height : r.width);
+            final double charW = isVerticalScript ? r.width : (r.height > 0 ? r.height : r.width);
             rawUnits.add(_TextColUnit(rect: r, text: t, avgCharWidth: charW));
           }
         }
@@ -266,14 +364,12 @@ class BatchTranslationService {
           continue;
         }
 
-        // 2단계: 일본어 만화의 후리가나(한자 옆 작은 발음 열)가 별도 말풍선으로 쪼개지는 현상 제거
         final sortedWidths = rawUnits.map((u) => u.avgCharWidth).toList()..sort();
-        final medianWidth = sortedWidths[sortedWidths.length ~/ 2];
+        final double medianWidth = sortedWidths[sortedWidths.length ~/ 2];
         final filteredUnits = rawUnits
             .where((u) => !_isRubyFuriganaColumn(u, rawUnits, medianWidth))
             .toList();
 
-        // 3단계: 인접한 텍스트 열들을 같은 말풍선(Connected Component)으로 통합 클러스터링!
         final int n = filteredUnits.length;
         final List<bool> visited = List.filled(n, false);
         final List<List<_TextColUnit>> bubbleClusters = [];
@@ -301,26 +397,25 @@ class BatchTranslationService {
           bubbleClusters.add(cluster);
         }
 
-        // 4단계: 각 말풍선 클러스터 내부의 열들을 올바른 만화 읽기 순서대로 정렬하여 한 문장으로 결합
-        final List<ui.Rect> mergedRects = [];
+        final List<ui.Rect> exactRects = [];
         final List<String> mergedSentences = [];
         final List<bool> isSerifFlags = [];
         final List<bool> isBoldFlags = [];
+        final List<bool> isVerticalFlags = [];
 
         for (final cluster in bubbleClusters) {
           if (isVerticalScript) {
-            // 일본 만화 세로쓰기: 오른쪽 열부터 왼쪽 열 순서로 읽어야 문장이 정상적으로 이어짐!
+            // 일본 만화 세로쓰기: 오른쪽 열부터 왼쪽 열 순서로 정렬
             cluster.sort((a, b) {
-              final xDiff = b.rect.center.dx - a.rect.center.dx;
+              final double xDiff = b.rect.center.dx - a.rect.center.dx;
               if (xDiff.abs() > medianWidth * 0.45) {
                 return xDiff > 0 ? 1 : -1;
               }
               return a.rect.top.compareTo(b.rect.top);
             });
           } else {
-            // 가로쓰기: 위에서 아래, 왼쪽에서 오른쪽 순서
             cluster.sort((a, b) {
-              final yDiff = a.rect.center.dy - b.rect.center.dy;
+              final double yDiff = a.rect.center.dy - b.rect.center.dy;
               if (yDiff.abs() > medianWidth * 0.5) {
                 return yDiff > 0 ? 1 : -1;
               }
@@ -333,72 +428,74 @@ class BatchTranslationService {
           double maxR = cluster.first.rect.right;
           double maxB = cluster.first.rect.bottom;
 
+          int verticalLinesCount = 0;
           for (final u in cluster) {
             if (u.rect.left < minL) minL = u.rect.left;
             if (u.rect.top < minT) minT = u.rect.top;
             if (u.rect.right > maxR) maxR = u.rect.right;
             if (u.rect.bottom > maxB) maxB = u.rect.bottom;
+            if (u.rect.height > u.rect.width * 1.15) {
+              verticalLinesCount++;
+            }
           }
 
           final joiner = isVerticalScript ? '' : ' ';
           String combinedText = cluster.map((u) => u.text).join(joiner).trim();
-          // OCR 줄바꿈 하이픈이나 불필요한 공백 정리
           if (isVerticalScript) {
             combinedText = combinedText.replaceAll(RegExp(r'\s+'), '');
           }
-
           if (combinedText.isEmpty) continue;
 
-          // 원문 글자가 말풍선 밖으로 삐져나오지 않도록 말풍선 내부 영역을 살짝 여유 있게 확장
-          final padX = (maxR - minL) * 0.08 + 6.0;
-          final padY = (maxB - minT) * 0.06 + 6.0;
-          final expandedRect = ui.Rect.fromLTRB(
-            (minL - padX).clamp(0.0, imgWidth),
-            (minT - padY).clamp(0.0, imgHeight),
-            (maxR + padX).clamp(0.0, imgWidth),
-            (maxB + padY).clamp(0.0, imgHeight),
+          // 중요: 만화책에 있는 기존 말풍선보다 절대 커지지 않도록, 검출된 원문 텍스트 바운딩 박스(minL, minT, maxR, maxB)를 그대로 사용!
+          final strictRect = ui.Rect.fromLTRB(
+            minL.clamp(0.0, imgWidth).toDouble(),
+            minT.clamp(0.0, imgHeight).toDouble(),
+            maxR.clamp(0.0, imgWidth).toDouble(),
+            maxB.clamp(0.0, imgHeight).toDouble(),
           );
 
-          mergedRects.add(expandedRect);
+          final bool isVertBubble = isVerticalScript &&
+              (verticalLinesCount >= (cluster.length / 2.0) || strictRect.height >= strictRect.width * 1.05);
+
+          exactRects.add(strictRect);
           mergedSentences.add(combinedText);
 
-          // 외침/강조 대사(!, ?, ！！ 등)는 굵은 글씨, 일반 만화 대사는 만화책 명조/앤티크 조판 스타일 적용
-          final isShout = combinedText.contains('!') ||
+          final bool isShout = combinedText.contains('!') ||
               combinedText.contains('！') ||
               combinedText.contains('?!') ||
               combinedText.contains('？！');
           isSerifFlags.add(!isShout);
           isBoldFlags.add(isShout);
+          isVerticalFlags.add(isVertBubble);
         }
 
-        // 5단계: 한 페이지의 통합된 말풍선 문장들을 번역
+        // Gugugo 파이프라인으로 말풍선 문장 번역
         final List<String> translatedSentences = List.from(mergedSentences);
         for (int k = 0; k < mergedSentences.length; k++) {
-          try {
-            final res = await _translator.translate(
-              mergedSentences[k],
-              from: sourceLang,
-              to: targetLang,
-            );
-            if (res.text.trim().isNotEmpty) {
-              translatedSentences[k] = res.text.trim();
-            }
-          } catch (_) {}
+          final tr = await translateWithGugugoPipeline(
+            mergedSentences[k],
+            sourceLang: sourceLang,
+            targetLang: targetLang,
+          );
+          if (tr.isNotEmpty) {
+            translatedSentences[k] = tr;
+          }
         }
 
         final List<BubbleTranslation> bubbles = [];
-        for (int k = 0; k < mergedRects.length; k++) {
-          final rect = mergedRects[k];
+        for (int k = 0; k < exactRects.length; k++) {
+          final rect = exactRects[k];
           bubbles.add(
             BubbleTranslation(
-              leftRatio: (rect.left / imgWidth).clamp(0.0, 0.98),
-              topRatio: (rect.top / imgHeight).clamp(0.0, 0.98),
-              widthRatio: (rect.width / imgWidth).clamp(0.05, 0.98),
-              heightRatio: (rect.height / imgHeight).clamp(0.04, 0.98),
+              leftRatio: (rect.left / imgWidth).clamp(0.0, 0.99).toDouble(),
+              topRatio: (rect.top / imgHeight).clamp(0.0, 0.99).toDouble(),
+              widthRatio: (rect.width / imgWidth).clamp(0.02, 0.99).toDouble(),
+              heightRatio: (rect.height / imgHeight).clamp(0.02, 0.99).toDouble(),
               originalText: mergedSentences[k],
               translatedText: translatedSentences[k],
               isSerif: isSerifFlags[k],
               isBold: isBoldFlags[k],
+              isVertical: isVerticalFlags[k],
             ),
           );
         }

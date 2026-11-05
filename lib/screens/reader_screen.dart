@@ -31,19 +31,18 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   String? _initialCfi;
   String? _currentCfi;
-  String? _previousJumpCfi; // 읽었던 페이지로 돌아가기용 이전 CFI 저장
+  String? _previousJumpCfi;
   String? _selectedCfiRange;
   bool _isLoading = true;
   bool _isDarkMode = false;
   bool _useVolumeKeys = true;
+  bool _enableTwoPageInLandscape = true;
   int _fontSize = 18;
   List<EpubChapter> _chapters = [];
 
   bool _showControls = true;
   double _progress = 0.0;
-  String _currentTimeString = '';
-  int _totalReadingSeconds = 0;
-  Timer? _clockAndReadingTimer;
+  bool _hasRestoredInitialPosition = false;
 
   Offset? _pointerDownPosition;
   DateTime? _pointerDownTime;
@@ -53,37 +52,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     super.initState();
     _activeFilePath = widget.filePath;
     WidgetsBinding.instance.addObserver(this);
-    _updateClock();
     _initReader();
-
-    // 1초마다 누적 독서 시간 기록 및 시계 갱신
-    _clockAndReadingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) {
-        setState(() => _totalReadingSeconds++);
-        if (_totalReadingSeconds % 5 == 0) {
-          StorageService.addReadingSeconds(widget.filePath, 5);
-        }
-        if (_totalReadingSeconds % 15 == 0) {
-          _updateClock();
-        }
-      }
-    });
-  }
-
-  void _updateClock() {
-    final now = DateTime.now();
-    final hh = now.hour.toString().padLeft(2, '0');
-    final mm = now.minute.toString().padLeft(2, '0');
-    if (mounted) {
-      setState(() => _currentTimeString = '$hh:$mm');
-    }
   }
 
   Future<void> _initReader() async {
     final savedCfi = await StorageService.getLastPosition(widget.filePath);
     final prevCfi = await StorageService.getPreviousPosition(widget.filePath);
     final savedProg = await StorageService.getProgress(widget.filePath);
-    final savedTime = await StorageService.getReadingSeconds(widget.filePath);
+    final twoPage = await StorageService.getTwoPageLandscape();
 
     if (_useVolumeKeys) {
       _enableVolumeNavigation();
@@ -92,8 +68,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _initialCfi = savedCfi;
       _currentCfi = savedCfi;
       _previousJumpCfi = prevCfi;
-      _progress = savedProg.clamp(0.0, 1.0);
-      _totalReadingSeconds = savedTime;
+      _progress = savedProg.clamp(0.0, 1.0).toDouble();
+      _enableTwoPageInLandscape = twoPage;
       _isLoading = false;
     });
   }
@@ -105,15 +81,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     );
   }
 
-  // 파일 통째로 사전 번역 실행 (번역 딜레이 제거 + 원본 글꼴 스타일 유지 말풍선 박스)
   Future<void> _handleBatchTranslateBook() async {
     if (_isTranslatedFileActive) {
-      // 원본으로 즉시 전환
       setState(() {
         _isLoading = true;
         _activeFilePath = widget.filePath;
         _isTranslatedFileActive = false;
         _initialCfi = _currentCfi;
+        _hasRestoredInitialPosition = false;
       });
       await Future.delayed(const Duration(milliseconds: 100));
       setState(() => _isLoading = false);
@@ -122,7 +97,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
     int cur = 0;
     int tot = 1;
-    String status = '책 전체를 스캔하여 사전 번역 파일을 생성합니다...';
+    String status = 'Gugugo 한일 번역 파이프라인으로 책 전체를 사전 번역합니다...';
     StateSetter? dialogSetState;
 
     showDialog(
@@ -167,19 +142,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         _activeFilePath = translatedFile.path;
         _isTranslatedFileActive = true;
         _initialCfi = _currentCfi;
+        _hasRestoredInitialPosition = false;
       });
       await Future.delayed(const Duration(milliseconds: 100));
       setState(() => _isLoading = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('책 전체 번역 완료! 이제 페이지를 넘길 때 번역 딜레이가 전혀 발생하지 않습니다.')),
+        const SnackBar(content: Text('책 전체 번역 완료! 이제 페이지를 넘길 때 딜레이가 발생하지 않습니다.')),
       );
     } catch (e) {
       if (mounted) Navigator.pop(context);
     }
   }
 
-  // 북마크 바텀시트 (추가/삭제/즉시 이동)
   Future<void> _openBookmarkSheet() async {
     final bookmarks = await StorageService.getBookmarks(widget.filePath);
     if (!mounted) return;
@@ -312,13 +287,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   void _changeFontSize(int delta) {
-    setState(() => _fontSize = (_fontSize + delta).clamp(12, 32));
+    setState(() => _fontSize = (_fontSize + delta).clamp(12, 32).toInt());
     _epubController.setFontSize(fontSize: _fontSize.toDouble());
   }
 
   @override
   void dispose() {
-    _clockAndReadingTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _volumeKeyService.stopListening();
     SystemChrome.setEnabledSystemUIMode(
@@ -338,6 +312,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final screenSize = mediaQuery.size;
     final topPadding = mediaQuery.viewPadding.top;
     final bottomPadding = mediaQuery.viewPadding.bottom;
+    final bool isLandscape = screenSize.width > screenSize.height;
+    final EpubSpread spreadSetting =
+        (isLandscape && _enableTwoPageInLandscape) ? EpubSpread.always : EpubSpread.none;
+
     final bgColor = _isDarkMode ? const Color(0xFF1E1E1E) : const Color(0xFFFBF0D9);
     final barColor = _isDarkMode
         ? const Color(0xFF2C2C2C).withOpacity(0.96)
@@ -395,13 +373,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 onPointerDown: _handlePointerDown,
                 onPointerUp: (event) => _handlePointerUp(event, screenSize),
                 child: EpubViewer(
-                  key: ValueKey(_activeFilePath),
+                  key: ValueKey('${_activeFilePath}_$spreadSetting'),
                   epubController: _epubController,
                   epubSource: EpubSource.fromFile(File(_activeFilePath)),
                   initialCfi: _initialCfi,
                   displaySettings: EpubDisplaySettings(
                     flow: EpubFlow.paginated,
                     snap: true,
+                    spread: spreadSetting,
                     fontSize: _fontSize,
                     theme: _buildTheme(),
                   ),
@@ -424,17 +403,35 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   ),
                   onChaptersLoaded: (chapters) {
                     setState(() => _chapters = chapters);
+                    // 책을 다시 열었을 때 저장되어 있던 CFI(또는 진행률) 위치로 확실하게 복귀!
+                    if (!_hasRestoredInitialPosition) {
+                      _hasRestoredInitialPosition = true;
+                      if (_initialCfi != null && _initialCfi!.isNotEmpty) {
+                        Future.delayed(const Duration(milliseconds: 150), () {
+                          _epubController.display(cfi: _initialCfi!);
+                        });
+                      } else if (_progress > 0.01) {
+                        Future.delayed(const Duration(milliseconds: 150), () {
+                          _epubController.toProgressPercentage(_progress);
+                        });
+                      }
+                    }
                   },
                   onTextSelected: (epubTextSelection) {
                     _selectedCfiRange = epubTextSelection.selectionCfi;
                   },
                   onRelocated: (value) {
+                    // 초기 로딩 시 0페이지로 덮어써지는 현상 방지
+                    if (!_hasRestoredInitialPosition && _initialCfi != null && value.progress < 0.01 && _progress > 0.05) {
+                      return;
+                    }
+                    _hasRestoredInitialPosition = true;
                     _currentCfi = value.startCfi;
                     StorageService.saveLastPosition(widget.filePath, value.startCfi);
                     StorageService.saveProgress(widget.filePath, value.progress);
                     if (mounted) {
                       setState(() {
-                        _progress = value.progress.clamp(0.0, 1.0);
+                        _progress = value.progress.clamp(0.0, 1.0).toDouble();
                       });
                     }
                   },
@@ -443,37 +440,28 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ),
           ),
 
-          // 2. 최하단 미니 상태줄 (읽은 시간 + 현재 시각 + 진행률 상시 표시)
+          // 2. 최하단 진행률 상태줄 (읽은 시간 완전 제거)
           Positioned(
             left: 16,
             right: 16,
             bottom: bottomPadding > 0 ? bottomPadding / 2 : 4,
             height: 22,
             child: IgnorePointer(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      '읽은 시간: ${StorageService.formatReadingTime(_totalReadingSeconds)}',
-                      style: TextStyle(fontSize: 11, color: footerTextColor),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '${(_progress * 100).toStringAsFixed(1)}%',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: footerTextColor,
                   ),
-                  Text(
-                    '$_currentTimeString  |  ${(_progress * 100).toStringAsFixed(1)}%',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: footerTextColor,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
 
-          // 3. 상단 오버레이 AppBar (통째로 번역, 북마크, 이전 읽던 위치 복귀 버튼 포함)
+          // 3. 상단 오버레이 AppBar
           AnimatedPositioned(
             duration: const Duration(milliseconds: 250),
             curve: Curves.easeInOut,
@@ -511,7 +499,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        // 읽었던 페이지로 돌아가기 버튼
                         if (_previousJumpCfi != null)
                           IconButton(
                             icon: const Icon(Icons.restore, color: Colors.indigo),
@@ -522,16 +509,30 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                               _epubController.display(cfi: target);
                             },
                           ),
-                        // 파일 통째로 사전 번역 버튼
+                        // 가로 모드 2페이지(양면) 보기 설정 토글
+                        IconButton(
+                          icon: Icon(
+                            _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
+                            color: _enableTwoPageInLandscape ? Colors.indigo : iconColor,
+                          ),
+                          tooltip: '가로 모드에서 2페이지씩 보기 켜기/끄기',
+                          onPressed: () async {
+                            final nextVal = !_enableTwoPageInLandscape;
+                            await StorageService.setTwoPageLandscape(nextVal);
+                            setState(() {
+                              _initialCfi = _currentCfi;
+                              _enableTwoPageInLandscape = nextVal;
+                            });
+                          },
+                        ),
                         IconButton(
                           icon: Icon(
                             Icons.translate,
                             color: _isTranslatedFileActive ? Colors.amber[800] : iconColor,
                           ),
-                          tooltip: '책 통째로 번역 (말풍선 스타일/딜레이 제거)',
+                          tooltip: '책 통째로 번역',
                           onPressed: _handleBatchTranslateBook,
                         ),
-                        // 북마크 버튼
                         IconButton(
                           icon: Icon(Icons.bookmarks_outlined, color: iconColor),
                           tooltip: '북마크 목록 및 추가',
@@ -575,7 +576,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                           Text('진행률', style: TextStyle(fontSize: 12, color: iconColor)),
                           Expanded(
                             child: Slider(
-                              value: _progress.clamp(0.0, 1.0),
+                              value: _progress.clamp(0.0, 1.0).toDouble(),
                               min: 0.0,
                               max: 1.0,
                               onChanged: (val) => setState(() => _progress = val),
