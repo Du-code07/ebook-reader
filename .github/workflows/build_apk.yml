@@ -131,7 +131,7 @@ jobs:
             if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
               sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/> <application/' "$MANIFEST"
             fi
-            sed -i 's/android:label="[^"]*"/android:label="올인원 모바일 리더기"/' "$MANIFEST"
+            sed -i 's/android:label="[^"]*"/android:label="FReader"/' "$MANIFEST"
           fi
 
       - name: 5. Install Dependencies & Build Release APK
