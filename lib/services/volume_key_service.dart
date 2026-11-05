@@ -6,27 +6,23 @@ class VolumeKeyService {
   static const EventChannel _eventChannel = EventChannel('ebook_reader/volume_events');
 
   StreamSubscription? _subscription;
-  DateTime _lastTriggered = DateTime.now();
 
   Future<void> startListening({
     required VoidCallback onVolumeUp,
     required VoidCallback onVolumeDown,
-    int cooldownMs = 250,
+    VoidCallback? onScreenLockButton,
   }) async {
-    try {
-      await _methodChannel.invokeMethod('setIntercept', {'enabled': true});
-      _subscription = _eventChannel.receiveBroadcastStream().listen((event) {
-        final now = DateTime.now();
-        if (now.difference(_lastTriggered).inMilliseconds < cooldownMs) return;
-        _lastTriggered = now;
-
-        if (event == 'UP') {
-          onVolumeUp();
-        } else if (event == 'DOWN') {
-          onVolumeDown();
-        }
-      });
-    } on PlatformException catch (_) {}
+    await _methodChannel.invokeMethod('setIntercept', {'enabled': true});
+    _subscription?.cancel();
+    _subscription = _eventChannel.receiveBroadcastStream().listen((event) {
+      if (event == 'UP') {
+        onVolumeUp();
+      } else if (event == 'DOWN') {
+        onVolumeDown();
+      } else if (event == 'SCREEN_LOCK_BTN') {
+        onScreenLockButton?.call();
+      }
+    });
   }
 
   Future<void> stopListening() async {
@@ -34,6 +30,6 @@ class VolumeKeyService {
     _subscription = null;
     try {
       await _methodChannel.invokeMethod('setIntercept', {'enabled': false});
-    } on PlatformException catch (_) {}
+    } catch (_) {}
   }
 }

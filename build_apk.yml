@@ -43,6 +43,7 @@ jobs:
           # Dart 3.x / Flutter 3.47+ 에서 .clamp() 반환 타입(num)이 Positioned(double?)에 전달될 때 발생하는 타입 오류 자동 보정
           if [ -f "lib/screens/pdf_and_image_viewer.dart" ]; then
             sed -i 's/left: boxLeft,/left: boxLeft.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
+            sed -i 's/math.max<int>(1, b.translatedText.length \* 1.8)/math.max<double>(1.0, b.translatedText.length * 1.8)/g' lib/screens/pdf_and_image_viewer.dart
             sed -i 's/top: boxTop,/top: boxTop.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
             sed -i 's/width: boxW,/width: boxW.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
             sed -i 's/height: boxH,/height: boxH.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
@@ -130,7 +131,7 @@ jobs:
             if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
               sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/> <application/' "$MANIFEST"
             fi
-            sed -i 's/android:label="[^"]*"/android:label="올인원 모바일 리더기"/' "$MANIFEST"
+            sed -i 's/android:label="[^"]*"/android:label="FReader"/' "$MANIFEST"
           fi
 
       - name: 5. Install Dependencies & Build Release APK

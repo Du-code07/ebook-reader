@@ -29,7 +29,7 @@ class UniversalMediaReaderScreen extends StatefulWidget {
   State<UniversalMediaReaderScreen> createState() => _UniversalMediaReaderScreenState();
 }
 
-class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen> {
+class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen> with WidgetsBindingObserver {
   static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
   PageController? _pageController;
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
@@ -46,6 +46,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _enableTwoPageInLandscape = true;
   bool _lastIsSpreadMode = false;
 
+  // 1. 화면 터치 잠금 상태 (물리적 화면 잠금/전원 버튼을 누르면 자동 해제됨)
+  bool _isTouchLocked = false;
+
+  // 2. 뷰어 하단 정보 표시 설정 ('progress', 'page', 'both', 'none')
+  String _footerInfoMode = 'both';
+
+  // 7. 진행도 UI 위치 설정 ('right', 'left', 'bottom')
+  String _progressBarPos = 'right';
+
   TextRecognitionScript _selectedScript = TextRecognitionScript.japanese;
   String _sourceLangCode = 'ja';
   final Map<int, List<BubbleTranslation>> _bubblesByPage = {};
@@ -55,8 +64,46 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _initMedia();
+  }
+
+  /// 물리적인 화면 잠금(전원) 버튼을 눌러 화면이 꺼지거나 잠금 해제될 때 터치 잠금 자동 해제!
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_isTouchLocked &&
+        (state == AppLifecycleState.paused ||
+            state == AppLifecycleState.inactive ||
+            state == AppLifecycleState.resumed)) {
+      _unlockTouchScreen();
+    }
+  }
+
+  void _unlockTouchScreen() {
+    if (!_isTouchLocked || !mounted) return;
+    setState(() {
+      _isTouchLocked = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('화면 터치 잠금이 해제되었습니다.'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+  }
+
+  void _lockTouchScreen() {
+    setState(() {
+      _isTouchLocked = true;
+      _showControls = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('화면 터치가 잠겼습니다. (음량 버튼으로 페이지 이동 / 물리 화면 잠금 버튼을 누르면 잠금 해제)'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<Size> _getImageDimension(File file) async {
@@ -82,6 +129,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   Future<void> _initMedia() async {
     _enableTwoPageInLandscape = await StorageService.getTwoPageLandscape();
+    _footerInfoMode = await StorageService.getFooterInfoMode();
+    _progressBarPos = await StorageService.getProgressBarPosition();
+
     final tempDir = await getTemporaryDirectory();
     final first = widget.files.first;
     final lower = first.path.toLowerCase();
@@ -148,6 +198,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     _volumeKeyService.startListening(
       onVolumeUp: () => _stepPage(-1),
       onVolumeDown: () => _stepPage(1),
+      onScreenLockButton: _unlockTouchScreen,
     );
 
     if (mounted) {
@@ -218,8 +269,154 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   void _toggleControls() {
+    if (_isTouchLocked) return;
     setState(() => _showControls = !_showControls);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  /// 4. 오른쪽·왼쪽 화살표를 위아래로 합친 커스텀 아이콘:
+  /// 왼쪽->오른쪽(!_isMangaRtlMode)이면 오른쪽 화살표만 주황색으로 빛나고,
+  /// 오른쪽->왼쪽(_isMangaRtlMode)이면 왼쪽 화살표만 주황색으로 빛남!
+  Widget _buildDualDirectionIcon() {
+    final bool isRightActive = !_isMangaRtlMode;
+    final Color activeColor = Colors.orangeAccent;
+    final Color inactiveColor = Colors.white38;
+
+    return SizedBox(
+      width: 28,
+      height: 28,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.east,
+            size: 14,
+            color: isRightActive ? activeColor : inactiveColor,
+            shadows: isRightActive
+                ? const [
+                    Shadow(color: Colors.orange, blurRadius: 8),
+                    Shadow(color: Colors.deepOrangeAccent, blurRadius: 12),
+                  ]
+                : null,
+          ),
+          const SizedBox(height: 1),
+          Icon(
+            Icons.west,
+            size: 14,
+            color: !isRightActive ? activeColor : inactiveColor,
+            shadows: !isRightActive
+                ? const [
+                    Shadow(color: Colors.orange, blurRadius: 8),
+                    Shadow(color: Colors.deepOrangeAccent, blurRadius: 12),
+                  ]
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 2 & 7. 뷰어 하단 정보 표시 방식 및 진행도 UI 위치(오른쪽/왼쪽/하단) 설정 시트
+  Future<void> _showViewerSettingsSheet() async {
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('뷰어 표시 설정', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                const Text('진행도 UI 위치', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('오른쪽'),
+                      selected: _progressBarPos == 'right',
+                      onSelected: (_) async {
+                        await StorageService.setProgressBarPosition('right');
+                        setState(() => _progressBarPos = 'right');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('왼쪽'),
+                      selected: _progressBarPos == 'left',
+                      onSelected: (_) async {
+                        await StorageService.setProgressBarPosition('left');
+                        setState(() => _progressBarPos = 'left');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('하단'),
+                      selected: _progressBarPos == 'bottom',
+                      onSelected: (_) async {
+                        await StorageService.setProgressBarPosition('bottom');
+                        setState(() => _progressBarPos = 'bottom');
+                        setModalState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const Divider(height: 24),
+                const Text('하단 정보 표시', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('진행률'),
+                      selected: _footerInfoMode == 'progress',
+                      onSelected: (_) async {
+                        await StorageService.setFooterInfoMode('progress');
+                        setState(() => _footerInfoMode = 'progress');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('페이지 번호'),
+                      selected: _footerInfoMode == 'page',
+                      onSelected: (_) async {
+                        await StorageService.setFooterInfoMode('page');
+                        setState(() => _footerInfoMode = 'page');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('진행률 및 페이지 번호'),
+                      selected: _footerInfoMode == 'both',
+                      onSelected: (_) async {
+                        await StorageService.setFooterInfoMode('both');
+                        setState(() => _footerInfoMode = 'both');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('정보 표시 없음'),
+                      selected: _footerInfoMode == 'none',
+                      onSelected: (_) async {
+                        await StorageService.setFooterInfoMode('none');
+                        setState(() => _footerInfoMode = 'none');
+                        setModalState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _showLanguageAndTranslateDialog({bool forceRetranslate = false}) async {
@@ -240,7 +437,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('원문 언어를 선택하세요 (기본값: 일본어):', style: TextStyle(fontSize: 13)),
+                // 5. '(기본값: 일본어):' 삭제 반영
+                const Text('원문 언어를 선택하세요', style: TextStyle(fontSize: 13)),
                 const SizedBox(height: 8),
                 DropdownButton<String>(
                   isExpanded: true,
@@ -450,7 +648,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final double safeW = math.max<double>(16.0, boxW - 3.0);
     final double safeH = math.max<double>(12.0, boxH - 2.0);
     final double area = safeW * safeH;
-    final double estFont = math.sqrt(area / math.max<int>(1, b.translatedText.length * 1.8)).clamp(6.5, 20.0).toDouble();
+    final double estFont = math.sqrt(area / math.max<double>(1.0, b.translatedText.length * 1.8)).clamp(6.5, 20.0).toDouble();
 
     return FittedBox(
       fit: BoxFit.scaleDown,
@@ -620,8 +818,118 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
+  String _formatFooterText(bool isSpread) {
+    if (_footerInfoMode == 'none') return '';
+    final double progPercent = _totalPages > 0 ? ((_currentPage + 1) / _totalPages * 100.0).clamp(0.0, 100.0).toDouble() : 0.0;
+    final String progStr = '${progPercent.toStringAsFixed(1)}%';
+    final String pageStr = isSpread && (_currentPage + 1 < _totalPages)
+        ? '${_currentPage + 1}-${_currentPage + 2} / $_totalPages'
+        : '${_currentPage + 1} / $_totalPages';
+
+    if (_footerInfoMode == 'progress') {
+      return progStr;
+    } else if (_footerInfoMode == 'page') {
+      return pageStr;
+    } else {
+      return '$progStr  |  $pageStr';
+    }
+  }
+
+  Widget _buildProgressControlBar() {
+    final double sliderVal = _currentPage.toDouble().clamp(0.0, math.max<double>(0.0, (_totalPages - 1).toDouble())).toDouble();
+    final double sliderMax = math.max<double>(1.0, (_totalPages - 1).toDouble());
+
+    if (_progressBarPos == 'bottom') {
+      return Positioned(
+        left: 16.0,
+        right: 16.0,
+        bottom: 28.0,
+        child: Material(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(26),
+          elevation: 6,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left, color: Colors.white),
+                  onPressed: () => _stepPage(-1),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: sliderVal,
+                    min: 0.0,
+                    max: sliderMax,
+                    onChanged: (v) => _goToPage(v.round(), smoothAnimation: false),
+                  ),
+                ),
+                Text(
+                  '${_currentPage + 1}/$_totalPages',
+                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right, color: Colors.white),
+                  onPressed: () => _stepPage(1),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Positioned(
+      top: 72.0,
+      bottom: 48.0,
+      left: _progressBarPos == 'left' ? 8.0 : null,
+      right: _progressBarPos == 'right' ? 8.0 : null,
+      width: 52.0,
+      child: Material(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(26),
+        elevation: 6,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.expand_less, color: Colors.white, size: 22),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                onPressed: () => _stepPage(-1),
+              ),
+              Expanded(
+                child: RotatedBox(
+                  quarterTurns: 1,
+                  child: Slider(
+                    value: sliderVal,
+                    min: 0.0,
+                    max: sliderMax,
+                    onChanged: (v) => _goToPage(v.round(), smoothAnimation: false),
+                  ),
+                ),
+              ),
+              Text(
+                '${_currentPage + 1}/$_totalPages',
+                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                icon: const Icon(Icons.expand_more, color: Colors.white, size: 22),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                onPressed: () => _stepPage(1),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _volumeKeyService.stopListening();
     _pageController?.dispose();
     SystemChrome.setEnabledSystemUIMode(
@@ -654,85 +962,92 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     final int viewItemCount = isSpread ? ((_totalPages + 1) ~/ 2) : _totalPages;
-    final String pageIndicatorText = isSpread && (_currentPage + 1 < _totalPages)
-        ? '${_currentPage + 1}-${_currentPage + 2} / $_totalPages 페이지'
-        : '${_currentPage + 1} / $_totalPages 페이지';
+    final String footerText = _formatFooterText(isSpread);
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
+          // 1. 터치 잠금 시 모든 화면 터치/스와이프를 차단하고 음량 버튼으로만 넘기도록 AbsorbPointer 적용
           Positioned.fill(
-            child: GestureDetector(
-              onTap: _toggleControls,
-              child: PageView.builder(
-                key: ValueKey('pageview_spread_$isSpread'),
-                controller: _pageController,
-                reverse: _isMangaRtlMode,
-                physics: const BouncingScrollPhysics(),
-                itemCount: viewItemCount,
-                onPageChanged: (viewIdx) {
-                  final int actualPage = isSpread ? (viewIdx * 2) : viewIdx;
-                  setState(() => _currentPage = actualPage);
-                  _ensurePageDimensionLoaded(actualPage);
-                  if (actualPage + 1 < _totalPages) _ensurePageDimensionLoaded(actualPage + 1);
-                  StorageService.saveLastPosition(_bookKey, actualPage.toString());
-                  StorageService.saveProgress(_bookKey, (actualPage + 1) / _totalPages);
-                },
-                itemBuilder: (context, viewIdx) {
-                  if (!isSpread) {
+            child: AbsorbPointer(
+              absorbing: _isTouchLocked,
+              child: GestureDetector(
+                onTap: _toggleControls,
+                child: PageView.builder(
+                  key: ValueKey('pageview_spread_$isSpread'),
+                  controller: _pageController,
+                  reverse: _isMangaRtlMode,
+                  physics: _isTouchLocked
+                      ? const NeverScrollableScrollPhysics()
+                      : const BouncingScrollPhysics(),
+                  itemCount: viewItemCount,
+                  onPageChanged: (viewIdx) {
+                    final int actualPage = isSpread ? (viewIdx * 2) : viewIdx;
+                    setState(() => _currentPage = actualPage);
+                    _ensurePageDimensionLoaded(actualPage);
+                    if (actualPage + 1 < _totalPages) _ensurePageDimensionLoaded(actualPage + 1);
+                    StorageService.saveLastPosition(_bookKey, actualPage.toString());
+                    StorageService.saveProgress(_bookKey, (actualPage + 1) / _totalPages);
+                  },
+                  itemBuilder: (context, viewIdx) {
+                    if (!isSpread) {
+                      return InteractiveViewer(
+                        minScale: 1.0,
+                        maxScale: 3.5,
+                        child: _buildSinglePagePanel(viewIdx),
+                      );
+                    }
+
+                    final int firstPage = viewIdx * 2;
+                    final int secondPage = firstPage + 1;
+                    final Widget leftPanel = _isMangaRtlMode
+                        ? (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand())
+                        : _buildSinglePagePanel(firstPage);
+                    final Widget rightPanel = _isMangaRtlMode
+                        ? _buildSinglePagePanel(firstPage)
+                        : (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand());
+
                     return InteractiveViewer(
                       minScale: 1.0,
                       maxScale: 3.5,
-                      child: _buildSinglePagePanel(viewIdx),
+                      child: Row(
+                        children: [
+                          Expanded(child: leftPanel),
+                          Container(width: 1, color: Colors.white12),
+                          Expanded(child: rightPanel),
+                        ],
+                      ),
                     );
-                  }
-
-                  final int firstPage = viewIdx * 2;
-                  final int secondPage = firstPage + 1;
-                  final Widget leftPanel = _isMangaRtlMode
-                      ? (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand())
-                      : _buildSinglePagePanel(firstPage);
-                  final Widget rightPanel = _isMangaRtlMode
-                      ? _buildSinglePagePanel(firstPage)
-                      : (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand());
-
-                  return InteractiveViewer(
-                    minScale: 1.0,
-                    maxScale: 3.5,
-                    child: Row(
-                      children: [
-                        Expanded(child: leftPanel),
-                        Container(width: 1, color: Colors.white12),
-                        Expanded(child: rightPanel),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-
-          Positioned(
-            left: 20,
-            right: 20,
-            bottom: math.max<double>(bottomInset + 4.0, 8.0),
-            child: IgnorePointer(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  pageIndicatorText,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                    shadows: [Shadow(color: Colors.black, blurRadius: 4)],
-                  ),
+                  },
                 ),
               ),
             ),
           ),
 
-          if (_showControls)
+          // 2. 최하단 우측 정보 표시줄 (진행률 / 페이지 번호 / 진행률 및 페이지 번호 / 정보 표시 없음)
+          if (footerText.isNotEmpty)
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: math.max<double>(bottomInset + 4.0, 8.0),
+              child: IgnorePointer(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    footerText,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          // 3. 상단 컨트롤 바
+          if (_showControls && !_isTouchLocked)
             Positioned(
               top: 0,
               left: 0,
@@ -750,24 +1065,31 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       Expanded(
                         child: Text(
                           widget.title,
-                          style: const TextStyle(color: Colors.white, fontSize: 15),
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       if (_previousJumpPage != null)
                         IconButton(
-                          icon: const Icon(Icons.restore, color: Colors.amber),
-                          tooltip: '이전 페이지(${_previousJumpPage! + 1}p)로 돌아가기',
+                          icon: const Icon(Icons.restore, color: Colors.amber, size: 20),
+                          tooltip: '이전 페이지로 돌아가기',
                           onPressed: () {
                             final target = _previousJumpPage!;
                             _previousJumpPage = null;
                             _goToPage(target, recordHistory: false, smoothAnimation: true);
                           },
                         ),
+                      // 1. 화면 터치 잠금 버튼 (물리적 화면 잠금 버튼을 누르면 자동 해제됨)
+                      IconButton(
+                        icon: const Icon(Icons.screen_lock_portrait, color: Colors.white, size: 20),
+                        tooltip: '화면 터치 잠금',
+                        onPressed: _lockTouchScreen,
+                      ),
                       IconButton(
                         icon: Icon(
                           _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
                           color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
+                          size: 20,
                         ),
                         tooltip: '가로 모드 2페이지 보기 설정',
                         onPressed: () async {
@@ -776,18 +1098,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                           setState(() => _enableTwoPageInLandscape = nextVal);
                         },
                       ),
+                      // 4. 방향 전환 버튼: 위아래 화살표 중 활성 방향만 주황색으로 빛나며 문구도 '방향(왼쪽 -> 오른쪽)' / '(오른쪽 -> 왼쪽)' 표시
                       IconButton(
-                        icon: Icon(
-                          _isMangaRtlMode ? Icons.arrow_back : Icons.arrow_forward,
-                          color: _isMangaRtlMode ? Colors.amber : Colors.white,
-                        ),
-                        tooltip: '방향',
+                        icon: _buildDualDirectionIcon(),
+                        tooltip: _isMangaRtlMode ? '(오른쪽 -> 왼쪽)' : '방향(왼쪽 -> 오른쪽)',
                         onPressed: () {
                           setState(() => _isMangaRtlMode = !_isMangaRtlMode);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('방향'),
-                              duration: Duration(milliseconds: 800),
+                            SnackBar(
+                              content: Text(_isMangaRtlMode ? '(오른쪽 -> 왼쪽)' : '방향(왼쪽 -> 오른쪽)'),
+                              duration: const Duration(milliseconds: 900),
                             ),
                           );
                         },
@@ -798,6 +1118,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                           icon: Icon(
                             _showTranslatedBubbles ? Icons.chat_bubble : Icons.translate,
                             color: _showTranslatedBubbles ? Colors.amber : Colors.white,
+                            size: 20,
                           ),
                           tooltip: '번역',
                           onPressed: () {
@@ -811,14 +1132,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       ),
                       if (_bubblesByPage.isNotEmpty)
                         IconButton(
-                          icon: const Icon(Icons.refresh, color: Colors.white70, size: 20),
+                          icon: const Icon(Icons.refresh, color: Colors.white70, size: 19),
                           tooltip: '다시 번역',
                           onPressed: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
                         ),
                       IconButton(
-                        icon: const Icon(Icons.bookmarks_outlined, color: Colors.white),
+                        icon: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
                         tooltip: '북마크',
                         onPressed: _showBookmarkSheet,
+                      ),
+                      // 2 & 7. 뷰어 설정 버튼 (진행도 UI 오른쪽/왼쪽/하단 & 하단 정보 표시 설정)
+                      IconButton(
+                        icon: const Icon(Icons.tune, color: Colors.white, size: 20),
+                        tooltip: '뷰어 표시 설정',
+                        onPressed: _showViewerSettingsSheet,
                       ),
                     ],
                   ),
@@ -826,52 +1153,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
             ),
 
-          if (_showControls && _totalPages > 1)
-            Positioned(
-              top: 72.0,
-              bottom: 48.0,
-              right: 8.0,
-              width: 52.0,
-              child: Material(
-                color: Colors.black87,
-                borderRadius: BorderRadius.circular(26),
-                elevation: 6,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Column(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.expand_less, color: Colors.white, size: 22),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                        onPressed: () => _stepPage(-1),
-                      ),
-                      Expanded(
-                        child: RotatedBox(
-                          quarterTurns: 1,
-                          child: Slider(
-                            value: _currentPage.toDouble().clamp(0.0, math.max<double>(0.0, (_totalPages - 1).toDouble())).toDouble(),
-                            min: 0.0,
-                            max: math.max<double>(1.0, (_totalPages - 1).toDouble()),
-                            onChanged: (v) => _goToPage(v.round(), smoothAnimation: false),
-                          ),
-                        ),
-                      ),
-                      Text(
-                        '${_currentPage + 1}/$_totalPages',
-                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.expand_more, color: Colors.white, size: 22),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                        onPressed: () => _stepPage(1),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          // 7. 진행도 UI 바 (오른쪽 / 왼쪽 / 하단 선택 반영)
+          if (_showControls && !_isTouchLocked && _totalPages > 1)
+            _buildProgressControlBar(),
         ],
       ),
     );

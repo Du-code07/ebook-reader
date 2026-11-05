@@ -127,6 +127,28 @@ class StorageService {
     return prefs.getBool('two_page_landscape') ?? true;
   }
 
+  // 뷰어 하단 정보 표시 설정: 'progress' (진행률), 'page' (페이지 번호), 'both' (진행률 및 페이지 번호), 'none' (정보 표시 없음)
+  static Future<void> setFooterInfoMode(String mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('viewer_footer_info_mode', mode);
+  }
+
+  static Future<String> getFooterInfoMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('viewer_footer_info_mode') ?? 'both';
+  }
+
+  // 진행도 UI 위치 설정: 'right' (오른쪽), 'left' (왼쪽), 'bottom' (하단)
+  static Future<void> setProgressBarPosition(String pos) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('viewer_progress_bar_pos', pos);
+  }
+
+  static Future<String> getProgressBarPosition() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('viewer_progress_bar_pos') ?? 'right';
+  }
+
   static Future<void> setGugugoApiConfig({required String serverUrl, required String hfToken}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('gugugo_server_url', serverUrl.trim());
@@ -228,7 +250,7 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       'bubbles_v4_${bookKey}_$pageIndex',
-      jsonEncode(bubbles.map((e) => e.toJson()).toList()),
+      jsonEncode(bubbles.map((e) => e.toJson())).toList(),
     );
   }
 

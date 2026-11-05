@@ -42,7 +42,7 @@ class _MyEbookAppState extends State<MyEbookApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: '내 서재',
+      title: 'FReader',
       themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,
@@ -741,7 +741,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                               context: ctx,
                               builder: (dCtx) => AlertDialog(
                                 title: const Text('휴지통 비우기'),
-                                content: const Text('휴지통의 모든 파일을 영구 삭제할까요? (복원할 수 없습니다)'),
+                                content: const Text('휴지통의 모든 파일을 영구 삭제할까요?'),
                                 actions: [
                                   TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('취소')),
                                   ElevatedButton(
@@ -904,7 +904,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
               ],
             )
           : AppBar(
-              title: const Text('내 서재'),
+              title: const Text('MY'),
               actions: [
                 IconButton(
                   icon: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode),

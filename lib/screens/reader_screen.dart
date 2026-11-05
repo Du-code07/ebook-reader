@@ -41,6 +41,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   List<EpubChapter> _chapters = [];
 
   bool _showControls = false;
+  bool _isTouchLocked = false;
+  String _footerInfoMode = 'both';
+  String _progressBarPos = 'right';
   double _progress = 0.0;
   bool _hasRestoredInitialPosition = false;
 
@@ -56,12 +59,51 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _initReader();
   }
 
+  /// 물리적인 화면 잠금(전원) 버튼을 누르면 화면 터치 잠금 자동 해제!
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_isTouchLocked &&
+        (state == AppLifecycleState.paused ||
+            state == AppLifecycleState.inactive ||
+            state == AppLifecycleState.resumed)) {
+      _unlockTouchScreen();
+    }
+  }
+
+  void _unlockTouchScreen() {
+    if (!_isTouchLocked || !mounted) return;
+    setState(() {
+      _isTouchLocked = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('화면 터치 잠금이 해제되었습니다.'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+  }
+
+  void _lockTouchScreen() {
+    setState(() {
+      _isTouchLocked = true;
+      _showControls = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('화면 터치가 잠겼습니다. (음량 버튼으로 페이지 이동 / 물리 화면 잠금 버튼을 누르면 잠금 해제)'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
   Future<void> _initReader() async {
     final savedCfi = await StorageService.getLastPosition(widget.filePath);
     final prevCfi = await StorageService.getPreviousPosition(widget.filePath);
     final savedProg = await StorageService.getProgress(widget.filePath);
     final twoPage = await StorageService.getTwoPageLandscape();
     final isDark = await StorageService.getDarkMode();
+    final footerMode = await StorageService.getFooterInfoMode();
+    final barPos = await StorageService.getProgressBarPosition();
 
     if (_useVolumeKeys) {
       _enableVolumeNavigation();
@@ -73,6 +115,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _progress = savedProg.clamp(0.0, 1.0).toDouble();
       _enableTwoPageInLandscape = twoPage;
       _isDarkMode = isDark;
+      _footerInfoMode = footerMode;
+      _progressBarPos = barPos;
       _isLoading = false;
     });
   }
@@ -81,6 +125,108 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _volumeKeyService.startListening(
       onVolumeUp: () => _epubController.prev(),
       onVolumeDown: () => _epubController.next(),
+      onScreenLockButton: _unlockTouchScreen,
+    );
+  }
+
+  Future<void> _showViewerSettingsSheet() async {
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('뷰어 표시 설정', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                const Text('진행도 UI 위치', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('오른쪽'),
+                      selected: _progressBarPos == 'right',
+                      onSelected: (_) async {
+                        await StorageService.setProgressBarPosition('right');
+                        setState(() => _progressBarPos = 'right');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('왼쪽'),
+                      selected: _progressBarPos == 'left',
+                      onSelected: (_) async {
+                        await StorageService.setProgressBarPosition('left');
+                        setState(() => _progressBarPos = 'left');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('하단'),
+                      selected: _progressBarPos == 'bottom',
+                      onSelected: (_) async {
+                        await StorageService.setProgressBarPosition('bottom');
+                        setState(() => _progressBarPos = 'bottom');
+                        setModalState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const Divider(height: 24),
+                const Text('하단 정보 표시', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('진행률'),
+                      selected: _footerInfoMode == 'progress',
+                      onSelected: (_) async {
+                        await StorageService.setFooterInfoMode('progress');
+                        setState(() => _footerInfoMode = 'progress');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('페이지 번호'),
+                      selected: _footerInfoMode == 'page',
+                      onSelected: (_) async {
+                        await StorageService.setFooterInfoMode('page');
+                        setState(() => _footerInfoMode = 'page');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('진행률 및 페이지 번호'),
+                      selected: _footerInfoMode == 'both',
+                      onSelected: (_) async {
+                        await StorageService.setFooterInfoMode('both');
+                        setState(() => _footerInfoMode = 'both');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('정보 표시 없음'),
+                      selected: _footerInfoMode == 'none',
+                      onSelected: (_) async {
+                        await StorageService.setFooterInfoMode('none');
+                        setState(() => _footerInfoMode = 'none');
+                        setModalState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -233,17 +379,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   void _toggleControls() {
+    if (_isTouchLocked) return;
     setState(() => _showControls = !_showControls);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    if (_isTouchLocked) return;
     _pointerDownPosition = event.position;
     _pointerDownTime = DateTime.now();
   }
 
   void _handlePointerUp(PointerUpEvent event, Size screenSize) {
-    if (_pointerDownPosition == null || _pointerDownTime == null) return;
+    if (_isTouchLocked || _pointerDownPosition == null || _pointerDownTime == null) return;
     final distance = (event.position - _pointerDownPosition!).distance;
     final duration = DateTime.now().difference(_pointerDownTime!).inMilliseconds;
 
@@ -292,6 +440,125 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _epubController.setFontSize(fontSize: _fontSize.toDouble());
   }
 
+  String _formatEpubFooterText() {
+    if (_footerInfoMode == 'none') return '';
+    final int totalEstPages = (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
+    final int curEstPage = ((_progress * totalEstPages).round()).clamp(1, totalEstPages).toInt();
+    final String progStr = '${(_progress * 100).toStringAsFixed(1)}%';
+    final String pageStr = '$curEstPage / $totalEstPages';
+
+    if (_footerInfoMode == 'progress') {
+      return progStr;
+    } else if (_footerInfoMode == 'page') {
+      return pageStr;
+    } else {
+      return '$progStr  |  $pageStr';
+    }
+  }
+
+  Widget _buildEpubProgressBar(Color barColor, Color iconColor) {
+    final double val = _progress.clamp(0.0, 1.0).toDouble();
+
+    if (_progressBarPos == 'bottom') {
+      return Positioned(
+        left: 16.0,
+        right: 16.0,
+        bottom: 28.0,
+        child: Material(
+          elevation: 6,
+          color: barColor,
+          borderRadius: BorderRadius.circular(26),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: Icon(Icons.chevron_left, color: iconColor),
+                  onPressed: () => _epubController.prev(),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: val,
+                    min: 0.0,
+                    max: 1.0,
+                    onChanged: (v) => setState(() => _progress = v),
+                    onChangeEnd: (v) {
+                      if (_currentCfi != null) {
+                        setState(() => _previousJumpCfi = _currentCfi);
+                      }
+                      _epubController.toProgressPercentage(v);
+                    },
+                  ),
+                ),
+                Text(
+                  '${(_progress * 100).toStringAsFixed(0)}%',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: iconColor),
+                ),
+                IconButton(
+                  icon: Icon(Icons.chevron_right, color: iconColor),
+                  onPressed: () => _epubController.next(),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Positioned(
+      top: 72.0,
+      bottom: 48.0,
+      left: _progressBarPos == 'left' ? 8.0 : null,
+      right: _progressBarPos == 'right' ? 8.0 : null,
+      width: 52.0,
+      child: Material(
+        elevation: 6,
+        color: barColor,
+        borderRadius: BorderRadius.circular(26),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            children: [
+              IconButton(
+                icon: Icon(Icons.expand_less, color: iconColor, size: 22),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                onPressed: () => _epubController.prev(),
+              ),
+              Expanded(
+                child: RotatedBox(
+                  quarterTurns: 1,
+                  child: Slider(
+                    value: val,
+                    min: 0.0,
+                    max: 1.0,
+                    onChanged: (v) => setState(() => _progress = v),
+                    onChangeEnd: (v) {
+                      if (_currentCfi != null) {
+                        setState(() => _previousJumpCfi = _currentCfi);
+                      }
+                      _epubController.toProgressPercentage(v);
+                    },
+                  ),
+                ),
+              ),
+              Text(
+                '${(_progress * 100).toStringAsFixed(0)}%',
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: iconColor),
+              ),
+              IconButton(
+                icon: Icon(Icons.expand_more, color: iconColor, size: 22),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                onPressed: () => _epubController.next(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -322,6 +589,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         : Colors.white.withOpacity(0.96);
     final iconColor = _isDarkMode ? Colors.white : Colors.black87;
     final footerTextColor = _isDarkMode ? Colors.white54 : Colors.black54;
+    final footerText = _formatEpubFooterText();
 
     return Scaffold(
       key: _scaffoldKey,
@@ -367,97 +635,101 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 top: 12.0,
                 bottom: (bottomPadding > 0 ? bottomPadding : 8.0) + 20.0,
               ),
-              child: Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: _handlePointerDown,
-                onPointerUp: (event) => _handlePointerUp(event, screenSize),
-                child: EpubViewer(
-                  key: ValueKey('${_activeFilePath}_$spreadSetting'),
-                  epubController: _epubController,
-                  epubSource: EpubSource.fromFile(File(_activeFilePath)),
-                  initialCfi: _initialCfi,
-                  displaySettings: EpubDisplaySettings(
-                    flow: EpubFlow.paginated,
-                    snap: true,
-                    spread: spreadSetting,
-                    fontSize: _fontSize,
-                    theme: _buildTheme(),
-                  ),
-                  selectionContextMenu: EpubContextMenu(
-                    hideDefaultSystemItems: false,
-                    items: [
-                      EpubContextMenuItem(
-                        id: 1,
-                        title: '형광펜 칠하기',
-                        action: () {
-                          if (_selectedCfiRange != null) {
-                            _epubController.addHighlight(
-                              cfi: _selectedCfiRange!,
-                              color: Colors.amber,
-                            );
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  onChaptersLoaded: (chapters) {
-                    setState(() => _chapters = chapters);
-                    if (!_hasRestoredInitialPosition) {
+              child: AbsorbPointer(
+                absorbing: _isTouchLocked,
+                child: Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: _handlePointerDown,
+                  onPointerUp: (event) => _handlePointerUp(event, screenSize),
+                  child: EpubViewer(
+                    key: ValueKey('${_activeFilePath}_$spreadSetting'),
+                    epubController: _epubController,
+                    epubSource: EpubSource.fromFile(File(_activeFilePath)),
+                    initialCfi: _initialCfi,
+                    displaySettings: EpubDisplaySettings(
+                      flow: EpubFlow.paginated,
+                      snap: true,
+                      spread: spreadSetting,
+                      fontSize: _fontSize,
+                      theme: _buildTheme(),
+                    ),
+                    selectionContextMenu: EpubContextMenu(
+                      hideDefaultSystemItems: false,
+                      items: [
+                        EpubContextMenuItem(
+                          id: 1,
+                          title: '형광펜 칠하기',
+                          action: () {
+                            if (_selectedCfiRange != null) {
+                              _epubController.addHighlight(
+                                cfi: _selectedCfiRange!,
+                                color: Colors.amber,
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    onChaptersLoaded: (chapters) {
+                      setState(() => _chapters = chapters);
+                      if (!_hasRestoredInitialPosition) {
+                        _hasRestoredInitialPosition = true;
+                        if (_initialCfi != null && _initialCfi!.isNotEmpty) {
+                          Future.delayed(const Duration(milliseconds: 150), () {
+                            _epubController.display(cfi: _initialCfi!);
+                          });
+                        } else if (_progress > 0.01) {
+                          Future.delayed(const Duration(milliseconds: 150), () {
+                            _epubController.toProgressPercentage(_progress);
+                          });
+                        }
+                      }
+                    },
+                    onTextSelected: (epubTextSelection) {
+                      _selectedCfiRange = epubTextSelection.selectionCfi;
+                    },
+                    onRelocated: (value) {
+                      if (!_hasRestoredInitialPosition && _initialCfi != null && value.progress < 0.01 && _progress > 0.05) {
+                        return;
+                      }
                       _hasRestoredInitialPosition = true;
-                      if (_initialCfi != null && _initialCfi!.isNotEmpty) {
-                        Future.delayed(const Duration(milliseconds: 150), () {
-                          _epubController.display(cfi: _initialCfi!);
-                        });
-                      } else if (_progress > 0.01) {
-                        Future.delayed(const Duration(milliseconds: 150), () {
-                          _epubController.toProgressPercentage(_progress);
+                      _currentCfi = value.startCfi;
+                      StorageService.saveLastPosition(widget.filePath, value.startCfi);
+                      StorageService.saveProgress(widget.filePath, value.progress);
+                      if (mounted) {
+                        setState(() {
+                          _progress = value.progress.clamp(0.0, 1.0).toDouble();
                         });
                       }
-                    }
-                  },
-                  onTextSelected: (epubTextSelection) {
-                    _selectedCfiRange = epubTextSelection.selectionCfi;
-                  },
-                  onRelocated: (value) {
-                    if (!_hasRestoredInitialPosition && _initialCfi != null && value.progress < 0.01 && _progress > 0.05) {
-                      return;
-                    }
-                    _hasRestoredInitialPosition = true;
-                    _currentCfi = value.startCfi;
-                    StorageService.saveLastPosition(widget.filePath, value.startCfi);
-                    StorageService.saveProgress(widget.filePath, value.progress);
-                    if (mounted) {
-                      setState(() {
-                        _progress = value.progress.clamp(0.0, 1.0).toDouble();
-                      });
-                    }
-                  },
-                ),
-              ),
-            ),
-          ),
-
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: bottomPadding > 0 ? bottomPadding / 2 : 4,
-            height: 22,
-            child: IgnorePointer(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  '${(_progress * 100).toStringAsFixed(1)}%',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: footerTextColor,
+                    },
                   ),
                 ),
               ),
             ),
           ),
 
-          if (_showControls)
+          if (footerText.isNotEmpty)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: bottomPadding > 0 ? bottomPadding / 2 : 4,
+              height: 22,
+              child: IgnorePointer(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    footerText,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: footerTextColor,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          if (_showControls && !_isTouchLocked)
             Positioned(
               top: 0,
               left: 0,
@@ -481,12 +753,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         child: Text(
                           widget.bookTitle,
                           style: TextStyle(
-                            fontSize: 15,
+                            fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: iconColor,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.screen_lock_portrait, color: iconColor, size: 20),
+                        tooltip: '화면 터치 잠금',
+                        onPressed: _lockTouchScreen,
                       ),
                       IconButton(
                         icon: Icon(Icons.text_decrease, color: iconColor, size: 20),
@@ -500,7 +777,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       ),
                       if (_previousJumpCfi != null)
                         IconButton(
-                          icon: const Icon(Icons.restore, color: Colors.indigo),
+                          icon: const Icon(Icons.restore, color: Colors.indigo, size: 20),
                           tooltip: '이전에 읽던 페이지로 돌아가기',
                           onPressed: () {
                             final target = _previousJumpCfi!;
@@ -510,36 +787,28 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         ),
                       IconButton(
                         icon: Icon(
-                          _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
-                          color: _enableTwoPageInLandscape ? Colors.indigo : iconColor,
-                        ),
-                        tooltip: '가로 모드 2페이지 보기 설정',
-                        onPressed: () async {
-                          final nextVal = !_enableTwoPageInLandscape;
-                          await StorageService.setTwoPageLandscape(nextVal);
-                          setState(() {
-                            _initialCfi = _currentCfi;
-                            _enableTwoPageInLandscape = nextVal;
-                          });
-                        },
-                      ),
-                      IconButton(
-                        icon: Icon(
                           Icons.translate,
                           color: _isTranslatedFileActive ? Colors.amber[800] : iconColor,
+                          size: 20,
                         ),
                         tooltip: '번역',
                         onPressed: _handleBatchTranslateBook,
                       ),
                       IconButton(
-                        icon: Icon(Icons.bookmarks_outlined, color: iconColor),
+                        icon: Icon(Icons.bookmarks_outlined, color: iconColor, size: 20),
                         tooltip: '북마크',
                         onPressed: _openBookmarkSheet,
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.tune, color: iconColor, size: 20),
+                        tooltip: '뷰어 표시 설정',
+                        onPressed: _showViewerSettingsSheet,
                       ),
                       IconButton(
                         icon: Icon(
                           _isDarkMode ? Icons.light_mode : Icons.dark_mode,
                           color: iconColor,
+                          size: 20,
                         ),
                         onPressed: _toggleTheme,
                       ),
@@ -549,58 +818,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               ),
             ),
 
-          if (_showControls)
-            Positioned(
-              top: 72.0,
-              bottom: 48.0,
-              right: 8.0,
-              width: 52.0,
-              child: Material(
-                elevation: 6,
-                color: barColor,
-                borderRadius: BorderRadius.circular(26),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Column(
-                    children: [
-                      IconButton(
-                        icon: Icon(Icons.expand_less, color: iconColor, size: 22),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                        onPressed: () => _epubController.prev(),
-                      ),
-                      Expanded(
-                        child: RotatedBox(
-                          quarterTurns: 1,
-                          child: Slider(
-                            value: _progress.clamp(0.0, 1.0).toDouble(),
-                            min: 0.0,
-                            max: 1.0,
-                            onChanged: (val) => setState(() => _progress = val),
-                            onChangeEnd: (val) {
-                              if (_currentCfi != null) {
-                                setState(() => _previousJumpCfi = _currentCfi);
-                              }
-                              _epubController.toProgressPercentage(val);
-                            },
-                          ),
-                        ),
-                      ),
-                      Text(
-                        '${(_progress * 100).toStringAsFixed(0)}%',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: iconColor),
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.expand_more, color: iconColor, size: 22),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                        onPressed: () => _epubController.next(),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          if (_showControls && !_isTouchLocked)
+            _buildEpubProgressBar(barColor, iconColor),
         ],
       ),
     );

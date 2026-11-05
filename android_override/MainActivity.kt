@@ -1,5 +1,9 @@
 package com.example.my_ebook_reader
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
@@ -19,9 +23,28 @@ class MainActivity: FlutterActivity() {
 
     private var eventSink: EventChannel.EventSink? = null
     private var isVolumeInterceptEnabled = false
+    private var screenOffReceiver: BroadcastReceiver? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // 물리적인 화면 잠금(전원) 버튼을 누를 때(ACTION_SCREEN_OFF / ACTION_USER_PRESENT) 터치 잠금 해제 이벤트 전달
+        screenOffReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val action = intent?.action
+                if (action == Intent.ACTION_SCREEN_OFF ||
+                    action == Intent.ACTION_SCREEN_ON ||
+                    action == Intent.ACTION_USER_PRESENT) {
+                    eventSink?.success("SCREEN_LOCK_BTN")
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        registerReceiver(screenOffReceiver, filter)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -88,6 +111,15 @@ class MainActivity: FlutterActivity() {
                     result.notImplemented()
                 }
             }
+    }
+
+    override fun onDestroy() {
+        screenOffReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (_: Exception) {}
+        }
+        super.onDestroy()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
