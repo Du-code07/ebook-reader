@@ -43,7 +43,6 @@ class MainActivity: FlutterActivity() {
                 }
             })
 
-        // Android OS 내장 PdfRenderer를 이용해 외부 플러그인 오류 없이 PDF를 고화질 이미지 페이지로 변환
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method == "renderPdfToImages") {

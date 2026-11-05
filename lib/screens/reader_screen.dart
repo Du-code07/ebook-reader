@@ -40,7 +40,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   int _fontSize = 18;
   List<EpubChapter> _chapters = [];
 
-  bool _showControls = true;
+  bool _showControls = false;
   double _progress = 0.0;
   bool _hasRestoredInitialPosition = false;
 
@@ -52,6 +52,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     super.initState();
     _activeFilePath = widget.filePath;
     WidgetsBinding.instance.addObserver(this);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _initReader();
   }
 
@@ -60,6 +61,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final prevCfi = await StorageService.getPreviousPosition(widget.filePath);
     final savedProg = await StorageService.getProgress(widget.filePath);
     final twoPage = await StorageService.getTwoPageLandscape();
+    final isDark = await StorageService.getDarkMode();
 
     if (_useVolumeKeys) {
       _enableVolumeNavigation();
@@ -70,6 +72,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _previousJumpCfi = prevCfi;
       _progress = savedProg.clamp(0.0, 1.0).toDouble();
       _enableTwoPageInLandscape = twoPage;
+      _isDarkMode = isDark;
       _isLoading = false;
     });
   }
@@ -97,7 +100,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
     int cur = 0;
     int tot = 1;
-    String status = 'Gugugo 한일 번역 파이프라인으로 책 전체를 사전 번역합니다...';
+    String status = '사전 번역 중...';
     StateSetter? dialogSetState;
 
     showDialog(
@@ -107,7 +110,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         builder: (ctx, setDialogState) {
           dialogSetState = setDialogState;
           return AlertDialog(
-            title: const Text('책 전체 사전 번역 (딜레이 0초)'),
+            title: const Text('사전 번역 중'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -148,7 +151,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       setState(() => _isLoading = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('책 전체 번역 완료! 이제 페이지를 넘길 때 딜레이가 발생하지 않습니다.')),
+        const SnackBar(content: Text('번역이 완료되었습니다.')),
       );
     } catch (e) {
       if (mounted) Navigator.pop(context);
@@ -231,11 +234,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
-    if (_showControls) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    } else {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    }
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
   void _handlePointerDown(PointerDownEvent event) {
@@ -281,8 +280,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     );
   }
 
-  void _toggleTheme() {
-    setState(() => _isDarkMode = !_isDarkMode);
+  void _toggleTheme() async {
+    final nextDark = !_isDarkMode;
+    setState(() => _isDarkMode = nextDark);
+    await StorageService.setDarkMode(nextDark);
     _epubController.updateTheme(theme: _buildTheme());
   }
 
@@ -310,7 +311,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
     final mediaQuery = MediaQuery.of(context);
     final screenSize = mediaQuery.size;
-    final topPadding = mediaQuery.viewPadding.top;
     final bottomPadding = mediaQuery.viewPadding.bottom;
     final bool isLandscape = screenSize.width > screenSize.height;
     final EpubSpread spreadSetting =
@@ -361,12 +361,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       ),
       body: Stack(
         children: [
-          // 1. EPUB 뷰어 본문
           Positioned.fill(
             child: Padding(
               padding: EdgeInsets.only(
-                top: topPadding > 0 ? topPadding : 24.0,
-                bottom: (bottomPadding > 0 ? bottomPadding : 8.0) + 24.0,
+                top: 12.0,
+                bottom: (bottomPadding > 0 ? bottomPadding : 8.0) + 20.0,
               ),
               child: Listener(
                 behavior: HitTestBehavior.translucent,
@@ -403,7 +402,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   ),
                   onChaptersLoaded: (chapters) {
                     setState(() => _chapters = chapters);
-                    // 책을 다시 열었을 때 저장되어 있던 CFI(또는 진행률) 위치로 확실하게 복귀!
                     if (!_hasRestoredInitialPosition) {
                       _hasRestoredInitialPosition = true;
                       if (_initialCfi != null && _initialCfi!.isNotEmpty) {
@@ -421,7 +419,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     _selectedCfiRange = epubTextSelection.selectionCfi;
                   },
                   onRelocated: (value) {
-                    // 초기 로딩 시 0페이지로 덮어써지는 현상 방지
                     if (!_hasRestoredInitialPosition && _initialCfi != null && value.progress < 0.01 && _progress > 0.05) {
                       return;
                     }
@@ -440,7 +437,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ),
           ),
 
-          // 2. 최하단 진행률 상태줄 (읽은 시간 완전 제거)
           Positioned(
             left: 16,
             right: 16,
@@ -461,181 +457,150 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ),
           ),
 
-          // 3. 상단 오버레이 AppBar
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
-            top: _showControls ? 0 : -(kToolbarHeight + topPadding + 10),
-            left: 0,
-            right: 0,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 200),
-              opacity: _showControls ? 1.0 : 0.0,
+          if (_showControls)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
               child: Material(
                 elevation: 4,
                 color: barColor,
-                child: Padding(
-                  padding: EdgeInsets.only(top: topPadding),
-                  child: SizedBox(
-                    height: kToolbarHeight,
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: Icon(Icons.arrow_back, color: iconColor),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.list, color: iconColor),
-                          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                        ),
-                        Expanded(
-                          child: Text(
-                            widget.bookTitle,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: iconColor,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (_previousJumpCfi != null)
-                          IconButton(
-                            icon: const Icon(Icons.restore, color: Colors.indigo),
-                            tooltip: '이전에 읽던 페이지로 돌아가기',
-                            onPressed: () {
-                              final target = _previousJumpCfi!;
-                              setState(() => _previousJumpCfi = _currentCfi);
-                              _epubController.display(cfi: target);
-                            },
-                          ),
-                        // 가로 모드 2페이지(양면) 보기 설정 토글
-                        IconButton(
-                          icon: Icon(
-                            _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
-                            color: _enableTwoPageInLandscape ? Colors.indigo : iconColor,
-                          ),
-                          tooltip: '가로 모드에서 2페이지씩 보기 켜기/끄기',
-                          onPressed: () async {
-                            final nextVal = !_enableTwoPageInLandscape;
-                            await StorageService.setTwoPageLandscape(nextVal);
-                            setState(() {
-                              _initialCfi = _currentCfi;
-                              _enableTwoPageInLandscape = nextVal;
-                            });
-                          },
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            Icons.translate,
-                            color: _isTranslatedFileActive ? Colors.amber[800] : iconColor,
-                          ),
-                          tooltip: '책 통째로 번역',
-                          onPressed: _handleBatchTranslateBook,
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.bookmarks_outlined, color: iconColor),
-                          tooltip: '북마크 목록 및 추가',
-                          onPressed: _openBookmarkSheet,
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            _isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                child: SizedBox(
+                  height: kToolbarHeight,
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.arrow_back, color: iconColor),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.list, color: iconColor),
+                        onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                      ),
+                      Expanded(
+                        child: Text(
+                          widget.bookTitle,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
                             color: iconColor,
                           ),
-                          onPressed: _toggleTheme,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // 4. 하단 오버레이 컨트롤 바
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
-            bottom: _showControls ? 0 : -(116 + bottomPadding + 10),
-            left: 0,
-            right: 0,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 200),
-              opacity: _showControls ? 1.0 : 0.0,
-              child: Material(
-                elevation: 8,
-                color: barColor,
-                child: Padding(
-                  padding: EdgeInsets.only(bottom: bottomPadding, left: 12, right: 12, top: 8),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          Text('진행률', style: TextStyle(fontSize: 12, color: iconColor)),
-                          Expanded(
-                            child: Slider(
-                              value: _progress.clamp(0.0, 1.0).toDouble(),
-                              min: 0.0,
-                              max: 1.0,
-                              onChanged: (val) => setState(() => _progress = val),
-                              onChangeEnd: (val) {
-                                if (_currentCfi != null) {
-                                  setState(() => _previousJumpCfi = _currentCfi);
-                                }
-                                _epubController.toProgressPercentage(val);
-                              },
-                            ),
-                          ),
-                          SizedBox(
-                            width: 48,
-                            child: Text(
-                              '${(_progress * 100).toStringAsFixed(1)}%',
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: iconColor,
-                              ),
-                            ),
-                          ),
-                        ],
                       ),
-                      SizedBox(
-                        height: 48,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            IconButton(
-                              icon: Icon(Icons.chevron_left, color: iconColor),
-                              onPressed: () => _epubController.prev(),
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.text_decrease, color: iconColor),
-                              onPressed: () => _changeFontSize(-2),
-                            ),
-                            Text(
-                              '${_fontSize}pt',
-                              style: TextStyle(fontWeight: FontWeight.bold, color: iconColor),
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.text_increase, color: iconColor),
-                              onPressed: () => _changeFontSize(2),
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.chevron_right, color: iconColor),
-                              onPressed: () => _epubController.next(),
-                            ),
-                          ],
+                      IconButton(
+                        icon: Icon(Icons.text_decrease, color: iconColor, size: 20),
+                        tooltip: '글자 작게',
+                        onPressed: () => _changeFontSize(-2),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.text_increase, color: iconColor, size: 20),
+                        tooltip: '글자 크게',
+                        onPressed: () => _changeFontSize(2),
+                      ),
+                      if (_previousJumpCfi != null)
+                        IconButton(
+                          icon: const Icon(Icons.restore, color: Colors.indigo),
+                          tooltip: '이전에 읽던 페이지로 돌아가기',
+                          onPressed: () {
+                            final target = _previousJumpCfi!;
+                            setState(() => _previousJumpCfi = _currentCfi);
+                            _epubController.display(cfi: target);
+                          },
                         ),
+                      IconButton(
+                        icon: Icon(
+                          _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
+                          color: _enableTwoPageInLandscape ? Colors.indigo : iconColor,
+                        ),
+                        tooltip: '가로 모드 2페이지 보기 설정',
+                        onPressed: () async {
+                          final nextVal = !_enableTwoPageInLandscape;
+                          await StorageService.setTwoPageLandscape(nextVal);
+                          setState(() {
+                            _initialCfi = _currentCfi;
+                            _enableTwoPageInLandscape = nextVal;
+                          });
+                        },
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          Icons.translate,
+                          color: _isTranslatedFileActive ? Colors.amber[800] : iconColor,
+                        ),
+                        tooltip: '번역',
+                        onPressed: _handleBatchTranslateBook,
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.bookmarks_outlined, color: iconColor),
+                        tooltip: '북마크',
+                        onPressed: _openBookmarkSheet,
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          _isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                          color: iconColor,
+                        ),
+                        onPressed: _toggleTheme,
                       ),
                     ],
                   ),
                 ),
               ),
             ),
-          ),
+
+          if (_showControls)
+            Positioned(
+              top: 72.0,
+              bottom: 48.0,
+              right: 8.0,
+              width: 52.0,
+              child: Material(
+                elevation: 6,
+                color: barColor,
+                borderRadius: BorderRadius.circular(26),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.expand_less, color: iconColor, size: 22),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                        onPressed: () => _epubController.prev(),
+                      ),
+                      Expanded(
+                        child: RotatedBox(
+                          quarterTurns: 1,
+                          child: Slider(
+                            value: _progress.clamp(0.0, 1.0).toDouble(),
+                            min: 0.0,
+                            max: 1.0,
+                            onChanged: (val) => setState(() => _progress = val),
+                            onChangeEnd: (val) {
+                              if (_currentCfi != null) {
+                                setState(() => _previousJumpCfi = _currentCfi);
+                              }
+                              _epubController.toProgressPercentage(val);
+                            },
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${(_progress * 100).toStringAsFixed(0)}%',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: iconColor),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.expand_more, color: iconColor, size: 22),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                        onPressed: () => _epubController.next(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

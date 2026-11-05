@@ -11,22 +11,20 @@ import 'storage_service.dart';
 class _TextColUnit {
   final ui.Rect rect;
   final String text;
-  final double avgCharWidth;
+  final double avgCharSize;
+  final bool isVerticalLine;
 
   _TextColUnit({
     required this.rect,
     required this.text,
-    required this.avgCharWidth,
+    required this.avgCharSize,
+    required this.isVerticalLine,
   });
 }
 
 class BatchTranslationService {
   static final GoogleTranslator _translator = GoogleTranslator();
 
-  /// Gugugo 오픈소스 모델(squarelike/Gugugo-koja-1.3B-V0.95 및 Gugugo-koen-7B-V1.1) 프로토콜 기반 번역기
-  /// 1순위: 사용자가 설정한 Gugugo Gradio WebUI 서버 (app_translation.py 호환: /run/predict 또는 /api/predict)
-  /// 2순위: HuggingFace Inference API (squarelike/Gugugo-koja-1.3B-V0.95 프롬프트: "### 일본어: {x}</끝>\n### 한국어:")
-  /// 3순위: 모바일 온디바이스 무설치 즉시 실행을 위한 멀티 엔진 폴백 (GTX 신경망 번역 + 만화 구어체 후처리)
   static Future<String> translateWithGugugoPipeline(
     String text, {
     required String sourceLang,
@@ -38,7 +36,6 @@ class BatchTranslationService {
     final gugugoUrl = await StorageService.getGugugoServerUrl();
     final hfToken = await StorageService.getGugugoHfToken();
 
-    // 1) Gugugo Gradio 서버(app_translation.py)가 입력되어 있는 경우 직접 호출
     if (gugugoUrl.isNotEmpty) {
       try {
         final base = gugugoUrl.endsWith('/') ? gugugoUrl.substring(0, gugugoUrl.length - 1) : gugugoUrl;
@@ -68,7 +65,6 @@ class BatchTranslationService {
       } catch (_) {}
     }
 
-    // 2) Gugugo HuggingFace 모델(squarelike/Gugugo-koja-1.3B-V0.95 / Gugugo-koen-7B-V1.1) 프롬프트 직접 호출
     if (sourceLang == 'ja' || sourceLang == 'en') {
       try {
         final modelId = sourceLang == 'ja'
@@ -114,7 +110,6 @@ class BatchTranslationService {
       } catch (_) {}
     }
 
-    // 3) 기본 내장 신경망 번역 폴백 (별도 서버 없이도 100% 작동 + Gugugo 한계점인 짧은 만화 감탄사/구어체 보완)
     try {
       final uri = Uri.https('translate.googleapis.com', '/translate_a/single', {
         'client': 'gtx',
@@ -147,7 +142,6 @@ class BatchTranslationService {
     }
   }
 
-  /// 1. 일본어/외국어 EPUB 파일 통째로 사전 번역
   static Future<File> preTranslateWholeEpub({
     required File sourceEpub,
     required String targetLang,
@@ -179,7 +173,7 @@ class BatchTranslationService {
 
       if (file.name.endsWith('.xhtml') || file.name.endsWith('.html') || file.name.endsWith('.htm')) {
         processed++;
-        onProgress(processed, total, 'Gugugo 한일 번역 파이프라인으로 챕터 번역 중 ($processed / $total)...');
+        onProgress(processed, total, '사전 번역 중 ($processed / $total)...');
         final content = utf8.decode(file.content as List<int>, allowMalformed: true);
         final translatedHtml = await _translateHtmlPreservingFonts(content, sourceLang, targetLang);
         final encoded = utf8.encode(translatedHtml);
@@ -258,9 +252,10 @@ class BatchTranslationService {
     return buffer.toString();
   }
 
-  /// 두 텍스트 열(또는 줄)이 같은 만화 말풍선 안에 속하는지 공간 거리로 판별
-  static bool _belongsToSameSpeechBubble(_TextColUnit a, _TextColUnit b, bool isVerticalScript) {
-    final double charSize = math.max<double>(a.avgCharWidth, b.avgCharWidth).clamp(10.0, 120.0).toDouble();
+  static bool _belongsToSameTextRegion(_TextColUnit a, _TextColUnit b) {
+    if (a.isVerticalLine != b.isVerticalLine) return false;
+
+    final double charSize = math.max<double>(a.avgCharSize, b.avgCharSize).clamp(8.0, 120.0).toDouble();
 
     final double hGap = math.max<double>(0.0, math.max<double>(a.rect.left - b.rect.right, b.rect.left - a.rect.right));
     final double vGap = math.max<double>(0.0, math.max<double>(a.rect.top - b.rect.bottom, b.rect.top - a.rect.bottom));
@@ -270,7 +265,7 @@ class BatchTranslationService {
     final double overlapWidth = math.min<double>(a.rect.right, b.rect.right) - math.max<double>(a.rect.left, b.rect.left);
     final double minWidth = math.min<double>(a.rect.width, b.rect.width);
 
-    if (isVerticalScript) {
+    if (a.isVerticalLine) {
       final bool verticallyAligned = overlapHeight > -charSize * 0.45 || vGap < charSize * 0.85;
       final bool horizontallyClose = hGap < charSize * 1.95;
       if (verticallyAligned && horizontallyClose) return true;
@@ -278,25 +273,29 @@ class BatchTranslationService {
       if (overlapWidth > minWidth * 0.35 && vGap < charSize * 1.3) return true;
       return false;
     } else {
-      final bool horizontallyAligned = overlapWidth > -charSize * 0.5 || hGap < charSize * 1.3;
-      final bool verticallyClose = vGap < charSize * 1.5;
-      return horizontallyAligned && verticallyClose;
+      final bool horizontallyAligned = overlapWidth > minWidth * 0.25 || (a.rect.left - b.rect.left).abs() < charSize * 2.2;
+      final bool verticallyClose = vGap < charSize * 1.25;
+      if (horizontallyAligned && verticallyClose) return true;
+
+      if (overlapHeight > minHeight * 0.45 && hGap < charSize * 1.8) return true;
+      return false;
     }
   }
 
-  static bool _isRubyFuriganaColumn(_TextColUnit candidate, List<_TextColUnit> allUnits, double medianWidth) {
+  static bool _isRubyFuriganaColumn(_TextColUnit candidate, List<_TextColUnit> allUnits, double medianSize) {
+    if (!candidate.isVerticalLine) return false;
     final onlyKana = RegExp(r'^[\u3040-\u309F\u30A0-\u30FF\u30FC\s・。、]+$').hasMatch(candidate.text);
     if (!onlyKana) return false;
-    if (candidate.avgCharWidth >= medianWidth * 0.65) return false;
+    if (candidate.avgCharSize >= medianSize * 0.65) return false;
 
     for (final mainCol in allUnits) {
-      if (identical(candidate, mainCol)) continue;
-      if (mainCol.avgCharWidth >= medianWidth * 0.8) {
+      if (identical(candidate, mainCol) || !mainCol.isVerticalLine) continue;
+      if (mainCol.avgCharSize >= medianSize * 0.8) {
         final double vOverlap = math.min<double>(candidate.rect.bottom, mainCol.rect.bottom) -
             math.max<double>(candidate.rect.top, mainCol.rect.top);
         final double hDist = (candidate.rect.left - mainCol.rect.right).abs();
         final double hDist2 = (candidate.rect.right - mainCol.rect.left).abs();
-        if (vOverlap > 0 && math.min<double>(hDist, hDist2) < mainCol.avgCharWidth * 0.9) {
+        if (vOverlap > 0 && math.min<double>(hDist, hDist2) < mainCol.avgCharSize * 0.9) {
           return true;
         }
       }
@@ -304,7 +303,6 @@ class BatchTranslationService {
     return false;
   }
 
-  /// 2. 일본어 만화/스캔 이미지 말풍선 통합 번역 (세로 말풍선 세로쓰기 유지 & 원본 말풍선 크기 절대 초과 금지)
   static Future<void> preTranslateAllImages({
     required String bookKey,
     required List<File> imageFiles,
@@ -319,7 +317,7 @@ class BatchTranslationService {
     }
 
     final recognizer = TextRecognizer(script: script);
-    final isVerticalScript =
+    final isCjkScript =
         script == TextRecognitionScript.japanese || script == TextRecognitionScript.chinese;
 
     try {
@@ -327,7 +325,7 @@ class BatchTranslationService {
         onProgress(
           i + 1,
           imageFiles.length,
-          'Gugugo 한일 번역 엔진으로 말풍선 번역 중 (${i + 1} / ${imageFiles.length})...',
+          '사전 번역 중 (${i + 1} / ${imageFiles.length})...',
         );
         if (!forceRetranslate) {
           final cached = await StorageService.getImageBubbleCache(bookKey, i);
@@ -349,13 +347,20 @@ class BatchTranslationService {
           for (final line in block.lines) {
             final t = line.text.trim();
             if (t.isEmpty) continue;
-            if (t.length == 1 && RegExp(r'^[0-9a-zA-Z!@#$%^&*()_+\-=\[\]{};:"\\|,.<>/?~`]$').hasMatch(t)) {
-              continue;
-            }
             final r = line.boundingBox;
-            if (r.width < 6 || r.height < 6) continue;
-            final double charW = isVerticalScript ? r.width : (r.height > 0 ? r.height : r.width);
-            rawUnits.add(_TextColUnit(rect: r, text: t, avgCharWidth: charW));
+            if (r.width < 5 || r.height < 5) continue;
+
+            final bool isVertLine = isCjkScript &&
+                (r.height > r.width * 1.25) &&
+                (t.length >= 2 || r.height > r.width * 1.5);
+            final double charSize = isVertLine ? r.width : r.height;
+
+            rawUnits.add(_TextColUnit(
+              rect: r,
+              text: t,
+              avgCharSize: charSize,
+              isVerticalLine: isVertLine,
+            ));
           }
         }
 
@@ -364,15 +369,15 @@ class BatchTranslationService {
           continue;
         }
 
-        final sortedWidths = rawUnits.map((u) => u.avgCharWidth).toList()..sort();
-        final double medianWidth = sortedWidths[sortedWidths.length ~/ 2];
+        final sortedSizes = rawUnits.map((u) => u.avgCharSize).toList()..sort();
+        final double medianSize = sortedSizes[sortedSizes.length ~/ 2];
         final filteredUnits = rawUnits
-            .where((u) => !_isRubyFuriganaColumn(u, rawUnits, medianWidth))
+            .where((u) => !_isRubyFuriganaColumn(u, rawUnits, medianSize))
             .toList();
 
         final int n = filteredUnits.length;
         final List<bool> visited = List.filled(n, false);
-        final List<List<_TextColUnit>> bubbleClusters = [];
+        final List<List<_TextColUnit>> textClusters = [];
 
         for (int idx = 0; idx < n; idx++) {
           if (visited[idx]) continue;
@@ -387,14 +392,14 @@ class BatchTranslationService {
 
             for (int next = 0; next < n; next++) {
               if (!visited[next]) {
-                if (_belongsToSameSpeechBubble(curUnit, filteredUnits[next], isVerticalScript)) {
+                if (_belongsToSameTextRegion(curUnit, filteredUnits[next])) {
                   visited[next] = true;
                   queue.add(next);
                 }
               }
             }
           }
-          bubbleClusters.add(cluster);
+          textClusters.add(cluster);
         }
 
         final List<ui.Rect> exactRects = [];
@@ -403,12 +408,13 @@ class BatchTranslationService {
         final List<bool> isBoldFlags = [];
         final List<bool> isVerticalFlags = [];
 
-        for (final cluster in bubbleClusters) {
-          if (isVerticalScript) {
-            // 일본 만화 세로쓰기: 오른쪽 열부터 왼쪽 열 순서로 정렬
+        for (final cluster in textClusters) {
+          final bool clusterIsVertical = cluster.first.isVerticalLine;
+
+          if (clusterIsVertical) {
             cluster.sort((a, b) {
               final double xDiff = b.rect.center.dx - a.rect.center.dx;
-              if (xDiff.abs() > medianWidth * 0.45) {
+              if (xDiff.abs() > medianSize * 0.45) {
                 return xDiff > 0 ? 1 : -1;
               }
               return a.rect.top.compareTo(b.rect.top);
@@ -416,7 +422,7 @@ class BatchTranslationService {
           } else {
             cluster.sort((a, b) {
               final double yDiff = a.rect.center.dy - b.rect.center.dy;
-              if (yDiff.abs() > medianWidth * 0.5) {
+              if (yDiff.abs() > medianSize * 0.45) {
                 return yDiff > 0 ? 1 : -1;
               }
               return a.rect.left.compareTo(b.rect.left);
@@ -428,25 +434,20 @@ class BatchTranslationService {
           double maxR = cluster.first.rect.right;
           double maxB = cluster.first.rect.bottom;
 
-          int verticalLinesCount = 0;
           for (final u in cluster) {
             if (u.rect.left < minL) minL = u.rect.left;
             if (u.rect.top < minT) minT = u.rect.top;
             if (u.rect.right > maxR) maxR = u.rect.right;
             if (u.rect.bottom > maxB) maxB = u.rect.bottom;
-            if (u.rect.height > u.rect.width * 1.15) {
-              verticalLinesCount++;
-            }
           }
 
-          final joiner = isVerticalScript ? '' : ' ';
+          final String joiner = (clusterIsVertical || isCjkScript) ? '' : ' ';
           String combinedText = cluster.map((u) => u.text).join(joiner).trim();
-          if (isVerticalScript) {
+          if (clusterIsVertical) {
             combinedText = combinedText.replaceAll(RegExp(r'\s+'), '');
           }
           if (combinedText.isEmpty) continue;
 
-          // 중요: 만화책에 있는 기존 말풍선보다 절대 커지지 않도록, 검출된 원문 텍스트 바운딩 박스(minL, minT, maxR, maxB)를 그대로 사용!
           final strictRect = ui.Rect.fromLTRB(
             minL.clamp(0.0, imgWidth).toDouble(),
             minT.clamp(0.0, imgHeight).toDouble(),
@@ -454,8 +455,7 @@ class BatchTranslationService {
             maxB.clamp(0.0, imgHeight).toDouble(),
           );
 
-          final bool isVertBubble = isVerticalScript &&
-              (verticalLinesCount >= (cluster.length / 2.0) || strictRect.height >= strictRect.width * 1.05);
+          final bool isVertBubble = clusterIsVertical && (strictRect.height >= strictRect.width * 1.05);
 
           exactRects.add(strictRect);
           mergedSentences.add(combinedText);
@@ -469,7 +469,6 @@ class BatchTranslationService {
           isVerticalFlags.add(isVertBubble);
         }
 
-        // Gugugo 파이프라인으로 말풍선 문장 번역
         final List<String> translatedSentences = List.from(mergedSentences);
         for (int k = 0; k < mergedSentences.length; k++) {
           final tr = await translateWithGugugoPipeline(
@@ -489,8 +488,8 @@ class BatchTranslationService {
             BubbleTranslation(
               leftRatio: (rect.left / imgWidth).clamp(0.0, 0.99).toDouble(),
               topRatio: (rect.top / imgHeight).clamp(0.0, 0.99).toDouble(),
-              widthRatio: (rect.width / imgWidth).clamp(0.02, 0.99).toDouble(),
-              heightRatio: (rect.height / imgHeight).clamp(0.02, 0.99).toDouble(),
+              widthRatio: (rect.width / imgWidth).clamp(0.015, 0.99).toDouble(),
+              heightRatio: (rect.height / imgHeight).clamp(0.015, 0.99).toDouble(),
               originalText: mergedSentences[k],
               translatedText: translatedSentences[k],
               isSerif: isSerifFlags[k],

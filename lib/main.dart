@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -8,17 +9,68 @@ import 'screens/reader_screen.dart';
 import 'services/storage_service.dart';
 import 'services/txt_to_epub_converter.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MaterialApp(
-    debugShowCheckedModeBanner: false,
-    title: '올인원 모바일 리더기',
-    home: BookshelfScreen(),
-  ));
+  final initialDark = await StorageService.getDarkMode();
+  runApp(MyEbookApp(initialDark: initialDark));
+}
+
+class MyEbookApp extends StatefulWidget {
+  final bool initialDark;
+  const MyEbookApp({super.key, required this.initialDark});
+
+  @override
+  State<MyEbookApp> createState() => _MyEbookAppState();
+}
+
+class _MyEbookAppState extends State<MyEbookApp> {
+  late bool _isDarkMode;
+
+  @override
+  void initState() {
+    super.initState();
+    _isDarkMode = widget.initialDark;
+  }
+
+  void _toggleDarkMode() async {
+    final nextVal = !_isDarkMode;
+    setState(() => _isDarkMode = nextVal);
+    await StorageService.setDarkMode(nextVal);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: '내 서재',
+      themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.light,
+        colorSchemeSeed: Colors.indigo,
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        colorSchemeSeed: Colors.indigo,
+      ),
+      home: BookshelfScreen(
+        isDarkMode: _isDarkMode,
+        onToggleDarkMode: _toggleDarkMode,
+      ),
+    );
+  }
 }
 
 class BookshelfScreen extends StatefulWidget {
-  const BookshelfScreen({super.key});
+  final bool isDarkMode;
+  final VoidCallback onToggleDarkMode;
+
+  const BookshelfScreen({
+    super.key,
+    required this.isDarkMode,
+    required this.onToggleDarkMode,
+  });
 
   @override
   State<BookshelfScreen> createState() => _BookshelfScreenState();
@@ -26,10 +78,14 @@ class BookshelfScreen extends StatefulWidget {
 
 class _BookshelfScreenState extends State<BookshelfScreen> {
   List<File> _allBooks = [];
+  List<File> _trashedBooks = [];
   List<String> _groups = ['전체', '소설/문학', '만화/웹툰', 'PDF/문서'];
   String _selectedGroup = '전체';
   Map<String, String> _bookGroupMap = {};
   Map<String, double> _bookProgressMap = {};
+
+  bool _isSelectionMode = false;
+  final Set<String> _selectedFilePaths = {};
 
   static const _supportedExts = ['epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz', 'zip'];
   static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
@@ -61,8 +117,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     return matchesA.length.compareTo(matchesB.length);
   }
 
+  Future<Directory> _getTrashDirectory() async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final trashDir = Directory('${appDir.path}/.trash_bin');
+    if (!await trashDir.exists()) {
+      await trashDir.create(recursive: true);
+    }
+    return trashDir;
+  }
+
   Future<void> _loadLibrary() async {
     final dir = await getApplicationDocumentsDirectory();
+    final trashDir = await _getTrashDirectory();
+
     final entities = dir.listSync();
     final files = <File>[];
 
@@ -77,7 +144,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       }
     }
 
+    final trashEntities = trashDir.listSync();
+    final trashed = <File>[];
+    for (final e in trashEntities) {
+      if (e is File) {
+        trashed.add(e);
+      }
+    }
+
     files.sort((a, b) => _naturalCompare(
+          a.path.split(Platform.pathSeparator).last,
+          b.path.split(Platform.pathSeparator).last,
+        ));
+    trashed.sort((a, b) => _naturalCompare(
           a.path.split(Platform.pathSeparator).last,
           b.path.split(Platform.pathSeparator).last,
         ));
@@ -94,12 +173,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     if (mounted) {
       setState(() {
         _allBooks = files;
+        _trashedBooks = trashed;
         _groups = groups;
         if (!_groups.contains(_selectedGroup)) {
           _selectedGroup = '전체';
         }
         _bookGroupMap = grpMap;
         _bookProgressMap = progMap;
+        _selectedFilePaths.removeWhere((p) => !_allBooks.any((f) => f.path == p));
+        if (_selectedFilePaths.isEmpty) {
+          _isSelectionMode = false;
+        }
       });
     }
   }
@@ -138,7 +222,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         builder: (ctx) => AlertDialog(
           title: Text('이미지 ${imagePicked.length}장 추가 방식 선택'),
           content: const Text(
-            '선택한 여러 장의 이미지(JPG/PNG)를 일본 만화책처럼 넘겨 볼 수 있도록 한 권의 만화책 파일(.cbz)로 합쳐서 추가할까요?',
+            '선택한 이미지들을 하나로 묶어 통합 파일(.cbz)로 추가할까요?',
           ),
           actions: [
             TextButton(
@@ -148,7 +232,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             ElevatedButton.icon(
               icon: const Icon(Icons.auto_stories, size: 18),
               onPressed: () => Navigator.pop(ctx, 'merge'),
-              label: const Text('만화책 1권으로 합치기'),
+              label: const Text('JPG 이미지 합치기'),
             ),
           ],
         ),
@@ -181,29 +265,31 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
   }
 
-  /// 여러 장의 JPG/PNG 파일을 만화책(.cbz)으로 통합할 때 번역 기능처럼 실시간 진행도(LinearProgressIndicator) UI 표시!
   Future<void> _createMangaBookFromImages(List<File> sourceImages, {bool deleteSourceAfter = false}) async {
-    final titleController = TextEditingController(
-      text: '만화책_${DateTime.now().month}월${DateTime.now().day}일_${DateTime.now().hour}${DateTime.now().minute}',
-    );
+    final now = DateTime.now();
+    final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+    final rand4 = (1000 + math.Random().nextInt(9000)).toString();
+    final defaultFileName = '파일_${dateStr}_$rand4';
+
+    final titleController = TextEditingController(text: defaultFileName);
     bool deleteOriginals = deleteSourceAfter;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('만화책 통합 파일(.cbz) 만들기'),
+          title: const Text('JPG 통합 파일 만들기'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('총 ${sourceImages.length}장의 이미지를 번호 순서대로 묶어 만화책 파일을 만듭니다.'),
+                const Text('이미지 번호 순서대로 묶어 파일을 만듭니다.'),
                 const SizedBox(height: 12),
                 TextField(
                   controller: titleController,
                   decoration: const InputDecoration(
-                    labelText: '만화책 제목',
+                    labelText: '파일 제목',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -212,7 +298,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: deleteOriginals,
-                    title: const Text('통합 후 서재에 있던 낱장 이미지 정리(삭제)', style: TextStyle(fontSize: 13)),
+                    title: const Text('통합 후 기존 낱장 이미지 휴지통으로 이동', style: TextStyle(fontSize: 13)),
                     onChanged: (v) => setModalState(() => deleteOriginals = v ?? false),
                   ),
                 ],
@@ -232,7 +318,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     if (confirmed != true || !mounted) return;
 
-    final bookTitle = titleController.text.trim().isEmpty ? '새_만화책' : titleController.text.trim();
+    final bookTitle = titleController.text.trim().isEmpty ? defaultFileName : titleController.text.trim();
     sourceImages.sort((a, b) => _naturalCompare(
           a.path.split(Platform.pathSeparator).last,
           b.path.split(Platform.pathSeparator).last,
@@ -240,7 +326,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     int currentStep = 0;
     final int totalSteps = sourceImages.length + 1;
-    String progressStatus = '이미지 정렬 및 만화책 통합 준비 중...';
+    String progressStatus = '이미지 정렬 및 준비 중...';
     StateSetter? progressSetState;
 
     showDialog(
@@ -251,7 +337,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           progressSetState = setDialogState;
           final double ratio = totalSteps > 0 ? (currentStep / totalSteps).clamp(0.0, 1.0).toDouble() : 0.0;
           return AlertDialog(
-            title: const Text('JPG 만화책 통합 파일 생성 중'),
+            title: const Text('JPG 통합 파일 생성 중'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -262,7 +348,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 ),
                 const SizedBox(height: 6),
-                Text(progressStatus, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                Text(progressStatus, style: const TextStyle(fontSize: 12)),
               ],
             ),
           );
@@ -291,7 +377,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     progressSetState?.call(() {
       currentStep = totalSteps;
-      progressStatus = 'CBZ 만화책 아카이브 압축 및 파일 저장 중...';
+      progressStatus = 'CBZ 압축 및 파일 저장 중';
     });
     await Future.delayed(const Duration(milliseconds: 50));
 
@@ -307,20 +393,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     if (deleteOriginals) {
       for (final img in sourceImages) {
         if (await img.exists()) {
-          await StorageService.removeBookMetadata(img.path);
-          await img.delete();
+          await _moveFileToTrash(img, reloadAfter: false);
         }
       }
     }
 
     if (mounted) {
-      Navigator.pop(context); // 진행도 다이얼로그 닫기
+      Navigator.pop(context);
     }
 
     await _loadLibrary();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('"$safeTitle.cbz" 만화책 통합 파일이 생성되었습니다!')),
+        SnackBar(content: Text('"$safeTitle.cbz" 파일이 생성되었습니다.')),
       );
       _openFile(outFile);
     }
@@ -354,7 +439,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('JPG/PNG 만화책으로 통합하기'),
+          title: const Text('JPG 이미지 합치기'),
           content: SizedBox(
             width: 420,
             height: 360,
@@ -470,8 +555,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       final savedPos = await StorageService.getLastPosition(bookKey);
       final clickedIdx = targetList.indexWhere((f) => f.path == file.path);
 
-      // 만약 첫 번째 이미지를 눌렀고 이미 저장된 읽던 페이지(예: 14페이지)가 있다면 덮어쓰지 않고 그대로 유지!
-      // 사용자가 명시적으로 다른 낱장(예: 5번째 파일)을 직접 눌렀을 때만 그 파일 위치로 시작
       if (clickedIdx > 0 || savedPos == null) {
         await StorageService.saveLastPosition(bookKey, clickedIdx.clamp(0, targetList.length - 1).toString());
       }
@@ -509,10 +592,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('새 파일 그룹(폴더) 만들기'),
+        title: const Text('새 그룹 만들기'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(hintText: '예: 일본 만화, 판타지 소설, 전공서적'),
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
@@ -570,18 +655,185 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
   }
 
-  Future<void> _deleteBookFile(File file) async {
+  Future<void> _moveFileToTrash(File file, {bool reloadAfter = true}) async {
     final fileName = file.path.split(Platform.pathSeparator).last;
-    await StorageService.removeBookMetadata(file.path);
+    final trashDir = await _getTrashDirectory();
+    final targetPath = '${trashDir.path}/$fileName';
     if (await file.exists()) {
+      await file.copy(targetPath);
       await file.delete();
     }
+    if (reloadAfter) {
+      await _loadLibrary();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('"$fileName" 파일이 휴지통으로 이동되었습니다.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteSelectedFilesBatch() async {
+    if (_selectedFilePaths.isEmpty) return;
+    final count = _selectedFilePaths.length;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('선택한 파일 삭제'),
+        content: Text('선택한 ${count}개의 파일을 휴지통으로 이동할까요?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final targets = _allBooks.where((f) => _selectedFilePaths.contains(f.path)).toList();
+    for (final f in targets) {
+      await _moveFileToTrash(f, reloadAfter: false);
+    }
+
+    setState(() {
+      _selectedFilePaths.clear();
+      _isSelectionMode = false;
+    });
+
     await _loadLibrary();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('"$fileName" 파일이 삭제되었습니다.')),
+        SnackBar(content: Text('${targets.length}개의 파일이 휴지통으로 이동되었습니다.')),
       );
     }
+  }
+
+  Future<void> _showTrashBinDialog() async {
+    await _loadLibrary();
+    if (!mounted) return;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.65,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.delete_outline),
+                  title: Text(
+                    '휴지통 (${_trashedBooks.length})',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  trailing: _trashedBooks.isNotEmpty
+                      ? TextButton.icon(
+                          icon: const Icon(Icons.delete_forever, color: Colors.redAccent, size: 18),
+                          label: const Text('휴지통 비우기', style: TextStyle(color: Colors.redAccent)),
+                          onPressed: () async {
+                            final confirmEmpty = await showDialog<bool>(
+                              context: ctx,
+                              builder: (dCtx) => AlertDialog(
+                                title: const Text('휴지통 비우기'),
+                                content: const Text('휴지통의 모든 파일을 영구 삭제할까요? (복원할 수 없습니다)'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('취소')),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.redAccent,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    onPressed: () => Navigator.pop(dCtx, true),
+                                    child: const Text('영구 삭제'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirmEmpty == true) {
+                              final appDir = await getApplicationDocumentsDirectory();
+                              for (final tf in _trashedBooks) {
+                                final fileName = tf.path.split(Platform.pathSeparator).last;
+                                await StorageService.removeBookMetadata('${appDir.path}/$fileName');
+                                if (await tf.exists()) await tf.delete();
+                              }
+                              await _loadLibrary();
+                              setModalState(() {});
+                            }
+                          },
+                        )
+                      : null,
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: _trashedBooks.isEmpty
+                      ? const Center(child: Text('휴지통이 비어 있습니다.'))
+                      : ListView.separated(
+                          itemCount: _trashedBooks.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (_, idx) {
+                            final tf = _trashedBooks[idx];
+                            final fileName = tf.path.split(Platform.pathSeparator).last;
+                            return ListTile(
+                              leading: const Icon(Icons.insert_drive_file_outlined),
+                              title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  TextButton.icon(
+                                    icon: const Icon(Icons.restore_from_trash, size: 18),
+                                    label: const Text('복원'),
+                                    onPressed: () async {
+                                      final appDir = await getApplicationDocumentsDirectory();
+                                      final restoredPath = '${appDir.path}/$fileName';
+                                      if (await tf.exists()) {
+                                        await tf.copy(restoredPath);
+                                        await tf.delete();
+                                      }
+                                      await _loadLibrary();
+                                      setModalState(() {});
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('"$fileName" 파일이 복원되었습니다.')),
+                                        );
+                                      }
+                                    },
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
+                                    tooltip: '영구 삭제',
+                                    onPressed: () async {
+                                      final appDir = await getApplicationDocumentsDirectory();
+                                      await StorageService.removeBookMetadata('${appDir.path}/$fileName');
+                                      if (await tf.exists()) {
+                                        await tf.delete();
+                                      }
+                                      await _loadLibrary();
+                                      setModalState(() {});
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('"$fileName" 파일이 영구 삭제되었습니다.')),
+                                        );
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _assignGroupDialog(File file) async {
@@ -619,21 +871,67 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         : _allBooks.where((f) => _bookGroupMap[f.path] == _selectedGroup).toList();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('내 서재 (EPUB·PDF·만화·번역)'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.auto_stories_outlined),
-            tooltip: 'JPG/PNG 이미지들을 만화책(.cbz) 한 권으로 합치기',
-            onPressed: _showMergeExistingImagesDialog,
-          ),
-          IconButton(
-            icon: const Icon(Icons.create_new_folder_outlined),
-            tooltip: '새 그룹 만들기 (그룹 길게 누르면 삭제)',
-            onPressed: _createNewGroupDialog,
-          ),
-        ],
-      ),
+      appBar: _isSelectionMode
+          ? AppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () {
+                  setState(() {
+                    _isSelectionMode = false;
+                    _selectedFilePaths.clear();
+                  });
+                },
+              ),
+              title: Text('${_selectedFilePaths.length}개 선택됨'),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      if (_selectedFilePaths.length == filteredBooks.length) {
+                        _selectedFilePaths.clear();
+                      } else {
+                        _selectedFilePaths.addAll(filteredBooks.map((f) => f.path));
+                      }
+                    });
+                  },
+                  child: const Text('전체 선택'),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  tooltip: '선택 삭제',
+                  onPressed: _selectedFilePaths.isNotEmpty ? _deleteSelectedFilesBatch : null,
+                ),
+              ],
+            )
+          : AppBar(
+              title: const Text('내 서재'),
+              actions: [
+                IconButton(
+                  icon: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode),
+                  tooltip: '다크 모드 전환',
+                  onPressed: widget.onToggleDarkMode,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.auto_stories_outlined),
+                  tooltip: 'JPG 이미지 합치기',
+                  onPressed: _showMergeExistingImagesDialog,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                  tooltip: '새 그룹 만들기',
+                  onPressed: _createNewGroupDialog,
+                ),
+                IconButton(
+                  icon: Badge(
+                    isLabelVisible: _trashedBooks.isNotEmpty,
+                    label: Text('${_trashedBooks.length}'),
+                    child: const Icon(Icons.delete_outline),
+                  ),
+                  tooltip: '휴지통',
+                  onPressed: _showTrashBinDialog,
+                ),
+              ],
+            ),
       body: SafeArea(
         child: Column(
           children: [
@@ -664,22 +962,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   ? Center(
                       child: Padding(
                         padding: const EdgeInsets.all(24.0),
-                        child: Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          alignment: WrapAlignment.center,
-                          children: [
-                            ElevatedButton.icon(
-                              icon: const Icon(Icons.folder_open),
-                              label: const Text('파일 여러 개 추가 (EPUB, PDF, JPG, TXT, CBZ)'),
-                              onPressed: _pickAndImportFiles,
-                            ),
-                            OutlinedButton.icon(
-                              icon: const Icon(Icons.auto_stories),
-                              label: const Text('JPG 이미지들을 만화책으로 합치기'),
-                              onPressed: _showMergeExistingImagesDialog,
-                            ),
-                          ],
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.auto_stories),
+                          label: const Text('JPG 이미지 합치기'),
+                          onPressed: _showMergeExistingImagesDialog,
                         ),
                       ),
                     )
@@ -692,10 +978,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         final fileName = file.path.split(Platform.pathSeparator).last;
                         final grp = _bookGroupMap[file.path] ?? '미분류';
                         final prog = (_bookProgressMap[file.path] ?? 0.0) * 100;
+                        final isSelected = _selectedFilePaths.contains(file.path);
 
                         return Dismissible(
                           key: ValueKey(file.path),
-                          direction: DismissDirection.endToStart,
+                          direction: _isSelectionMode ? DismissDirection.none : DismissDirection.endToStart,
                           background: Container(
                             color: Colors.redAccent,
                             alignment: Alignment.centerRight,
@@ -703,50 +990,43 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                             child: const Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                Icon(Icons.delete_forever, color: Colors.white),
+                                Icon(Icons.delete_outline, color: Colors.white),
                                 SizedBox(width: 6),
-                                Text('삭제', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                Text('휴지통 이동', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                               ],
                             ),
                           ),
-                          confirmDismiss: (_) async {
-                            return await showDialog<bool>(
-                                  context: context,
-                                  builder: (ctx) => AlertDialog(
-                                    title: const Text('파일 삭제'),
-                                    content: Text('"$fileName" 파일을 서재에서 삭제할까요?'),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(ctx, false),
-                                        child: const Text('취소'),
-                                      ),
-                                      ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.redAccent,
-                                          foregroundColor: Colors.white,
-                                        ),
-                                        onPressed: () => Navigator.pop(ctx, true),
-                                        child: const Text('삭제'),
-                                      ),
-                                    ],
-                                  ),
-                                ) ??
-                                false;
-                          },
-                          onDismissed: (_) => _deleteBookFile(file),
+                          onDismissed: (_) => _moveFileToTrash(file),
                           child: ListTile(
-                            leading: Icon(
-                              fileName.toLowerCase().endsWith('.pdf')
-                                  ? Icons.picture_as_pdf
-                                  : (fileName.toLowerCase().endsWith('.epub') ||
-                                          fileName.toLowerCase().endsWith('.txt'))
-                                      ? Icons.menu_book
-                                      : (fileName.toLowerCase().endsWith('.cbz') ||
-                                              fileName.toLowerCase().endsWith('.zip'))
-                                          ? Icons.auto_stories
-                                          : Icons.image,
-                              color: Colors.indigo,
-                            ),
+                            selected: isSelected,
+                            leading: _isSelectionMode
+                                ? Checkbox(
+                                    value: isSelected,
+                                    onChanged: (v) {
+                                      setState(() {
+                                        if (v == true) {
+                                          _selectedFilePaths.add(file.path);
+                                        } else {
+                                          _selectedFilePaths.remove(file.path);
+                                          if (_selectedFilePaths.isEmpty) {
+                                            _isSelectionMode = false;
+                                          }
+                                        }
+                                      });
+                                    },
+                                  )
+                                : Icon(
+                                    fileName.toLowerCase().endsWith('.pdf')
+                                        ? Icons.picture_as_pdf
+                                        : (fileName.toLowerCase().endsWith('.epub') ||
+                                                fileName.toLowerCase().endsWith('.txt'))
+                                            ? Icons.menu_book
+                                            : (fileName.toLowerCase().endsWith('.cbz') ||
+                                                    fileName.toLowerCase().endsWith('.zip'))
+                                                ? Icons.auto_stories
+                                                : Icons.image,
+                                    color: Colors.indigo,
+                                  ),
                             title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
                             subtitle: Text(
                               '[$grp]  •  진행률 ${prog.toStringAsFixed(1)}%',
@@ -754,12 +1034,35 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.drive_file_move_outline),
-                              tooltip: '그룹 변경',
-                              onPressed: () => _assignGroupDialog(file),
-                            ),
-                            onTap: () => _openFile(file),
+                            trailing: _isSelectionMode
+                                ? null
+                                : IconButton(
+                                    icon: const Icon(Icons.drive_file_move_outline),
+                                    tooltip: '그룹 변경',
+                                    onPressed: () => _assignGroupDialog(file),
+                                  ),
+                            onLongPress: () {
+                              setState(() {
+                                _isSelectionMode = true;
+                                _selectedFilePaths.add(file.path);
+                              });
+                            },
+                            onTap: () {
+                              if (_isSelectionMode) {
+                                setState(() {
+                                  if (isSelected) {
+                                    _selectedFilePaths.remove(file.path);
+                                    if (_selectedFilePaths.isEmpty) {
+                                      _isSelectionMode = false;
+                                    }
+                                  } else {
+                                    _selectedFilePaths.add(file.path);
+                                  }
+                                });
+                              } else {
+                                _openFile(file);
+                              }
+                            },
                           ),
                         );
                       },
@@ -768,11 +1071,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _pickAndImportFiles,
-        icon: const Icon(Icons.add),
-        label: const Text('파일 추가'),
-      ),
+      floatingActionButton: _isSelectionMode
+          ? FloatingActionButton.extended(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              onPressed: _selectedFilePaths.isNotEmpty ? _deleteSelectedFilesBatch : null,
+              icon: const Icon(Icons.delete_outline),
+              label: Text('선택 삭제 (${_selectedFilePaths.length})'),
+            )
+          : FloatingActionButton.extended(
+              onPressed: _pickAndImportFiles,
+              icon: const Icon(Icons.add),
+              label: const Text('파일 추가'),
+            ),
     );
   }
 }

@@ -40,7 +40,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   int _currentPage = 0;
   int _totalPages = 1;
   int? _previousJumpPage;
-  bool _showControls = true;
+  bool _showControls = false;
   bool _showTranslatedBubbles = false;
   bool _isMangaRtlMode = false;
   bool _enableTwoPageInLandscape = true;
@@ -55,6 +55,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   @override
   void initState() {
     super.initState();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _initMedia();
   }
 
@@ -119,8 +120,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
     _totalPages = _imagePages.isNotEmpty ? _imagePages.length : 1;
 
-    // 핵심 수정: 저장된 마지막 페이지 번호를 읽어 PageController의 initialPage에 직접 주입하여
-    // 다시 열었을 때 1페이지가 아닌 읽던 페이지(예: 14페이지) 화면이 즉시 렌더링되도록 보장!
     final savedPos = await StorageService.getLastPosition(_bookKey);
     if (savedPos != null) {
       final savedPage = int.tryParse(savedPos) ?? 0;
@@ -153,7 +152,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
     if (mounted) {
       setState(() => _isPreparingPages = false);
-      // 레이아웃 직후에도 혹시 모를 컨트롤러 오차를 한 번 더 동기화
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _syncControllerToCurrentPage(animate: false);
       });
@@ -219,6 +217,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
+  void _toggleControls() {
+    setState(() => _showControls = !_showControls);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
   Future<void> _showLanguageAndTranslateDialog({bool forceRetranslate = false}) async {
     final currentGugugoUrl = await StorageService.getGugugoServerUrl();
     final currentHfToken = await StorageService.getGugugoHfToken();
@@ -231,7 +234,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('Gugugo 한일 만화 말풍선 번역'),
+          title: const Text('번역'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -243,9 +246,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   isExpanded: true,
                   value: _sourceLangCode,
                   items: const [
-                    DropdownMenuItem(value: 'ja', child: Text('일본어 (Gugugo-koja 세로 말풍선 번역)')),
-                    DropdownMenuItem(value: 'en', child: Text('영어 (Gugugo-koen 가로 말풍선 번역)')),
-                    DropdownMenuItem(value: 'zh-cn', child: Text('중국어 (Chinese)')),
+                    DropdownMenuItem(value: 'ja', child: Text('일본어')),
+                    DropdownMenuItem(value: 'en', child: Text('영어')),
+                    DropdownMenuItem(value: 'zh-cn', child: Text('중국어')),
                   ],
                   onChanged: (val) {
                     if (val == null) return;
@@ -261,12 +264,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     });
                   },
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  '• 세로 말풍선은 한국어도 만화책처럼 세로쓰기(위→아래, 우→좌)로 조판하며, 기존 말풍선 크기를 절대 넘지 않습니다.',
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
-                ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 TextButton.icon(
                   style: TextButton.styleFrom(padding: EdgeInsets.zero),
                   icon: Icon(showAdvanced ? Icons.expand_less : Icons.expand_more, size: 18),
@@ -290,7 +288,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     controller: tokenCtrl,
                     decoration: const InputDecoration(
                       labelText: 'HuggingFace API 토큰 (선택)',
-                      hintText: 'hf_... (Gugugo-koja-1.3B 추론 가속)',
+                      hintText: 'hf_...',
                       isDense: true,
                       border: OutlineInputBorder(),
                     ),
@@ -310,7 +308,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 );
                 if (ctx.mounted) Navigator.pop(ctx, true);
               },
-              child: const Text('말풍선 번역 시작'),
+              child: const Text('번역 시작'),
             ),
           ],
         ),
@@ -325,7 +323,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   Future<void> _runWholeFileBatchTranslation({bool forceRetranslate = false}) async {
     int current = 0;
     int total = _imagePages.length;
-    String status = 'Gugugo 번역 파이프라인 및 말풍선 분석 준비 중...';
+    String status = '사전 번역 중...';
     StateSetter? dialogSetState;
 
     showDialog(
@@ -335,7 +333,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         builder: (ctx, setDialogState) {
           dialogSetState = setDialogState;
           return AlertDialog(
-            title: const Text('만화 말풍선 사전 번역 중'),
+            title: const Text('사전 번역 중'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -375,13 +373,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       Navigator.pop(context);
       setState(() => _showTranslatedBubbles = true);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('말풍선 세로/가로 맞춤 번역이 완료되었습니다!')),
+        const SnackBar(content: Text('번역이 완료되었습니다.')),
       );
     }
   }
 
-  /// 세로 말풍선용 한국어 세로쓰기(위→아래, 오른쪽 열→왼쪽 열) 위젯 생성
-  /// 만화책의 원래 말풍선 크기(boxW x boxH) 안에 정확히 들어가도록 열 개수와 글자 크기를 자동 계산합니다.
   Widget _buildVerticalKoreanText(BubbleTranslation b, double boxW, double boxH) {
     String clean = b.translatedText
         .replaceAll('\n', ' ')
@@ -389,7 +385,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         .trim();
     if (clean.isEmpty) return const SizedBox.shrink();
 
-    // 세로쓰기 시 가로 괄호/장음 기호를 세로 기호로 치환
     clean = clean
         .replaceAll('(', '︵')
         .replaceAll(')', '︶')
@@ -402,9 +397,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final chars = clean.runes.map((r) => String.fromCharCode(r)).toList();
     final int charCount = chars.length;
 
-    // 말풍선 비율(boxH / boxW)에 맞춰 최적의 세로열 개수와 한 열당 글자 수 계산
-    final double safeW = math.max<double>(16.0, boxW - 4.0);
-    final double safeH = math.max<double>(20.0, boxH - 4.0);
+    final double safeW = math.max<double>(14.0, boxW - 3.0);
+    final double safeH = math.max<double>(18.0, boxH - 3.0);
     final double aspect = safeH / safeW;
 
     int numCols = math.sqrt(charCount / math.max<double>(1.2, aspect * 0.85)).round();
@@ -421,9 +415,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
     final double colW = safeW / columns.length;
     final double rowH = safeH / charsPerCol;
-    final double fontSize = math.min<double>(colW * 0.82, rowH * 0.78).clamp(6.5, 20.0).toDouble();
+    final double fontSize = math.min<double>(colW * 0.82, rowH * 0.78).clamp(6.0, 20.0).toDouble();
 
-    // 일본 만화 세로쓰기 전통 방식대로 오른쪽 열부터 왼쪽 열 순서(TextDirection.rtl)로 배치
     return FittedBox(
       fit: BoxFit.scaleDown,
       alignment: Alignment.center,
@@ -434,7 +427,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: columns.map((colStr) {
             return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 1.5),
+              padding: const EdgeInsets.symmetric(horizontal: 1.2),
               child: Text(
                 colStr,
                 textAlign: TextAlign.center,
@@ -453,12 +446,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  /// 가로 말풍선용 한국어 가로쓰기 위젯 생성 (기존 말풍선 크기 내 자동 축소)
   Widget _buildHorizontalKoreanText(BubbleTranslation b, double boxW, double boxH) {
-    final double safeW = math.max<double>(20.0, boxW - 4.0);
-    final double safeH = math.max<double>(16.0, boxH - 4.0);
+    final double safeW = math.max<double>(16.0, boxW - 3.0);
+    final double safeH = math.max<double>(12.0, boxH - 2.0);
     final double area = safeW * safeH;
-    final double estFont = math.sqrt(area / math.max<int>(1, b.translatedText.length * 2)).clamp(7.0, 20.0).toDouble();
+    final double estFont = math.sqrt(area / math.max<int>(1, b.translatedText.length * 1.8)).clamp(6.5, 20.0).toDouble();
 
     return FittedBox(
       fit: BoxFit.scaleDown,
@@ -474,7 +466,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             fontSize: estFont,
             fontWeight: b.isBold ? FontWeight.w800 : FontWeight.w600,
             fontFamily: b.isSerif ? 'serif' : 'sans-serif',
-            height: 1.18,
+            height: 1.15,
             letterSpacing: -0.2,
           ),
         ),
@@ -482,7 +474,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  /// 단일 만화 페이지(이미지 + 기존 말풍선 크기를 절대 넘지 않는 번역 오버레이) 렌더링
   Widget _buildSinglePagePanel(int pageIndex) {
     if (pageIndex < 0 || pageIndex >= _imagePages.length) {
       return const SizedBox.expand();
@@ -519,9 +510,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ),
             if (_showTranslatedBubbles && bubbles.isNotEmpty)
               ...bubbles.map((b) {
-                // 핵심: 만화책에 있는 기존 말풍선(원문 텍스트 영역) 크기를 절대 넘지 않도록 원본 비율 그대로 제한!
-                final double boxW = (b.widthRatio * drawWidth).clamp(14.0, drawWidth).toDouble();
-                final double boxH = (b.heightRatio * drawHeight).clamp(14.0, drawHeight).toDouble();
+                final double boxW = (b.widthRatio * drawWidth).clamp(12.0, drawWidth).toDouble();
+                final double boxH = (b.heightRatio * drawHeight).clamp(12.0, drawHeight).toDouble();
                 final double boxLeft = (drawLeft + b.leftRatio * drawWidth).clamp(
                   drawLeft,
                   math.max<double>(drawLeft, drawLeft + drawWidth - boxW),
@@ -531,7 +521,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   math.max<double>(drawTop, drawTop + drawHeight - boxH),
                 ).toDouble();
 
-                final bool renderVertically = b.isVertical || (boxH > boxW * 1.15);
+                final bool renderVertically = b.isVertical && (boxH >= boxW * 1.05);
 
                 return Positioned(
                   left: boxLeft,
@@ -539,10 +529,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   width: boxW,
                   height: boxH,
                   child: Container(
-                    padding: const EdgeInsets.all(1.5),
+                    padding: const EdgeInsets.all(1.0),
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(math.min<double>(boxW, boxH) * 0.15),
+                      color: Colors.white.withOpacity(0.96),
+                      borderRadius: BorderRadius.circular(
+                        renderVertically ? math.min<double>(boxW, boxH) * 0.15 : 4.0,
+                      ),
                     ),
                     alignment: Alignment.center,
                     clipBehavior: Clip.hardEdge,
@@ -632,6 +624,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   void dispose() {
     _volumeKeyService.stopListening();
     _pageController?.dispose();
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
     super.dispose();
   }
 
@@ -650,7 +646,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final double bottomInset = mediaQuery.viewPadding.bottom;
     final bool isSpread = _isSpreadActive(context);
 
-    // 화면 회전(세로 <-> 가로 2페이지 모드) 전환 시 현재 읽던 페이지 위치를 유지하도록 PageController 재동기화
     if (isSpread != _lastIsSpreadMode) {
       _lastIsSpreadMode = isSpread;
       final int targetViewIdx = isSpread ? (_currentPage ~/ 2) : _currentPage;
@@ -669,7 +664,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         children: [
           Positioned.fill(
             child: GestureDetector(
-              onTap: () => setState(() => _showControls = !_showControls),
+              onTap: _toggleControls,
               child: PageView.builder(
                 key: ValueKey('pageview_spread_$isSpread'),
                 controller: _pageController,
@@ -693,7 +688,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     );
                   }
 
-                  // 가로 모드 2페이지(양면) 보기: 일본 만화 모드(우→좌)면 오른쪽에 첫 페이지, 왼쪽에 다음 페이지 배치
                   final int firstPage = viewIdx * 2;
                   final int secondPage = firstPage + 1;
                   final Widget leftPanel = _isMangaRtlMode
@@ -719,7 +713,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ),
           ),
 
-          // 최하단 페이지 표시줄 (읽은 시간 완전 삭제, 페이지 정보만 깔끔하게 표시)
           Positioned(
             left: 20,
             right: 20,
@@ -739,7 +732,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ),
           ),
 
-          // 상단 컨트롤 바
           if (_showControls)
             Positioned(
               top: 0,
@@ -747,104 +739,88 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               right: 0,
               child: Material(
                 color: Colors.black87,
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back, color: Colors.white),
-                          onPressed: () => Navigator.pop(context),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          style: const TextStyle(color: Colors.white, fontSize: 15),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        Expanded(
-                          child: Text(
-                            widget.title,
-                            style: const TextStyle(color: Colors.white, fontSize: 15),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (_previousJumpPage != null)
-                          IconButton(
-                            icon: const Icon(Icons.restore, color: Colors.amber),
-                            tooltip: '이전 페이지(${_previousJumpPage! + 1}p)로 돌아가기',
-                            onPressed: () {
-                              final target = _previousJumpPage!;
-                              _previousJumpPage = null;
-                              _goToPage(target, recordHistory: false, smoothAnimation: true);
-                            },
-                          ),
-                        // 가로 모드 시 2페이지씩 보기(양면 보기) 켜기/끄기 설정 버튼
+                      ),
+                      if (_previousJumpPage != null)
                         IconButton(
+                          icon: const Icon(Icons.restore, color: Colors.amber),
+                          tooltip: '이전 페이지(${_previousJumpPage! + 1}p)로 돌아가기',
+                          onPressed: () {
+                            final target = _previousJumpPage!;
+                            _previousJumpPage = null;
+                            _goToPage(target, recordHistory: false, smoothAnimation: true);
+                          },
+                        ),
+                      IconButton(
+                        icon: Icon(
+                          _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
+                          color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
+                        ),
+                        tooltip: '가로 모드 2페이지 보기 설정',
+                        onPressed: () async {
+                          final nextVal = !_enableTwoPageInLandscape;
+                          await StorageService.setTwoPageLandscape(nextVal);
+                          setState(() => _enableTwoPageInLandscape = nextVal);
+                        },
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          _isMangaRtlMode ? Icons.arrow_back : Icons.arrow_forward,
+                          color: _isMangaRtlMode ? Colors.amber : Colors.white,
+                        ),
+                        tooltip: '방향',
+                        onPressed: () {
+                          setState(() => _isMangaRtlMode = !_isMangaRtlMode);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('방향'),
+                              duration: Duration(milliseconds: 800),
+                            ),
+                          );
+                        },
+                      ),
+                      GestureDetector(
+                        onLongPress: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
+                        child: IconButton(
                           icon: Icon(
-                            _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
-                            color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
+                            _showTranslatedBubbles ? Icons.chat_bubble : Icons.translate,
+                            color: _showTranslatedBubbles ? Colors.amber : Colors.white,
                           ),
-                          tooltip: '가로 모드에서 2페이지씩 보기 켜기/끄기',
-                          onPressed: () async {
-                            final nextVal = !_enableTwoPageInLandscape;
-                            await StorageService.setTwoPageLandscape(nextVal);
-                            setState(() => _enableTwoPageInLandscape = nextVal);
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(nextVal
-                                      ? '가로 모드 2페이지(양면) 보기가 켜졌습니다.'
-                                      : '가로 모드 1페이지 보기로 변경되었습니다.'),
-                                  duration: const Duration(seconds: 1),
-                                ),
-                              );
+                          tooltip: '번역',
+                          onPressed: () {
+                            if (_bubblesByPage.isEmpty) {
+                              _showLanguageAndTranslateDialog(forceRetranslate: false);
+                            } else {
+                              setState(() => _showTranslatedBubbles = !_showTranslatedBubbles);
                             }
                           },
                         ),
+                      ),
+                      if (_bubblesByPage.isNotEmpty)
                         IconButton(
-                          icon: Icon(
-                            Icons.swap_horiz,
-                            color: _isMangaRtlMode ? Colors.amber : Colors.white,
-                          ),
-                          tooltip: '일본 만화 제본 방향(우→좌 넘김) 전환',
-                          onPressed: () {
-                            setState(() => _isMangaRtlMode = !_isMangaRtlMode);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(_isMangaRtlMode
-                                    ? '일본 만화책 넘김 방향 (오른쪽 → 왼쪽) 적용됨'
-                                    : '일반 넘김 방향 (왼쪽 → 오른쪽) 적용됨'),
-                                duration: const Duration(seconds: 1),
-                              ),
-                            );
-                          },
+                          icon: const Icon(Icons.refresh, color: Colors.white70, size: 20),
+                          tooltip: '다시 번역',
+                          onPressed: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
                         ),
-                        GestureDetector(
-                          onLongPress: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
-                          child: IconButton(
-                            icon: Icon(
-                              _showTranslatedBubbles ? Icons.chat_bubble : Icons.translate,
-                              color: _showTranslatedBubbles ? Colors.amber : Colors.white,
-                            ),
-                            tooltip: '말풍선 번역 켜기/끄기 (길게 누르면 다시 번역)',
-                            onPressed: () {
-                              if (_bubblesByPage.isEmpty) {
-                                _showLanguageAndTranslateDialog(forceRetranslate: false);
-                              } else {
-                                setState(() => _showTranslatedBubbles = !_showTranslatedBubbles);
-                              }
-                            },
-                          ),
-                        ),
-                        if (_bubblesByPage.isNotEmpty)
-                          IconButton(
-                            icon: const Icon(Icons.refresh, color: Colors.white70, size: 20),
-                            tooltip: '말풍선 다시 번역하기',
-                            onPressed: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
-                          ),
-                        IconButton(
-                          icon: const Icon(Icons.bookmarks_outlined, color: Colors.white),
-                          tooltip: '북마크',
-                          onPressed: _showBookmarkSheet,
-                        ),
-                      ],
-                    ),
+                      IconButton(
+                        icon: const Icon(Icons.bookmarks_outlined, color: Colors.white),
+                        tooltip: '북마크',
+                        onPressed: _showBookmarkSheet,
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -852,23 +828,27 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
           if (_showControls && _totalPages > 1)
             Positioned(
-              bottom: math.max<double>(bottomInset + 26.0, 28.0),
-              left: 0,
-              right: 0,
+              top: 72.0,
+              bottom: 48.0,
+              right: 8.0,
+              width: 52.0,
               child: Material(
                 color: Colors.black87,
-                child: SafeArea(
-                  top: false,
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.chevron_left, color: Colors.white),
-                          onPressed: () => _stepPage(-1),
-                        ),
-                        Expanded(
+                borderRadius: BorderRadius.circular(26),
+                elevation: 6,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.expand_less, color: Colors.white, size: 22),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                        onPressed: () => _stepPage(-1),
+                      ),
+                      Expanded(
+                        child: RotatedBox(
+                          quarterTurns: 1,
                           child: Slider(
                             value: _currentPage.toDouble().clamp(0.0, math.max<double>(0.0, (_totalPages - 1).toDouble())).toDouble(),
                             min: 0.0,
@@ -876,12 +856,18 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             onChanged: (v) => _goToPage(v.round(), smoothAnimation: false),
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.chevron_right, color: Colors.white),
-                          onPressed: () => _stepPage(1),
-                        ),
-                      ],
-                    ),
+                      ),
+                      Text(
+                        '${_currentPage + 1}/$_totalPages',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.expand_more, color: Colors.white, size: 22),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                        onPressed: () => _stepPage(1),
+                      ),
+                    ],
                   ),
                 ),
               ),

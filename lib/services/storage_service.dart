@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class BookmarkItem {
   final String id;
   final String label;
-  final String position; // CFI for EPUB, page index for PDF/Image
+  final String position;
   final String createdAt;
 
   BookmarkItem({
@@ -78,7 +78,6 @@ class BubbleTranslation {
 }
 
 class StorageService {
-  // 1. 마지막 읽은 위치 및 이전 위치 히스토리
   static Future<void> saveLastPosition(String bookPath, String pos) async {
     final prefs = await SharedPreferences.getInstance();
     final prev = prefs.getString('pos_$bookPath');
@@ -98,7 +97,6 @@ class StorageService {
     return prefs.getString('prev_pos_$bookPath');
   }
 
-  // 2. 진행률(%) 저장
   static Future<void> saveProgress(String bookPath, double progress) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('prog_$bookPath', progress);
@@ -109,7 +107,16 @@ class StorageService {
     return prefs.getDouble('prog_$bookPath') ?? 0.0;
   }
 
-  // 3. 가로 모드 2페이지 보기(양면 보기) 설정 저장/조회
+  static Future<void> setDarkMode(bool isDark) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('app_dark_mode', isDark);
+  }
+
+  static Future<bool> getDarkMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('app_dark_mode') ?? false;
+  }
+
   static Future<void> setTwoPageLandscape(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('two_page_landscape', enabled);
@@ -120,7 +127,6 @@ class StorageService {
     return prefs.getBool('two_page_landscape') ?? true;
   }
 
-  // 4. Gugugo 오픈소스 번역 서버(Gradio / HuggingFace API) 설정 저장/조회
   static Future<void> setGugugoApiConfig({required String serverUrl, required String hfToken}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('gugugo_server_url', serverUrl.trim());
@@ -137,7 +143,6 @@ class StorageService {
     return prefs.getString('gugugo_hf_token') ?? '';
   }
 
-  // 5. 북마크 관리 (추가 / 조회 / 삭제)
   static Future<List<BookmarkItem>> getBookmarks(String bookPath) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList('bm_$bookPath') ?? [];
@@ -164,7 +169,6 @@ class StorageService {
     );
   }
 
-  // 6. 파일 그룹화 (카테고리/폴더 추가 및 꾹 눌러서 삭제)
   static Future<List<String>> getGroups() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getStringList('book_groups') ?? ['전체', '소설/문학', '만화/웹툰', 'PDF/문서'];
@@ -210,7 +214,8 @@ class StorageService {
     await prefs.remove('bm_$bookPath');
     await prefs.remove('grp_$bookPath');
     for (final key in prefs.getKeys().toList()) {
-      if (key.startsWith('bubbles_v3_${bookPath}_') ||
+      if (key.startsWith('bubbles_v4_${bookPath}_') ||
+          key.startsWith('bubbles_v3_${bookPath}_') ||
           key.startsWith('bubbles_v2_${bookPath}_') ||
           key.startsWith('bubbles_${bookPath}_')) {
         await prefs.remove(key);
@@ -218,12 +223,11 @@ class StorageService {
     }
   }
 
-  // 7. 사전 전체 번역(Pre-translation) 세로/가로 말풍선 캐시 저장 (v3 키 적용)
   static Future<void> saveImageBubbleCache(
       String bookKey, int pageIndex, List<BubbleTranslation> bubbles) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-      'bubbles_v3_${bookKey}_$pageIndex',
+      'bubbles_v4_${bookKey}_$pageIndex',
       jsonEncode(bubbles.map((e) => e.toJson()).toList()),
     );
   }
@@ -231,7 +235,7 @@ class StorageService {
   static Future<List<BubbleTranslation>?> getImageBubbleCache(
       String bookKey, int pageIndex) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('bubbles_v3_${bookKey}_$pageIndex');
+    final raw = prefs.getString('bubbles_v4_${bookKey}_$pageIndex');
     if (raw == null) return null;
     final List decoded = jsonDecode(raw);
     return decoded.map((e) => BubbleTranslation.fromJson(e)).toList();
@@ -240,7 +244,8 @@ class StorageService {
   static Future<void> clearImageBubbleCacheForBook(String bookKey) async {
     final prefs = await SharedPreferences.getInstance();
     for (final key in prefs.getKeys().toList()) {
-      if (key.startsWith('bubbles_v3_${bookKey}_') ||
+      if (key.startsWith('bubbles_v4_${bookKey}_') ||
+          key.startsWith('bubbles_v3_${bookKey}_') ||
           key.startsWith('bubbles_v2_${bookKey}_') ||
           key.startsWith('bubbles_${bookKey}_')) {
         await prefs.remove(key);
