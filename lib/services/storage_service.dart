@@ -37,6 +37,7 @@ class BubbleTranslation {
   final String originalText;
   final String translatedText;
   final bool isSerif;
+  final bool isBold;
 
   BubbleTranslation({
     required this.leftRatio,
@@ -45,7 +46,8 @@ class BubbleTranslation {
     required this.heightRatio,
     required this.originalText,
     required this.translatedText,
-    this.isSerif = false,
+    this.isSerif = true,
+    this.isBold = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -56,6 +58,7 @@ class BubbleTranslation {
         'o': originalText,
         'tr': translatedText,
         's': isSerif,
+        'b': isBold,
       };
 
   factory BubbleTranslation.fromJson(Map<String, dynamic> json) => BubbleTranslation(
@@ -65,12 +68,13 @@ class BubbleTranslation {
         heightRatio: (json['h'] as num).toDouble(),
         originalText: json['o'] ?? '',
         translatedText: json['tr'] ?? '',
-        isSerif: json['s'] ?? false,
+        isSerif: json['s'] ?? true,
+        isBold: json['b'] ?? false,
       );
 }
 
 class StorageService {
-  // 1. 마지막 읽은 위치 및 이전 위치 히스토리 (읽었던 페이지로 돌아가기)
+  // 1. 마지막 읽은 위치 및 이전 위치 히스토리
   static Future<void> saveLastPosition(String bookPath, String pos) async {
     final prefs = await SharedPreferences.getInstance();
     final prev = prefs.getString('pos_$bookPath');
@@ -152,7 +156,7 @@ class StorageService {
     );
   }
 
-  // 5. 파일 그룹화 (카테고리/폴더 관리)
+  // 5. 파일 그룹화 (카테고리/폴더 추가 및 꾹 눌러서 삭제)
   static Future<List<String>> getGroups() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getStringList('book_groups') ?? ['전체', '소설/문학', '만화/웹툰', 'PDF/문서'];
@@ -167,6 +171,19 @@ class StorageService {
     }
   }
 
+  static Future<void> removeGroup(String groupName) async {
+    if (groupName == '전체') return;
+    final prefs = await SharedPreferences.getInstance();
+    final groups = await getGroups();
+    groups.remove(groupName);
+    await prefs.setStringList('book_groups', groups);
+    for (final key in prefs.getKeys().toList()) {
+      if (key.startsWith('grp_') && prefs.getString(key) == groupName) {
+        await prefs.setString(key, '미분류');
+      }
+    }
+  }
+
   static Future<void> setBookGroup(String bookPath, String groupName) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('grp_$bookPath', groupName);
@@ -177,12 +194,27 @@ class StorageService {
     return prefs.getString('grp_$bookPath') ?? '미분류';
   }
 
-  // 6. 사전 전체 번역(Pre-translation) 말풍선 캐시 저장
+  static Future<void> removeBookMetadata(String bookPath) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('pos_$bookPath');
+    await prefs.remove('prev_pos_$bookPath');
+    await prefs.remove('prog_$bookPath');
+    await prefs.remove('time_$bookPath');
+    await prefs.remove('bm_$bookPath');
+    await prefs.remove('grp_$bookPath');
+    for (final key in prefs.getKeys().toList()) {
+      if (key.startsWith('bubbles_v2_${bookPath}_') || key.startsWith('bubbles_${bookPath}_')) {
+        await prefs.remove(key);
+      }
+    }
+  }
+
+  // 6. 사전 전체 번역(Pre-translation) 통합 말풍선 캐시 저장 (v2 클러스터링 캐시 키 적용)
   static Future<void> saveImageBubbleCache(
       String bookKey, int pageIndex, List<BubbleTranslation> bubbles) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-      'bubbles_${bookKey}_$pageIndex',
+      'bubbles_v2_${bookKey}_$pageIndex',
       jsonEncode(bubbles.map((e) => e.toJson()).toList()),
     );
   }
@@ -190,9 +222,18 @@ class StorageService {
   static Future<List<BubbleTranslation>?> getImageBubbleCache(
       String bookKey, int pageIndex) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('bubbles_${bookKey}_$pageIndex');
+    final raw = prefs.getString('bubbles_v2_${bookKey}_$pageIndex');
     if (raw == null) return null;
     final List decoded = jsonDecode(raw);
     return decoded.map((e) => BubbleTranslation.fromJson(e)).toList();
+  }
+
+  static Future<void> clearImageBubbleCacheForBook(String bookKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in prefs.getKeys().toList()) {
+      if (key.startsWith('bubbles_v2_${bookKey}_') || key.startsWith('bubbles_${bookKey}_')) {
+        await prefs.remove(key);
+      }
+    }
   }
 }

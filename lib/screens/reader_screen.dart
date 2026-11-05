@@ -336,8 +336,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
     final mediaQuery = MediaQuery.of(context);
     final screenSize = mediaQuery.size;
-    final topPadding = mediaQuery.padding.top;
-    final bottomPadding = mediaQuery.padding.bottom;
+    final topPadding = mediaQuery.viewPadding.top;
+    final bottomPadding = mediaQuery.viewPadding.bottom;
     final bgColor = _isDarkMode ? const Color(0xFF1E1E1E) : const Color(0xFFFBF0D9);
     final barColor = _isDarkMode
         ? const Color(0xFF2C2C2C).withOpacity(0.96)

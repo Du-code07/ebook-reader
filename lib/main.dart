@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -32,11 +33,34 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   Map<String, double> _bookProgressMap = {};
 
   static const _supportedExts = ['epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz', 'zip'];
+  static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
 
   @override
   void initState() {
     super.initState();
     _loadLibrary();
+  }
+
+  /// 파일 이름 자연 정렬 (1.jpg, 2.jpg, ..., 10.jpg 순서 보장)
+  int _naturalCompare(String a, String b) {
+    final reg = RegExp(r'(\d+)|(\D+)');
+    final matchesA = reg.allMatches(a.toLowerCase()).toList();
+    final matchesB = reg.allMatches(b.toLowerCase()).toList();
+    final len = matchesA.length < matchesB.length ? matchesA.length : matchesB.length;
+    for (int i = 0; i < len; i++) {
+      final partA = matchesA[i].group(0)!;
+      final partB = matchesB[i].group(0)!;
+      final numA = int.tryParse(partA);
+      final numB = int.tryParse(partB);
+      if (numA != null && numB != null) {
+        final cmp = numA.compareTo(numB);
+        if (cmp != 0) return cmp;
+      } else {
+        final cmp = partA.compareTo(partB);
+        if (cmp != 0) return cmp;
+      }
+    }
+    return matchesA.length.compareTo(matchesB.length);
   }
 
   Future<void> _loadLibrary() async {
@@ -47,14 +71,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     for (final e in entities) {
       if (e is File) {
         final lower = e.path.toLowerCase();
-        // 자동 생성된 임시 번역본/변환본은 서재 중복 표시 제외
-        if (lower.endsWith('_ko_translated.epub') || lower.endsWith('.converted.epub')) continue;
+        if (lower.endsWith('_translated.epub') || lower.endsWith('.converted.epub')) continue;
         final ext = lower.split('.').last;
         if (_supportedExts.contains(ext)) {
           files.add(e);
         }
       }
     }
+
+    files.sort((a, b) => _naturalCompare(
+          a.path.split(Platform.pathSeparator).last,
+          b.path.split(Platform.pathSeparator).last,
+        ));
 
     final groups = await StorageService.getGroups();
     final grpMap = <String, String>{};
@@ -71,6 +99,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       setState(() {
         _allBooks = files;
         _groups = groups;
+        if (!_groups.contains(_selectedGroup)) {
+          _selectedGroup = '전체';
+        }
         _bookGroupMap = grpMap;
         _bookReadingTimeMap = timeMap;
         _bookProgressMap = progMap;
@@ -78,30 +109,277 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
   }
 
+  /// 여러 파일 동시 추가 지원 + 여러 장의 JPG/PNG 선택 시 만화책(.cbz) 한 권으로 바로 묶기 지원
   Future<void> _pickAndImportFiles() async {
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: _supportedExts,
+      type: FileType.any,
       allowMultiple: true,
     );
 
-    if (result != null && result.files.isNotEmpty) {
-      final appDir = await getApplicationDocumentsDirectory();
-      final importedFiles = <File>[];
+    if (result == null || result.files.isEmpty) return;
 
-      for (final pf in result.files) {
-        if (pf.path == null) continue;
-        final saved = await File(pf.path!).copy('${appDir.path}/${pf.name}');
-        if (_selectedGroup != '전체') {
-          await StorageService.setBookGroup(saved.path, _selectedGroup);
+    final validPicked = result.files.where((pf) {
+      if (pf.path == null) return false;
+      final ext = pf.name.split('.').last.toLowerCase();
+      return _supportedExts.contains(ext);
+    }).toList();
+
+    if (validPicked.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('지원되는 파일 형식(EPUB, PDF, JPG, PNG, TXT, CBZ, ZIP)을 선택해 주세요.')),
+        );
+      }
+      return;
+    }
+
+    final imagePicked = validPicked.where((pf) {
+      final ext = pf.name.split('.').last.toLowerCase();
+      return _imageExts.contains(ext);
+    }).toList();
+
+    // 여러 장의 이미지(JPG/PNG 등)를 한 번에 추가할 때 만화책 1권(.cbz)으로 통합할지 물어보기
+    if (imagePicked.length >= 2 && imagePicked.length == validPicked.length && mounted) {
+      final action = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('이미지 ${imagePicked.length}장 추가 방식 선택'),
+          content: const Text(
+            '선택한 여러 장의 이미지(JPG/PNG)를 일본 만화책처럼 넘겨 볼 수 있도록 한 권의 만화책 파일(.cbz)로 합쳐서 추가할까요?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'separate'),
+              child: const Text('개별 파일로 추가'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.auto_stories, size: 18),
+              onPressed: () => Navigator.pop(ctx, 'merge'),
+              label: const Text('만화책 1권으로 합치기'),
+            ),
+          ],
+        ),
+      );
+
+      if (action == 'merge') {
+        final paths = imagePicked.map((e) => File(e.path!)).toList();
+        await _createMangaBookFromImages(paths, deleteSourceAfter: false);
+        return;
+      }
+    }
+
+    final appDir = await getApplicationDocumentsDirectory();
+    final importedFiles = <File>[];
+
+    for (final pf in validPicked) {
+      if (pf.path == null) continue;
+      final saved = await File(pf.path!).copy('${appDir.path}/${pf.name}');
+      if (_selectedGroup != '전체') {
+        await StorageService.setBookGroup(saved.path, _selectedGroup);
+      }
+      importedFiles.add(saved);
+    }
+
+    await _loadLibrary();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${importedFiles.length}개의 파일이 서재에 추가되었습니다.')),
+      );
+    }
+  }
+
+  /// 여러 장의 JPG/PNG 파일을 일본 만화책처럼 넘겨볼 수 있는 단일 만화책(.cbz) 파일로 통합 생성
+  Future<void> _createMangaBookFromImages(List<File> sourceImages, {bool deleteSourceAfter = false}) async {
+    final titleController = TextEditingController(
+      text: '만화책_${DateTime.now().month}월${DateTime.now().day}일_${DateTime.now().hour}${DateTime.now().minute}',
+    );
+    bool deleteOriginals = deleteSourceAfter;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          title: const Text('만화책 통합 파일(.cbz) 만들기'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('총 ${sourceImages.length}장의 이미지를 번호 순서대로 묶어 만화책 파일을 만듭니다.'),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: '만화책 제목',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (deleteSourceAfter) ...[
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: deleteOriginals,
+                    title: const Text('통합 후 서재에 있던 낱장 이미지 정리(삭제)', style: TextStyle(fontSize: 13)),
+                    onChanged: (v) => setModalState(() => deleteOriginals = v ?? false),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('만들기'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final bookTitle = titleController.text.trim().isEmpty ? '새_만화책' : titleController.text.trim();
+    sourceImages.sort((a, b) => _naturalCompare(
+          a.path.split(Platform.pathSeparator).last,
+          b.path.split(Platform.pathSeparator).last,
+        ));
+
+    final archive = Archive();
+    for (int i = 0; i < sourceImages.length; i++) {
+      final img = sourceImages[i];
+      final ext = img.path.split('.').last.toLowerCase();
+      final bytes = await img.readAsBytes();
+      final entryName = 'page_${i.toString().padLeft(4, '0')}.$ext';
+      archive.addFile(ArchiveFile(entryName, bytes.length, bytes));
+    }
+
+    final appDir = await getApplicationDocumentsDirectory();
+    final safeTitle = bookTitle.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final outFile = File('${appDir.path}/$safeTitle.cbz');
+    final zipBytes = ZipEncoder().encode(archive);
+    await outFile.writeAsBytes(zipBytes!);
+
+    final targetGroup = _selectedGroup == '전체' ? '만화/웹툰' : _selectedGroup;
+    await StorageService.setBookGroup(outFile.path, targetGroup);
+
+    if (deleteOriginals) {
+      for (final img in sourceImages) {
+        if (await img.exists()) {
+          await StorageService.removeBookMetadata(img.path);
+          await img.delete();
         }
-        importedFiles.add(saved);
       }
+    }
 
-      await _loadLibrary();
-      if (importedFiles.length == 1 && mounted) {
-        _openFile(importedFiles.first);
+    await _loadLibrary();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('"$safeTitle.cbz" 만화책 통합 파일이 생성되었습니다!')),
+      );
+      _openFile(outFile);
+    }
+  }
+
+  /// 서재에 이미 등록된 JPG/PNG 이미지들을 선택해서 만화책으로 합치는 다이얼로그
+  Future<void> _showMergeExistingImagesDialog() async {
+    final existingImages = _allBooks.where((f) {
+      final ext = f.path.split('.').last.toLowerCase();
+      return _imageExts.contains(ext);
+    }).toList();
+
+    if (existingImages.isEmpty) {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: true,
+      );
+      if (result != null && result.files.length >= 2) {
+        final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
+        await _createMangaBookFromImages(files, deleteSourceAfter: false);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('합칠 JPG/PNG 이미지를 2장 이상 선택해 주세요.')),
+        );
       }
+      return;
+    }
+
+    final selectedPaths = existingImages.map((e) => e.path).toSet();
+
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          title: const Text('JPG/PNG 만화책으로 통합하기'),
+          content: SizedBox(
+            width: 420,
+            height: 360,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('선택됨: ${selectedPaths.length}장', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    TextButton.icon(
+                      icon: const Icon(Icons.folder_open, size: 16),
+                      label: const Text('기기에서 바로 선택'),
+                      onPressed: () async {
+                        Navigator.pop(ctx, false);
+                        final result = await FilePicker.platform.pickFiles(
+                          type: FileType.image,
+                          allowMultiple: true,
+                        );
+                        if (result != null && result.files.length >= 2) {
+                          final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
+                          await _createMangaBookFromImages(files, deleteSourceAfter: false);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: existingImages.length,
+                    itemBuilder: (_, idx) {
+                      final f = existingImages[idx];
+                      final name = f.path.split(Platform.pathSeparator).last;
+                      final checked = selectedPaths.contains(f.path);
+                      return CheckboxListTile(
+                        dense: true,
+                        value: checked,
+                        title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        onChanged: (v) {
+                          setModalState(() {
+                            if (v == true) {
+                              selectedPaths.add(f.path);
+                            } else {
+                              selectedPaths.remove(f.path);
+                            }
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            ElevatedButton(
+              onPressed: selectedPaths.length >= 2 ? () => Navigator.pop(ctx, true) : null,
+              child: const Text('선택한 이미지 합치기'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (proceed == true && selectedPaths.length >= 2) {
+      final chosen = existingImages.where((f) => selectedPaths.contains(f.path)).toList();
+      await _createMangaBookFromImages(chosen, deleteSourceAfter: true);
     }
   }
 
@@ -136,8 +414,32 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           ),
         ),
       );
+    } else if (_imageExts.contains(ext)) {
+      // 개별 JPG/PNG 클릭 시에도 같은 그룹 내의 연속된 이미지들을 함께 묶어 만화책처럼 바로 넘겨볼 수 있게 지원
+      final currentGroup = _bookGroupMap[file.path];
+      final siblingImages = _allBooks.where((f) {
+        final fExt = f.path.split('.').last.toLowerCase();
+        return _imageExts.contains(fExt) && _bookGroupMap[f.path] == currentGroup;
+      }).toList();
+
+      final targetList = siblingImages.length > 1 ? siblingImages : [file];
+      final initIdx = targetList.indexWhere((f) => f.path == file.path);
+      if (initIdx > 0) {
+        await StorageService.saveLastPosition(targetList.first.path, initIdx.toString());
+      }
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => UniversalMediaReaderScreen(
+            files: targetList,
+            title: targetList.length > 1 ? '$name 외 ${targetList.length - 1}장' : name,
+            isPdf: false,
+          ),
+        ),
+      );
     } else {
-      // JPG, PNG, WEBP, CBZ, ZIP 만화/이미지 열람
+      // CBZ, ZIP 만화책 열람
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -161,7 +463,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         title: const Text('새 파일 그룹(폴더) 만들기'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(hintText: '예: 영어 원서, 판타지, 전공서적'),
+          decoration: const InputDecoration(hintText: '예: 일본 만화, 판타지 소설, 전공서적'),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
@@ -181,27 +483,82 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     );
   }
 
+  /// 그룹을 꾹 누르면 삭제할 수 있는 다이얼로그
+  Future<void> _confirmDeleteGroup(String groupName) async {
+    if (groupName == '전체') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('"전체" 기본 보기는 삭제할 수 없습니다.')),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('"$groupName" 그룹 삭제'),
+        content: Text('"$groupName" 그룹을 삭제할까요?\n(그룹 안의 파일들은 삭제되지 않고 미분류로 유지됩니다)'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('그룹 삭제'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await StorageService.removeGroup(groupName);
+      if (_selectedGroup == groupName) {
+        _selectedGroup = '전체';
+      }
+      await _loadLibrary();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('"$groupName" 그룹이 삭제되었습니다.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteBookFile(File file) async {
+    final fileName = file.path.split(Platform.pathSeparator).last;
+    await StorageService.removeBookMetadata(file.path);
+    if (await file.exists()) {
+      await file.delete();
+    }
+    await _loadLibrary();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('"$fileName" 파일이 삭제되었습니다.')),
+      );
+    }
+  }
+
   Future<void> _assignGroupDialog(File file) async {
     await showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-              title: Text('파일 그룹(카테고리) 이동', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            const Divider(height: 1),
-            ..._groups.where((g) => g != '전체').map((g) => ListTile(
-                  leading: const Icon(Icons.folder_outlined),
-                  title: Text(g),
-                  onTap: () async {
-                    await StorageService.setBookGroup(file.path, g);
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    _loadLibrary();
-                  },
-                )),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                title: Text('파일 그룹(카테고리) 이동', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              const Divider(height: 1),
+              ..._groups.where((g) => g != '전체').map((g) => ListTile(
+                    leading: const Icon(Icons.folder_outlined),
+                    title: Text(g),
+                    onTap: () async {
+                      await StorageService.setBookGroup(file.path, g);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      _loadLibrary();
+                    },
+                  )),
+            ],
+          ),
         ),
       ),
     );
@@ -218,79 +575,153 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         title: const Text('내 서재 (EPUB·PDF·만화·번역)'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.auto_stories_outlined),
+            tooltip: 'JPG/PNG 이미지들을 만화책(.cbz) 한 권으로 합치기',
+            onPressed: _showMergeExistingImagesDialog,
+          ),
+          IconButton(
             icon: const Icon(Icons.create_new_folder_outlined),
-            tooltip: '새 그룹 만들기',
+            tooltip: '새 그룹 만들기 (그룹 길게 누르면 삭제)',
             onPressed: _createNewGroupDialog,
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // 상단 그룹(카테고리) 필터 칩 바
-          SizedBox(
-            height: 52,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              scrollDirection: Axis.horizontal,
-              itemCount: _groups.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final grp = _groups[index];
-                final selected = grp == _selectedGroup;
-                return ChoiceChip(
-                  label: Text(grp),
-                  selected: selected,
-                  onSelected: (_) => setState(() => _selectedGroup = grp),
-                );
-              },
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: filteredBooks.isEmpty
-                ? Center(
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.folder_open),
-                      label: const Text('파일 열기 (EPUB, PDF, JPG, PNG, TXT, CBZ)'),
-                      onPressed: _pickAndImportFiles,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // 상단 그룹(카테고리) 필터 칩 바 (꾹 누르면 그룹 삭제 가능)
+            SizedBox(
+              height: 54,
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                scrollDirection: Axis.horizontal,
+                itemCount: _groups.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final grp = _groups[index];
+                  final selected = grp == _selectedGroup;
+                  return GestureDetector(
+                    onLongPress: () => _confirmDeleteGroup(grp),
+                    child: ChoiceChip(
+                      label: Text(grp),
+                      selected: selected,
+                      onSelected: (_) => setState(() => _selectedGroup = grp),
                     ),
-                  )
-                : ListView.separated(
-                    itemCount: filteredBooks.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final file = filteredBooks[index];
-                      final fileName = file.path.split(Platform.pathSeparator).last;
-                      final grp = _bookGroupMap[file.path] ?? '미분류';
-                      final secs = _bookReadingTimeMap[file.path] ?? 0;
-                      final prog = (_bookProgressMap[file.path] ?? 0.0) * 100;
+                  );
+                },
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: filteredBooks.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            ElevatedButton.icon(
+                              icon: const Icon(Icons.folder_open),
+                              label: const Text('파일 여러 개 추가 (EPUB, PDF, JPG, TXT, CBZ)'),
+                              onPressed: _pickAndImportFiles,
+                            ),
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.auto_stories),
+                              label: const Text('JPG 이미지들을 만화책으로 합치기'),
+                              onPressed: _showMergeExistingImagesDialog,
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.only(bottom: 88),
+                      itemCount: filteredBooks.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final file = filteredBooks[index];
+                        final fileName = file.path.split(Platform.pathSeparator).last;
+                        final grp = _bookGroupMap[file.path] ?? '미분류';
+                        final secs = _bookReadingTimeMap[file.path] ?? 0;
+                        final prog = (_bookProgressMap[file.path] ?? 0.0) * 100;
 
-                      return ListTile(
-                        leading: Icon(
-                          fileName.toLowerCase().endsWith('.pdf')
-                              ? Icons.picture_as_pdf
-                              : (fileName.toLowerCase().endsWith('.epub') ||
-                                      fileName.toLowerCase().endsWith('.txt'))
-                                  ? Icons.menu_book
-                                  : Icons.image,
-                          color: Colors.indigo,
-                        ),
-                        title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text(
-                          '[$grp]  •  진행률 ${prog.toStringAsFixed(1)}%  •  읽은 시간 ${StorageService.formatReadingTime(secs)}',
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.drive_file_move_outline),
-                          tooltip: '그룹 변경',
-                          onPressed: () => _assignGroupDialog(file),
-                        ),
-                        onTap: () => _openFile(file),
-                      );
-                    },
-                  ),
-          ),
-        ],
+                        // 왼쪽으로 밀어서(Swipe Left) 파일 삭제 지원
+                        return Dismissible(
+                          key: ValueKey(file.path),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            color: Colors.redAccent,
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                Icon(Icons.delete_forever, color: Colors.white),
+                                SizedBox(width: 6),
+                                Text('삭제', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ),
+                          confirmDismiss: (_) async {
+                            return await showDialog<bool>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('파일 삭제'),
+                                    content: Text('"$fileName" 파일을 서재에서 삭제할까요?'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(ctx, false),
+                                        child: const Text('취소'),
+                                      ),
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.redAccent,
+                                          foregroundColor: Colors.white,
+                                        ),
+                                        onPressed: () => Navigator.pop(ctx, true),
+                                        child: const Text('삭제'),
+                                      ),
+                                    ],
+                                  ),
+                                ) ??
+                                false;
+                          },
+                          onDismissed: (_) => _deleteBookFile(file),
+                          child: ListTile(
+                            leading: Icon(
+                              fileName.toLowerCase().endsWith('.pdf')
+                                  ? Icons.picture_as_pdf
+                                  : (fileName.toLowerCase().endsWith('.epub') ||
+                                          fileName.toLowerCase().endsWith('.txt'))
+                                      ? Icons.menu_book
+                                      : (fileName.toLowerCase().endsWith('.cbz') ||
+                                              fileName.toLowerCase().endsWith('.zip'))
+                                          ? Icons.auto_stories
+                                          : Icons.image,
+                              color: Colors.indigo,
+                            ),
+                            title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                            subtitle: Text(
+                              '[$grp]  •  진행률 ${prog.toStringAsFixed(1)}%  •  읽은 시간 ${StorageService.formatReadingTime(secs)}',
+                              style: const TextStyle(fontSize: 12),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.drive_file_move_outline),
+                              tooltip: '그룹 변경',
+                              onPressed: () => _assignGroupDialog(file),
+                            ),
+                            onTap: () => _openFile(file),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _pickAndImportFiles,
