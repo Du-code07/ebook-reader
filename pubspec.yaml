@@ -1,0 +1,27 @@
+name: my_ebook_reader
+description: All-in-one Android eBook, PDF, and Comic Reader with Batch Translation, Speech Bubble Overlay, Bookmarks, Reading Timer, and File Grouping.
+publish_to: 'none'
+version: 2.1.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_epub_viewer: ^2.2.1
+  file_picker: ^10.1.2
+  shared_preferences: ^2.3.0
+  path_provider: ^2.1.4
+  archive: ^3.6.1
+  http: ^1.2.2
+  translator: ^1.0.3+1
+  google_mlkit_text_recognition: ^0.14.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
