@@ -1420,8 +1420,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Padding(
-                padding: EdgeInsets.all(16.0),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
                 child: Text(_tr('목차', 'Contents', '目录', '目次'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ),
               const Divider(height: 1),
