@@ -2,6 +2,13 @@ package com.example.my_ebook_reader
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.graphics.Color
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
@@ -290,28 +297,185 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             runOnUiThread { result.error("MERGE_PDF_ERR", e.message, null) }
                         }
                     }.start()
-                } else if (call.method == "extractHwpText") {
-                    val hwpPath = call.argument<String>("hwpPath")
-                    if (hwpPath == null) {
-                        result.error("INVALID_ARGS", "Missing hwpPath", null)
+                } else if (call.method == "renderStructuredDocToPdf") {
+                    val outputPath = call.argument<String>("outputPath")
+                    val rawBlocks = call.argument<List<Map<String, Any?>>>("blocks")
+                    if (outputPath == null || rawBlocks == null) {
+                        result.error("INVALID_ARGS", "Missing outputPath or blocks", null)
                         return@setMethodCallHandler
                     }
                     Thread {
+                        val pdfDoc = PdfDocument()
                         try {
-                            val readerCls = Class.forName("kr.dogfoot.hwplib.reader.HWPReader")
-                            val fromFileMethod = readerCls.getMethod("fromFile", String::class.java)
-                            val hwpObj = fromFileMethod.invoke(null, hwpPath)
-                            val methodEnumCls = Class.forName("kr.dogfoot.hwplib.tool.textextractor.TextExtractMethod")
-                            val enumConst = methodEnumCls.enumConstants?.firstOrNull {
-                                it.toString() == "InsertControlTextBetweenParagraphText"
-                            } ?: methodEnumCls.enumConstants?.firstOrNull()
-                            val extractorCls = Class.forName("kr.dogfoot.hwplib.tool.textextractor.TextExtractor")
-                            val hwpFileCls = Class.forName("kr.dogfoot.hwplib.object.HWPFile")
-                            val extractMethod = extractorCls.getMethod("extract", hwpFileCls, methodEnumCls)
-                            val extractedText = extractMethod.invoke(null, hwpObj, enumConst) as? String
-                            runOnUiThread { result.success(extractedText ?: "") }
+                            val pageWidth = 1240
+                            val pageHeight = 1754
+                            val marginX = 80f
+                            val marginY = 90f
+                            val contentWidth = (pageWidth - 2 * marginX).toInt()
+                            val maxBottomY = pageHeight - marginY
+
+                            var pageNumber = 1
+                            var currentPage: PdfDocument.Page? = null
+                            var currentY = marginY
+
+                            fun startNewPage(): android.graphics.Canvas {
+                                currentPage?.let { pdfDoc.finishPage(it) }
+                                val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber++).create()
+                                val page = pdfDoc.startPage(pageInfo)
+                                currentPage = page
+                                page.canvas.drawColor(Color.WHITE)
+                                currentY = marginY
+                                return page.canvas
+                            }
+
+                            var canvas = startNewPage()
+
+                            val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                                color = Color.rgb(20, 20, 20)
+                                textSize = 27f
+                            }
+                            val cellPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                                color = Color.rgb(20, 20, 20)
+                                textSize = 23f
+                            }
+                            val headerCellPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                                color = Color.rgb(15, 23, 42)
+                                textSize = 23f
+                                isFakeBoldText = true
+                            }
+                            val tableBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                                color = Color.rgb(100, 116, 139)
+                                style = Paint.Style.STROKE
+                                strokeWidth = 2f
+                            }
+                            val tableHeaderBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                                color = Color.rgb(241, 245, 249)
+                                style = Paint.Style.FILL
+                            }
+
+                            for (block in rawBlocks) {
+                                val bType = block["type"] as? String ?: "paragraph"
+                                if (bType == "paragraph") {
+                                    val text = (block["text"] as? String ?: "").trimEnd()
+                                    if (text.isEmpty()) {
+                                        currentY += 22f
+                                        if (currentY > maxBottomY) {
+                                            canvas = startNewPage()
+                                        }
+                                        continue
+                                    }
+                                    val layout = StaticLayout.Builder.obtain(text, 0, text.length, bodyPaint, contentWidth)
+                                        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                                        .setLineSpacing(0f, 1.35f)
+                                        .setIncludePad(false)
+                                        .build()
+
+                                    for (lineIdx in 0 until layout.lineCount) {
+                                        val lineTop = layout.getLineTop(lineIdx).toFloat()
+                                        val lineBottom = layout.getLineBottom(lineIdx).toFloat()
+                                        val lineH = (lineBottom - lineTop).coerceAtLeast(28f)
+                                        if (currentY + lineH > maxBottomY && currentY > marginY + 1f) {
+                                            canvas = startNewPage()
+                                        }
+                                        val lineStart = layout.getLineStart(lineIdx)
+                                        val lineEnd = layout.getLineEnd(lineIdx)
+                                        val lineStr = text.substring(lineStart, lineEnd).trimEnd('\r', '\n')
+                                        if (lineStr.isNotEmpty()) {
+                                            canvas.drawText(lineStr, marginX, currentY - bodyPaint.ascent(), bodyPaint)
+                                        }
+                                        currentY += lineH
+                                    }
+                                    currentY += 16f
+                                } else if (bType == "table") {
+                                    @Suppress("UNCHECKED_CAST")
+                                    val rows = block["rows"] as? List<List<String>> ?: emptyList()
+                                    if (rows.isEmpty()) continue
+                                    var numCols = 1
+                                    for (r in rows) {
+                                        if (r.size > numCols) numCols = r.size
+                                    }
+                                    val colW = contentWidth.toFloat() / numCols.toFloat()
+                                    val cellPadX = 12f
+                                    val cellPadY = 12f
+                                    val cellTextW = (colW - 2 * cellPadX).toInt().coerceAtLeast(40)
+
+                                    currentY += 8f
+                                    for ((rIdx, row) in rows.withIndex()) {
+                                        val tPaint = if (rIdx == 0 && rows.size > 1) headerCellPaint else cellPaint
+                                        val cellLayouts = ArrayList<StaticLayout>(numCols)
+                                        var maxCellH = 32f
+                                        for (cIdx in 0 until numCols) {
+                                            val cellText = if (cIdx < row.size) row[cIdx].trim() else ""
+                                            val sl = StaticLayout.Builder.obtain(cellText, 0, cellText.length, tPaint, cellTextW)
+                                                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                                                .setLineSpacing(0f, 1.25f)
+                                                .setIncludePad(false)
+                                                .build()
+                                            cellLayouts.add(sl)
+                                            val h = sl.height.toFloat()
+                                            if (h > maxCellH) maxCellH = h
+                                        }
+                                        val rowH = (maxCellH + 2 * cellPadY).coerceAtMost(pageHeight - 2 * marginY - 20f)
+                                        if (currentY + rowH > maxBottomY && currentY > marginY + 1f) {
+                                            canvas = startNewPage()
+                                        }
+                                        for (cIdx in 0 until numCols) {
+                                            val left = marginX + cIdx * colW
+                                            val top = currentY
+                                            val right = left + colW
+                                            val bottom = top + rowH
+                                            val rect = RectF(left, top, right, bottom)
+                                            if (rIdx == 0 && rows.size > 1) {
+                                                canvas.drawRect(rect, tableHeaderBgPaint)
+                                            }
+                                            canvas.drawRect(rect, tableBorderPaint)
+                                            canvas.save()
+                                            canvas.clipRect(left + 2f, top + 2f, right - 2f, bottom - 2f)
+                                            canvas.translate(left + cellPadX, top + cellPadY)
+                                            cellLayouts[cIdx].draw(canvas)
+                                            canvas.restore()
+                                        }
+                                        currentY += rowH
+                                    }
+                                    currentY += 20f
+                                } else if (bType == "image") {
+                                    val imgBytes = block["bytes"] as? ByteArray
+                                    if (imgBytes != null && imgBytes.isNotEmpty()) {
+                                        val bmp = BitmapFactory.decodeByteArray(imgBytes, 0, imgBytes.size)
+                                        if (bmp != null && bmp.width > 0 && bmp.height > 0) {
+                                            val maxImgW = contentWidth.toFloat()
+                                            val maxImgH = (pageHeight - 2 * marginY) * 0.72f
+                                            var scale = maxImgW / bmp.width.toFloat()
+                                            if (scale > 2.2f) scale = 2.2f
+                                            if (bmp.height * scale > maxImgH) {
+                                                scale = maxImgH / bmp.height.toFloat()
+                                            }
+                                            val drawW = (bmp.width * scale).coerceAtLeast(1f)
+                                            val drawH = (bmp.height * scale).coerceAtLeast(1f)
+                                            if (currentY + drawH + 16f > maxBottomY && currentY > marginY + 1f) {
+                                                canvas = startNewPage()
+                                            }
+                                            val left = marginX + (contentWidth - drawW) / 2f
+                                            val dstRect = RectF(left, currentY + 8f, left + drawW, currentY + 8f + drawH)
+                                            canvas.drawBitmap(bmp, null, dstRect, Paint(Paint.FILTER_BITMAP_FLAG))
+                                            bmp.recycle()
+                                            currentY += drawH + 24f
+                                        }
+                                    }
+                                }
+                            }
+
+                            currentPage?.let { pdfDoc.finishPage(it) }
+                            val outFile = File(outputPath)
+                            outFile.parentFile?.mkdirs()
+                            FileOutputStream(outFile).use { outStream ->
+                                pdfDoc.writeTo(outStream)
+                            }
+                            pdfDoc.close()
+                            runOnUiThread { result.success(outFile.absolutePath) }
                         } catch (e: Exception) {
-                            runOnUiThread { result.error("HWP_ERR", e.message, null) }
+                            try { pdfDoc.close() } catch (_: Exception) {}
+                            runOnUiThread { result.error("DOC_PDF_ERR", e.message, null) }
                         }
                     }.start()
                 } else {

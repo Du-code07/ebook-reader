@@ -383,6 +383,11 @@ class UserManualScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _buildIconGuideRow(
+              iconWidget: const Icon(Icons.draw, color: Colors.white, size: 22),
+              title: _tr('손으로 글씨 쓰기 토글 (색상 왼쪽 펜 아이콘)', 'Finger Writing Toggle (Pen Icon Left of Colors)', '手指书写开关（颜色左侧画笔图标）', '指で手書き切替（色パレット左のペンアイコン）'),
+              desc: _tr('S펜 필기 바에서 색상 원 왼쪽의 펜 아이콘을 누르면 아이콘이 흰색으로 바뀌며 손가락으로 글씨를 쓸 수 있습니다. 손으로 글씨를 쓰는 동안에는 손터치 페이지 넘김이 자동으로 잠깁니다.', 'Tap the pen icon to the left of the colors to turn it white and write with your finger. Touch page turning is automatically locked while finger writing is active.', '点击颜色左侧的画笔图标使其变为白色即可用手指书写，书写期间自动锁定触屏翻页。', '色の左にあるペンアイコンを押すと白色に変わり指で手書きできます。手書き中は指でのページめくりが自動ロックされます。'),
+          ),
+            _buildIconGuideRow(
               iconWidget: const Icon(Icons.cleaning_services_outlined, color: Colors.amber, size: 22),
               title: _tr('S펜 지우개 / 색상(6색) / 선 굵기 조절(기본 2.0)', 'S Pen Eraser, 6 Colors & Width Slider (Default 2.0)', 'S Pen 橡皮擦、6种颜色与粗细调节 (默认 2.0)', 'Sペン消しゴム・6色パレット・太さ調節 (基本 2.0)'),
               desc: _tr('노란·빨간·하늘·초록·흰색·검은색 펜 선택과 선 굵기 슬라이더(기본 2.0pt), S펜 지우개(🧹), 텍스트 메모(📝), 현재 페이지 필기 전체 지우기(🗑)를 제공합니다.', 'Pick from 6 colors (including White & Black), adjust stroke width (default 2.0), toggle Eraser, add text notes, or clear page strokes.', '支持6种颜色（含黑白）、线条粗细滑块（默认 2.0）、橡皮擦、文字备注及清空当前页手写。', '6色(白・黒含む)、太さスライダー(基本2.0)、消しゴム、テキストメモ、ページ手書き全消去が使えます。'),
@@ -449,14 +454,67 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
   bool _isSelectionMode = false;
   final Set<String> _selectedFilePaths = {};
+  final ScrollController _bookshelfScrollController = ScrollController();
+  final Map<String, GlobalKey> _fileRowKeys = {};
+  bool _isDragSelecting = false;
+  bool _dragTargetSelectState = true;
+  String? _lastDragTouchedPath;
+  String? _pointerDownRowPath;
+  Offset? _pointerDownGlobalPos;
 
-  // 7 & 8. 삼성 노트(.sdocx, .spd) 및 .zip 제외 / 워드(.docx, .doc) 및 한글(.hwpx, .hwp) 정식 지원!
+  // 7 & 8. 삼성 노트(.sdocx, .spd) 및 .zip 제외 / 워드(.docx, .doc) 및 한글(.hwpx, .hwp)은 PDF로 변환하여 업로드!
   static const _supportedExts = [
     'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
     'docx', 'doc', 'hwpx', 'hwp'
   ];
   static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
-  static const _docConvertExts = ['txt', 'docx', 'doc', 'hwpx', 'hwp'];
+  static const _pdfConvertDocExts = ['docx', 'doc', 'hwpx', 'hwp'];
+  static const _docConvertExts = ['txt'];
+
+  String? _findFileRowPathAtGlobalPos(Offset globalPos) {
+    for (final entry in _fileRowKeys.entries) {
+      final ctx = entry.value.currentContext;
+      if (ctx == null) continue;
+      final box = ctx.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize || !box.attached) continue;
+      final topLeft = box.localToGlobal(Offset.zero);
+      final rect = topLeft & box.size;
+      if (rect.contains(globalPos)) {
+        return entry.key;
+      }
+    }
+    return null;
+  }
+
+  void _applyDragSelectionAtGlobalPos(Offset globalPos) {
+    final hitPath = _findFileRowPathAtGlobalPos(globalPos);
+    if (hitPath != null && hitPath != _lastDragTouchedPath) {
+      _lastDragTouchedPath = hitPath;
+      setState(() {
+        if (_dragTargetSelectState) {
+          _selectedFilePaths.add(hitPath);
+        } else {
+          _selectedFilePaths.remove(hitPath);
+          if (_selectedFilePaths.isEmpty) {
+            _isSelectionMode = false;
+          }
+        }
+      });
+    }
+    if (_bookshelfScrollController.hasClients) {
+      final screenH = MediaQuery.of(context).size.height;
+      final pos = _bookshelfScrollController.position;
+      if (globalPos.dy < 160 && pos.pixels > pos.minScrollExtent) {
+        _bookshelfScrollController.jumpTo(
+          (pos.pixels - 12.0).clamp(pos.minScrollExtent, pos.maxScrollExtent),
+        );
+      } else if (globalPos.dy > screenH - 120 && pos.pixels < pos.maxScrollExtent) {
+        _bookshelfScrollController.jumpTo(
+          (pos.pixels + 12.0).clamp(pos.minScrollExtent, pos.maxScrollExtent),
+        );
+      }
+    }
+  }
 
   String _tr(String ko, String en, String zh, String ja) =>
       AppI18n.t(widget.appLang, ko: ko, en: en, zh: zh, ja: ja);
@@ -712,12 +770,68 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     final appDir = await getApplicationDocumentsDirectory();
     final importedFiles = <File>[];
 
-    for (final pf in validPicked) {
-      if (pf.path == null) continue;
-      final saved = await File(pf.path!).copy('${appDir.path}/${pf.name}');
-      final targetGrp = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
-      await StorageService.setBookGroup(saved.path, targetGrp);
-      importedFiles.add(saved);
+    final hasDocOrHwp = validPicked.any((pf) {
+      final ext = pf.name.split('.').last.toLowerCase();
+      return _pdfConvertDocExts.contains(ext);
+    });
+
+    if (hasDocOrHwp && mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          content: Row(
+            children: [
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  _tr(
+                    '워드/한글 문서를 표·사진 포함 PDF로 변환 중...',
+                    'Converting Word/HWP to PDF (with tables & images)...',
+                    '正在将 Word/HWP 文档转换为包含表格与图片的 PDF...',
+                    'Word/HWP文書を表・画像付きPDFに変換中...',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    try {
+      for (final pf in validPicked) {
+        if (pf.path == null) continue;
+        final ext = pf.name.split('.').last.toLowerCase();
+        final targetGrp = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
+
+        if (_pdfConvertDocExts.contains(ext)) {
+          final baseName = pf.name.replaceAll(
+            RegExp(r'\.(docx|doc|hwpx|hwp)$', caseSensitive: false),
+            '',
+          );
+          final targetPdfPath = '${appDir.path}/$baseName.pdf';
+          final convertedPdf = await TxtToEpubConverter.convertDocOrHwpToPdf(
+            File(pf.path!),
+            targetPdfPath: targetPdfPath,
+          );
+          await StorageService.setBookGroup(convertedPdf.path, targetGrp);
+          importedFiles.add(convertedPdf);
+        } else {
+          final saved = await File(pf.path!).copy('${appDir.path}/${pf.name}');
+          await StorageService.setBookGroup(saved.path, targetGrp);
+          importedFiles.add(saved);
+        }
+      }
+    } finally {
+      if (hasDocOrHwp && mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
     }
 
     await _loadLibrary();
@@ -1391,6 +1505,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           builder: (_) => ReaderScreen(filePath: file.path, bookTitle: displayName),
         ),
       );
+    } else if (_pdfConvertDocExts.contains(ext)) {
+      final pdfFile = await TxtToEpubConverter.convertDocOrHwpToPdf(file);
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => UniversalMediaReaderScreen(
+            files: [pdfFile],
+            title: displayName,
+            isPdf: true,
+          ),
+        ),
+      );
     } else if (_docConvertExts.contains(ext)) {
       final epubFile = await TxtToEpubConverter.convertDocumentToEpub(file);
       if (!mounted) return;
@@ -2054,12 +2181,60 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         ),
                       ),
                     )
-                  : ListView.separated(
-                      padding: const EdgeInsets.only(bottom: 88),
-                      itemCount: filteredBooks.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final file = filteredBooks[index];
+                  : Listener(
+                      behavior: HitTestBehavior.translucent,
+                      onPointerDown: (event) {
+                        if (_isSelectionMode) {
+                          _pointerDownGlobalPos = event.position;
+                          _pointerDownRowPath = _findFileRowPathAtGlobalPos(event.position);
+                          _lastDragTouchedPath = null;
+                        }
+                      },
+                      onPointerMove: (event) {
+                        if (!_isSelectionMode) return;
+                        if (!_isDragSelecting && _pointerDownGlobalPos != null) {
+                          if ((event.position - _pointerDownGlobalPos!).distance > 8.0) {
+                            setState(() {
+                              _isDragSelecting = true;
+                              _dragTargetSelectState = true;
+                              if (_pointerDownRowPath != null) {
+                                _selectedFilePaths.add(_pointerDownRowPath!);
+                                _lastDragTouchedPath = _pointerDownRowPath;
+                              }
+                            });
+                          }
+                        }
+                        if (_isDragSelecting) {
+                          _applyDragSelectionAtGlobalPos(event.position);
+                        }
+                      },
+                      onPointerUp: (_) {
+                        if (_isDragSelecting) {
+                          setState(() => _isDragSelecting = false);
+                        }
+                        _pointerDownGlobalPos = null;
+                        _pointerDownRowPath = null;
+                        _lastDragTouchedPath = null;
+                      },
+                      onPointerCancel: (_) {
+                        if (_isDragSelecting) {
+                          setState(() => _isDragSelecting = false);
+                        }
+                        _pointerDownGlobalPos = null;
+                        _pointerDownRowPath = null;
+                        _lastDragTouchedPath = null;
+                      },
+                      child: ListView.separated(
+                        controller: _bookshelfScrollController,
+                        physics: _isSelectionMode
+                            ? const NeverScrollableScrollPhysics()
+                            : const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.only(bottom: 88),
+                        itemCount: filteredBooks.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final file = filteredBooks[index];
+                          final rowKey = _fileRowKeys.putIfAbsent(file.path, () => GlobalKey());
                         final rawFileName = file.path.split(Platform.pathSeparator).last;
                         final displayFileName = _formatDisplayFileName(rawFileName);
                         final grp = _bookGroupMap[file.path] ?? '미분류';
@@ -2098,7 +2273,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                             ),
                           ),
                           onDismissed: (_) => _moveFileToTrash(file),
-                          child: ListTile(
+                          child: Container(
+                            key: rowKey,
+                            child: ListTile(
                             selected: isSelected,
                             leading: _isSelectionMode
                                 ? Checkbox(
@@ -2263,6 +2440,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                             onLongPress: () {
                               setState(() {
                                 _isSelectionMode = true;
+                                _isDragSelecting = true;
+                                _dragTargetSelectState = true;
+                                _lastDragTouchedPath = file.path;
                                 _selectedFilePaths.add(file.path);
                               });
                             },
@@ -2283,9 +2463,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                               }
                             },
                           ),
+                          ),
                         );
                       },
                     ),
+                      ),
             ),
           ],
         ),

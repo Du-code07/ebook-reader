@@ -19,6 +19,7 @@ import 'reader_screen.dart';
 /// 하위 PageView나 InteractiveViewer, WebView가 S펜 움직임으로 화면을 흔들거나 페이지를 넘기는 것을 100% 원천 차단합니다!
 /// 반면 일반 손가락 터치(PointerDeviceKind.touch)는 아예 거부(isPointerAllowed = false)하므로 손가락 스와이프로는 평소처럼 페이지가 부드럽게 넘어갑니다!
 class EagerStylusPanGestureRecognizer extends OneSequenceGestureRecognizer {
+  bool allowTouch = false;
   void Function(PointerDownEvent event)? onStylusDown;
   void Function(PointerMoveEvent event)? onStylusMove;
   void Function(PointerUpEvent event)? onStylusUp;
@@ -26,6 +27,11 @@ class EagerStylusPanGestureRecognizer extends OneSequenceGestureRecognizer {
 
   @override
   bool isPointerAllowed(PointerDownEvent event) {
+    if (allowTouch &&
+        (event.kind == PointerDeviceKind.touch ||
+            event.kind == PointerDeviceKind.mouse)) {
+      return true;
+    }
     return event.kind == PointerDeviceKind.stylus ||
         event.kind == PointerDeviceKind.invertedStylus;
   }
@@ -60,6 +66,7 @@ class EagerStylusPanGestureRecognizer extends OneSequenceGestureRecognizer {
 
 class StylusOnlyDrawingLayer extends StatelessWidget {
   final bool enabled;
+  final bool allowTouch;
   final void Function(PointerDownEvent event) onStylusDown;
   final void Function(PointerMoveEvent event) onStylusMove;
   final void Function(PointerUpEvent event) onStylusUp;
@@ -69,6 +76,7 @@ class StylusOnlyDrawingLayer extends StatelessWidget {
   const StylusOnlyDrawingLayer({
     super.key,
     required this.enabled,
+    this.allowTouch = false,
     required this.onStylusDown,
     required this.onStylusMove,
     required this.onStylusUp,
@@ -89,6 +97,7 @@ class StylusOnlyDrawingLayer extends StatelessWidget {
           () => EagerStylusPanGestureRecognizer(),
           (EagerStylusPanGestureRecognizer instance) {
             instance
+              ..allowTouch = allowTouch
               ..onStylusDown = onStylusDown
               ..onStylusMove = onStylusMove
               ..onStylusUp = onStylusUp
@@ -199,6 +208,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   bool _isMemoMode = false;
   bool _isEraserMode = false;
+  bool _allowFingerDrawing = false;
   bool _isStylusDown = false;
   int _activeDrawingPageIndex = 0;
   final Map<int, List<MemoStroke>> _memoStrokesByPage = {};
@@ -1230,6 +1240,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               Positioned.fill(
                 child: StylusOnlyDrawingLayer(
                   enabled: _isMemoMode,
+                  allowTouch: _allowFingerDrawing,
                   onStylusDown: (_) {},
                   onStylusMove: (_) {},
                   onStylusUp: (_) {},
@@ -1245,6 +1256,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 height: drawHeight,
                 child: StylusOnlyDrawingLayer(
                   enabled: _isMemoMode,
+                  allowTouch: _allowFingerDrawing,
                   onStylusDown: (event) {
                     final bool useEraser =
                         _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
@@ -1698,7 +1710,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     key: ValueKey('pageview_spread_$isSpread'),
                     controller: _pageController,
                     reverse: _isMangaRtlMode,
-                    physics: (_isTouchLocked || (_isMemoMode && _isStylusDown))
+                    physics: (_isTouchLocked || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)))
                         ? const NeverScrollableScrollPhysics()
                         : const BouncingScrollPhysics(),
                   itemCount: viewItemCount,
@@ -1825,10 +1837,21 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            _isEraserMode ? Icons.auto_fix_normal : Icons.draw,
-                            color: Colors.amber,
-                            size: 18,
+                          IconButton(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            constraints: const BoxConstraints(),
+                            icon: Icon(
+                              _isEraserMode ? Icons.auto_fix_normal : Icons.draw,
+                              color: _allowFingerDrawing ? Colors.white : Colors.amber,
+                              size: 20,
+                            ),
+                            tooltip: _tr(
+                              '손으로 글씨 쓰기 (활성 시 흰색 / 페이지 넘김 잠금)',
+                              'Finger Writing (White when active / Locks page turn)',
+                              '手指书写（开启时变白 / 锁定翻页）',
+                              '指で手書き（ONで白色 / ページめくりロック）',
+                            ),
+                            onPressed: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
                           ),
                           const SizedBox(width: 6),
                           ...[
@@ -1909,6 +1932,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             onPressed: () => setState(() {
                               _isMemoMode = false;
                               _isEraserMode = false;
+                              _allowFingerDrawing = false;
                             }),
                             child: Text(_tr('완료', 'Done', '完成', '完了'), style: const TextStyle(color: Colors.amber)),
                           ),
@@ -1964,6 +1988,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                           setState(() {
                             _isMemoMode = !_isMemoMode;
                             _isEraserMode = false;
+                            if (!_isMemoMode) _allowFingerDrawing = false;
                           });
                         },
                       ),

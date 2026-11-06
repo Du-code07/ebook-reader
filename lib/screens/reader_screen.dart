@@ -109,6 +109,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   // 1 & 3. S펜 전용 페이지별 필기 및 지우개 상태 (필기 모드에서 S펜이 닿으면 화면 이동 100% 차단 + 해당 페이지에서만 필기 표시)
   bool _isMemoMode = false;
   bool _isEraserMode = false;
+  bool _allowFingerDrawing = false;
   bool _isStylusDown = false;
   String _currentPageLocationKey = 'page_0';
   List<MemoStroke> _epubStrokes = [];
@@ -1459,7 +1460,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   bottom: (bottomPadding > 0 ? bottomPadding : 8.0) + 20.0,
                 ),
                 child: IgnorePointer(
-                  ignoring: _isTouchLocked || (_isMemoMode && _isStylusDown),
+                  ignoring: _isTouchLocked || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)),
                   child: Listener(
                     behavior: HitTestBehavior.translucent,
                     onPointerDown: _handlePointerDown,
@@ -1560,6 +1561,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     final double drawHeight = constraints.maxHeight;
                     return StylusOnlyDrawingLayer(
                       enabled: _isMemoMode,
+                      allowTouch: _allowFingerDrawing,
                       onStylusDown: (event) {
                         if (!_isStylusDown) {
                           setState(() => _isStylusDown = true);
@@ -1712,10 +1714,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
-                              _isEraserMode ? Icons.auto_fix_normal : Icons.draw,
-                              color: Colors.amber,
-                              size: 18,
+                            IconButton(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              constraints: const BoxConstraints(),
+                              icon: Icon(
+                                _isEraserMode ? Icons.auto_fix_normal : Icons.draw,
+                                color: _allowFingerDrawing ? Colors.white : Colors.amber,
+                                size: 20,
+                              ),
+                              tooltip: _tr(
+                                '손으로 글씨 쓰기 (활성 시 흰색 / 페이지 넘김 잠금)',
+                                'Finger Writing (White when active / Locks page turn)',
+                                '手指书写（开启时变白 / 锁定翻页）',
+                                '指で手書き（ONで白色 / ページめくりロック）',
+                              ),
+                              onPressed: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
                             ),
                             const SizedBox(width: 6),
                             ...[
@@ -1797,6 +1810,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                               onPressed: () => setState(() {
                                 _isMemoMode = false;
                                 _isEraserMode = false;
+                                _allowFingerDrawing = false;
                                 _isStylusDown = false;
                               }),
                               child: Text(_tr('완료', 'Done', '完成', '完了'), style: const TextStyle(color: Colors.amber)),
@@ -1859,6 +1873,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                             setState(() {
                               _isMemoMode = !_isMemoMode;
                               _isEraserMode = false;
+                              if (!_isMemoMode) _allowFingerDrawing = false;
                               _isStylusDown = false;
                             });
                           },
