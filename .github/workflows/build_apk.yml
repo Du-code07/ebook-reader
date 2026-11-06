@@ -110,6 +110,7 @@ jobs:
             echo "    implementation 'com.google.mlkit:text-recognition-korean:16.0.1'" >> android/app/build.gradle
             echo "    implementation 'com.google.mlkit:text-recognition-devanagari:16.0.1'" >> android/app/build.gradle
             echo "    implementation 'com.google.mlkit:translate:17.0.3'" >> android/app/build.gradle
+            echo "    implementation 'kr.dogfoot:hwplib:1.1.8'" >> android/app/build.gradle
             echo "}" >> android/app/build.gradle
           fi
 
@@ -124,6 +125,7 @@ jobs:
             echo '    implementation("com.google.mlkit:text-recognition-korean:16.0.1")' >> android/app/build.gradle.kts
             echo '    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")' >> android/app/build.gradle.kts
             echo '    implementation("com.google.mlkit:translate:17.0.3")' >> android/app/build.gradle.kts
+            echo '    implementation("kr.dogfoot:hwplib:1.1.8")' >> android/app/build.gradle.kts
             echo "}" >> android/app/build.gradle.kts
           fi
 
@@ -176,3 +178,4 @@ jobs:
         with:
           name: my-ebook-reader-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
