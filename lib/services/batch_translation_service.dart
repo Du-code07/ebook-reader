@@ -71,6 +71,90 @@ class BatchTranslationService {
     return activeTasks.value.containsKey(bookKey);
   }
 
+  /// OCR 오인식 노이즈 정리 (일본어/중국어 세로쓰기 만화에서 자주 섞이는 특수기호 노이즈 제거)
+  static String cleanOcrSourceText(String raw, String sourceLang) {
+    String s = raw.trim();
+    if (s.isEmpty) return '';
+    if (sourceLang == 'ja' || sourceLang == 'zh' || sourceLang == 'zh-cn') {
+      s = s
+          .replaceAll(RegExp(r'[|｜¦]'), '')
+          .replaceAll('ـ', 'ー')
+          .replaceAll(RegExp(r'\s+'), '');
+    }
+    return s.trim();
+  }
+
+  /// 한국어 띄어쓰기 및 맞춤법 자동 교정기
+  static String polishKoreanSpacingAndSpelling(String raw) {
+    if (raw.trim().isEmpty) return '';
+    String s = raw.trim();
+
+    s = s
+        .replaceAll('</끝>', '')
+        .replaceAll(RegExp(r'###.*'), '')
+        .replaceAll('「', '"')
+        .replaceAll('」', '"')
+        .replaceAll('『', '"')
+        .replaceAll('』', '"')
+        .replaceAll('…', '...')
+        .replaceAll(RegExp(r'[ 	]+'), ' ');
+
+    // 문장부호 뒤 자동 띄어쓰기 보정
+    s = s.replaceAllMapped(
+      RegExp(r'([,?!])([가-힣a-zA-Z0-9])'),
+      (m) => '${m.group(1)} ${m.group(2)}',
+    );
+    s = s.replaceAllMapped(
+      RegExp(r'([.]{1})([가-힣])'),
+      (m) => '.${m.group(2) != null ? " " + m.group(2)! : ""}',
+    );
+
+    // 자주 틀리는 한국어 맞춤법 및 어색한 번역투 자동 교정
+    const corrections = <String, String>{
+      '안되요': '안 돼요',
+      '안되니까': '안 되니까',
+      '안됩니다': '안 됩니다',
+      '안되는': '안 되는',
+      '되요': '돼요',
+      '됬': '됐',
+      '어떻해': '어떡해',
+      '어떻게 해': '어떡해',
+      '할께': '할게',
+      '줄께': '줄게',
+      '갈께': '갈게',
+      '볼께': '볼게',
+      '할꺼야': '할 거야',
+      '될꺼야': '될 거야',
+      '있을꺼야': '있을 거야',
+      '거에요': '거예요',
+      '뭐에요': '뭐예요',
+      '아니에요': '아니에요',
+      '왜냐면': '왜냐하면',
+      '그치만': '그렇지만',
+      '어쨋든': '어쨌든',
+      '어쨌든간에': '어쨌든',
+      '금새': '금세',
+      '왠지': '왠지',
+      '웬지': '왠지',
+      '몇일': '며칠',
+      '오랫만에': '오랜만에',
+      '일찌기': '일찍이',
+      '더우기': '더욱이',
+      '깨달음': '깨달음',
+    };
+    corrections.forEach((wrong, right) {
+      s = s.replaceAll(wrong, right);
+    });
+
+    // 의존명사 띄어쓰기 교정 (할수 -> 할 수, 한것 -> 한 것 등)
+    s = s.replaceAllMapped(
+      RegExp(r'([가-힣][을를은는던진할될갈볼줄])(수|것|줄|리|지|데|바)(?=[가-힣\s.,?!]|$)'),
+      (m) => '${m.group(1)} ${m.group(2)}',
+    );
+
+    return s.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
   // 1. OCR에 사용 중인 Google ML Kit의 공식 온디바이스 번역 라이브러리(com.google.mlkit:translate) 연동 채널
   static const MethodChannel _mlkitTranslateChannel = MethodChannel('ebook_reader/mlkit_translate');
 
@@ -116,7 +200,7 @@ class BatchTranslationService {
     if (rawSentences.isEmpty) return [];
 
     final List<String> cleanedList = rawSentences
-        .map((s) => cleanOcrSourceText(s, sourceLang))
+        .map<String>((s) => cleanOcrSourceText(s, sourceLang))
         .toList();
 
     try {
@@ -130,7 +214,7 @@ class BatchTranslationService {
       );
       if (batchRes != null && batchRes.length == rawSentences.length) {
         return batchRes
-            .map((e) => targetLang == 'ko'
+            .map<String>((e) => targetLang == 'ko'
                 ? polishKoreanSpacingAndSpelling(e.toString())
                 : e.toString().trim())
             .toList();
