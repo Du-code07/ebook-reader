@@ -172,7 +172,7 @@ class UniversalMediaReaderScreen extends StatefulWidget {
   State<UniversalMediaReaderScreen> createState() => _UniversalMediaReaderScreenState();
 }
 
-class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen> {
+class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen> with WidgetsBindingObserver {
   static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
   PageController? _pageController;
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
@@ -190,6 +190,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _lastIsSpreadMode = false;
 
   bool _isTouchLocked = false;
+  bool _useShakeLock = true;
+  bool _useVolumeComboLock = true;
 
   bool _useVolumeTurn = true;
   bool _useQuickNavTurn = false;
@@ -203,7 +205,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   final Map<int, String> _memoNotesByPage = {};
   final List<Offset> _activeStrokePoints = [];
   Color _penColor = Colors.amber;
-  final double _penWidth = 3.2;
+  double _penWidth = 3.2;
 
   String _footerInfoMode = 'both';
   String _progressBarPos = 'right';
@@ -217,9 +219,21 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     BatchTranslationService.translationCompletedEvent.addListener(_onBackgroundTranslationFinished);
     _initMedia();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_isTouchLocked &&
+        (state == AppLifecycleState.paused ||
+            state == AppLifecycleState.inactive ||
+            state == AppLifecycleState.detached ||
+            state == AppLifecycleState.hidden)) {
+      setState(() => _isTouchLocked = false);
+    }
   }
 
   void _onBackgroundTranslationFinished() {
@@ -240,29 +254,29 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
-  void _unlockTouchScreenByVolumeCombo() {
-    if (!_isTouchLocked || !mounted) return;
-    setState(() {
-      _isTouchLocked = false;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('음량 버튼 동시 입력으로 화면 터치 잠금이 해제되었습니다.'),
-        duration: Duration(seconds: 1),
-      ),
-    );
-  }
+  void _toggleTouchScreenLock({required bool byVolume}) {
+    if (!mounted) return;
+    if (byVolume && !_useVolumeComboLock) return;
+    if (!byVolume && !_useShakeLock) return;
 
-  void _lockTouchScreen() {
+    final nextLocked = !_isTouchLocked;
     setState(() {
-      _isTouchLocked = true;
-      _showControls = false;
-      _isMemoMode = false;
+      _isTouchLocked = nextLocked;
+      if (nextLocked) {
+        _showControls = false;
+        _isMemoMode = false;
+        _isStylusDown = false;
+      }
     });
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('화면 터치가 잠겼습니다. (음량 버튼 2개를 동시에 누르면 잠금 해제)'),
-        duration: Duration(seconds: 2),
+      SnackBar(
+        content: Text(
+          nextLocked
+              ? (byVolume ? '음량 버튼 동시 입력으로 화면이 잠겼습니다.' : '흔들기 감지로 화면이 잠겼습니다.')
+              : (byVolume ? '음량 버튼 동시 입력으로 화면 잠금이 해제되었습니다.' : '흔들기 감지로 화면 잠금이 해제되었습니다.'),
+        ),
+        duration: const Duration(seconds: 1),
       ),
     );
   }
@@ -309,13 +323,18 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     return matchesA.length.compareTo(matchesB.length);
   }
 
-  /// 4. 같은 그룹 내의 다음 파일로 즉시 이동
-  Future<void> _openNextFileInSameGroup() async {
+  /// 8. 같은 그룹 내의 이전(step: -1) 또는 다음(step: 1) 파일로 즉시 이동
+  Future<void> _openAdjacentFileInSameGroup(int step) async {
     final currentPath = widget.files.first.path;
     final currentGroup = await StorageService.getBookGroup(currentPath);
+    final favs = await StorageService.getFavoriteBooks();
     final dir = await getApplicationDocumentsDirectory();
-    const supportedExts = ['epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz', 'zip'];
+    const supportedExts = [
+      'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz', 'zip',
+      'sdocx', 'spd', 'docx', 'doc', 'hwpx', 'hwp'
+    ];
     const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
+    const docConvertExts = ['txt', 'docx', 'doc', 'hwpx', 'hwp'];
 
     final allFiles = <File>[];
     for (final e in dir.listSync()) {
@@ -332,10 +351,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       }
     }
 
-    allFiles.sort((a, b) => _naturalCompare(
-          a.path.split(Platform.pathSeparator).last,
-          b.path.split(Platform.pathSeparator).last,
-        ));
+    allFiles.sort((a, b) {
+      final aFav = favs.contains(a.path);
+      final bFav = favs.contains(b.path);
+      if (aFav != bFav) return aFav ? -1 : 1;
+      return _naturalCompare(
+        a.path.split(Platform.pathSeparator).last,
+        b.path.split(Platform.pathSeparator).last,
+      );
+    });
 
     final currentPathsSet = widget.files.map((f) => f.path).toSet();
     final curIdx = allFiles.indexWhere((f) => f.path == currentPath);
@@ -343,7 +367,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('현재 그룹("$currentGroup")에 이동할 다음 파일이 없습니다.'),
+            content: Text('현재 그룹("$currentGroup")에 이동할 다른 파일이 없습니다.'),
             duration: const Duration(seconds: 1),
           ),
         );
@@ -351,24 +375,25 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       return;
     }
 
-    File? nextFile;
-    for (int offset = 1; offset < allFiles.length; offset++) {
-      final candidate = allFiles[(curIdx + offset) % allFiles.length];
+    File? targetFile;
+    for (int i = 1; i < allFiles.length; i++) {
+      final idx = (curIdx + step * i + allFiles.length * 10) % allFiles.length;
+      final candidate = allFiles[idx];
       if (!currentPathsSet.contains(candidate.path)) {
-        nextFile = candidate;
+        targetFile = candidate;
         break;
       }
     }
 
-    if (nextFile == null || !mounted) return;
+    if (targetFile == null || !mounted) return;
 
-    final nextName = nextFile.path.split(Platform.pathSeparator).last;
+    final nextName = targetFile.path.split(Platform.pathSeparator).last;
     final nextExt = nextName.split('.').last.toLowerCase();
 
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('다음 파일 열기: $nextName'),
+        content: Text('${step < 0 ? "이전" : "다음"} 파일 열기: $nextName'),
         duration: const Duration(milliseconds: 900),
       ),
     );
@@ -377,11 +402,36 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => ReaderScreen(filePath: nextFile!.path, bookTitle: nextName),
+          builder: (_) => ReaderScreen(filePath: targetFile!.path, bookTitle: nextName),
         ),
       );
-    } else if (nextExt == 'txt') {
-      final epubFile = await TxtToEpubConverter.convertTxtToEpub(nextFile);
+    } else if (nextExt == 'sdocx' || nextExt == 'spd') {
+      final noteImages = await TxtToEpubConverter.extractSamsungNoteImagesIfPresent(targetFile);
+      if (!mounted) return;
+      if (noteImages.isNotEmpty) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => UniversalMediaReaderScreen(
+              files: noteImages,
+              title: nextName,
+              isPdf: false,
+              customBookKey: targetFile!.path,
+            ),
+          ),
+        );
+      } else {
+        final epubFile = await TxtToEpubConverter.convertDocumentToEpub(targetFile);
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ReaderScreen(filePath: epubFile.path, bookTitle: nextName),
+          ),
+        );
+      }
+    } else if (docConvertExts.contains(nextExt)) {
+      final epubFile = await TxtToEpubConverter.convertDocumentToEpub(targetFile);
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
@@ -394,7 +444,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         context,
         MaterialPageRoute(
           builder: (_) => UniversalMediaReaderScreen(
-            files: [nextFile!],
+            files: [targetFile!],
             title: nextName,
             isPdf: true,
           ),
@@ -405,9 +455,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         final fExt = f.path.split('.').last.toLowerCase();
         return imageExts.contains(fExt);
       }).toList();
-      final targetList = siblingImages.length > 1 ? siblingImages : [nextFile];
+      final targetList = siblingImages.length > 1 ? siblingImages : [targetFile];
       final bookKey = targetList.first.path;
-      final clickedIdx = targetList.indexWhere((f) => f.path == nextFile!.path);
+      final clickedIdx = targetList.indexWhere((f) => f.path == targetFile!.path);
       if (clickedIdx >= 0) {
         await StorageService.saveLastPosition(bookKey, clickedIdx.toString());
       }
@@ -428,7 +478,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         context,
         MaterialPageRoute(
           builder: (_) => UniversalMediaReaderScreen(
-            files: [nextFile!],
+            files: [targetFile!],
             title: nextName,
             isPdf: false,
           ),
@@ -441,6 +491,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     try {
       _enableTwoPageInLandscape = await StorageService.getTwoPageLandscape();
       _isMangaRtlMode = await StorageService.getReadingDirectionRtl();
+      _useShakeLock = await StorageService.getUseShakeLock();
+      _useVolumeComboLock = await StorageService.getUseVolumeComboLock();
       _useVolumeTurn = await StorageService.getUseVolumeTurn();
       _useQuickNavTurn = await StorageService.getUseQuickNavTurn();
       _useSpenTurn = await StorageService.getUseSpenTurn();
@@ -559,7 +611,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       onVolumeDown: () {
         if (_useVolumeTurn) _stepPage(1);
       },
-      onVolumeBothUnlock: _unlockTouchScreenByVolumeCombo,
+      onVolumeBothUnlock: () => _toggleTouchScreenLock(byVolume: true),
+      onShakeToggle: () => _toggleTouchScreenLock(byVolume: false),
       onSpenSinglePress: () {
         if (_useSpenTurn) _stepPage(1, fastResponse: true);
       },
@@ -778,6 +831,33 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               children: [
                 const Text('뷰어 표시 설정', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
+                const Text('화면 잠금 설정 (동시 사용 가능)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    FilterChip(
+                      label: const Text('흔들어서 잠그고 끄기'),
+                      selected: _useShakeLock,
+                      onSelected: (val) async {
+                        await StorageService.setUseShakeLock(val);
+                        setState(() => _useShakeLock = val);
+                        setModalState(() {});
+                      },
+                    ),
+                    FilterChip(
+                      label: const Text('음량 버튼 동시에 눌러서 끄고 켜기'),
+                      selected: _useVolumeComboLock,
+                      onSelected: (val) async {
+                        await StorageService.setUseVolumeComboLock(val);
+                        setState(() => _useVolumeComboLock = val);
+                        setModalState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const Divider(height: 20),
                 const Text('페이지 전환 설정 (동시 사용 가능)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 6),
                 Wrap(
@@ -920,49 +1000,74 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       return;
     }
 
+    final targetLang = await StorageService.getAppLanguage();
+    final targetLangLabels = {
+      'ko': '한국어 (Korean)',
+      'en': '영어 (English)',
+      'zh': '중국어 (Chinese)',
+      'ja': '일본어 (Japanese)',
+    };
+    final targetLabel = targetLangLabels[targetLang] ?? '한국어 (Korean)';
+
     if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('번역'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('원문 언어를 선택하세요', style: TextStyle(fontSize: 13)),
-                const SizedBox(height: 8),
-                DropdownButton<String>(
-                  isExpanded: true,
-                  value: _sourceLangCode,
-                  items: const [
-                    DropdownMenuItem(value: 'ja', child: Text('일본어')),
-                    DropdownMenuItem(value: 'en', child: Text('영어')),
-                    DropdownMenuItem(value: 'zh-cn', child: Text('중국어')),
-                  ],
-                  onChanged: (val) {
-                    if (val == null) return;
-                    setModalState(() {
-                      _sourceLangCode = val;
-                      if (val == 'ja') {
+          title: const Text('Google ML Kit 공식 번역'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '원본 언어를 선택하면 현재 프로그램 설정 언어($targetLabel)로 번역합니다:',
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  ChoiceChip(
+                    label: const Text('일본어 (Japanese)'),
+                    selected: _sourceLangCode == 'ja',
+                    onSelected: (_) {
+                      setModalState(() {
+                        _sourceLangCode = 'ja';
                         _selectedScript = TextRecognitionScript.japanese;
-                      } else if (val == 'zh-cn') {
+                      });
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('중국어 (Chinese)'),
+                    selected: _sourceLangCode == 'zh',
+                    onSelected: (_) {
+                      setModalState(() {
+                        _sourceLangCode = 'zh';
                         _selectedScript = TextRecognitionScript.chinese;
-                      } else {
-                        _selectedScript = TextRecognitionScript.latin;
-                      }
-                    });
-                  },
-                ),
-              ],
-            ),
+                      });
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('한국어 (Korean)'),
+                    selected: _sourceLangCode == 'ko',
+                    onSelected: (_) {
+                      setModalState(() {
+                        _sourceLangCode = 'ko';
+                        _selectedScript = TextRecognitionScript.korean;
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ],
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
-            ElevatedButton(
+            ElevatedButton.icon(
+              icon: const Icon(Icons.translate, size: 18),
+              label: const Text('번역 시작'),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('번역 시작'),
             ),
           ],
         ),
@@ -970,12 +1075,18 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
 
     if (confirmed == true) {
-      _startBackgroundBatchTranslation(forceRetranslate: forceRetranslate);
+      _startBackgroundBatchTranslation(
+        forceRetranslate: forceRetranslate,
+        targetLang: targetLang,
+      );
     }
   }
 
-  /// 4. 번역 중 뒤로가기를 눌러 서재로 나가도 백그라운드에서 번역이 계속 진행되며, 완료 시 실시간 반영!
-  void _startBackgroundBatchTranslation({bool forceRetranslate = false}) {
+  /// 1 & 4. Google ML Kit 공식 번역기로 설정 언어(targetLang)로 백그라운드 번역
+  void _startBackgroundBatchTranslation({
+    bool forceRetranslate = false,
+    required String targetLang,
+  }) {
     final String key = _bookKey;
     final List<File> pages = List<File>.from(_imagePages);
     final String lang = _sourceLangCode;
@@ -983,21 +1094,19 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('백그라운드 사전 번역이 시작되었습니다. (뒤로가기를 눌러도 계속 번역됩니다)'),
+        content: Text('Google ML Kit 백그라운드 번역이 시작되었습니다. (뒤로가기를 눌러도 유지됩니다)'),
         duration: Duration(seconds: 2),
       ),
     );
 
-    // unawaited 백그라운드 실행
     BatchTranslationService.preTranslateAllImages(
       bookKey: key,
       imageFiles: pages,
-      targetLang: 'ko',
+      targetLang: targetLang,
       sourceLang: lang,
       script: scr,
       forceRetranslate: forceRetranslate,
       onProgress: (c, t, s) {
-        // 한 페이지씩 번역될 때마다 현재 열려 있는 뷰어에도 즉시 캐시 반영
         StorageService.getImageBubbleCache(key, c - 1).then((cached) {
           if (cached != null && mounted) {
             setState(() {
@@ -1486,7 +1595,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_upward, color: Colors.amber, size: 19),
+                icon: const Icon(Icons.arrow_back, color: Colors.amber, size: 19),
                 tooltip: '이전 페이지',
                 visualDensity: VisualDensity.compact,
                 constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
@@ -1495,7 +1604,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
               Container(width: 1, height: 18, color: Colors.white24),
               IconButton(
-                icon: const Icon(Icons.arrow_downward, color: Colors.amber, size: 19),
+                icon: const Icon(Icons.arrow_forward, color: Colors.amber, size: 19),
                 tooltip: '다음 페이지',
                 visualDensity: VisualDensity.compact,
                 constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
@@ -1511,6 +1620,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     BatchTranslationService.translationCompletedEvent.removeListener(_onBackgroundTranslationFinished);
     _volumeKeyService.stopListening();
     _pageController?.dispose();
@@ -1546,7 +1656,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final int viewItemCount = isSpread ? ((_totalPages + 1) ~/ 2) : _totalPages;
     final String footerText = _formatFooterText(isSpread);
 
-    return Scaffold(
+    return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
+        if (_isTouchLocked) {
+          _isTouchLocked = false;
+        }
+      },
+      child: Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         fit: StackFit.expand,
@@ -1713,33 +1829,57 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             size: 18,
                           ),
                           const SizedBox(width: 6),
-                          Text(
-                            _isEraserMode ? 'S펜 지우개' : 'S펜 필기 (손터치: 페이지 이동)',
-                            style: const TextStyle(color: Colors.white, fontSize: 11),
-                          ),
-                          const SizedBox(width: 8),
-                          ...[Colors.amber, Colors.redAccent, Colors.lightBlueAccent, Colors.greenAccent]
-                              .map((c) => GestureDetector(
-                                    onTap: () => setState(() {
-                                      _penColor = c;
-                                      _isEraserMode = false;
-                                    }),
-                                    child: Container(
-                                      margin: const EdgeInsets.symmetric(horizontal: 3),
-                                      width: 18,
-                                      height: 18,
-                                      decoration: BoxDecoration(
-                                        color: c,
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: (!_isEraserMode && _penColor == c)
-                                              ? Colors.white
-                                              : Colors.transparent,
-                                          width: 2,
-                                        ),
-                                      ),
+                          ...[
+                            Colors.amber,
+                            Colors.redAccent,
+                            Colors.lightBlueAccent,
+                            Colors.greenAccent,
+                            Colors.white,
+                            Colors.black,
+                          ].map((c) => GestureDetector(
+                                onTap: () => setState(() {
+                                  _penColor = c;
+                                  _isEraserMode = false;
+                                }),
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                                  width: 20,
+                                  height: 20,
+                                  decoration: BoxDecoration(
+                                    color: c,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: (!_isEraserMode && _penColor == c)
+                                          ? Colors.amberAccent
+                                          : Colors.white54,
+                                      width: (!_isEraserMode && _penColor == c) ? 2.2 : 1.0,
                                     ),
-                                  )),
+                                  ),
+                                ),
+                              )),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.line_weight, color: Colors.white70, size: 15),
+                          SizedBox(
+                            width: 82,
+                            child: SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                trackHeight: 2.2,
+                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.5),
+                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 10.0),
+                              ),
+                              child: Slider(
+                                value: _penWidth.clamp(1.0, 14.0).toDouble(),
+                                min: 1.0,
+                                max: 14.0,
+                                activeColor: Colors.amber,
+                                onChanged: (v) => setState(() => _penWidth = v),
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${_penWidth.toStringAsFixed(1)}',
+                            style: const TextStyle(color: Colors.white70, fontSize: 10),
+                          ),
                           const SizedBox(width: 4),
                           IconButton(
                             icon: Icon(
@@ -1811,14 +1951,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                           },
                         ),
                       IconButton(
-                        icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
-                        tooltip: '다음 파일로 이동 (같은 그룹)',
-                        onPressed: _openNextFileInSameGroup,
+                        icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 22),
+                        tooltip: '이전 파일로 이동 (같은 그룹)',
+                        onPressed: () => _openAdjacentFileInSameGroup(-1),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.screen_lock_portrait, color: Colors.white, size: 20),
-                        tooltip: '화면 터치 잠금',
-                        onPressed: _lockTouchScreen,
+                        icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
+                        tooltip: '다음 파일로 이동 (같은 그룹)',
+                        onPressed: () => _openAdjacentFileInSameGroup(1),
                       ),
                       IconButton(
                         icon: Icon(
@@ -1909,6 +2049,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           if (_useQuickNavTurn && !_isTouchLocked && _totalPages > 1)
             _buildQuickNavButtons(bottomInset),
         ],
+      ),
       ),
     );
   }

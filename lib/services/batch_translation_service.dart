@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:archive/archive.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:http/http.dart' as http;
@@ -70,93 +71,11 @@ class BatchTranslationService {
     return activeTasks.value.containsKey(bookKey);
   }
 
-  // 업로드해주신 Google 번역 Chrome 확장 프로그램(v2.0.18, bubble_compiled.js)의 공식 OnePlatform API 키 및 엔드포인트
-  static const String _chromeExtOnePlatformUrl = 'https://translate-pa.googleapis.com/v1/translate';
-  static const String _chromeExtAjaxSingleUrl = 'https://translate.googleapis.com/translate_a/single';
-  static const String _chromeExtApiKey = 'AIzaSyDLEeFI5OtFBwYBIoK_jj5m32rZK5CkCXA';
+  // 1. OCR에 사용 중인 Google ML Kit의 공식 온디바이스 번역 라이브러리(com.google.mlkit:translate) 연동 채널
+  static const MethodChannel _mlkitTranslateChannel = MethodChannel('ebook_reader/mlkit_translate');
 
-  /// OCR 오인식 노이즈 정리 (일본어 세로쓰기 만화에서 자주 섞이는 특수기호 노이즈 제거)
-  static String cleanOcrSourceText(String raw, String sourceLang) {
-    String s = raw.trim();
-    if (s.isEmpty) return '';
-    if (sourceLang == 'ja' || sourceLang == 'zh-cn') {
-      s = s
-          .replaceAll(RegExp(r'[|｜¦]'), '')
-          .replaceAll('ـ', 'ー')
-          .replaceAll(RegExp(r'\s+'), '');
-    }
-    return s.trim();
-  }
-
-  /// 한국어 띄어쓰기 및 맞춤법 자동 교정기
-  static String polishKoreanSpacingAndSpelling(String raw) {
-    if (raw.trim().isEmpty) return '';
-    String s = raw.trim();
-
-    s = s
-        .replaceAll('</끝>', '')
-        .replaceAll(RegExp(r'###.*'), '')
-        .replaceAll('「', '"')
-        .replaceAll('」', '"')
-        .replaceAll('『', '"')
-        .replaceAll('』', '"')
-        .replaceAll('…', '...')
-        .replaceAll(RegExp(r'[ \t]+'), ' ');
-
-    // 문장부호 뒤 자동 띄어쓰기 보정
-    s = s.replaceAllMapped(
-      RegExp(r'([,!?])[가-힣]'),
-      (m) => '${m.group(0)!.substring(0, 1)} ${m.group(0)!.substring(1)}',
-    );
-    s = s.replaceAllMapped(
-      RegExp(r'(\.{1,3})([가-힣])'),
-      (m) => '${m.group(1)} ${m.group(2)}',
-    );
-
-    // 자주 틀리는 한국어 맞춤법 및 의존명사 띄어쓰기 교정 규칙
-    final Map<RegExp, String> spellingRules = {
-      RegExp(r'안되([요네고지])'): '안 돼\$1',
-      RegExp(r'안된다'): '안 된다',
-      RegExp(r'안돼요'): '안 돼요',
-      RegExp(r'되서'): '돼서',
-      RegExp(r'되요'): '돼요',
-      RegExp(r'웬지'): '왠지',
-      RegExp(r'어떻해'): '어떡해',
-      RegExp(r'할수있'): '할 수 있',
-      RegExp(r'할수없'): '할 수 없',
-      RegExp(r'볼수있'): '볼 수 있',
-      RegExp(r'볼수없'): '볼 수 없',
-      RegExp(r'갈수있'): '갈 수 있',
-      RegExp(r'갈수없'): '갈 수 없',
-      RegExp(r'될수있'): '될 수 있',
-      RegExp(r'인것같'): '인 것 같',
-      RegExp(r'한것같'): '한 것 같',
-      RegExp(r'할것같'): '할 것 같',
-      RegExp(r'거에요'): '거예요',
-    };
-
-    spellingRules.forEach((pattern, replacement) {
-      s = s.replaceAllMapped(pattern, (m) {
-        String out = replacement;
-        for (int g = 1; g <= m.groupCount; g++) {
-          out = out.replaceAll('\$$g', m.group(g) ?? '');
-        }
-        return out;
-      });
-    });
-
-    // 조사 앞 불필요한 공백 제거
-    s = s.replaceAllMapped(
-      RegExp(r'([가-힣])\s+(은|는|이|가|을|를|에|에서|에게|으로|로|과|와|도|만|까지|부터)(?=\s|[,.!?]|$)'),
-      (m) => '${m.group(1)}${m.group(2)}',
-    );
-
-    s = s.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
-    return s;
-  }
-
-  /// Google 번역 Chrome 확장 프로그램(bubble_compiled.js)의 OnePlatform(/v1/translate) 및 GTX(/translate_a/single) 엔진 탑재
-  static Future<String> translateWithGoogleChromeExtensionEngine(
+  /// Google ML Kit 공식 온디바이스 번역 엔진으로 단문/문단 번역 (Japanese, Chinese, Korean, English -> 앱 설정 언어)
+  static Future<String> translateWithOfficialMlKit(
     String text, {
     required String sourceLang,
     required String targetLang,
@@ -164,153 +83,71 @@ class BatchTranslationService {
     final cleaned = cleanOcrSourceText(text, sourceLang);
     if (cleaned.isEmpty) return '';
 
-    // 1순위: Google 번역 Chrome 확장 프로그램의 OnePlatform API (translate-pa.googleapis.com/v1/translate)
     try {
-      final queryParams = <String, dynamic>{
-        'params.client': 'gtx',
-        'query.source_language': sourceLang,
-        'query.target_language': targetLang,
-        'query.display_language': 'ko',
-        'query.text': cleaned,
-        'key': _chromeExtApiKey,
-        'data_types': [
-          'TRANSLATION',
-          'SENTENCE_SPLITS',
-          'QUERY_CORRECTION_AUTOCORRECT',
-        ],
-      };
-
-      final uri = Uri.parse(_chromeExtOnePlatformUrl).replace(queryParameters: queryParams);
-      final resp = await http.get(
-        uri,
-        headers: {
-          'Accept': 'application/json, text/plain, */*',
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        },
-      ).timeout(const Duration(seconds: 6));
-
-      if (resp.statusCode == 200) {
-        final bodyStr = utf8.decode(resp.bodyBytes).trim();
-        final decoded = jsonDecode(bodyStr);
-        if (decoded is Map) {
-          if (decoded['translation'] != null && decoded['translation'].toString().trim().isNotEmpty) {
-            return polishKoreanSpacingAndSpelling(decoded['translation'].toString());
-          }
-          if (decoded['sentences'] is List) {
-            final parts = <String>[];
-            for (final s in decoded['sentences']) {
-              if (s is Map && s['trans'] != null) {
-                parts.add(s['trans'].toString().trim());
-              }
-            }
-            if (parts.isNotEmpty) {
-              return polishKoreanSpacingAndSpelling(parts.join(' '));
-            }
-          }
-        } else if (decoded is List && decoded.isNotEmpty) {
-          // JSPB 배열 형태로 반환될 때 첫 번째 필드(1: translation) 또는 두 번째 필드(2: sentences) 추출
-          if (decoded[0] is String && (decoded[0] as String).trim().isNotEmpty) {
-            return polishKoreanSpacingAndSpelling(decoded[0] as String);
-          }
-          if (decoded.length > 1 && decoded[1] is List) {
-            final parts = <String>[];
-            for (final s in decoded[1]) {
-              if (s is List && s.isNotEmpty && s[0] != null) {
-                parts.add(s[0].toString().trim());
-              }
-            }
-            if (parts.isNotEmpty) {
-              return polishKoreanSpacingAndSpelling(parts.join(' '));
-            }
-          }
-        }
-      }
-    } catch (_) {}
-
-    // 2순위: Google 번역 Chrome 확장 프로그램의 GTX Single API (자동 오타 교정 dt=qc & 문장 분리 dt=t & dj=1 포함)
-    try {
-      final uri = Uri.parse(_chromeExtAjaxSingleUrl).replace(queryParameters: {
-        'client': 'gtx',
-        'sl': sourceLang,
-        'tl': targetLang,
-        'hl': 'ko',
-        'dt': ['t', 'qc', 'bd'],
-        'dj': '1',
-        'ie': 'UTF-8',
-        'oe': 'UTF-8',
-        'source': 'bubble',
-        'q': cleaned,
+      final String? res = await _mlkitTranslateChannel.invokeMethod<String>('translateText', {
+        'text': cleaned,
+        'sourceLang': sourceLang,
+        'targetLang': targetLang,
       });
-      final resp = await http.get(
-        uri,
-        headers: {
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        },
-      ).timeout(const Duration(seconds: 6));
-
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(resp.bodyBytes));
-        if (data is Map && data['sentences'] is List) {
-          final parts = <String>[];
-          for (final seg in data['sentences']) {
-            if (seg is Map && seg['trans'] != null) {
-              parts.add(seg['trans'].toString().trim());
-            }
-          }
-          final result = parts.where((p) => p.isNotEmpty).join(' ');
-          if (result.isNotEmpty) return polishKoreanSpacingAndSpelling(result);
-        }
+      if (res != null && res.trim().isNotEmpty) {
+        return targetLang == 'ko' ? polishKoreanSpacingAndSpelling(res) : res.trim();
       }
     } catch (_) {}
 
+    // 온디바이스 모델 초기 다운로드 전이거나 예외 시에만 폴백
     try {
-      final res = await _translator.translate(cleaned, from: sourceLang, to: targetLang);
-      return polishKoreanSpacingAndSpelling(res.text);
+      final fallback = await _translator.translate(
+        cleaned,
+        from: sourceLang == 'zh' ? 'zh-cn' : sourceLang,
+        to: targetLang == 'zh' ? 'zh-cn' : targetLang,
+      );
+      return targetLang == 'ko' ? polishKoreanSpacingAndSpelling(fallback.text) : fallback.text.trim();
     } catch (_) {
       return cleaned;
     }
   }
 
-  /// 한 페이지 안의 모든 말풍선 문장들을 문맥이 이어지도록 한꺼번에 Google Chrome 확장 번역기로 번역!
-  /// (문맥 단절로 인해 반말/존댓말이나 대명사가 엉망이 되는 현상을 막아줍니다)
+  /// 페이지 내 모든 말풍선 대사를 Google ML Kit 공식 온디바이스 번역기로 일괄 번역
   static Future<List<String>> translatePageSentencesWithContext(
-    List<String> sentences, {
+    List<String> rawSentences, {
     required String sourceLang,
     required String targetLang,
   }) async {
-    if (sentences.isEmpty) return [];
-    final cleanedList = sentences.map((s) => cleanOcrSourceText(s, sourceLang)).toList();
+    if (rawSentences.isEmpty) return [];
 
-    // 여러 말풍선을 줄바꿈으로 묶어서 한 번에 번역 요청 후 다시 줄 단위로 분리하면 앞뒤 대사 문맥이 유지됨!
+    final List<String> cleanedList = rawSentences
+        .map((s) => cleanOcrSourceText(s, sourceLang))
+        .toList();
+
     try {
-      final joined = cleanedList.join('\n');
-      final translatedBlock = await translateWithGoogleChromeExtensionEngine(
-        joined,
-        sourceLang: sourceLang,
-        targetLang: targetLang,
+      final List<dynamic>? batchRes = await _mlkitTranslateChannel.invokeMethod<List<dynamic>>(
+        'translateBatch',
+        {
+          'texts': cleanedList,
+          'sourceLang': sourceLang,
+          'targetLang': targetLang,
+        },
       );
-      final lines = translatedBlock
-          .split('\n')
-          .map((l) => polishKoreanSpacingAndSpelling(l))
-          .where((l) => l.isNotEmpty)
-          .toList();
-      if (lines.length == sentences.length) {
-        return lines;
+      if (batchRes != null && batchRes.length == rawSentences.length) {
+        return batchRes
+            .map((e) => targetLang == 'ko'
+                ? polishKoreanSpacingAndSpelling(e.toString())
+                : e.toString().trim())
+            .toList();
       }
     } catch (_) {}
 
-    // 줄 개수가 다를 경우 각 말풍선별로 정확하게 개별 번역
-    final List<String> results = List.from(sentences);
-    for (int i = 0; i < sentences.length; i++) {
-      final tr = await translateWithGoogleChromeExtensionEngine(
-        sentences[i],
-        sourceLang: sourceLang,
-        targetLang: targetLang,
-      );
-      if (tr.isNotEmpty) {
-        results[i] = tr;
+    final List<String> results = [];
+    for (final s in cleanedList) {
+      if (s.isEmpty) {
+        results.add('');
+      } else {
+        final tr = await translateWithOfficialMlKit(
+          s,
+          sourceLang: sourceLang,
+          targetLang: targetLang,
+        );
+        results.add(tr);
       }
     }
     return results;

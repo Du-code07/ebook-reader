@@ -1,16 +1,20 @@
 package com.example.my_ebook_reader
 
-import android.content.Intent
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
-import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
@@ -18,22 +22,27 @@ import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.sqrt
 
-class MainActivity: FlutterActivity() {
+class MainActivity : FlutterActivity(), SensorEventListener {
     private val METHOD_CHANNEL = "ebook_reader/volume_control"
     private val EVENT_CHANNEL = "ebook_reader/volume_events"
     private val PDF_CHANNEL = "ebook_reader/pdf_renderer"
+    private val TRANSLATE_CHANNEL = "ebook_reader/mlkit_translate"
 
-    private var eventSink: EventChannel.EventSink? = null
     private var isVolumeInterceptEnabled = false
+    private var eventSink: EventChannel.EventSink? = null
 
-    // 음량 버튼 2개(UP + DOWN) 동시 누름 감지용 상태
     private var isVolUpPressed = false
     private var isVolDownPressed = false
     private var comboTriggered = false
@@ -41,14 +50,32 @@ class MainActivity: FlutterActivity() {
     private var pendingVolUpRunnable: Runnable? = null
     private var pendingVolDownRunnable: Runnable? = null
 
-    // S펜 호버 버튼 및 에어 액션 초고속 반응 처리용 타임스탬프
     private var lastSpenSingleTime = 0L
     private var wasStylusButtonPressed = false
     private var mediaSession: MediaSession? = null
 
+    // 3. 흔들어서 화면 잠그고 끄기(Shake to Lock/Unlock)용 가속도 센서
+    private var sensorManager: SensorManager? = null
+    private var accelerometer: Sensor? = null
+    private var lastShakeTimestamp = 0L
+    private var shakeCount = 0
+    private var firstShakeTime = 0L
+
+    private fun mapMlKitLangCode(code: String): String {
+        val lower = code.trim().lowercase()
+        return when {
+            lower.startsWith("ja") -> TranslateLanguage.JAPANESE
+            lower.startsWith("zh") -> TranslateLanguage.CHINESE
+            lower.startsWith("ko") -> TranslateLanguage.KOREAN
+            lower.startsWith("en") -> TranslateLanguage.ENGLISH
+            else -> TranslateLanguage.KOREAN
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         setupSpenMediaSession()
+        setupShakeSensor()
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -71,6 +98,108 @@ class MainActivity: FlutterActivity() {
                     eventSink = null
                 }
             })
+
+        // 1. Google ML Kit 공식 온디바이스 번역 채널 (Japanese, Chinese, Korean, English -> 설정 언어)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TRANSLATE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "translateText") {
+                    val text = call.argument<String>("text") ?: ""
+                    val sourceLang = call.argument<String>("sourceLang") ?: "ja"
+                    val targetLang = call.argument<String>("targetLang") ?: "ko"
+                    if (text.isBlank()) {
+                        result.success("")
+                        return@setMethodCallHandler
+                    }
+                    val srcCode = mapMlKitLangCode(sourceLang)
+                    val tgtCode = mapMlKitLangCode(targetLang)
+                    if (srcCode == tgtCode) {
+                        result.success(text)
+                        return@setMethodCallHandler
+                    }
+                    val options = TranslatorOptions.Builder()
+                        .setSourceLanguage(srcCode)
+                        .setTargetLanguage(tgtCode)
+                        .build()
+                    val translator = Translation.getClient(options)
+                    val conditions = DownloadConditions.Builder().build()
+                    translator.downloadModelIfNeeded(conditions)
+                        .addOnSuccessListener {
+                            translator.translate(text)
+                                .addOnSuccessListener { translated ->
+                                    translator.close()
+                                    result.success(translated)
+                                }
+                                .addOnFailureListener { e ->
+                                    translator.close()
+                                    result.error("TRANSLATE_ERR", e.message, null)
+                                }
+                        }
+                        .addOnFailureListener { e ->
+                            translator.close()
+                            result.error("MODEL_DOWNLOAD_ERR", e.message, null)
+                        }
+                } else if (call.method == "translateBatch") {
+                    val texts = call.argument<List<String>>("texts") ?: emptyList()
+                    val sourceLang = call.argument<String>("sourceLang") ?: "ja"
+                    val targetLang = call.argument<String>("targetLang") ?: "ko"
+                    if (texts.isEmpty()) {
+                        result.success(emptyList<String>())
+                        return@setMethodCallHandler
+                    }
+                    val srcCode = mapMlKitLangCode(sourceLang)
+                    val tgtCode = mapMlKitLangCode(targetLang)
+                    if (srcCode == tgtCode) {
+                        result.success(texts)
+                        return@setMethodCallHandler
+                    }
+                    val options = TranslatorOptions.Builder()
+                        .setSourceLanguage(srcCode)
+                        .setTargetLanguage(tgtCode)
+                        .build()
+                    val translator = Translation.getClient(options)
+                    val conditions = DownloadConditions.Builder().build()
+                    translator.downloadModelIfNeeded(conditions)
+                        .addOnSuccessListener {
+                            val translatedList = MutableList(texts.size) { "" }
+                            var remaining = texts.size
+                            for (index in texts.indices) {
+                                val item = texts[index]
+                                if (item.isBlank()) {
+                                    translatedList[index] = ""
+                                    remaining--
+                                    if (remaining == 0) {
+                                        translator.close()
+                                        result.success(translatedList)
+                                    }
+                                } else {
+                                    translator.translate(item)
+                                        .addOnSuccessListener { res ->
+                                            translatedList[index] = res
+                                            remaining--
+                                            if (remaining == 0) {
+                                                translator.close()
+                                                result.success(translatedList)
+                                            }
+                                        }
+                                        .addOnFailureListener {
+                                            translatedList[index] = item
+                                            remaining--
+                                            if (remaining == 0) {
+                                                translator.close()
+                                                result.success(translatedList)
+                                            }
+                                        }
+                                }
+                            }
+                        }
+                        .addOnFailureListener { e ->
+                            translator.close()
+                            result.error("MODEL_DOWNLOAD_ERR", e.message, null)
+                        }
+                } else {
+                    result.notImplemented()
+                }
+            }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -167,11 +296,47 @@ class MainActivity: FlutterActivity() {
             }
     }
 
-    // S펜 1번 클릭(다음 페이지) / 2번 연속 클릭(이전 페이지) 딜레이 0초 즉시 반응!
+    private fun setupShakeSensor() {
+        try {
+            sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+            accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        } catch (_: Exception) {}
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event == null || !isVolumeInterceptEnabled) return
+        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+            val x = event.values[0]
+            val y = event.values[1]
+            val z = event.values[2]
+            val gX = x / SensorManager.GRAVITY_EARTH
+            val gY = y / SensorManager.GRAVITY_EARTH
+            val gZ = z / SensorManager.GRAVITY_EARTH
+            val gForce = sqrt(gX * gX + gY * gY + gZ * gZ)
+
+            if (gForce > 2.25f) {
+                val now = SystemClock.uptimeMillis()
+                if (now - lastShakeTimestamp < 900L) return
+                if (now - firstShakeTime > 650L) {
+                    shakeCount = 1
+                    firstShakeTime = now
+                } else {
+                    shakeCount++
+                    if (shakeCount >= 2) {
+                        shakeCount = 0
+                        lastShakeTimestamp = now
+                        eventSink?.success("SHAKE_TOGGLE")
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
     private fun handleInstantSpenClick() {
         val now = SystemClock.uptimeMillis()
         if (now - lastSpenSingleTime <= 480L) {
-            // 0.48초 이내에 두 번째 클릭이 들어오면 즉시 이전 페이지로 복귀(직전 1페이지 전진분 + 1페이지 후진 = 총 2페이지 후진 신호)
             lastSpenSingleTime = 0L
             eventSink?.success("SPEN_DOUBLE_REVERT")
         } else {
@@ -180,7 +345,6 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    // 삼성 One UI가 자체적으로 S펜 2번 클릭을 감지해 보낸 신호(MEDIA_NEXT / SKIP_TO_NEXT / PAGE_UP 등)는 즉시 이전 페이지(SPEN_DOUBLE)로 실행!
     private fun handleDirectSpenDouble() {
         lastSpenSingleTime = 0L
         eventSink?.success("SPEN_DOUBLE")
@@ -190,18 +354,12 @@ class MainActivity: FlutterActivity() {
         try {
             mediaSession = MediaSession(this, "FReaderSpenSession").apply {
                 setCallback(object : MediaSession.Callback() {
-                    override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
-                        val ke = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            mediaButtonIntent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
-                        }
+                    override fun onMediaButtonEvent(mediaButtonIntent: android.content.Intent): Boolean {
+                        @Suppress("DEPRECATION")
+                        val ke = mediaButtonIntent.getParcelableExtra<KeyEvent>(android.content.Intent.EXTRA_KEY_EVENT)
                         if (ke != null && isVolumeInterceptEnabled) {
                             if (ke.action == KeyEvent.ACTION_DOWN && ke.repeatCount == 0) {
                                 when (ke.keyCode) {
-                                    // 핵심 수정: 갤럭시 탭에서 S펜 버튼을 2번 누르면 삼성 One UI가 MEDIA_NEXT(다음 곡)를 전송합니다!
-                                    // 이를 즉시 이전 페이지(SPEN_DOUBLE)로 매핑하여 S펜 2번 클릭이 100% 작동하도록 수정!
                                     KeyEvent.KEYCODE_MEDIA_NEXT,
                                     KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
                                         handleDirectSpenDouble()
@@ -216,7 +374,6 @@ class MainActivity: FlutterActivity() {
                                     }
                                 }
                             }
-                            return true
                         }
                         return super.onMediaButtonEvent(mediaButtonIntent)
                     }
@@ -247,11 +404,8 @@ class MainActivity: FlutterActivity() {
         Thread {
             try {
                 val sampleRate = 8000
-                val bufferSize = AudioTrack.getMinBufferSize(
-                    sampleRate,
-                    AudioFormat.CHANNEL_OUT_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT
-                ).coerceAtLeast(800)
+                val numSamples = sampleRate / 20
+                val generatedSnd = ByteArray(2 * numSamples)
                 val audioTrack = AudioTrack.Builder()
                     .setAudioAttributes(
                         AudioAttributes.Builder()
@@ -266,11 +420,10 @@ class MainActivity: FlutterActivity() {
                             .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                             .build()
                     )
-                    .setBufferSizeInBytes(bufferSize)
+                    .setBufferSizeInBytes(generatedSnd.size)
                     .setTransferMode(AudioTrack.MODE_STATIC)
                     .build()
-                val silence = ByteArray(bufferSize)
-                audioTrack.write(silence, 0, silence.size)
+                audioTrack.write(generatedSnd, 0, generatedSnd.size)
                 audioTrack.play()
                 Thread.sleep(60)
                 audioTrack.stop()
@@ -281,40 +434,54 @@ class MainActivity: FlutterActivity() {
 
     private fun updateMediaSessionState(enabled: Boolean) {
         try {
-            val session = mediaSession ?: return
-            if (enabled) {
-                val state = PlaybackState.Builder()
-                    .setActions(
-                        PlaybackState.ACTION_PLAY or
-                        PlaybackState.ACTION_PAUSE or
-                        PlaybackState.ACTION_PLAY_PAUSE or
-                        PlaybackState.ACTION_SKIP_TO_NEXT or
-                        PlaybackState.ACTION_SKIP_TO_PREVIOUS
-                    )
-                    .setState(PlaybackState.STATE_PLAYING, 0L, 1.0f)
-                    .build()
-                session.setPlaybackState(state)
-                session.isActive = true
-                playSilentAudioPulse()
-            } else {
-                val state = PlaybackState.Builder()
-                    .setState(PlaybackState.STATE_STOPPED, 0L, 0.0f)
-                    .build()
-                session.setPlaybackState(state)
-                session.isActive = false
+            mediaSession?.let { session ->
+                if (enabled) {
+                    val state = PlaybackState.Builder()
+                        .setActions(
+                            PlaybackState.ACTION_PLAY or
+                            PlaybackState.ACTION_PAUSE or
+                            PlaybackState.ACTION_PLAY_PAUSE or
+                            PlaybackState.ACTION_SKIP_TO_NEXT or
+                            PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                        )
+                        .setState(PlaybackState.STATE_PLAYING, 1L, 1.0f)
+                        .build()
+                    session.setPlaybackState(state)
+                    session.isActive = true
+                    playSilentAudioPulse()
+                } else {
+                    val state = PlaybackState.Builder()
+                        .setState(PlaybackState.STATE_PAUSED, 1L, 0.0f)
+                        .build()
+                    session.setPlaybackState(state)
+                    session.isActive = false
+                }
             }
         } catch (_: Exception) {}
     }
 
     override fun onResume() {
         super.onResume()
+        try {
+            accelerometer?.let {
+                sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+            }
+        } catch (_: Exception) {}
         if (isVolumeInterceptEnabled) {
             updateMediaSessionState(true)
         }
     }
 
+    override fun onPause() {
+        try {
+            sensorManager?.unregisterListener(this)
+        } catch (_: Exception) {}
+        super.onPause()
+    }
+
     override fun onDestroy() {
         try {
+            sensorManager?.unregisterListener(this)
             mediaSession?.isActive = false
             mediaSession?.release()
         } catch (_: Exception) {}
@@ -325,8 +492,8 @@ class MainActivity: FlutterActivity() {
         if (ev == null) return false
         var isStylus = ev.isFromSource(InputDevice.SOURCE_STYLUS)
         if (!isStylus && ev.pointerCount > 0) {
-            val tool = ev.getToolType(0)
-            isStylus = (tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER)
+            val toolType = ev.getToolType(0)
+            isStylus = toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER
         }
         if (isStylus) {
             val isPressed = (ev.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0 ||
@@ -359,11 +526,11 @@ class MainActivity: FlutterActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (isVolumeInterceptEnabled) {
-            val keyCode = event.keyCode
-            val action = event.action
+        val keyCode = event.keyCode
+        val action = event.action
 
-            // 1. 음량 버튼 (단독 누름 시 페이지 이동 / 2개 동시 누름 시 화면 터치 잠금 해제)
+        if (isVolumeInterceptEnabled) {
+            // 1. 음량 버튼 동시 입력 시 화면 잠금 토글(VOL_BOTH_UNLOCK) 및 단독 입력 시 페이지 넘김
             if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
                 if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                     isVolUpPressed = true
@@ -412,7 +579,6 @@ class MainActivity: FlutterActivity() {
                 return true
             }
 
-            // 2. 삼성 S펜 2번 클릭 신호(PAGE_UP, MEDIA_NEXT, MEDIA_PREVIOUS, DPAD_LEFT, DPAD_UP) -> 딜레이 없이 즉시 이전 페이지!
             if (keyCode == KeyEvent.KEYCODE_PAGE_UP ||
                 keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
                 keyCode == KeyEvent.KEYCODE_DPAD_UP ||
@@ -424,7 +590,6 @@ class MainActivity: FlutterActivity() {
                 return true
             }
 
-            // 3. 삼성 S펜 1번 클릭 신호(PAGE_DOWN, DPAD_RIGHT, SPACE, ENTER, PLAY_PAUSE 등) -> 딜레이 없이 즉시 다음 페이지 (연속 2회 입력 시 즉시 이전 페이지 복귀)!
             if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN ||
                 keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
                 keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
@@ -433,7 +598,7 @@ class MainActivity: FlutterActivity() {
                 keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
                 keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
                 keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE ||
-                keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
+                keyCode == KeyEvent.KEYCODE_CAMERA ||
                 keyCode == KeyEvent.KEYCODE_F1 ||
                 keyCode == KeyEvent.KEYCODE_F2) {
                 if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
@@ -442,6 +607,7 @@ class MainActivity: FlutterActivity() {
                 return true
             }
         }
+
         return super.dispatchKeyEvent(event)
     }
 }

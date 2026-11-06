@@ -11,6 +11,7 @@ class VolumeKeyService {
     required VoidCallback onVolumeUp,
     required VoidCallback onVolumeDown,
     VoidCallback? onVolumeBothUnlock,
+    VoidCallback? onShakeToggle,
     VoidCallback? onSpenSinglePress,
     VoidCallback? onSpenDoublePress,
     VoidCallback? onSpenDoubleRevert,
@@ -24,6 +25,8 @@ class VolumeKeyService {
         onVolumeDown();
       } else if (event == 'VOL_BOTH_UNLOCK') {
         onVolumeBothUnlock?.call();
+      } else if (event == 'SHAKE_TOGGLE') {
+        onShakeToggle?.call();
       } else if (event == 'SPEN_SINGLE') {
         onSpenSinglePress?.call();
       } else if (event == 'SPEN_DOUBLE') {

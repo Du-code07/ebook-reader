@@ -59,9 +59,9 @@ class BubbleTranslation {
         'h': heightRatio,
         'o': originalText,
         'tr': translatedText,
-        's': isSerif,
-        'b': isBold,
-        'd': isDarkBg,
+        'sf': isSerif,
+        'bd': isBold,
+        'dk': isDarkBg,
       };
 
   factory BubbleTranslation.fromJson(Map<String, dynamic> json) => BubbleTranslation(
@@ -71,9 +71,9 @@ class BubbleTranslation {
         heightRatio: (json['h'] as num).toDouble(),
         originalText: json['o'] ?? '',
         translatedText: json['tr'] ?? '',
-        isSerif: json['s'] ?? true,
-        isBold: json['b'] ?? false,
-        isDarkBg: json['d'] ?? false,
+        isSerif: json['sf'] ?? true,
+        isBold: json['bd'] ?? false,
+        isDarkBg: json['dk'] ?? false,
       );
 }
 
@@ -100,17 +100,17 @@ class MemoStroke {
   factory MemoStroke.fromJson(Map<String, dynamic> json) => MemoStroke(
         dxList: (json['x'] as List).map((e) => (e as num).toDouble()).toList(),
         dyList: (json['y'] as List).map((e) => (e as num).toDouble()).toList(),
-        colorValue: (json['c'] as num).toInt(),
-        strokeWidth: (json['w'] as num).toDouble(),
+        colorValue: (json['c'] as num?)?.toInt() ?? 0xFFFFC107,
+        strokeWidth: (json['w'] as num?)?.toDouble() ?? 3.0,
       );
 }
 
 class StorageService {
   static Future<void> saveLastPosition(String bookPath, String pos) async {
     final prefs = await SharedPreferences.getInstance();
-    final prev = prefs.getString('pos_$bookPath');
-    if (prev != null && prev != pos) {
-      await prefs.setString('prev_pos_$bookPath', prev);
+    final oldPos = prefs.getString('pos_$bookPath');
+    if (oldPos != null && oldPos != pos) {
+      await prefs.setString('prev_pos_$bookPath', oldPos);
     }
     await prefs.setString('pos_$bookPath', pos);
   }
@@ -137,15 +137,79 @@ class StorageService {
 
   static Future<void> setDarkMode(bool isDark) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('app_dark_mode', isDark);
+    await prefs.setBool('dark_mode', isDark);
   }
 
   static Future<bool> getDarkMode() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('app_dark_mode') ?? false;
+    return prefs.getBool('dark_mode') ?? false;
   }
 
-  // EPUB 배경 테마 설정: 'white' (흰색), 'sepia' (종이색), 'dark' (다크)
+  // 6. 앱 언어 설정 ('ko': 한국어, 'en': 영어, 'zh': 중국어, 'ja': 일본어)
+  static Future<void> setAppLanguage(String langCode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('app_language_code', langCode);
+  }
+
+  static Future<String> getAppLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('app_language_code') ?? 'ko';
+  }
+
+  // 15. 파일 이름 뒤에 형식(.pdf, .epub 등) 숨기기 설정
+  static Future<void> setHideFileExtension(bool hide) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('hide_file_extension', hide);
+  }
+
+  static Future<bool> getHideFileExtension() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('hide_file_extension') ?? false;
+  }
+
+  // 2. 즐겨찾기(별표) 도서 관리
+  static Future<Set<String>> getFavoriteBooks() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('favorite_book_paths') ?? [];
+    return list.toSet();
+  }
+
+  static Future<bool> toggleFavoriteBook(String bookPath) async {
+    final prefs = await SharedPreferences.getInstance();
+    final favs = (prefs.getStringList('favorite_book_paths') ?? []).toSet();
+    final bool isNowFav;
+    if (favs.contains(bookPath)) {
+      favs.remove(bookPath);
+      isNowFav = false;
+    } else {
+      favs.add(bookPath);
+      isNowFav = true;
+    }
+    await prefs.setStringList('favorite_book_paths', favs.toList());
+    return isNowFav;
+  }
+
+  // 3. 화면 잠금 버튼 설정 (흔들어서 잠그고 끄기 / 음량 버튼 동시에 눌러서 끄고 켜기)
+  static Future<void> setUseShakeLock(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('use_shake_lock', enabled);
+  }
+
+  static Future<bool> getUseShakeLock() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('use_shake_lock') ?? true;
+  }
+
+  static Future<void> setUseVolumeComboLock(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('use_volume_combo_lock', enabled);
+  }
+
+  static Future<bool> getUseVolumeComboLock() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('use_volume_combo_lock') ?? true;
+  }
+
   static Future<void> setEpubBgTheme(String theme) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('epub_bg_theme', theme);
@@ -166,71 +230,66 @@ class StorageService {
     return prefs.getBool('two_page_landscape') ?? true;
   }
 
-  // 3. 넘김 방향 전환 상태 기억 (기본값: 왼쪽 -> 오른쪽 false)
   static Future<void> setReadingDirectionRtl(bool isRtl) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('viewer_reading_rtl', isRtl);
+    await prefs.setBool('reading_direction_rtl', isRtl);
   }
 
   static Future<bool> getReadingDirectionRtl() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('viewer_reading_rtl') ?? false;
+    return prefs.getBool('reading_direction_rtl') ?? false;
   }
 
-  // 7. 페이지 전환 설정 3가지 (음량 버튼, 화면 이동 버튼, S펜 버튼 - 3개 동시 사용 가능)
   static Future<void> setUseVolumeTurn(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('turn_use_volume', enabled);
+    await prefs.setBool('use_volume_turn', enabled);
   }
 
   static Future<bool> getUseVolumeTurn() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('turn_use_volume') ?? true;
+    return prefs.getBool('use_volume_turn') ?? true;
   }
 
   static Future<void> setUseQuickNavTurn(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('turn_use_quick_nav', enabled);
+    await prefs.setBool('use_quick_nav_turn', enabled);
   }
 
   static Future<bool> getUseQuickNavTurn() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('turn_use_quick_nav') ?? false;
+    return prefs.getBool('use_quick_nav_turn') ?? false;
   }
 
   static Future<void> setUseSpenTurn(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('turn_use_spen', enabled);
+    await prefs.setBool('use_spen_turn', enabled);
   }
 
   static Future<bool> getUseSpenTurn() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('turn_use_spen') ?? true;
+    return prefs.getBool('use_spen_turn') ?? true;
   }
 
-  // 뷰어 하단 정보 표시 설정: 'progress' (진행률), 'page' (페이지 번호), 'both' (진행률 및 페이지 번호), 'none' (정보 표시 없음)
   static Future<void> setFooterInfoMode(String mode) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('viewer_footer_info_mode', mode);
+    await prefs.setString('footer_info_mode', mode);
   }
 
   static Future<String> getFooterInfoMode() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('viewer_footer_info_mode') ?? 'both';
+    return prefs.getString('footer_info_mode') ?? 'both';
   }
 
-  // 8. 진행도 UI 위치 설정: 'right' (오른쪽), 'left' (왼쪽), 'bottom' (하단), 'hidden' (숨김)
   static Future<void> setProgressBarPosition(String pos) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('viewer_progress_bar_pos', pos);
+    await prefs.setString('progress_bar_pos', pos);
   }
 
   static Future<String> getProgressBarPosition() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('viewer_progress_bar_pos') ?? 'right';
+    return prefs.getString('progress_bar_pos') ?? 'right';
   }
 
-  // 6. S펜 간단 메모(필기 스트로크 및 텍스트 노트) 저장/조회
   static Future<void> savePageMemoStrokes(
       String bookKey, int pageIndex, List<MemoStroke> strokes) async {
     final prefs = await SharedPreferences.getInstance();
@@ -259,7 +318,6 @@ class StorageService {
     return prefs.getString('memo_note_${bookKey}_$pageIndex') ?? '';
   }
 
-  // 3. EPUB 각 페이지(CFI 위치)별 독립 필기 저장/조회 (페이지를 넘기면 해당 페이지 필기만 표시!)
   static Future<void> saveEpubLocationStrokes(
       String bookKey, String locationKey, List<MemoStroke> strokes) async {
     final prefs = await SharedPreferences.getInstance();
@@ -278,32 +336,16 @@ class StorageService {
     return decoded.map((e) => MemoStroke.fromJson(e)).toList();
   }
 
-  static Future<void> setGugugoApiConfig({required String serverUrl, required String hfToken}) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('gugugo_server_url', serverUrl.trim());
-    await prefs.setString('gugugo_hf_token', hfToken.trim());
-  }
-
-  static Future<String> getGugugoServerUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('gugugo_server_url') ?? '';
-  }
-
-  static Future<String> getGugugoHfToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('gugugo_hf_token') ?? '';
-  }
-
   static Future<List<BookmarkItem>> getBookmarks(String bookPath) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList('bm_$bookPath') ?? [];
-    return raw.map((e) => BookmarkItem.fromJson(jsonDecode(e))).toList();
+    final rawList = prefs.getStringList('bm_$bookPath') ?? [];
+    return rawList.map((e) => BookmarkItem.fromJson(jsonDecode(e))).toList();
   }
 
   static Future<void> addBookmark(String bookPath, BookmarkItem item) async {
     final prefs = await SharedPreferences.getInstance();
     final list = await getBookmarks(bookPath);
-    list.insert(0, item);
+    list.add(item);
     await prefs.setStringList(
       'bm_$bookPath',
       list.map((e) => jsonEncode(e.toJson())).toList(),
@@ -342,9 +384,19 @@ class StorageService {
     await prefs.setStringList('book_groups_v2', groups);
     for (final key in prefs.getKeys().toList()) {
       if (key.startsWith('grp_') && prefs.getString(key) == groupName) {
-        await prefs.setString(key, 'PDF/문서');
+        await prefs.setString(key, '미분류');
       }
     }
+  }
+
+  static Future<void> setBookGroup(String bookPath, String groupName) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('grp_$bookPath', groupName);
+  }
+
+  static Future<String> getBookGroup(String bookPath) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('grp_$bookPath') ?? '미분류';
   }
 
   static Future<void> migrateBookMetadata(String oldPath, String newPath) async {
@@ -362,6 +414,12 @@ class StorageService {
     if (bms != null) {
       await prefs.setStringList('bm_$newPath', bms);
       await prefs.remove('bm_$oldPath');
+    }
+    final favs = (prefs.getStringList('favorite_book_paths') ?? []).toSet();
+    if (favs.contains(oldPath)) {
+      favs.remove(oldPath);
+      favs.add(newPath);
+      await prefs.setStringList('favorite_book_paths', favs.toList());
     }
     for (final key in prefs.getKeys().toList()) {
       for (final prefix in [
@@ -383,16 +441,6 @@ class StorageService {
     }
   }
 
-  static Future<void> setBookGroup(String bookPath, String groupName) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('grp_$bookPath', groupName);
-  }
-
-  static Future<String> getBookGroup(String bookPath) async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('grp_$bookPath') ?? 'PDF/문서';
-  }
-
   static Future<void> removeBookMetadata(String bookPath) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('pos_$bookPath');
@@ -400,6 +448,10 @@ class StorageService {
     await prefs.remove('prog_$bookPath');
     await prefs.remove('bm_$bookPath');
     await prefs.remove('grp_$bookPath');
+    final favs = (prefs.getStringList('favorite_book_paths') ?? []).toSet();
+    if (favs.remove(bookPath)) {
+      await prefs.setStringList('favorite_book_paths', favs.toList());
+    }
     for (final key in prefs.getKeys().toList()) {
       if (key.startsWith('bubbles_v5_${bookPath}_') ||
           key.startsWith('bubbles_v4_${bookPath}_') ||
@@ -407,7 +459,8 @@ class StorageService {
           key.startsWith('bubbles_v2_${bookPath}_') ||
           key.startsWith('bubbles_${bookPath}_') ||
           key.startsWith('memo_strokes_${bookPath}_') ||
-          key.startsWith('memo_note_${bookPath}_')) {
+          key.startsWith('memo_note_${bookPath}_') ||
+          key.startsWith('epub_strokes_${bookPath}_')) {
         await prefs.remove(key);
       }
     }
