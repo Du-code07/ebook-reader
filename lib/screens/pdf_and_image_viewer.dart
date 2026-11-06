@@ -893,8 +893,18 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 height: drawHeight,
                 child: StylusOnlyHitTestWrapper(
                   enabled: _isMemoMode && pageIndex == _currentPage,
-                  child: Listener(
+                  // GestureDetector(supportedDevices: stylus)가 GestureArena를 독점하여 S펜 필기 중에는 S펜으로 페이지가 절대 넘어가지 않게 차단! (손가락 스와이프는 그대로 페이지 이동 가능)
+                  child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
+                    supportedDevices: const {
+                      PointerDeviceKind.stylus,
+                      PointerDeviceKind.invertedStylus,
+                    },
+                    onPanStart: (_) {},
+                    onPanUpdate: (_) {},
+                    onPanEnd: (_) {},
+                    child: Listener(
+                      behavior: HitTestBehavior.opaque,
                     onPointerDown: (event) {
                       if (!_isMemoMode || pageIndex != _currentPage) return;
                       if (event.kind != PointerDeviceKind.stylus &&
@@ -966,12 +976,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       _activeStylusPointerId = null;
                       setState(() => _activeStrokePoints.clear());
                     },
-                    child: CustomPaint(
-                      painter: _MemoCanvasPainter(
-                        strokes: strokes,
-                        currentPoints: pageIndex == _currentPage ? _activeStrokePoints : const [],
-                        currentColor: _penColor,
-                        currentWidth: _penWidth,
+                      child: CustomPaint(
+                        painter: _MemoCanvasPainter(
+                          strokes: strokes,
+                          currentPoints: pageIndex == _currentPage ? _activeStrokePoints : const [],
+                          currentColor: _penColor,
+                          currentWidth: _penWidth,
+                        ),
                       ),
                     ),
                   ),

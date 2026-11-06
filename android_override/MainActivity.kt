@@ -1,8 +1,16 @@
 package com.example.my_ebook_reader
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioTrack
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
@@ -37,13 +45,20 @@ class MainActivity: FlutterActivity() {
     private var pendingSpenRunnable: Runnable? = null
     private var wasStylusButtonPressed = false
 
+    // 핵심: 삼성 One UI의 S펜 에어 액션(Air Actions)이 별도 설정 없이도 즉시 버튼 클릭 신호를 보내도록 만드는 MediaSession!
+    // 삼성 공식 문서(S Pen Remote FAQ Q3): 앱이 활성 MediaSession을 가지면 S펜 버튼 1번/2번 클릭이 즉시 MediaSession으로 전달됩니다.
+    private var mediaSession: MediaSession? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        setupSpenMediaSession()
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method == "setIntercept") {
-                    isVolumeInterceptEnabled = call.argument<Boolean>("enabled") ?: false
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    isVolumeInterceptEnabled = enabled
+                    updateMediaSessionState(enabled)
                     result.success(null)
                 } else {
                     result.notImplemented()
@@ -107,6 +122,144 @@ class MainActivity: FlutterActivity() {
             }
     }
 
+    private fun setupSpenMediaSession() {
+        try {
+            mediaSession = MediaSession(this, "FReaderSpenSession").apply {
+                setCallback(object : MediaSession.Callback() {
+                    override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                        val ke = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            mediaButtonIntent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                        }
+                        if (ke != null && isVolumeInterceptEnabled) {
+                            if (ke.action == KeyEvent.ACTION_DOWN && ke.repeatCount == 0) {
+                                when (ke.keyCode) {
+                                    KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                                        // 삼성 에어 액션에서 2번 클릭을 MEDIA_NEXT로 보낼 때와 1번 클릭(PLAY_PAUSE)을 모두 통합 처리
+                                        triggerSpenButtonPress()
+                                        return true
+                                    }
+                                    KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                                        eventSink?.success("SPEN_DOUBLE")
+                                        return true
+                                    }
+                                    KeyEvent.KEYCODE_MEDIA_PLAY,
+                                    KeyEvent.KEYCODE_MEDIA_PAUSE,
+                                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                                    KeyEvent.KEYCODE_HEADSETHOOK -> {
+                                        triggerSpenButtonPress()
+                                        return true
+                                    }
+                                }
+                            }
+                            return true
+                        }
+                        return super.onMediaButtonEvent(mediaButtonIntent)
+                    }
+
+                    override fun onPlay() {
+                        if (isVolumeInterceptEnabled) triggerSpenButtonPress()
+                    }
+
+                    override fun onPause() {
+                        if (isVolumeInterceptEnabled) triggerSpenButtonPress()
+                    }
+
+                    override fun onSkipToNext() {
+                        if (isVolumeInterceptEnabled) eventSink?.success("SPEN_DOUBLE")
+                    }
+
+                    override fun onSkipToPrevious() {
+                        if (isVolumeInterceptEnabled) eventSink?.success("SPEN_DOUBLE")
+                    }
+                })
+                @Suppress("DEPRECATION")
+                setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun playSilentAudioPulse() {
+        // Android OS가 이 앱의 MediaSession을 최우선 활성 세션으로 등록하도록 0.05초 무음 오디오 펄스 재생
+        Thread {
+            try {
+                val sampleRate = 8000
+                val bufferSize = AudioTrack.getMinBufferSize(
+                    sampleRate,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                ).coerceAtLeast(800)
+                val audioTrack = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(sampleRate)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(bufferSize)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .build()
+                val silence = ByteArray(bufferSize)
+                audioTrack.write(silence, 0, silence.size)
+                audioTrack.play()
+                Thread.sleep(60)
+                audioTrack.stop()
+                audioTrack.release()
+            } catch (_: Exception) {}
+        }.start()
+    }
+
+    private fun updateMediaSessionState(enabled: Boolean) {
+        try {
+            val session = mediaSession ?: return
+            if (enabled) {
+                val state = PlaybackState.Builder()
+                    .setActions(
+                        PlaybackState.ACTION_PLAY or
+                        PlaybackState.ACTION_PAUSE or
+                        PlaybackState.ACTION_PLAY_PAUSE or
+                        PlaybackState.ACTION_SKIP_TO_NEXT or
+                        PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                    )
+                    .setState(PlaybackState.STATE_PLAYING, 0L, 1.0f)
+                    .build()
+                session.setPlaybackState(state)
+                session.isActive = true
+                playSilentAudioPulse()
+            } else {
+                val state = PlaybackState.Builder()
+                    .setState(PlaybackState.STATE_STOPPED, 0L, 0.0f)
+                    .build()
+                session.setPlaybackState(state)
+                session.isActive = false
+            }
+        } catch (_: Exception) {}
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (isVolumeInterceptEnabled) {
+            updateMediaSessionState(true)
+        }
+    }
+
+    override fun onDestroy() {
+        try {
+            mediaSession?.isActive = false
+            mediaSession?.release()
+        } catch (_: Exception) {}
+        super.onDestroy()
+    }
+
     private fun triggerSpenButtonPress() {
         spenClickCount++
         pendingSpenRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -123,27 +276,6 @@ class MainActivity: FlutterActivity() {
             pendingSpenRunnable = r
             mainHandler.postDelayed(r, 380L)
         }
-    }
-
-    private fun isSpenAirActionKey(keyCode: Int): Boolean {
-        return keyCode == KeyEvent.KEYCODE_PAGE_DOWN ||
-               keyCode == KeyEvent.KEYCODE_PAGE_UP ||
-               keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
-               keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
-               keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
-               keyCode == KeyEvent.KEYCODE_DPAD_UP ||
-               keyCode == KeyEvent.KEYCODE_SPACE ||
-               keyCode == KeyEvent.KEYCODE_ENTER ||
-               keyCode == KeyEvent.KEYCODE_MEDIA_NEXT ||
-               keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS ||
-               keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
-               keyCode == KeyEvent.KEYCODE_F1 ||
-               keyCode == KeyEvent.KEYCODE_F2 ||
-               keyCode == KeyEvent.KEYCODE_F3 ||
-               keyCode == KeyEvent.KEYCODE_F4 ||
-               keyCode == KeyEvent.KEYCODE_F5 ||
-               keyCode == KeyEvent.KEYCODE_BUTTON_1 ||
-               keyCode == KeyEvent.KEYCODE_BUTTON_2
     }
 
     // 갤럭시 S펜 호버 및 터치 상태에서 펜 옆면 버튼을 누를 때 발생하는 모든 스타일러스 버튼 이벤트 감지
@@ -184,7 +316,6 @@ class MainActivity: FlutterActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
-    // 핵심 수정: WebView(EPUB)나 하위 뷰가 키 이벤트를 가로채기 전에 최상위 dispatchKeyEvent에서 먼저 인터셉트!
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (isVolumeInterceptEnabled) {
             val keyCode = event.keyCode
@@ -239,9 +370,31 @@ class MainActivity: FlutterActivity() {
                 return true
             }
 
-            // 2. 갤럭시 탭 S펜 에어 액션(Air Actions) 및 블루투스 리모컨 키 감지
-            // 어떤 키코드가 날아오든 1번 누르면 다음 페이지(SPEN_SINGLE), 2번 연속 누르면 이전 페이지(SPEN_DOUBLE)로 동작!
-            if (isSpenAirActionKey(keyCode)) {
+            // 2. 삼성 S펜 RemoteActions(remote_action.xml) 및 블루투스 리모컨 키 감지
+            // PAGE_UP / DPAD_LEFT / MEDIA_PREVIOUS가 직접 오면 즉시 이전 페이지(SPEN_DOUBLE)
+            if (keyCode == KeyEvent.KEYCODE_PAGE_UP ||
+                keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+                keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
+                if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    eventSink?.success("SPEN_DOUBLE")
+                }
+                return true
+            }
+
+            // PAGE_DOWN / DPAD_RIGHT / SPACE / ENTER / MEDIA_PLAY_PAUSE 등은 1번 클릭 시 다음 페이지, 2번 연속 클릭 시 이전 페이지
+            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN ||
+                keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+                keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
+                keyCode == KeyEvent.KEYCODE_SPACE ||
+                keyCode == KeyEvent.KEYCODE_ENTER ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_NEXT ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE ||
+                keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
+                keyCode == KeyEvent.KEYCODE_F1 ||
+                keyCode == KeyEvent.KEYCODE_F2) {
                 if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                     triggerSpenButtonPress()
                 }

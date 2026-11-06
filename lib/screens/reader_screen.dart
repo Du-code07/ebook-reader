@@ -716,15 +716,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final distance = (event.position - _pointerDownPosition!).distance;
     final duration = DateTime.now().difference(_pointerDownTime!).inMilliseconds;
 
+    // 3. EPUB 파일에서도 JPG 통합 파일처럼 화면을 터치(탭)하면 페이지가 넘어가지 않고 상단/진행도 UI 표시만 켜지고 꺼지도록 통일! (밀어서 넘기는 스와이프만 페이지 이동)
     if (distance < 15.0 && duration < 250) {
-      final dx = event.position.dx;
-      if (dx > screenSize.width * 0.2 && dx < screenSize.width * 0.8) {
-        _toggleControls();
-      } else if (dx <= screenSize.width * 0.2) {
-        _turnPrev();
-      } else {
-        _turnNext();
-      }
+      _toggleControls();
     }
     _pointerDownPosition = null;
     _pointerDownTime = null;
@@ -1095,8 +1089,18 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   final double drawHeight = constraints.maxHeight;
                   return StylusOnlyHitTestWrapper(
                     enabled: _isMemoMode,
-                    child: Listener(
+                    // S펜 필기 모드가 켜졌을 때 S펜 드래그가 하위 EPUB 뷰어의 페이지 넘김으로 전달되지 않도록 차단!
+                    child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
+                      supportedDevices: const {
+                        PointerDeviceKind.stylus,
+                        PointerDeviceKind.invertedStylus,
+                      },
+                      onPanStart: (_) {},
+                      onPanUpdate: (_) {},
+                      onPanEnd: (_) {},
+                      child: Listener(
+                        behavior: HitTestBehavior.opaque,
                       onPointerDown: (event) {
                         if (!_isMemoMode) return;
                         if (event.kind != PointerDeviceKind.stylus &&
@@ -1159,12 +1163,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         _activeStylusPointerId = null;
                         setState(() => _activeStrokePoints.clear());
                       },
-                      child: CustomPaint(
-                        painter: _EpubMemoPainter(
-                          strokes: _epubStrokes,
-                          currentPoints: _activeStrokePoints,
-                          currentColor: _penColor,
-                          currentWidth: _penWidth,
+                        child: CustomPaint(
+                          painter: _EpubMemoPainter(
+                            strokes: _epubStrokes,
+                            currentPoints: _activeStrokePoints,
+                            currentColor: _penColor,
+                            currentWidth: _penWidth,
+                          ),
                         ),
                       ),
                     ),
