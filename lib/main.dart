@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -80,6 +79,344 @@ class _MyEbookAppState extends State<MyEbookApp> {
   }
 }
 
+/// 6. 실제 앱에 표시되는 아이콘 위젯들을 그대로 사용하여 위치를 시각적으로 보여주는 '사용 설명서' 화면
+class UserManualScreen extends StatelessWidget {
+  final String appLang;
+  const UserManualScreen({super.key, required this.appLang});
+
+  String _tr(String ko, String en, String zh, String ja) =>
+      AppI18n.t(appLang, ko: ko, en: en, zh: zh, ja: ja);
+
+  Widget _buildDualDirectionSampleIcon() {
+    return const SizedBox(
+      width: 24,
+      height: 22,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned(top: 1, child: Icon(Icons.east, size: 14, color: Colors.amber)),
+          Positioned(bottom: 1, child: Icon(Icons.west, size: 14, color: Colors.white54)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIconGuideRow({
+    required Widget iconWidget,
+    required String title,
+    required String desc,
+    Color iconBg = const Color(0xFF1E293B),
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: iconBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            alignment: Alignment.center,
+            child: iconWidget,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 3),
+                Text(desc, style: const TextStyle(fontSize: 12.5, height: 1.4)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_tr('사용 설명서', 'User Manual', '使用说明书', '取扱説明書')),
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            // 1. 서재(MY) 화면 상단 및 파일 아이콘 안내
+            Text(
+              _tr('1. 서재(MY) 화면 아이콘 안내', '1. Bookshelf (MY) Screen Icons', '1. 书架 (MY) 界面图标说明', '1. 書斎(MY)画面のアイコン説明'),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            // 실제 서재 상단 바 미리보기
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        'MY',
+                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      const Icon(Icons.dark_mode, color: Colors.white, size: 20),
+                      const SizedBox(width: 14),
+                      const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 20),
+                      const SizedBox(width: 14),
+                      const Icon(Icons.auto_stories_outlined, color: Colors.white, size: 20),
+                      const SizedBox(width: 14),
+                      const Icon(Icons.delete_outline, color: Colors.white, size: 20),
+                      const SizedBox(width: 14),
+                      const Icon(Icons.settings_outlined, color: Colors.white, size: 20),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.indigo,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          _tr('전체', 'All', '全部', 'すべて'),
+                          style: const TextStyle(color: Colors.white, fontSize: 12),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white12,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text('PDF/문서', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.amber),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.add, size: 16, color: Colors.amber),
+                      ),
+                      const Spacer(),
+                      const Icon(Icons.star_rounded, color: Colors.amber, size: 20),
+                      const SizedBox(width: 10),
+                      const Icon(Icons.edit_outlined, color: Colors.white70, size: 19),
+                      const SizedBox(width: 10),
+                      const Icon(Icons.drive_file_move_outline, color: Colors.white70, size: 19),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.dark_mode, color: Colors.white, size: 22),
+              title: _tr('다크 모드 / 라이트 모드 전환', 'Toggle Dark / Light Mode', '切换深色 / 浅色模式', 'ダーク / ライトモード切替'),
+              desc: _tr('앱 전체 화면 테마를 라이트 모드와 다크 모드로 전환합니다.', 'Switches the app theme between Light and Dark mode.', '在浅色模式和深色模式之间切换。', 'アプリ全体のテーマをライト/ダークに切り替えます。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 22),
+              title: _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'),
+              desc: _tr('2개 이상의 PDF 파일을 고른 순서대로 또는 파일 이름 순서대로 합쳐 하나의 PDF로 만듭니다.', 'Merges 2 or more PDF files in selected order or filename order into a single PDF.', '按所选顺序或文件名顺序将多个 PDF 合并为一个 PDF。', '2つ以上のPDFを選択順または名前順に結合して1つのPDFにします。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.auto_stories_outlined, color: Colors.white, size: 22),
+              title: _tr('JPG 이미지 합치기', 'Merge JPG Images', '合并 JPG 图片', 'JPG画像結合'),
+              desc: _tr('여러 장의 JPG/PNG 이미지를 고른 순서 또는 이름 순서대로 묶어 단권 파일(.cbz)로 만듭니다.', 'Bundles multiple JPG/PNG images in selected or filename order into a single .cbz book.', '将多张图片按选择顺序或名称顺序打包为单本文件(.cbz)。', '複数のJPG/PNG画像を選択順または名前順にまとめて1冊(.cbz)にします。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.delete_outline, color: Colors.white, size: 22),
+              title: _tr('휴지통', 'Trash Bin', '回收站', 'ゴミ箱'),
+              desc: _tr('삭제된 파일을 확인하고 복원하거나 영구 삭제합니다.', 'Restore or permanently delete trashed files.', '查看、恢复或永久删除已删除的文件。', '削除したファイルの復元または完全削除を行います。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.settings_outlined, color: Colors.white, size: 22),
+              title: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
+              desc: _tr('앱 언어(한국어/영어/중국어/일본어) 변경, 파일 이름 뒤 형식(확장자) 숨기기, 사용 설명서를 확인합니다.', 'Change app language (KO/EN/ZH/JA), hide file extensions, and open the User Manual.', '更改应用语言、隐藏文件扩展名及查看使用说明书。', '言語(韓/英/中/日)変更、拡張子非表示、取扱説明書を確認します。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.add, color: Colors.amber, size: 24),
+              title: _tr('새 그룹 추가 (+ 버튼)', 'Add New Group (+)', '新建分组 (+)', '新規グループ追加 (+)'),
+              desc: _tr('그룹 네모칸 맨 오른쪽의 [+] 아이콘을 눌러 새 그룹을 추가합니다. (기존 그룹 길게 누르기: 삭제)', 'Tap [+] at the right end of the group bar to add a group (long-press a group to delete).', '点击分组栏最右侧的 [+] 新建分组（长按分组可删除）。', 'グループバー右端の[+]で新規グループを追加します(長押しで削除)。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.star_rounded, color: Colors.amber, size: 24),
+              title: _tr('즐겨찾기 (별 아이콘)', 'Favorite (Star Icon)', '收藏 (星标)', 'お気に入り (星アイコン)'),
+              desc: _tr('누르면 노란색 별(★)로 바뀌며 해당 그룹의 가장 상단에 위치합니다.', 'Turns yellow (★) and pins the file to the very top of its group.', '点击变为黄色星标(★)，并将文件置顶于当前分组最上方。', '黄色い星(★)になり、そのグループの最上部に固定されます。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.edit_outlined, color: Colors.white, size: 22),
+              title: _tr('파일 이름 변경 (연필 아이콘)', 'Rename File (Pencil Icon)', '重命名文件 (铅笔图标)', 'ファイル名変更 (鉛筆アイコン)'),
+              desc: _tr('확장자를 유지한 채 파일 이름을 변경합니다.', 'Renames the file while preserving its format extension.', '保持扩展名不变并修改文件名称。', '拡張子を維持したままファイル名を変更します。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.drive_file_move_outline, color: Colors.white, size: 22),
+              title: _tr('그룹 이동 (개별 및 다중 선택)', 'Move to Group (Single & Batch)', '移动分组 (单个与批量)', 'グループ移動 (個別・一括)'),
+              desc: _tr('파일을 다른 그룹으로 옮깁니다. 파일을 길게 눌러 다중 선택하면 하단 [그룹 이동] 버튼으로 한 번에 이동할 수 있습니다.', 'Moves the file to another group. Long-press files to batch move multiple files at once.', '将文件移至其他分组；长按多选后可通过底部按钮批量移动。', '別のグループへ移動します。長押しで複数選択すると一括移動できます。'),
+            ),
+
+            const Divider(height: 36),
+
+            // 2. 파일 열람 시 나오는 상단 UI 아이콘 안내
+            Text(
+              _tr('2. 파일 열람 시 상단 UI 아이콘 안내', '2. Viewer Top Bar Icons', '2. 阅读界面顶部栏图标说明', '2. ファイル閲覧時の上部UIアイコン説明'),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            // 실제 뷰어 상단 바 미리보기
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.black87,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                    const SizedBox(width: 12),
+                    const Icon(Icons.list, color: Colors.white, size: 20),
+                    const SizedBox(width: 12),
+                    Text(
+                      _tr('문서 제목', 'Document', '文档标题', '文書タイトル'),
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(width: 18),
+                    const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 22),
+                    const SizedBox(width: 12),
+                    const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
+                    const SizedBox(width: 12),
+                    const Icon(Icons.draw_outlined, color: Colors.amber, size: 20),
+                    const SizedBox(width: 12),
+                    const Icon(Icons.menu_book, color: Colors.amber, size: 20),
+                    const SizedBox(width: 12),
+                    _buildDualDirectionSampleIcon(),
+                    const SizedBox(width: 12),
+                    const Icon(Icons.translate, color: Colors.white, size: 20),
+                    const SizedBox(width: 12),
+                    const Icon(Icons.refresh, color: Colors.white70, size: 19),
+                    const SizedBox(width: 12),
+                    const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
+                    const SizedBox(width: 12),
+                    const Icon(Icons.tune, color: Colors.white, size: 20),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
+              title: _tr('뒤로가기', 'Back to Bookshelf', '返回书架', '書斎へ戻る'),
+              desc: _tr('서재 화면으로 돌아갑니다. (화면 잠금 상태였다면 자동으로 잠금이 해제되며, 백그라운드 번역은 계속 유지됩니다.)', 'Returns to the bookshelf (automatically unlocks screen if locked; background translation continues).', '返回书架（若处于锁定状态则自动解锁，后台翻译继续进行）。', '書斎に戻ります(画面ロック中は自動解除され、バックグラウンド翻訳は継続します)。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.list, color: Colors.white, size: 22),
+              title: _tr('목차 열기 (문서/EPUB)', 'Table of Contents', '打开目录', '目次を開く'),
+              desc: _tr('EPUB·워드·한글·텍스트 문서의 장(Chapter) 목록 서랍을 엽니다.', 'Opens the chapter drawer for EPUB/Word/HWP/TXT documents.', '打开文档章节目录侧边栏。', 'EPUB・Word・HWP・TXT文書の目次を開きます。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.skip_previous_rounded, color: Colors.white, size: 19),
+                  Icon(Icons.skip_next_rounded, color: Colors.white, size: 19),
+                ],
+              ),
+              title: _tr('이전 파일 / 다음 파일 이동 (같은 그룹)', 'Previous / Next File in Same Group', '同分组上一文件 / 下一文件', '同じグループ内の前 / 次のファイルへ移動'),
+              desc: _tr('서재로 나가지 않고 현재 파일과 같은 그룹에 있는 이전 파일 또는 다음 파일로 즉시 이동합니다.', 'Jumps directly to the previous or next file within the same group without leaving the viewer.', '无需返回书架，直接切换到同一分组中的上一个或下一个文件。', '書斎に戻らずに同じグループ内の前/次のファイルを直接開きます。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.draw_outlined, color: Colors.amber, size: 22),
+              title: _tr('S펜 필기 모드 열기/닫기', 'S Pen Handwriting Mode', 'S Pen 手写模式', 'Sペン手書きモード'),
+              desc: _tr('S펜 전용 필기 툴바를 엽니다. 필기 모드가 켜진 동안에는 S펜으로 화면을 움직여도 페이지가 흔들리거나 넘어가지 않으며, 손가락 스와이프로만 페이지가 이동합니다.', 'Opens the S Pen toolbar. While active, S Pen strokes never move or turn the page; finger swipes turn pages.', '打开 S Pen 工具栏。开启时 S Pen 书写不会移动页面，仅手指滑动可翻页。', 'Sペンツールバーを開きます。手書き中はSペンで画面が動かず、指のスワイプでのみページがめくれます。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.menu_book, color: Colors.amber, size: 22),
+              title: _tr('가로 모드 2페이지 양면 보기', 'Two-Page Spread in Landscape', '横屏双页显示', '横画面2ページ見開き表示'),
+              desc: _tr('태블릿 가로 화면에서 한 화면에 2페이지씩 나란히 보여줄지 1페이지만 보여줄지 전환합니다.', 'Toggles between 2-page side-by-side spread and single-page view in landscape orientation.', '在横屏模式下切换双页并排显示或单页显示。', '横画面で2ページ見開き表示と1ページ表示を切り替えます。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: _buildDualDirectionSampleIcon(),
+              title: _tr('읽기 방향 전환 (좌→우 / 우→좌)', 'Reading Direction (LTR / RTL)', '阅读方向切换 (左→右 / 右→左)', '読み방향切替 (左→右 / 右→左)'),
+              desc: _tr('일반 도서 방향(왼쪽→오른쪽)과 일본 만화 방향(오른쪽→왼쪽)을 전환하고 기억합니다.', 'Switches and remembers Left-to-Right vs. Right-to-Left (manga) reading direction.', '切换并记住从左到右或从右到左（漫画）的翻页方向。', '左→右(一般)と右→左(マンガ)のページめくり方向を切り替えて記憶します。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.translate, color: Colors.white, size: 22),
+              title: _tr('Google ML Kit 공식 번역 (번역 / 원문 전환)', 'Google ML Kit Official Translation', 'Google ML Kit 官方翻译', 'Google ML Kit 公式翻訳'),
+              desc: _tr('일본어·중국어·한국어 문서를 현재 설정된 앱 언어로 백그라운드 번역합니다. 이미 번역된 경우 누르면 번역본/원문을 전환하며, 옆의 새로고침(↻) 아이콘으로 재번역할 수 있습니다.', 'Translates JA/ZH/KO into your app language in the background using Google ML Kit. Tap to toggle translation, or tap Refresh (↻) to re-translate.', '使用 Google ML Kit 将日/中/韩文档后台翻译为当前应用语言。', 'Google ML Kitで日本語・中国語・韓国語を設定言語へバックグラウンド翻訳します。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 22),
+              title: _tr('북마크 추가 및 목록', 'Bookmarks', '书签管理', 'ブックマーク'),
+              desc: _tr('현재 페이지를 북마크에 저장하거나 저장된 북마크 위치로 즉시 이동합니다.', 'Saves the current page as a bookmark or jumps to saved bookmarks.', '添加当前页书签或跳转到已保存的书签位置。', '現在のページをブックマーク登録、または登録済み位置へ移動します。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.tune, color: Colors.white, size: 22),
+              title: _tr('뷰어 표시 설정', 'Viewer Display Settings', '阅读器显示设置', '뷰어表示設定'),
+              desc: _tr('글자 크기·배경색(완전 흰색/종이색/다크), 화면 잠금 방식(흔들기 / 음량 버튼 동시 입력), 페이지 전환 버튼(음량 / 페이지 이동 / S펜), 진행도 UI 위치를 설정합니다.', 'Configure font size, background (pure white/sepia/dark), screen lock (shake / dual volume), page turn buttons, and progress bar position.', '设置字号、背景色、屏幕锁定方式（摇晃/双音量键）、翻页按钮及进度条位置。', '文字サイズ・背景色(純白/セピア/ダーク)、画面ロック方式(振る/音量同時押し)、ページ 전환、進行度バー位置を設定します。'),
+            ),
+
+            const Divider(height: 36),
+
+            // 3. S펜 툴바 & 하단 진행도 UI & 페이지 이동 버튼 안내
+            Text(
+              _tr('3. S펜 필기 툴바 및 하단 이동 아이콘 안내', '3. S Pen Toolbar & Bottom Navigation Icons', '3. S Pen 工具栏与底部导航图标', '3. Sペンツールバーと下部移動アイコン'),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            _buildIconGuideRow(
+              iconWidget: const Icon(Icons.cleaning_services_outlined, color: Colors.amber, size: 22),
+              title: _tr('S펜 지우개 / 색상(6색) / 선 굵기 조절(기본 2.0)', 'S Pen Eraser, 6 Colors & Width Slider (Default 2.0)', 'S Pen 橡皮擦、6种颜色与粗细调节 (默认 2.0)', 'Sペン消しゴム・6色パレット・太さ調節 (基本 2.0)'),
+              desc: _tr('노란·빨간·하늘·초록·흰색·검은색 펜 선택과 선 굵기 슬라이더(기본 2.0pt), S펜 지우개(🧹), 텍스트 메모(📝), 현재 페이지 필기 전체 지우기(🗑)를 제공합니다.', 'Pick from 6 colors (including White & Black), adjust stroke width (default 2.0), toggle Eraser, add text notes, or clear page strokes.', '支持6种颜色（含黑白）、线条粗细滑块（默认 2.0）、橡皮擦、文字备注及清空当前页手写。', '6色(白・黒含む)、太さスライダー(基本2.0)、消しゴム、テキストメモ、ページ手書き全消去が使えます。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.first_page, color: Colors.white, size: 19),
+                  Icon(Icons.last_page, color: Colors.white, size: 19),
+                ],
+              ),
+              title: _tr('진행도 바 맨 처음 / 맨 마지막 페이지 이동 화살표', 'Jump to First / Last Page Arrows', '跳转至第一页 / 最后一页箭头', '最初 / 最後のページへ移動する矢印'),
+              desc: _tr('진행도 슬라이더 양끝의 화살표를 누르면 문서의 맨 처음(1페이지)과 맨 마지막(끝 페이지)으로 즉시 이동합니다.', 'Tap the arrows at both ends of the progress bar to jump straight to the first or last page.', '点击进度条两端的箭头可直接跳至第一页或最后一页。', '進行度バー両端の矢印で最初(1ページ)と最後のページへ即座に移動します。'),
+            ),
+            _buildIconGuideRow(
+              iconWidget: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.arrow_back, color: Colors.amber, size: 18),
+                  SizedBox(width: 2),
+                  Icon(Icons.arrow_forward, color: Colors.amber, size: 18),
+                ],
+              ),
+              title: _tr('우측 하단 페이지 이동 버튼 (← / →)', 'Bottom-Right Page Nav Buttons (← / →)', '右下角翻页按钮 (← / →)', '右下ページ移動ボタン (← / →)'),
+              desc: _tr('뷰어 표시 설정에서 [페이지 이동 버튼]을 켜면 우측 하단에 나타나며, 상단 UI를 띄우지 않고 깔끔하게 이전(←)·다음(→) 페이지로 전환합니다.', 'When enabled in Viewer Settings, appears at the bottom-right to turn to the previous (←) or next (→) page without popping up the top bar.', '在阅读器设置中开启后显示在右下角，点击左(←)/右(→)箭头可直接翻页且不会弹出顶部菜单。', '뷰어設定でONにすると右下に表示され、上部UIを出さずに前(←)・次(→)のページへ移動します。'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class BookshelfScreen extends StatefulWidget {
   final bool isDarkMode;
   final String appLang;
@@ -113,25 +450,22 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   bool _isSelectionMode = false;
   final Set<String> _selectedFilePaths = {};
 
-  // 11. 삼성 노트(.sdocx, .spd), MS 워드(.docx, .doc), 한컴 한글(.hwpx, .hwp) 포함
+  // 7 & 8. 삼성 노트(.sdocx, .spd) 및 .zip 제외 / 워드(.docx, .doc) 및 한글(.hwpx, .hwp) 정식 지원!
   static const _supportedExts = [
-    'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz', 'zip',
-    'sdocx', 'spd', 'docx', 'doc', 'hwpx', 'hwp'
+    'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+    'docx', 'doc', 'hwpx', 'hwp'
   ];
   static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
   static const _docConvertExts = ['txt', 'docx', 'doc', 'hwpx', 'hwp'];
 
-  String _tr(String ko, String en, String zh, String ja) {
-    switch (widget.appLang) {
-      case 'en':
-        return en;
-      case 'zh':
-        return zh;
-      case 'ja':
-        return ja;
-      default:
-        return ko;
-    }
+  String _tr(String ko, String en, String zh, String ja) =>
+      AppI18n.t(widget.appLang, ko: ko, en: en, zh: zh, ja: ja);
+
+  String _localizeGroupName(String g) {
+    if (g == '전체') return _tr('전체', 'All', '全部', 'すべて');
+    if (g == '미분류') return _tr('미분류', 'Uncategorized', '未分类', '未分類');
+    if (g == 'PDF/문서') return _tr('PDF/문서', 'PDF/Docs', 'PDF/文档', 'PDF/文書');
+    return g;
   }
 
   String _formatDisplayFileName(String rawFileName) {
@@ -221,7 +555,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     final favs = await StorageService.getFavoriteBooks();
     final hideExt = await StorageService.getHideFileExtension();
 
-    // 2. 즐겨찾기(별표)된 파일이 해당 그룹에서 가장 상단에 오도록 정렬
     files.sort((a, b) {
       final aFav = favs.contains(a.path);
       final bFav = favs.contains(b.path);
@@ -283,8 +616,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     if (validPicked.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('지원되는 파일 형식(EPUB, PDF, JPG, PNG, TXT, CBZ, ZIP, 삼성노트, 워드, 한글)을 선택해 주세요.'),
+          SnackBar(
+            content: Text(
+              _tr(
+                '지원되는 파일 형식(EPUB, PDF, JPG, PNG, TXT, CBZ, 워드, 한글)을 선택해 주세요.',
+                'Please select supported files (EPUB, PDF, JPG, PNG, TXT, CBZ, Word, HWP).',
+                '请选择受支持的文件格式 (EPUB, PDF, JPG, PNG, TXT, CBZ, Word, HWP)。',
+                '対応ファイル形式(EPUB, PDF, JPG, PNG, TXT, CBZ, Word, HWP)を選択してください。',
+              ),
+            ),
           ),
         );
       }
@@ -300,19 +640,24 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       final action = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: Text('PDF ${pdfPicked.length}개 추가 방식 선택'),
-          content: const Text(
-            '선택한 PDF 파일들을 하나로 합쳐서 단일 PDF 파일로 추가할까요?',
+          title: Text(_tr('PDF ${pdfPicked.length}개 추가 방식 선택', 'Import ${pdfPicked.length} PDFs', '选择导入 ${pdfPicked.length} 个 PDF 的方式', 'PDF ${pdfPicked.length}個の追加方法を選択')),
+          content: Text(
+            _tr(
+              '선택한 PDF 파일들을 하나로 합쳐서 단일 PDF 파일로 추가할까요?',
+              'Would you like to merge the selected PDFs into a single PDF file?',
+              '是否将所选 PDF 合并为单个 PDF 文件添加？',
+              '選択したPDFを1つのPDFファイルに結合して追加しますか？',
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, 'separate'),
-              child: const Text('개별 파일로 추가'),
+              child: Text(_tr('개별 파일로 추가', 'Add Separately', '单独添加', '個別に追加')),
             ),
             ElevatedButton.icon(
               icon: const Icon(Icons.picture_as_pdf, size: 18),
               onPressed: () => Navigator.pop(ctx, 'merge_pdf'),
-              label: const Text('하나의 PDF로 합치기'),
+              label: Text(_tr('하나의 PDF로 합치기', 'Merge into One PDF', '合并为一个 PDF', '1つのPDFに結合')),
             ),
           ],
         ),
@@ -334,19 +679,24 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       final action = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: Text('이미지 ${imagePicked.length}장 추가 방식 선택'),
-          content: const Text(
-            '선택한 이미지들을 하나로 묶어 통합 파일(.cbz)로 추가할까요?',
+          title: Text(_tr('이미지 ${imagePicked.length}장 추가 방식 선택', 'Import ${imagePicked.length} Images', '选择导入 ${imagePicked.length} 张图片的方式', '画像 ${imagePicked.length}枚の追加方法を選択')),
+          content: Text(
+            _tr(
+              '선택한 이미지들을 하나로 묶어 통합 파일(.cbz)로 추가할까요?',
+              'Would you like to bundle the selected images into a single .cbz book?',
+              '是否将所选图片打包为单个 .cbz 文件添加？',
+              '選択した画像を1つのファイル(.cbz)にまとめて追加しますか？',
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, 'separate'),
-              child: const Text('개별 파일로 추가'),
+              child: Text(_tr('개별 파일로 추가', 'Add Separately', '单独添加', '個別に追加')),
             ),
             ElevatedButton.icon(
               icon: const Icon(Icons.auto_stories, size: 18),
               onPressed: () => Navigator.pop(ctx, 'merge'),
-              label: const Text('JPG 이미지 합치기'),
+              label: Text(_tr('JPG 이미지 합치기', 'Merge JPGs', '合并图片', 'JPG結合')),
             ),
           ],
         ),
@@ -365,7 +715,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     for (final pf in validPicked) {
       if (pf.path == null) continue;
       final saved = await File(pf.path!).copy('${appDir.path}/${pf.name}');
-      // 13. '전체' 그룹에서 파일을 생성/추가하면 '[미분류]'로 분류!
       final targetGrp = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
       await StorageService.setBookGroup(saved.path, targetGrp);
       importedFiles.add(saved);
@@ -374,12 +723,20 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     await _loadLibrary();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${importedFiles.length}개의 파일이 서재에 추가되었습니다.')),
+        SnackBar(
+          content: Text(
+            _tr(
+              '${importedFiles.length}개의 파일이 서재에 추가되었습니다.',
+              'Added ${importedFiles.length} file(s) to bookshelf.',
+              '已添加 ${importedFiles.length} 个文件到书架。',
+              '${importedFiles.length}個のファイルが追加されました。',
+            ),
+          ),
+        ),
       );
     }
   }
 
-  /// 10 & 13. JPG 통합 파일 만들기 (이름 순서 vs 선택한 순서 물어보기 + '전체' 탭에서는 '미분류'로 저장)
   Future<void> _createMangaBookFromImages(List<File> sourceImages, {bool deleteSourceAfter = false}) async {
     final now = DateTime.now();
     final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
@@ -388,13 +745,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     final titleController = TextEditingController(text: defaultFileName);
     bool deleteOriginals = deleteSourceAfter;
-    bool sortByName = true; // true: 이름 순서대로, false: 고른 순서대로
+    bool sortByName = true;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('JPG 통합 파일 만들기'),
+          title: Text(_tr('JPG 통합 파일 만들기', 'Create Merged Image Book', '创建合并图片文件', 'JPG結合ファイル作成')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -402,18 +759,21 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
               children: [
                 TextField(
                   controller: titleController,
-                  decoration: const InputDecoration(
-                    labelText: '파일 제목',
+                  decoration: InputDecoration(
+                    labelText: _tr('파일 제목', 'File Title', '文件标题', 'ファイル名'),
                     suffixText: '.cbz',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text('합치는 순서 선택', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                Text(
+                  _tr('합치는 순서 선택', 'Merge Order', '合并顺序', '結合順序の選択'),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
                 RadioListTile<bool>(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('파일 이름 순서대로 합치기', style: TextStyle(fontSize: 13)),
+                  title: Text(_tr('파일 이름 순서대로 합치기', 'Sort by Filename', '按文件名顺序合并', 'ファイル名順に結合'), style: const TextStyle(fontSize: 13)),
                   value: true,
                   groupValue: sortByName,
                   onChanged: (v) => setModalState(() => sortByName = v ?? true),
@@ -421,7 +781,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 RadioListTile<bool>(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('파일을 고른(선택한) 순서대로 합치기', style: TextStyle(fontSize: 13)),
+                  title: Text(_tr('파일을 고른(선택한) 순서대로 합치기', 'Keep Selected Order', '按选择顺序合并', '選択した順番通りに結合'), style: const TextStyle(fontSize: 13)),
                   value: false,
                   groupValue: sortByName,
                   onChanged: (v) => setModalState(() => sortByName = v ?? false),
@@ -431,7 +791,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: deleteOriginals,
-                    title: const Text('통합 후 기존 낱장 이미지 휴지통으로 이동', style: TextStyle(fontSize: 13)),
+                    title: Text(
+                      _tr('통합 후 기존 낱장 이미지 휴지통으로 이동', 'Move original images to Trash after merge', '合并后将原图移至回收站', '結合後に元の画像をゴミ箱へ移動'),
+                      style: const TextStyle(fontSize: 13),
+                    ),
                     onChanged: (v) => setModalState(() => deleteOriginals = v ?? false),
                   ),
                 ],
@@ -439,10 +802,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('만들기'),
+              child: Text(_tr('만들기', 'Create', '创建', '作成')),
             ),
           ],
         ),
@@ -462,7 +825,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     int currentStep = 0;
     final int totalSteps = orderedImages.length + 1;
-    String progressStatus = '이미지 준비 중...';
+    String progressStatus = _tr('이미지 준비 중...', 'Preparing images...', '正在准备图片...', '画像を準備中...');
     StateSetter? progressSetState;
 
     showDialog(
@@ -473,14 +836,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           progressSetState = setDialogState;
           final double ratio = totalSteps > 0 ? (currentStep / totalSteps).clamp(0.0, 1.0).toDouble() : 0.0;
           return AlertDialog(
-            title: const Text('JPG 통합 파일 생성 중'),
+            title: Text(_tr('JPG 통합 파일 생성 중', 'Creating Merged Book', '正在生成合并文件', 'JPG結合ファイル作成中')),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 LinearProgressIndicator(value: ratio),
                 const SizedBox(height: 12),
                 Text(
-                  '${(ratio * 100).toStringAsFixed(0)}% 완료 ($currentStep / ${orderedImages.length}장)',
+                  '${(ratio * 100).toStringAsFixed(0)}% ($currentStep / ${orderedImages.length})',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 ),
                 const SizedBox(height: 6),
@@ -502,7 +865,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
       progressSetState?.call(() {
         currentStep = i + 1;
-        progressStatus = '페이지 병합 중 (${i + 1}/${orderedImages.length}): $fileName';
+        progressStatus = '(${i + 1}/${orderedImages.length}): $fileName';
       });
       await Future.delayed(const Duration(milliseconds: 15));
 
@@ -511,19 +874,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       archive.addFile(ArchiveFile(entryName, bytes.length, bytes));
     }
 
-    progressSetState?.call(() {
-      currentStep = totalSteps;
-      progressStatus = 'CBZ 압축 및 파일 저장 중';
-    });
-    await Future.delayed(const Duration(milliseconds: 50));
-
     final appDir = await getApplicationDocumentsDirectory();
     final safeTitle = bookTitle.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
     final outFile = File('${appDir.path}/$safeTitle.cbz');
     final zipBytes = ZipEncoder().encode(archive);
     await outFile.writeAsBytes(zipBytes!);
 
-    // 13. '전체' 그룹에서 파일을 생성하면 '[미분류]'로 분류!
     final targetGroup = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
     await StorageService.setBookGroup(outFile.path, targetGroup);
 
@@ -541,9 +897,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     await _loadLibrary();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('"$safeTitle.cbz" 파일이 생성되었습니다.')),
-      );
       _openFile(outFile);
     }
   }
@@ -564,20 +917,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         await _createMangaBookFromImages(files, deleteSourceAfter: false);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('합칠 JPG/PNG 이미지를 2장 이상 선택해 주세요.')),
+          SnackBar(content: Text(_tr('합칠 JPG/PNG 이미지를 2장 이상 선택해 주세요.', 'Select at least 2 images to merge.', '请选择至少 2 张图片进行合并。', '結合する画像を2枚以上選択してください。'))),
         );
       }
       return;
     }
 
-    // 선택한 순서를 그대로 기억하도록 List<String> 사용
     final List<String> selectedPaths = [];
 
     final proceed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('JPG 이미지 합치기'),
+          title: Text(_tr('JPG 이미지 합치기', 'Merge JPG Images', '合并 JPG 图片', 'JPG画像結合')),
           content: SizedBox(
             width: 420,
             height: 360,
@@ -587,7 +939,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('선택됨: ${selectedPaths.length}장', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text('${_tr("선택됨", "Selected", "已选", "選択中")}: ${selectedPaths.length}', style: const TextStyle(fontWeight: FontWeight.bold)),
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -603,11 +955,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                               }
                             });
                           },
-                          child: const Text('전체선택'),
+                          child: Text(_tr('전체선택', 'Select All', '全选', 'すべて選択')),
                         ),
                         TextButton.icon(
                           icon: const Icon(Icons.folder_open, size: 16),
-                          label: const Text('기기에서 선택'),
+                          label: Text(_tr('기기에서 선택', 'Browse Device', '从设备选择', '端末から選択')),
                           onPressed: () async {
                             Navigator.pop(ctx, false);
                             final result = await FilePicker.platform.pickFiles(
@@ -666,10 +1018,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
             ElevatedButton(
               onPressed: selectedPaths.length >= 2 ? () => Navigator.pop(ctx, true) : null,
-              child: const Text('선택한 이미지 합치기'),
+              child: Text(_tr('선택한 이미지 합치기', 'Merge Selected', '合并所选图片', '選択した画像を結合')),
             ),
           ],
         ),
@@ -683,7 +1035,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
   }
 
-  /// 5, 10, 13. 여러 PDF 파일을 하나의 PDF로 병합 (이름 순서 vs 고른 순서 선택 가능 + '전체' 탭에서는 '미분류' 분류)
   Future<void> _createMergedPdfFromFiles(List<File> sourcePdfs, {bool deleteSourceAfter = false}) async {
     final now = DateTime.now();
     final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
@@ -692,34 +1043,35 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     final titleController = TextEditingController(text: defaultFileName);
     bool deleteOriginals = deleteSourceAfter;
-    bool sortByName = false; // 기본값: 고른 순서대로 또는 이름 순서대로 선택 가능
+    bool sortByName = false;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('PDF 하나로 합치기'),
+          title: Text(_tr('PDF 하나로 합치기', 'Merge into Single PDF', '合并为一个 PDF', '1つのPDFに結合')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('선택한 ${sourcePdfs.length}개의 PDF를 합쳐 하나의 PDF로 만듭니다.'),
-                const SizedBox(height: 12),
                 TextField(
                   controller: titleController,
-                  decoration: const InputDecoration(
-                    labelText: '합쳐진 PDF 파일 이름',
+                  decoration: InputDecoration(
+                    labelText: _tr('합쳐진 PDF 파일 이름', 'Merged PDF Filename', '合并后的 PDF 名称', '結合後のPDFファイル名'),
                     suffixText: '.pdf',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text('합치는 순서 선택', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                Text(
+                  _tr('합치는 순서 선택', 'Merge Order', '合并顺序', '結合順序の選択'),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
                 RadioListTile<bool>(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('파일을 고른(선택한) 순서대로 합치기', style: TextStyle(fontSize: 13)),
+                  title: Text(_tr('파일을 고른(선택한) 순서대로 합치기', 'Keep Selected Order', '按选择顺序合并', '選択した順番通りに結合'), style: const TextStyle(fontSize: 13)),
                   value: false,
                   groupValue: sortByName,
                   onChanged: (v) => setModalState(() => sortByName = v ?? false),
@@ -727,7 +1079,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 RadioListTile<bool>(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('파일 이름 순서대로 합치기', style: TextStyle(fontSize: 13)),
+                  title: Text(_tr('파일 이름 순서대로 합치기', 'Sort by Filename', '按文件名顺序合并', 'ファイル名順に結合'), style: const TextStyle(fontSize: 13)),
                   value: true,
                   groupValue: sortByName,
                   onChanged: (v) => setModalState(() => sortByName = v ?? true),
@@ -737,7 +1089,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: deleteOriginals,
-                    title: const Text('합친 후 기존 개별 PDF 파일 휴지통으로 이동', style: TextStyle(fontSize: 13)),
+                    title: Text(
+                      _tr('합친 후 기존 개별 PDF 파일 휴지통으로 이동', 'Move original PDFs to Trash after merge', '合并后将原 PDF 移至回收站', '結合後に元のPDFをゴミ箱へ移動'),
+                      style: const TextStyle(fontSize: 13),
+                    ),
                     onChanged: (v) => setModalState(() => deleteOriginals = v ?? false),
                   ),
                 ],
@@ -745,11 +1100,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
             ElevatedButton.icon(
               icon: const Icon(Icons.picture_as_pdf, size: 18),
               onPressed: () => Navigator.pop(ctx, true),
-              label: const Text('PDF 합치기'),
+              label: Text(_tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合')),
             ),
           ],
         ),
@@ -773,16 +1128,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => const AlertDialog(
-        title: Text('PDF 병합 중'),
+      builder: (ctx) => AlertDialog(
+        title: Text(_tr('PDF 병합 중', 'Merging PDFs', '正在合并 PDF', 'PDF結合中')),
         content: Row(
           children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 16),
+            const CircularProgressIndicator(),
+            const SizedBox(width: 16),
             Expanded(
               child: Text(
-                'PDF 페이지들을 하나로 합치는 중입니다... 잠시만 기다려 주세요.',
-                style: TextStyle(fontSize: 13),
+                _tr('PDF 페이지들을 하나로 합치는 중입니다...', 'Merging PDF pages into a single document...', '正在将 PDF 页面合并为一个文件...', 'PDFページを1つに結合しています...'),
+                style: const TextStyle(fontSize: 13),
               ),
             ),
           ],
@@ -800,7 +1155,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       });
 
       final outFile = File(outPath);
-      // 13. '전체' 그룹에서 파일을 생성하면 '[미분류]'로 분류!
       final targetGroup = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
       await StorageService.setBookGroup(outFile.path, targetGroup);
 
@@ -816,22 +1170,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       await _loadLibrary();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('"$safeTitle.pdf" 통합 파일이 생성되었습니다.')),
-        );
         _openFile(outFile);
       }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('PDF 병합 중 오류가 발생했습니다: $e')),
+          SnackBar(content: Text('PDF Merge Error: $e')),
         );
       }
     }
   }
 
-  /// 10 & 17. PDF 합치기 다이얼로그 (기본 선택됨: 0개로 시작 + 선택한 순서 번호 표시!)
   Future<void> _showMergeExistingPdfsDialog() async {
     final existingPdfs = _allBooks.where((f) {
       final ext = f.path.split('.').last.toLowerCase();
@@ -849,20 +1199,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         await _createMergedPdfFromFiles(files, deleteSourceAfter: false);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('합칠 PDF 파일을 2개 이상 선택해 주세요.')),
+          SnackBar(content: Text(_tr('합칠 PDF 파일을 2개 이상 선택해 주세요.', 'Select at least 2 PDF files to merge.', '请选择至少 2 个 PDF 文件进行合并。', '結合するPDFを2つ以上選択してください。'))),
         );
       }
       return;
     }
 
-    // 17. 기본 설정을 '선택됨: 0개'로 변경! (사용자가 고르는 순서대로 리스트에 추가됨)
     final List<String> selectedPaths = [];
 
     final proceed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('PDF 합치기'),
+          title: Text(_tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合')),
           content: SizedBox(
             width: 420,
             height: 360,
@@ -872,7 +1221,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('선택됨: ${selectedPaths.length}개', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text('${_tr("선택됨", "Selected", "已选", "選択中")}: ${selectedPaths.length}', style: const TextStyle(fontWeight: FontWeight.bold)),
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -888,11 +1237,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                               }
                             });
                           },
-                          child: const Text('전체선택'),
+                          child: Text(_tr('전체선택', 'Select All', '全选', 'すべて選択')),
                         ),
                         TextButton.icon(
                           icon: const Icon(Icons.folder_open, size: 16),
-                          label: const Text('기기에서 선택'),
+                          label: Text(_tr('기기에서 선택', 'Browse Device', '从设备选择', '端末から選択')),
                           onPressed: () async {
                             Navigator.pop(ctx, false);
                             final result = await FilePicker.platform.pickFiles(
@@ -952,10 +1301,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
             ElevatedButton(
               onPressed: selectedPaths.length >= 2 ? () => Navigator.pop(ctx, true) : null,
-              child: const Text('선택한 PDF 합치기'),
+              child: Text(_tr('선택한 PDF 합치기', 'Merge Selected PDFs', '合并所选 PDF', '選択したPDFを結合')),
             ),
           ],
         ),
@@ -969,7 +1318,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
   }
 
-  /// 3. 파일 이름 변경 다이얼로그 (연필 아이콘 클릭 시)
   Future<void> _renameFileDialog(File file) async {
     final fullName = file.path.split(Platform.pathSeparator).last;
     final dotIdx = fullName.lastIndexOf('.');
@@ -981,12 +1329,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('파일 이름 변경'),
+        title: Text(_tr('파일 이름 변경', 'Rename File', '重命名文件', 'ファイル名変更')),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           decoration: InputDecoration(
-            labelText: '새 파일 이름',
+            labelText: _tr('새 파일 이름', 'New Filename', '新文件名', '新しいファイル名'),
             suffixText: ext.isNotEmpty ? '.$ext' : null,
             border: const OutlineInputBorder(),
           ),
@@ -994,11 +1342,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('취소'),
+            child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('변경'),
+            child: Text(_tr('변경', 'Rename', '确定', '変更')),
           ),
         ],
       ),
@@ -1017,7 +1365,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     if (await File(newPath).exists()) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('같은 이름의 파일이 이미 존재합니다.')),
+          SnackBar(content: Text(_tr('같은 이름의 파일이 이미 존재합니다.', 'A file with that name already exists.', '同名文件已存在。', '同じ名前のファイルが既に存在します。'))),
         );
       }
       return;
@@ -1027,23 +1375,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       final oldPath = file.path;
       await file.rename(newPath);
       await StorageService.migrateBookMetadata(oldPath, newPath);
-
       await _loadLibrary();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('파일 이름이 "$newFileName"(으)로 변경되었습니다.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('이름 변경 실패: $e')),
-        );
-      }
-    }
+    } catch (_) {}
   }
 
-  /// 11. 파일 열기 (EPUB, PDF, JPG, CBZ, TXT, 삼성 노트 .sdocx/.spd, 워드 .docx/.doc, 한글 .hwpx/.hwp 모두 지원!)
   Future<void> _openFile(File file) async {
     final rawName = file.path.split(Platform.pathSeparator).last;
     final displayName = _formatDisplayFileName(rawName);
@@ -1056,31 +1391,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           builder: (_) => ReaderScreen(filePath: file.path, bookTitle: displayName),
         ),
       );
-    } else if (ext == 'sdocx' || ext == 'spd') {
-      final noteImages = await TxtToEpubConverter.extractSamsungNoteImagesIfPresent(file);
-      if (!mounted) return;
-      if (noteImages.isNotEmpty) {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => UniversalMediaReaderScreen(
-              files: noteImages,
-              title: displayName,
-              isPdf: false,
-              customBookKey: file.path,
-            ),
-          ),
-        );
-      } else {
-        final epubFile = await TxtToEpubConverter.convertDocumentToEpub(file);
-        if (!mounted) return;
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ReaderScreen(filePath: epubFile.path, bookTitle: displayName),
-          ),
-        );
-      }
     } else if (_docConvertExts.contains(ext)) {
       final epubFile = await TxtToEpubConverter.convertDocumentToEpub(file);
       if (!mounted) return;
@@ -1123,7 +1433,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         MaterialPageRoute(
           builder: (_) => UniversalMediaReaderScreen(
             files: targetList,
-            title: targetList.length > 1 ? '$displayName 외 ${targetList.length - 1}장' : displayName,
+            title: targetList.length > 1 ? '$displayName (+${targetList.length - 1})' : displayName,
             isPdf: false,
             customBookKey: bookKey,
           ),
@@ -1150,17 +1460,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('새 그룹 만들기'),
+        title: Text(_tr('새 그룹 만들기', 'Create New Group', '新建分组', '新規グループ作成')),
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '그룹 이름 입력',
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            hintText: _tr('그룹 이름 입력', 'Enter group name', '输入分组名称', 'グループ名を入力'),
+            border: const OutlineInputBorder(),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
           ElevatedButton(
             onPressed: () async {
               final text = controller.text.trim();
@@ -1170,7 +1480,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 _loadLibrary();
               }
             },
-            child: const Text('추가'),
+            child: Text(_tr('추가', 'Add', '添加', '追加')),
           ),
         ],
       ),
@@ -1180,7 +1490,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   Future<void> _confirmDeleteGroup(String groupName) async {
     if (groupName == '전체') {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('"전체" 기본 보기는 삭제할 수 없습니다.')),
+        SnackBar(content: Text(_tr('"전체" 기본 보기는 삭제할 수 없습니다.', '"All" group cannot be deleted.', '无法删除“全部”默认分组。', '「すべて」は削除できません。'))),
       );
       return;
     }
@@ -1188,14 +1498,21 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('"$groupName" 그룹 삭제'),
-        content: Text('"$groupName" 그룹을 삭제할까요?\n(그룹 안의 파일들은 삭제되지 않고 [미분류]로 유지됩니다)'),
+        title: Text(_tr('"$groupName" 그룹 삭제', 'Delete "$groupName"', '删除 "$groupName"', '「$groupName」グループ削除')),
+        content: Text(
+          _tr(
+            '"$groupName" 그룹을 삭제할까요?\n(그룹 안의 파일들은 삭제되지 않고 [미분류]로 유지됩니다)',
+            'Delete group "$groupName"?\n(Files inside will remain as [Uncategorized])',
+            '确定删除 "$groupName" 分组吗？\n（组内文件不会删除，将归为[未分类]）',
+            '「$groupName」を削除しますか？\n(中のファイルは削除されず[未分類]になります)',
+          ),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('그룹 삭제'),
+            child: Text(_tr('그룹 삭제', 'Delete', '删除分组', '削除')),
           ),
         ],
       ),
@@ -1207,11 +1524,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         _selectedGroup = '전체';
       }
       await _loadLibrary();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('"$groupName" 그룹이 삭제되었습니다.')),
-        );
-      }
     }
   }
 
@@ -1225,15 +1537,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
     if (reloadAfter) {
       await _loadLibrary();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('"$fileName" 파일이 휴지통으로 이동되었습니다.')),
-        );
-      }
     }
   }
 
-  /// 14. 여러 개 선택한 파일을 한 번에 원하는 그룹으로 일괄 이동 ('선택 삭제' 왼쪽에 배치)
   Future<void> _moveSelectedFilesBatch() async {
     if (_selectedFilePaths.isEmpty) return;
     final candidateGroups = [
@@ -1250,14 +1556,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             children: [
               ListTile(
                 title: Text(
-                  '선택한 ${_selectedFilePaths.length}개 파일 그룹 이동',
+                  _tr(
+                    '선택한 ${_selectedFilePaths.length}개 파일 그룹 이동',
+                    'Move ${_selectedFilePaths.length} Selected File(s)',
+                    '移动所选 ${_selectedFilePaths.length} 个文件',
+                    '選択した${_selectedFilePaths.length}個のファイルを移動',
+                  ),
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
               const Divider(height: 1),
               ...candidateGroups.map((g) => ListTile(
                     leading: const Icon(Icons.folder_outlined),
-                    title: Text(g),
+                    title: Text(_localizeGroupName(g)),
                     onTap: () => Navigator.pop(ctx, g),
                   )),
             ],
@@ -1268,7 +1579,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     if (chosenGroup == null) return;
 
-    final count = _selectedFilePaths.length;
     for (final path in _selectedFilePaths) {
       await StorageService.setBookGroup(path, chosenGroup);
     }
@@ -1279,11 +1589,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     });
 
     await _loadLibrary();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$count개의 파일이 [$chosenGroup] 그룹으로 이동되었습니다.')),
-      );
-    }
   }
 
   Future<void> _deleteSelectedFilesBatch() async {
@@ -1293,14 +1598,21 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('선택한 파일 삭제'),
-        content: Text('선택한 $count개의 파일을 휴지통으로 이동할까요?'),
+        title: Text(_tr('선택한 파일 삭제', 'Delete Selected Files', '删除所选文件', '選択したファイルを削除')),
+        content: Text(
+          _tr(
+            '선택한 $count개의 파일을 휴지통으로 이동할까요?',
+            'Move $count selected file(s) to Trash?',
+            '是否将所选 $count 个文件移至回收站？',
+            '選択した$count個のファイルをゴミ箱へ移動しますか？',
+          ),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('삭제'),
+            child: Text(_tr('삭제', 'Delete', '删除', '削除')),
           ),
         ],
       ),
@@ -1319,11 +1631,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     });
 
     await _loadLibrary();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${targets.length}개의 파일이 휴지통으로 이동되었습니다.')),
-      );
-    }
   }
 
   Future<void> _showTrashBinDialog() async {
@@ -1342,28 +1649,28 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 ListTile(
                   leading: const Icon(Icons.delete_outline),
                   title: Text(
-                    '휴지통 (${_trashedBooks.length})',
+                    '${_tr("휴지통", "Trash", "回收站", "ゴミ箱")} (${_trashedBooks.length})',
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   trailing: _trashedBooks.isNotEmpty
                       ? TextButton.icon(
                           icon: const Icon(Icons.delete_forever, color: Colors.redAccent, size: 18),
-                          label: const Text('휴지통 비우기', style: TextStyle(color: Colors.redAccent)),
+                          label: Text(_tr('휴지통 비우기', 'Empty Trash', '清空回收站', 'ゴミ箱を空にする'), style: const TextStyle(color: Colors.redAccent)),
                           onPressed: () async {
                             final confirmEmpty = await showDialog<bool>(
                               context: ctx,
                               builder: (dCtx) => AlertDialog(
-                                title: const Text('휴지통 비우기'),
-                                content: const Text('휴지통의 모든 파일을 영구 삭제할까요?'),
+                                title: Text(_tr('휴지통 비우기', 'Empty Trash', '清空回收站', 'ゴミ箱を空にする')),
+                                content: Text(_tr('휴지통의 모든 파일을 영구 삭제할까요?', 'Permanently delete all files in Trash?', '确定永久删除回收站中的所有文件吗？', 'ゴミ箱内のすべてのファイルを完全に削除しますか？')),
                                 actions: [
-                                  TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('취소')),
+                                  TextButton(onPressed: () => Navigator.pop(dCtx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
                                   ElevatedButton(
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.redAccent,
                                       foregroundColor: Colors.white,
                                     ),
                                     onPressed: () => Navigator.pop(dCtx, true),
-                                    child: const Text('영구 삭제'),
+                                    child: Text(_tr('영구 삭제', 'Delete Forever', '永久删除', '完全削除')),
                                   ),
                                 ],
                               ),
@@ -1385,7 +1692,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 const Divider(height: 1),
                 Expanded(
                   child: _trashedBooks.isEmpty
-                      ? const Center(child: Text('휴지통이 비어 있습니다.'))
+                      ? Center(child: Text(_tr('휴지통이 비어 있습니다.', 'Trash is empty.', '回收站为空。', 'ゴミ箱は空です。')))
                       : ListView.separated(
                           itemCount: _trashedBooks.length,
                           separatorBuilder: (_, __) => const Divider(height: 1),
@@ -1400,7 +1707,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                 children: [
                                   TextButton.icon(
                                     icon: const Icon(Icons.restore_from_trash, size: 18),
-                                    label: const Text('복원'),
+                                    label: Text(_tr('복원', 'Restore', '恢复', '復元')),
                                     onPressed: () async {
                                       final appDir = await getApplicationDocumentsDirectory();
                                       final restoredPath = '${appDir.path}/$fileName';
@@ -1410,26 +1717,21 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                       }
                                       await _loadLibrary();
                                       setModalState(() {});
-                                      if (mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text('"$fileName" 파일이 복원되었습니다.')),
-                                        );
-                                      }
                                     },
                                   ),
                                   IconButton(
                                     icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
-                                    tooltip: '영구 삭제',
+                                    tooltip: _tr('영구 삭제', 'Delete Forever', '永久删除', '完全削除'),
                                     onPressed: () async {
                                       final confirmDelete = await showDialog<bool>(
                                         context: ctx,
                                         builder: (dCtx) => AlertDialog(
-                                          title: const Text('영구 삭제'),
-                                          content: Text('"$fileName" 파일을 영구 삭제할까요?'),
+                                          title: Text(_tr('영구 삭제', 'Delete Forever', '永久删除', '完全削除')),
+                                          content: Text(_tr('"$fileName" 파일을 영구 삭제할까요?', 'Permanently delete "$fileName"?', '确定永久删除 "$fileName" 吗？', '「$fileName」を完全に削除しますか？')),
                                           actions: [
                                             TextButton(
                                               onPressed: () => Navigator.pop(dCtx, false),
-                                              child: const Text('취소'),
+                                              child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
                                             ),
                                             ElevatedButton(
                                               style: ElevatedButton.styleFrom(
@@ -1437,7 +1739,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                                 foregroundColor: Colors.white,
                                               ),
                                               onPressed: () => Navigator.pop(dCtx, true),
-                                              child: const Text('영구 삭제'),
+                                              child: Text(_tr('영구 삭제', 'Delete Forever', '永久删除', '完全削除')),
                                             ),
                                           ],
                                         ),
@@ -1450,11 +1752,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                         }
                                         await _loadLibrary();
                                         setModalState(() {});
-                                        if (mounted) {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(content: Text('"$fileName" 파일이 영구 삭제되었습니다.')),
-                                          );
-                                        }
                                       }
                                     },
                                   ),
@@ -1484,13 +1781,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const ListTile(
-                title: Text('파일 그룹(카테고리) 이동', style: TextStyle(fontWeight: FontWeight.bold)),
+              ListTile(
+                title: Text(_tr('파일 그룹 이동', 'Move to Group', '移动分组', 'グループ移動'), style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
               const Divider(height: 1),
               ...candidateGroups.map((g) => ListTile(
                     leading: const Icon(Icons.folder_outlined),
-                    title: Text(g),
+                    title: Text(_localizeGroupName(g)),
                     onTap: () async {
                       await StorageService.setBookGroup(file.path, g);
                       if (ctx.mounted) Navigator.pop(ctx);
@@ -1504,124 +1801,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     );
   }
 
-  /// 5. 앱 내에서 언제든 열람 가능한 시각적 아이콘 설명 가이드 PDF 자동 생성 및 열기
-  Future<void> _generateAndOpenIconGuidePdf() async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final pdfFile = File('${appDir.path}/FReader_아이콘_설명_가이드.pdf');
-    final tempDir = await getTemporaryDirectory();
-
-    final pagesSpec = [
-      {
-        'title': '1. 서재(MY) 상단 바 및 그룹 바 아이콘 안내',
-        'subtitle': '서재 화면 우측 상단 아이콘과 그룹(+) 추가 버튼의 위치 및 기능입니다.',
-        'banner': '[MY 서재 상단 바]   ☀️/🌙 다크모드   |   📄 PDF 합치기   |   📖 JPG 합치기   |   🗑️ 휴지통   |   ⚙️ 설정',
-        'items': [
-          '• ☀️ / 🌙 (다크 모드 전환): 라이트 모드와 다크 모드를 즉시 전환합니다.',
-          '• 📄 (PDF 합치기): 여러 개의 PDF 파일을 이름 순서 또는 고른 순서대로 묶어 하나의 PDF로 만듭니다.',
-          '• 📖 (JPG 이미지 합치기): 여러 장의 JPG/PNG 이미지를 묶어 단권 만화/문서(.cbz)로 만듭니다.',
-          '• 🗑️ (휴지통): 삭제한 파일을 복원하거나 영구 삭제합니다.',
-          '• ⚙️ (톱니바퀴 설정): 프로그램 언어(한국어/영어/중국어/일본어) 변경 및 확장자 숨기기를 설정합니다.',
-          '• [ + ] (그룹 바 맨 오른쪽 + 버튼): 새로운 파일 그룹(카테고리)을 추가합니다 (길게 누르면 그룹 삭제).',
-        ],
-      },
-      {
-        'title': '2. 파일 목록 우측 아이콘 및 다중 선택 기능 안내',
-        'subtitle': '각 파일 항목의 오른쪽에 위치한 3가지 아이콘과 길게 누르기(다중 선택) 기능입니다.',
-        'banner': '[파일 항목 우측]   파일이름.pdf          ⭐ 즐겨찾기   |   ✏️ 이름 변경   |   📁 그룹 이동',
-        'items': [
-          '• ⭐ / ☆ (별 모양 즐겨찾기): 누르면 노란색 별로 바뀌며 해당 그룹의 가장 상단에 고정됩니다.',
-          '• ✏️ (연필 모양 편집): 파일의 확장자를 유지한 채 파일 이름을 변경합니다.',
-          '• 📁 (파일 그룹 이동): 해당 파일을 다른 그룹 또는 [미분류]로 이동합니다.',
-          '• [파일 길게 누르기 -> 다중 선택 모드]: 상단/하단의 [그룹 이동] 버튼으로 여러 파일을 한 번에 이동하거나 [선택 삭제]로 일괄 삭제합니다.',
-        ],
-      },
-      {
-        'title': '3. 뷰어 상단 바 · S펜 필기 툴바 · 하단 진행도/이동 버튼 안내',
-        'subtitle': '파일 열람 중 화면을 가볍게 탭하면 나타나는 상단·하단 컨트롤 아이콘 설명입니다.',
-        'banner': '[뷰어 상단 바]  ← 뒤로  |  ⏮️ 이전 파일  |  ⏭️ 다음 파일  |  🖊️ S펜 필기  |  📖 2페이지  |  ⇄ 방향  |  🌐 번역  |  🔖 북마크  |  🎛️ 설정',
-        'items': [
-          '• ⏮️ / ⏭️ (이전·다음 파일 이동): 현재 파일과 같은 그룹에 속한 이전/다음 파일로 즉시 이동합니다.',
-          '• 🖊️ (S펜 필기 툴바): 6가지 색상(노란·빨간·하늘·초록·흰색·검은색), 선 굵기 슬라이더, S펜 지우개, 메모 기능을 제공합니다.',
-          '• 🌐 (Google ML Kit 번역): 일본어·중국어·한국어 텍스트를 현재 설정된 앱 언어로 백그라운드 번역합니다.',
-          '• ⏮ / ⏭ (진행도 바 양끝 화살표): 문서의 맨 처음(1페이지)과 맨 마지막 페이지로 즉시 이동합니다.',
-          '• ⬅️ / ➡️ (우측 하단 페이지 이동 버튼): 이전 페이지(←)와 다음 페이지(→)로 전환합니다.',
-          '• 📳 화면 잠금/해제: 기기를 흔들거나 음량(+)·(-) 버튼을 동시에 눌러 화면 터치를 잠그고 해제합니다.',
-        ],
-      },
-    ];
-
-    final List<String> pngPaths = [];
-    for (int i = 0; i < pagesSpec.length; i++) {
-      final spec = pagesSpec[i];
-      final recorder = ui.PictureRecorder();
-      const double w = 1240;
-      const double h = 1754;
-      final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, w, h));
-
-      canvas.drawRect(const Rect.fromLTWH(0, 0, w, h), Paint()..color = const Color(0xFFF8FAFC));
-      canvas.drawRect(const Rect.fromLTWH(0, 0, w, 150), Paint()..color = const Color(0xFF1E293B));
-
-      void drawText(String text, double x, double y, double maxW, double fontSize, Color color, {FontWeight weight = FontWeight.normal}) {
-        final tp = TextPainter(
-          text: TextSpan(
-            text: text,
-            style: TextStyle(color: color, fontSize: fontSize, fontWeight: weight, height: 1.45),
-          ),
-          textDirection: TextDirection.ltr,
-        )..layout(maxWidth: maxW);
-        tp.paint(canvas, Offset(x, y));
-      }
-
-      drawText('FReader 아이콘 및 기능 설명 가이드 (${i + 1}/${pagesSpec.length})', 60, 48, w - 120, 34, Colors.white, weight: FontWeight.bold);
-      drawText(spec['title'] as String, 60, 195, w - 120, 32, const Color(0xFF0F172A), weight: FontWeight.bold);
-      drawText(spec['subtitle'] as String, 60, 250, w - 120, 22, const Color(0xFF475569));
-
-      // Draw visual bar mockup
-      final bannerRect = RRect.fromRectAndRadius(const Rect.fromLTWH(60, 320, w - 120, 120), const Radius.circular(18));
-      canvas.drawRRect(bannerRect, Paint()..color = const Color(0xFF0F172A));
-      drawText(spec['banner'] as String, 90, 360, w - 180, 24, const Color(0xFFFBBF24), weight: FontWeight.bold);
-
-      double curY = 490;
-      for (final item in (spec['items'] as List<String>)) {
-        final cardRect = RRect.fromRectAndRadius(Rect.fromLTWH(60, curY, w - 120, 165), const Radius.circular(14));
-        canvas.drawRRect(cardRect, Paint()..color = Colors.white);
-        canvas.drawRRect(
-          cardRect,
-          Paint()
-            ..color = const Color(0xFFCBD5E1)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2,
-        );
-        drawText(item, 90, curY + 32, w - 180, 23, const Color(0xFF1E293B), weight: FontWeight.w600);
-        curY += 190;
-      }
-
-      final picture = recorder.endRecording();
-      final img = await picture.toImage(w.toInt(), h.toInt());
-      final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
-      final pngFile = File('${tempDir.path}/guide_page_$i.png');
-      await pngFile.writeAsBytes(byteData!.buffer.asUint8List());
-      pngPaths.add(pngFile.path);
-    }
-
-    if (!mounted) return;
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => UniversalMediaReaderScreen(
-          files: pngPaths.map((p) => File(p)).toList(),
-          title: 'FReader 아이콘 설명 가이드',
-          isPdf: false,
-          customBookKey: pdfFile.path,
-        ),
-      ),
-    );
-  }
-
-  /// 6 & 15. 우측 상단 톱니바퀴(설정) 다이얼로그: 언어 변경(한국어/영어/중국어/일본어) + 파일 형식(확장자) 숨기기 + 화면 잠금 설정 + 아이콘 가이드 보기
+  /// 1, 2, 6, 11, 15. 우측 상단 톱니바퀴 '앱 설정' 다이얼로그:
+  /// - 문구: '프로그램 설정' -> '앱 설정'으로 변경 (#11)
+  /// - 화면 잠금 방식 설정 제거 (뷰어 표시 설정에서만 제공) (#2)
+  /// - '각 아이콘 위치 및 기능 설명 가이드 열람' -> '사용 설명서'로 변경 (#6)
+  /// - 선택된 언어에 따라 다이얼로그 및 앱 전체 문구 실시간 번역 (#1)
   Future<void> _showGlobalSettingsDialog() async {
-    bool useShake = await StorageService.getUseShakeLock();
-    bool useVolCombo = await StorageService.getUseVolumeComboLock();
     String currentLang = widget.appLang;
     bool hideExt = _hideFileExtension;
 
@@ -1629,112 +1814,105 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Row(
-            children: [
-              const Icon(Icons.settings, size: 22),
-              const SizedBox(width: 8),
-              Text(_tr('프로그램 설정', 'Settings', '应用设置', 'アプリ設定')),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+        builder: (ctx, setModalState) {
+          String tDialog(String ko, String en, String zh, String ja) =>
+              AppI18n.t(currentLang, ko: ko, en: en, zh: zh, ja: ja);
+
+          return AlertDialog(
+            title: Row(
               children: [
-                Text(
-                  _tr('1. 언어 설정 (표시 언어 및 번역 타겟 언어)', '1. Language (UI & Translation Target)', '1. 语言设置 (界面与翻译目标语言)', '1. 言語設定 (表示および翻訳先言語)'),
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    {'code': 'ko', 'label': '한국어'},
-                    {'code': 'en', 'label': 'English'},
-                    {'code': 'zh', 'label': '中文'},
-                    {'code': 'ja', 'label': '日本語'},
-                  ].map((item) {
-                    final code = item['code']!;
-                    return ChoiceChip(
-                      label: Text(item['label']!),
-                      selected: currentLang == code,
-                      onSelected: (_) {
-                        setModalState(() => currentLang = code);
-                        widget.onChangeLanguage(code);
-                      },
-                    );
-                  }).toList(),
-                ),
-                const Divider(height: 24),
-                Text(
-                  _tr('2. 파일 표시 설정', '2. File Display', '2. 文件显示设置', '2. ファイル表示設定'),
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: Text(
-                    _tr('파일 이름 뒤에 형식(.pdf, .epub 등) 숨기기', 'Hide file extension (.pdf, .epub)', '隐藏文件扩展名', '파일 확장자(.pdf 등)を隠す'),
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                  value: hideExt,
-                  onChanged: (val) async {
-                    await StorageService.setHideFileExtension(val);
-                    setModalState(() => hideExt = val);
-                    setState(() => _hideFileExtension = val);
-                  },
-                ),
-                const Divider(height: 24),
-                Text(
-                  _tr('3. 화면 잠금 방식 설정 (동시 사용 가능)', '3. Screen Lock Methods', '3. 屏幕锁定方式', '3. 画面ロック設定'),
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: const Text('흔들어서 잠그고 끄기', style: TextStyle(fontSize: 13)),
-                  value: useShake,
-                  onChanged: (val) async {
-                    final next = val ?? true;
-                    await StorageService.setUseShakeLock(next);
-                    setModalState(() => useShake = next);
-                  },
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: const Text('음량 버튼 동시에 눌러서 끄고 켜기', style: TextStyle(fontSize: 13)),
-                  value: useVolCombo,
-                  onChanged: (val) async {
-                    final next = val ?? true;
-                    await StorageService.setUseVolumeComboLock(next);
-                    setModalState(() => useVolCombo = next);
-                  },
-                ),
-                const Divider(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.menu_book_outlined, size: 18),
-                    label: const Text('각 아이콘 위치 및 기능 설명 가이드 열람'),
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      _generateAndOpenIconGuidePdf();
-                    },
-                  ),
-                ),
+                const Icon(Icons.settings, size: 22),
+                const SizedBox(width: 8),
+                Text(tDialog('앱 설정', 'App Settings', '应用设置', 'アプリ設定')),
               ],
             ),
-          ),
-          actions: [
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(_tr('닫기', 'Close', '关闭', '閉じる')),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tDialog(
+                      '1. 언어 설정 (표시 언어 및 번역 타겟 언어)',
+                      '1. Language (Display & Translation Target)',
+                      '1. 语言设置 (界面与翻译目标语言)',
+                      '1. 言語設定 (表示および翻訳先言語)',
+                    ),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      {'code': 'ko', 'label': '한국어'},
+                      {'code': 'en', 'label': 'English'},
+                      {'code': 'zh', 'label': '中文'},
+                      {'code': 'ja', 'label': '日本語'},
+                    ].map((item) {
+                      final code = item['code']!;
+                      return ChoiceChip(
+                        label: Text(item['label']!),
+                        selected: currentLang == code,
+                        onSelected: (_) {
+                          setModalState(() => currentLang = code);
+                          widget.onChangeLanguage(code);
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const Divider(height: 24),
+                  Text(
+                    tDialog('2. 파일 표시 설정', '2. File Display', '2. 文件显示设置', '2. ファイル表示設定'),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: Text(
+                      tDialog(
+                        '파일 이름 뒤에 형식(.pdf, .epub 등) 숨기기',
+                        'Hide file extension (.pdf, .epub)',
+                        '隐藏文件扩展名 (.pdf, .epub)',
+                        'ファイル名の後ろの形式(.pdf等)を隠す',
+                      ),
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    value: hideExt,
+                    onChanged: (val) async {
+                      await StorageService.setHideFileExtension(val);
+                      setModalState(() => hideExt = val);
+                      setState(() => _hideFileExtension = val);
+                    },
+                  ),
+                  const Divider(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.menu_book_outlined, size: 18),
+                      label: Text(tDialog('사용 설명서', 'User Manual', '使用说明书', '取扱説明書')),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => UserManualScreen(appLang: currentLang),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(tDialog('닫기', 'Close', '关闭', '閉じる')),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1757,7 +1935,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   });
                 },
               ),
-              title: Text('${_selectedFilePaths.length}개 선택됨'),
+              title: Text(
+                _tr(
+                  '${_selectedFilePaths.length}개 선택됨',
+                  '${_selectedFilePaths.length} Selected',
+                  '已选择 ${_selectedFilePaths.length} 项',
+                  '${_selectedFilePaths.length}個選択中',
+                ),
+              ),
+              // 5. 파일 여러 개 선택 창 상단에서 전체 선택 옆의 '그룹이동', '쓰레기통' 아이콘 삭제! (하단 버튼만 유지)
               actions: [
                 TextButton(
                   onPressed: () {
@@ -1770,17 +1956,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                     });
                   },
                   child: Text(_tr('전체 선택', 'Select All', '全选', 'すべて選択')),
-                ),
-                // 14. '선택 삭제' 왼쪽에 '그룹 이동' 버튼 배치!
-                TextButton.icon(
-                  icon: const Icon(Icons.drive_file_move_outline, size: 18),
-                  label: Text(_tr('그룹 이동', 'Move Group', '移动分组', 'グループ移動')),
-                  onPressed: _selectedFilePaths.isNotEmpty ? _moveSelectedFilesBatch : null,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                  tooltip: _tr('선택 삭제', 'Delete Selected', '删除所选', '選択削除'),
-                  onPressed: _selectedFilePaths.isNotEmpty ? _deleteSelectedFilesBatch : null,
                 ),
               ],
             )
@@ -1802,7 +1977,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   tooltip: _tr('JPG 이미지 합치기', 'Merge JPGs', '合并图片', 'JPG結合'),
                   onPressed: _showMergeExistingImagesDialog,
                 ),
-                // 9. 상단 바의 파일 그룹 생성 아이콘을 제거하고 그룹 네모칸 맨 우측 [+] 버튼으로 대체!
                 IconButton(
                   icon: Badge(
                     isLabelVisible: _trashedBooks.isNotEmpty,
@@ -1812,10 +1986,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   tooltip: _tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
                   onPressed: _showTrashBinDialog,
                 ),
-                // 6. 휴지통 옆에 톱니바퀴(설정) 아이콘 추가!
                 IconButton(
                   icon: const Icon(Icons.settings_outlined),
-                  tooltip: _tr('설정', 'Settings', '设置', '設定'),
+                  tooltip: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
                   onPressed: _showGlobalSettingsDialog,
                 ),
               ],
@@ -1823,7 +1996,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // 9. 파일 그룹 이름이 있는 네모칸 가장 오른쪽에 [+] 아이콘을 추가해서 누르면 그룹을 추가!
             SizedBox(
               height: 54,
               child: ListView.separated(
@@ -1834,8 +2006,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 itemBuilder: (context, index) {
                   if (index == _groups.length) {
                     return ActionChip(
-                      avatar: const Icon(Icons.add, size: 18),
-                      label: const Text('+', style: TextStyle(fontWeight: FontWeight.bold)),
+                      label: Icon(
+                        Icons.add,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
                       tooltip: _tr('새 그룹 추가', 'Add Group', '新建分组', 'グループ追加'),
                       onPressed: _createNewGroupDialog,
                     );
@@ -1845,7 +2021,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   return GestureDetector(
                     onLongPress: () => _confirmDeleteGroup(grp),
                     child: ChoiceChip(
-                      label: Text(grp),
+                      label: Text(_localizeGroupName(grp)),
                       selected: selected,
                       onSelected: (_) => setState(() => _selectedGroup = grp),
                     ),
@@ -1892,7 +2068,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         final isFavorite = _favoritePaths.contains(file.path);
                         final lowerExt = rawFileName.split('.').last.toLowerCase();
 
-                        // 16. 라이트 모드에서 번역 진행도가 어둡고 선명하게 보이도록 색상 보정
                         final Color badgeBg = widget.isDarkMode
                             ? Colors.amber.withOpacity(0.18)
                             : const Color(0xFF1E293B);
@@ -1913,12 +2088,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                             color: Colors.redAccent,
                             alignment: Alignment.centerRight,
                             padding: const EdgeInsets.symmetric(horizontal: 20),
-                            child: const Row(
+                            child: Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                Icon(Icons.delete_outline, color: Colors.white),
-                                SizedBox(width: 6),
-                                Text('휴지통 이동', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                const Icon(Icons.delete_outline, color: Colors.white),
+                                const SizedBox(width: 6),
+                                Text(_tr('휴지통 이동', 'Move to Trash', '移至回收站', 'ゴミ箱へ移動'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                               ],
                             ),
                           ),
@@ -1944,15 +2119,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                 : Icon(
                                     lowerExt == 'pdf'
                                         ? Icons.picture_as_pdf
-                                        : (lowerExt == 'sdocx' || lowerExt == 'spd')
-                                            ? Icons.edit_note_rounded
-                                            : (lowerExt == 'docx' || lowerExt == 'doc' || lowerExt == 'hwpx' || lowerExt == 'hwp')
-                                                ? Icons.description_outlined
-                                                : (lowerExt == 'epub' || lowerExt == 'txt')
-                                                    ? Icons.menu_book
-                                                    : (lowerExt == 'cbz' || lowerExt == 'zip')
-                                                        ? Icons.auto_stories
-                                                        : Icons.image,
+                                        : (lowerExt == 'docx' || lowerExt == 'doc' || lowerExt == 'hwpx' || lowerExt == 'hwp')
+                                            ? Icons.description_outlined
+                                            : (lowerExt == 'epub' || lowerExt == 'txt')
+                                                ? Icons.menu_book
+                                                : lowerExt == 'cbz'
+                                                    ? Icons.auto_stories
+                                                    : Icons.image,
                                     color: Colors.indigo,
                                   ),
                             title: ValueListenableBuilder<Map<String, TranslationTaskInfo>>(
@@ -2000,7 +2173,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                             ),
                                             const SizedBox(width: 5),
                                             Text(
-                                              '번역 ${(task.progress * 100).toStringAsFixed(0)}% (${task.current}/${task.total})',
+                                              '${_tr("번역", "Trans", "翻译", "翻訳")} ${(task.progress * 100).toStringAsFixed(0)}% (${task.current}/${task.total})',
                                               style: TextStyle(
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.bold,
@@ -2029,13 +2202,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                   );
                                   task = activeTasks[firstSibling.path];
                                 }
+                                final grpDisplay = _localizeGroupName(grp);
+                                final progLabel = _tr('진행률', 'Progress', '进度', '進行率');
                                 return Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       task != null
-                                          ? '[$grp]  •  진행률 ${prog.toStringAsFixed(1)}%  •  ${task.status}'
-                                          : '[$grp]  •  진행률 ${prog.toStringAsFixed(1)}%',
+                                          ? '[$grpDisplay]  •  $progLabel ${prog.toStringAsFixed(1)}%  •  ${task.status}'
+                                          : '[$grpDisplay]  •  $progLabel ${prog.toStringAsFixed(1)}%',
                                       style: const TextStyle(fontSize: 12),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
@@ -2054,7 +2229,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                 );
                               },
                             ),
-                            // 2 & 3. 편집(연필) 아이콘 왼쪽에 별 모양(즐겨찾기) 아이콘 추가!
                             trailing: _isSelectionMode
                                 ? null
                                 : Row(
@@ -2116,7 +2290,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           ],
         ),
       ),
-      // 14. 다중 선택 모드 하단에도 '선택 삭제' 왼쪽에 '그룹 이동' 버튼 배치!
       floatingActionButton: _isSelectionMode
           ? Row(
               mainAxisSize: MainAxisSize.min,

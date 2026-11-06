@@ -1,9 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:archive/archive.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart';
 
 class TxtToEpubConverter {
+  static const MethodChannel _pdfAndDocChannel = MethodChannel('ebook_reader/pdf_renderer');
+
   static String _escapeXml(String input) {
     return input
         .replaceAll('&', '&amp;')
@@ -13,77 +16,82 @@ class TxtToEpubConverter {
         .replaceAll("'", '&apos;');
   }
 
-  /// 11. 삼성 노트(.sdocx, .spd)에서 페이지 이미지가 있으면 추출하여 반환하고, 없으면 빈 리스트 반환
-  static Future<List<File>> extractSamsungNoteImagesIfPresent(File file) async {
-    try {
-      final bytes = await file.readAsBytes();
-      final archive = ZipDecoder().decodeBytes(bytes);
-      final tempDir = await getTemporaryDirectory();
-      final outDir = Directory('${tempDir.path}/sdoc_img_${file.path.hashCode.abs()}');
-      await outDir.create(recursive: true);
-
-      final extracted = <File>[];
-      int idx = 0;
-      for (final f in archive.files) {
-        if (!f.isFile) continue;
-        final lower = f.name.toLowerCase();
-        if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
-          // 작은 아이콘이나 썸네일 제외 (일정 크기 이상 페이지 이미지만 추출)
-          final content = f.content as List<int>;
-          if (content.length > 4096) {
-            final ext = lower.split('.').last;
-            final outFile = File('${outDir.path}/page_${idx.toString().padLeft(4, '0')}.$ext');
-            await outFile.writeAsBytes(content);
-            extracted.add(outFile);
-            idx++;
-          }
-        }
-      }
-      return extracted;
-    } catch (_) {
-      return [];
-    }
-  }
-
-  /// Word(.docx, .doc), 한글(.hwpx, .hwp), 삼성 노트(.sdocx, .spd), 텍스트(.txt) 파일을
-  /// 모두 정식 EPUB 문서로 자동 변환하여 뷰어에서 열람할 수 있게 합니다!
+  /// Word(.docx, .doc), 한글(.hwpx, .hwp), 텍스트(.txt) 파일을 정식 EPUB으로 변환하여 열람
   static Future<File> convertDocumentToEpub(File sourceFile) async {
     final ext = sourceFile.path.split('.').last.toLowerCase();
     if (ext == 'txt') {
       return convertTxtToEpub(sourceFile);
     }
 
-    final outPath = '${sourceFile.path}.converted.epub';
+    // 캐시 버전 키를 v2로 분리하여 이전 깨진 캐시가 절대 재사용되지 않도록 보장
+    final outPath = '${sourceFile.path}.v2.converted.epub';
     final outFile = File(outPath);
     if (await outFile.exists() && await outFile.length() > 0) {
       return outFile;
     }
 
     final fileName = sourceFile.path.split(Platform.pathSeparator).last;
-    final List<String> paragraphs = await _extractParagraphsFromOfficeOrNote(sourceFile, ext);
+    final List<String> paragraphs = await _extractParagraphsFromDocument(sourceFile, ext);
 
     return _buildEpubFromParagraphs(
       outFile: outFile,
       title: fileName,
       paragraphs: paragraphs.isEmpty
-          ? ['문서 내용을 불러왔습니다. ($fileName)', '텍스트 레이어가 없거나 이미지 기반 문서일 수 있습니다.']
+          ? ['문서 내용을 불러왔습니다. ($fileName)', '표시할 텍스트 본문이 없거나 이미지 전용 문서입니다.']
           : paragraphs,
     );
   }
 
-  static Future<List<String>> _extractParagraphsFromOfficeOrNote(File file, String ext) async {
-    final bytes = await file.readAsBytes();
+  static Future<List<String>> _extractParagraphsFromDocument(File file, String ext) async {
     final List<String> lines = [];
 
-    // 1. ZIP 기반 문서 포맷 (.docx, .hwpx, .sdocx, .spd)
-    if (ext == 'docx' || ext == 'hwpx' || ext == 'sdocx' || ext == 'spd') {
+    // 1. 한컴 한글 HWP 5.0 (.hwp):
+    //    (1) Android 네이티브 오픈소스 HWP 파서(kr.dogfoot:hwplib, Apache-2.0) 호출
+    //    (2) 폴백으로 rhwp/hop(MIT 라이선스) 규격의 OLE2 Compound File + Deflate + HWPTAG_PARA_TEXT(Tag 67) 파서 실행
+    if (ext == 'hwp') {
       try {
+        final String? nativeText = await _pdfAndDocChannel.invokeMethod<String>(
+          'extractHwpText',
+          {'hwpPath': file.path},
+        );
+        if (nativeText != null && nativeText.trim().isNotEmpty) {
+          for (final l in nativeText.split(RegExp(r'\r?\n'))) {
+            final trimmed = l.trim();
+            if (trimmed.isNotEmpty) {
+              lines.add(trimmed);
+            }
+          }
+          if (lines.isNotEmpty) return lines;
+        }
+      } catch (_) {}
+
+      try {
+        final bytes = await file.readAsBytes();
+        // 만약 확장자만 .hwp이고 실제로는 ZIP(HWPX)인 경우 처리
+        if (bytes.length >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B) {
+          lines.addAll(_extractHwpxFromBytes(bytes));
+          if (lines.isNotEmpty) return lines;
+        }
+        // OLE2 Compound File (0xD0CF11E0A1B11AE1) HWP 5.0 정밀 파싱
+        final oleLines = _parseHwp5OleCompoundFile(Uint8List.fromList(bytes));
+        if (oleLines.isNotEmpty) return oleLines;
+      } catch (_) {}
+    }
+
+    final bytes = await file.readAsBytes();
+
+    // 2. ZIP 기반 오픈 문서 포맷 (.docx, .hwpx)
+    if (ext == 'docx' || ext == 'hwpx') {
+      try {
+        if (ext == 'hwpx') {
+          final hwpxLines = _extractHwpxFromBytes(bytes);
+          if (hwpxLines.isNotEmpty) return hwpxLines;
+        }
         final archive = ZipDecoder().decodeBytes(bytes);
         for (final entry in archive.files) {
           if (!entry.isFile) continue;
           final name = entry.name.toLowerCase();
 
-          // MS Word: word/document.xml
           if (ext == 'docx' && name == 'word/document.xml') {
             final xml = utf8.decode(entry.content as List<int>, allowMalformed: true);
             final pMatches = RegExp(r'<w:p[\s>][\s\S]*?</w:p>').allMatches(xml);
@@ -98,39 +106,10 @@ class TxtToEpubConverter {
               if (clean.isNotEmpty) lines.add(clean);
             }
           }
-
-          // 한컴 한글 OWPML: Contents/section*.xml 또는 PrvText.txt
-          if (ext == 'hwpx' && (name.contains('section') && name.endsWith('.xml'))) {
-            final xml = utf8.decode(entry.content as List<int>, allowMalformed: true);
-            final tMatches = RegExp(r'<hp:t[^>]*>([\s\S]*?)</hp:t>').allMatches(xml);
-            for (final tm in tMatches) {
-              final clean = _unescapeXmlEntities(tm.group(1) ?? '').trim();
-              if (clean.isNotEmpty) lines.add(clean);
-            }
-          } else if (name.endsWith('prvtext.txt') || name.endsWith('.txt')) {
-            final txt = utf8.decode(entry.content as List<int>, allowMalformed: true);
-            for (final l in txt.split(RegExp(r'\r?\n'))) {
-              if (l.trim().isNotEmpty) lines.add(l.trim());
-            }
-          }
-
-          // 삼성 노트 (.sdocx, .spd) 내부 XML/JSON/텍스트 추출
-          if ((ext == 'sdocx' || ext == 'spd') &&
-              (name.endsWith('.xml') || name.endsWith('.json') || name.endsWith('.txt'))) {
-            final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
-            final stripped = raw
-                .replaceAll(RegExp(r'<[^>]+>'), '\n')
-                .split(RegExp(r'\r?\n'))
-                .map((s) => s.trim())
-                .where((s) => s.length >= 2 && !s.startsWith('{') && !s.startsWith('http'))
-                .toList();
-            lines.addAll(stripped);
-          }
         }
       } catch (_) {}
     }
 
-    // 2. 구형 바이너리 포맷 (.hwp, .doc) 또는 위에서 텍스트가 추출되지 않은 경우 UTF-16LE 및 UTF-8 가독 문자열 추출
     if (lines.isEmpty) {
       lines.addAll(_extractReadableStringsFromBinary(bytes));
     }
@@ -138,47 +117,343 @@ class TxtToEpubConverter {
     return lines;
   }
 
+  static List<String> _extractHwpxFromBytes(List<int> bytes) {
+    final lines = <String>[];
+    final archive = ZipDecoder().decodeBytes(bytes);
+    final sectionEntries = archive.files
+        .where((e) => e.isFile && e.name.toLowerCase().contains('section') && e.name.toLowerCase().endsWith('.xml'))
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+
+    for (final entry in sectionEntries) {
+      final xml = utf8.decode(entry.content as List<int>, allowMalformed: true);
+      final pMatches = RegExp(r'<hp:p[\s>][\s\S]*?</hp:p>').allMatches(xml);
+      if (pMatches.isNotEmpty) {
+        for (final pm in pMatches) {
+          final pXml = pm.group(0) ?? '';
+          final tMatches = RegExp(r'<hp:t[^>]*>([\s\S]*?)</hp:t>').allMatches(pXml);
+          final buf = StringBuffer();
+          for (final tm in tMatches) {
+            buf.write(_unescapeXmlEntities(tm.group(1) ?? ''));
+          }
+          final clean = buf.toString().trim();
+          if (clean.isNotEmpty) lines.add(clean);
+        }
+      } else {
+        final tMatches = RegExp(r'<hp:t[^>]*>([\s\S]*?)</hp:t>').allMatches(xml);
+        for (final tm in tMatches) {
+          final clean = _unescapeXmlEntities(tm.group(1) ?? '').trim();
+          if (clean.isNotEmpty) lines.add(clean);
+        }
+      }
+    }
+    return lines;
+  }
+
+  /// rhwp / hop (MIT License) HWP 5.0 OLE2 Compound File + Raw Deflate + HWPTAG_PARA_TEXT (Tag 67) 파서
+  static List<String> _parseHwp5OleCompoundFile(Uint8List bytes) {
+    if (bytes.length < 512) return [];
+    // OLE2 Magic Header 확인: D0 CF 11 E0 A1 B1 1A E1
+    if (bytes[0] != 0xD0 || bytes[1] != 0xCF || bytes[2] != 0x11 || bytes[3] != 0xE0) {
+      return [];
+    }
+
+    final bd = ByteData.sublistView(bytes);
+    final int sectorShift = bd.getUint16(30, Endian.little);
+    final int miniSectorShift = bd.getUint16(32, Endian.little);
+    final int sectorSize = 1 << sectorShift;
+    final int miniSectorSize = 1 << miniSectorShift;
+
+    final int numFatSectors = bd.getUint32(44, Endian.little);
+    final int firstDirSector = bd.getUint32(48, Endian.little);
+    final int miniCutoff = bd.getUint32(56, Endian.little);
+    final int firstMiniFatSector = bd.getUint32(60, Endian.little);
+    final int numMiniFatSectors = bd.getUint32(64, Endian.little);
+    final int firstDifatSector = bd.getUint32(68, Endian.little);
+    final int numDifatSectors = bd.getUint32(72, Endian.little);
+
+    // 1. DIFAT 목록 수집
+    final List<int> fatSectorIds = [];
+    for (int i = 0; i < 109 && fatSectorIds.length < numFatSectors; i++) {
+      final sid = bd.getUint32(76 + i * 4, Endian.little);
+      if (sid < 0xFFFFFFFE) fatSectorIds.add(sid);
+    }
+    int difatSec = firstDifatSector;
+    for (int d = 0; d < numDifatSectors && difatSec < 0xFFFFFFFE; d++) {
+      final offset = (difatSec + 1) * sectorSize;
+      if (offset + sectorSize > bytes.length) break;
+      final countInSec = (sectorSize ~/ 4) - 1;
+      for (int i = 0; i < countInSec && fatSectorIds.length < numFatSectors; i++) {
+        final sid = bd.getUint32(offset + i * 4, Endian.little);
+        if (sid < 0xFFFFFFFE) fatSectorIds.add(sid);
+      }
+      difatSec = bd.getUint32(offset + sectorSize - 4, Endian.little);
+    }
+
+    // 2. FAT 테이블 구축
+    final List<int> fat = [];
+    for (final sid in fatSectorIds) {
+      final offset = (sid + 1) * sectorSize;
+      if (offset + sectorSize > bytes.length) continue;
+      for (int i = 0; i < sectorSize ~/ 4; i++) {
+        fat.add(bd.getUint32(offset + i * 4, Endian.little));
+      }
+    }
+
+    Uint8List readChain(int startSector, [int? exactSize]) {
+      final builder = BytesBuilder(copy: false);
+      int cur = startSector;
+      int guard = 0;
+      while (cur < 0xFFFFFFFE && cur < fat.length && guard < 200000) {
+        final pos = (cur + 1) * sectorSize;
+        if (pos + sectorSize <= bytes.length) {
+          builder.add(Uint8List.sublistView(bytes, pos, pos + sectorSize));
+        } else {
+          break;
+        }
+        cur = fat[cur];
+        guard++;
+      }
+      final raw = builder.takeBytes();
+      if (exactSize != null && exactSize < raw.length) {
+        return Uint8List.sublistView(raw, 0, exactSize);
+      }
+      return raw;
+    }
+
+    // 3. Directory Entries 읽기
+    final dirBytes = readChain(firstDirSector);
+    final dirBd = ByteData.sublistView(dirBytes);
+    final int numDirs = dirBytes.length ~/ 128;
+
+    int rootStartSector = 0xFFFFFFFF;
+    int rootSize = 0;
+    Uint8List? fileHeaderData;
+    Uint8List? prvTextData;
+    final Map<String, (int, int)> sectionStreams = {};
+
+    for (int i = 0; i < numDirs; i++) {
+      final base = i * 128;
+      final nameByteLen = dirBd.getUint16(base + 64, Endian.little);
+      if (nameByteLen <= 2 || nameByteLen > 64) continue;
+      final objType = dirBytes[base + 66];
+      if (objType == 0) continue;
+
+      final codeUnits = <int>[];
+      for (int k = 0; k < (nameByteLen - 2) ~/ 2; k++) {
+        codeUnits.add(dirBd.getUint16(base + k * 2, Endian.little));
+      }
+      final name = String.fromCharCodes(codeUnits);
+      final startSec = dirBd.getUint32(base + 116, Endian.little);
+      final streamSize = dirBd.getUint32(base + 120, Endian.little);
+
+      if (objType == 5) {
+        rootStartSector = startSec;
+        rootSize = streamSize;
+      } else if (objType == 2) {
+        if (name == 'FileHeader' && streamSize >= 40) {
+          fileHeaderData = readChain(startSec, streamSize);
+        } else if (name == 'PrvText') {
+          prvTextData = (streamSize < miniCutoff && rootStartSector < 0xFFFFFFFE)
+              ? null // miniStream에서 아래에서 추출
+              : readChain(startSec, streamSize);
+          sectionStreams['__PrvText__'] = (startSec, streamSize);
+        } else if (name.startsWith('Section')) {
+          sectionStreams[name] = (startSec, streamSize);
+        }
+      }
+    }
+
+    // MiniFAT 및 MiniStream 구성
+    final List<int> miniFat = [];
+    if (firstMiniFatSector < 0xFFFFFFFE && numMiniFatSectors > 0) {
+      final miniFatBytes = readChain(firstMiniFatSector);
+      final mfBd = ByteData.sublistView(miniFatBytes);
+      for (int i = 0; i < miniFatBytes.length ~/ 4; i++) {
+        miniFat.add(mfBd.getUint32(i * 4, Endian.little));
+      }
+    }
+    final Uint8List miniStream =
+        (rootStartSector < 0xFFFFFFFE && rootSize > 0) ? readChain(rootStartSector, rootSize) : Uint8List(0);
+
+    Uint8List readEntryStream(int startSec, int size) {
+      if (size == 0) return Uint8List(0);
+      if (size >= miniCutoff || miniStream.isEmpty) {
+        return readChain(startSec, size);
+      }
+      final builder = BytesBuilder(copy: false);
+      int cur = startSec;
+      int guard = 0;
+      while (cur < 0xFFFFFFFE && cur < miniFat.length && guard < 100000) {
+        final pos = cur * miniSectorSize;
+        if (pos + miniSectorSize <= miniStream.length) {
+          builder.add(Uint8List.sublistView(miniStream, pos, pos + miniSectorSize));
+        } else {
+          break;
+        }
+        cur = miniFat[cur];
+        guard++;
+      }
+      final raw = builder.takeBytes();
+      if (size < raw.length) {
+        return Uint8List.sublistView(raw, 0, size);
+      }
+      return raw;
+    }
+
+    bool isCompressed = true;
+    if (fileHeaderData != null && fileHeaderData.length >= 40) {
+      final flags = ByteData.sublistView(fileHeaderData).getUint32(36, Endian.little);
+      isCompressed = (flags & 0x01) != 0;
+    }
+
+    final List<String> extractedParagraphs = [];
+    final sortedSectionNames = sectionStreams.keys.where((k) => k.startsWith('Section')).toList()
+      ..sort();
+
+    for (final secName in sortedSectionNames) {
+      final (startSec, size) = sectionStreams[secName]!;
+      Uint8List secBytes = readEntryStream(startSec, size);
+      if (secBytes.isEmpty) continue;
+
+      if (isCompressed) {
+        try {
+          secBytes = Uint8List.fromList(ZLibCodec(raw: true).decoder.convert(secBytes));
+        } catch (_) {
+          try {
+            secBytes = Uint8List.fromList(ZLibCodec(raw: false).decoder.convert(secBytes));
+          } catch (_) {}
+        }
+      }
+
+      extractedParagraphs.addAll(_parseHwpSectionRecords(secBytes));
+    }
+
+    if (extractedParagraphs.isNotEmpty) {
+      return extractedParagraphs;
+    }
+
+    // 만약 암호화되었거나 배포용 문서여서 Section 파싱 결과가 비어있다면 PrvText(미리보기 텍스트) 추출
+    if (sectionStreams.containsKey('__PrvText__')) {
+      final (startSec, size) = sectionStreams['__PrvText__']!;
+      final rawPrv = prvTextData ?? readEntryStream(startSec, size);
+      if (rawPrv.length >= 2) {
+        final pBd = ByteData.sublistView(rawPrv);
+        final units = <int>[];
+        for (int i = 0; i + 1 < rawPrv.length; i += 2) {
+          units.add(pBd.getUint16(i, Endian.little));
+        }
+        final prvStr = String.fromCharCodes(units);
+        for (final line in prvStr.split(RegExp(r'\r?\n'))) {
+          final t = line.trim();
+          if (t.isNotEmpty) extractedParagraphs.add(t);
+        }
+      }
+    }
+
+    return extractedParagraphs;
+  }
+
+  /// HWP 5.0 레코드 스트림에서 HWPTAG_PARA_TEXT (Tag ID = 67) 텍스트 정밀 디코딩
+  static List<String> _parseHwpSectionRecords(Uint8List data) {
+    final List<String> paragraphs = [];
+    final bd = ByteData.sublistView(data);
+    int offset = 0;
+
+    while (offset + 4 <= data.length) {
+      final header = bd.getUint32(offset, Endian.little);
+      offset += 4;
+
+      final int tagId = header & 0x3FF;
+      int recSize = (header >> 20) & 0xFFF;
+      if (recSize == 0xFFF) {
+        if (offset + 4 > data.length) break;
+        recSize = bd.getUint32(offset, Endian.little);
+        offset += 4;
+      }
+
+      if (offset + recSize > data.length) break;
+
+      // HWPTAG_PARA_TEXT == 67 (0x43)
+      if (tagId == 67 && recSize >= 2) {
+        final buf = StringBuffer();
+        int pos = offset;
+        final int end = offset + recSize;
+
+        while (pos + 1 < end) {
+          final int ch = bd.getUint16(pos, Endian.little);
+          pos += 2;
+
+          if (ch == 0) {
+            break;
+          } else if (ch == 1 ||
+              ch == 2 ||
+              ch == 3 ||
+              ch == 11 ||
+              ch == 12 ||
+              ch == 14 ||
+              ch == 15 ||
+              ch == 16 ||
+              ch == 17 ||
+              ch == 18 ||
+              ch == 21 ||
+              ch == 22 ||
+              ch == 23) {
+            // HWP 5.0 확장/인라인 컨트롤 문자: 총 8 WCHAR(16바이트) 차지하므로 나머지 14바이트 스킵
+            pos += 14;
+          } else if (ch == 4 ||
+              ch == 5 ||
+              ch == 6 ||
+              ch == 7 ||
+              ch == 8 ||
+              ch == 9 ||
+              ch == 19 ||
+              ch == 20) {
+            // 인라인 컨트롤(16바이트) 중 탭(9)은 공백 추가
+            if (ch == 9) buf.write('    ');
+            pos += 14;
+          } else if (ch == 10 || ch == 13) {
+            buf.write('\n');
+          } else if (ch >= 32) {
+            buf.writeCharCode(ch);
+          }
+        }
+
+        for (final line in buf.toString().split('\n')) {
+          final trimmed = line.trim();
+          if (trimmed.isNotEmpty) {
+            paragraphs.add(trimmed);
+          }
+        }
+      }
+
+      offset += recSize;
+    }
+
+    return paragraphs;
+  }
+
   static List<String> _extractReadableStringsFromBinary(List<int> bytes) {
     final result = <String>[];
-    // UTF-16LE 한글/영문/일본어/한자 연속 문자열 추출 (.hwp PrvText 및 .doc 유니코드 스트림 호환)
     final buf = StringBuffer();
     for (int i = 0; i + 1 < bytes.length; i += 2) {
       final code = bytes[i] | (bytes[i + 1] << 8);
       final isKorean = code >= 0xAC00 && code <= 0xD7A3;
-      final isJamo = code >= 0x3131 && code <= 0x318E;
-      final isCjk = code >= 0x3040 && code <= 0x9FFF;
       final isAsciiPrintable = (code >= 0x20 && code <= 0x7E) || code == 0x0A || code == 0x0D;
 
-      if (isKorean || isJamo || isCjk || isAsciiPrintable) {
+      if (isKorean || isAsciiPrintable) {
         buf.writeCharCode(code);
       } else {
-        if (buf.length >= 4) {
+        if (buf.length >= 6) {
           final s = buf.toString().trim();
-          if (RegExp(r'[가-힣a-zA-Z0-9\u3040-\u9FFF]{2,}').hasMatch(s)) {
+          if (RegExp(r'[가-힣a-zA-Z0-9]{3,}').hasMatch(s)) {
             for (final line in s.split(RegExp(r'\r?\n'))) {
               final t = line.trim();
-              if (t.length >= 2) result.add(t);
+              if (t.length >= 3) result.add(t);
             }
           }
         }
         buf.clear();
-      }
-    }
-    if (buf.length >= 4) {
-      final s = buf.toString().trim();
-      for (final line in s.split(RegExp(r'\r?\n'))) {
-        final t = line.trim();
-        if (t.length >= 2) result.add(t);
-      }
-    }
-
-    if (result.isEmpty) {
-      final utf8Str = utf8.decode(bytes, allowMalformed: true);
-      for (final line in utf8Str.split(RegExp(r'\r?\n'))) {
-        final clean = line.replaceAll(RegExp(r'[^\x20-\x7E가-힣ㄱ-ㅎㅏ-ㅣ\u3040-\u9FFF]'), '').trim();
-        if (clean.length >= 3) {
-          result.add(clean);
-        }
       }
     }
     return result;
@@ -247,7 +522,7 @@ class TxtToEpubConverter {
 <head>
   <title>$safeTitle</title>
   <style type="text/css">
-    body { font-family: sans-serif; line-height: 1.75; padding: 4%; word-break: keep-all; }
+    html, body { font-family: sans-serif; line-height: 1.75; padding: 4%; word-break: keep-all; }
     p { margin: 0.45em 0; text-indent: 0.5em; }
   </style>
 </head>

@@ -205,7 +205,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   final Map<int, String> _memoNotesByPage = {};
   final List<Offset> _activeStrokePoints = [];
   Color _penColor = Colors.amber;
-  double _penWidth = 3.2;
+  double _penWidth = 2.0;
 
   String _footerInfoMode = 'both';
   String _progressBarPos = 'right';
@@ -215,6 +215,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   final Map<int, List<BubbleTranslation>> _bubblesByPage = {};
 
   String get _bookKey => widget.customBookKey ?? widget.files.first.path;
+
+  String _tr(String ko, String en, String zh, String ja) =>
+      AppI18n.t(StorageService.appLangNotifier.value, ko: ko, en: en, zh: zh, ja: ja);
 
   @override
   void initState() {
@@ -330,8 +333,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final favs = await StorageService.getFavoriteBooks();
     final dir = await getApplicationDocumentsDirectory();
     const supportedExts = [
-      'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz', 'zip',
-      'sdocx', 'spd', 'docx', 'doc', 'hwpx', 'hwp'
+      'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+      'docx', 'doc', 'hwpx', 'hwp'
     ];
     const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
     const docConvertExts = ['txt', 'docx', 'doc', 'hwpx', 'hwp'];
@@ -405,31 +408,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           builder: (_) => ReaderScreen(filePath: targetFile!.path, bookTitle: nextName),
         ),
       );
-    } else if (nextExt == 'sdocx' || nextExt == 'spd') {
-      final noteImages = await TxtToEpubConverter.extractSamsungNoteImagesIfPresent(targetFile);
-      if (!mounted) return;
-      if (noteImages.isNotEmpty) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => UniversalMediaReaderScreen(
-              files: noteImages,
-              title: nextName,
-              isPdf: false,
-              customBookKey: targetFile!.path,
-            ),
-          ),
-        );
-      } else {
-        final epubFile = await TxtToEpubConverter.convertDocumentToEpub(targetFile);
-        if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ReaderScreen(filePath: epubFile.path, bookTitle: nextName),
-          ),
-        );
-      }
+
     } else if (docConvertExts.contains(nextExt)) {
       final epubFile = await TxtToEpubConverter.convertDocumentToEpub(targetFile);
       if (!mounted) return;
@@ -514,7 +493,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         if (renderedPaths != null) {
           _imagePages = renderedPaths.map((p) => File(p.toString())).toList();
         }
-      } else if (lower.endsWith('.cbz') || lower.endsWith('.zip')) {
+      } else if (lower.endsWith('.cbz')) {
         final bytes = await first.readAsBytes();
         final archive = ZipDecoder().decodeBytes(bytes);
         final extractDir = Directory('${tempDir.path}/cbz_$safeHashKey');
@@ -829,16 +808,22 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('뷰어 표시 설정', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(
+                  _tr('뷰어 표시 설정', 'Viewer Display Settings', '阅读器显示设置', '뷰어表示設定'),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 12),
-                const Text('화면 잠금 설정 (동시 사용 가능)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(
+                  _tr('화면 잠금 설정 (동시 사용 가능)', 'Screen Lock Settings (Multiple allowed)', '屏幕锁定设置 (可同时启用)', '画面ロック設定 (同時使用可)'),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
                   children: [
                     FilterChip(
-                      label: const Text('흔들어서 잠그고 끄기'),
+                      label: Text(_tr('흔들어서 잠그고 끄기', 'Shake to Lock/Unlock', '摇晃锁定/解锁', '振ってロック/解除')),
                       selected: _useShakeLock,
                       onSelected: (val) async {
                         await StorageService.setUseShakeLock(val);
@@ -847,7 +832,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     FilterChip(
-                      label: const Text('음량 버튼 동시에 눌러서 끄고 켜기'),
+                      label: Text(_tr('음량 버튼 동시에 눌러서 끄고 켜기', 'Press Both Volume Keys to Lock/Unlock', '同时按音量键锁定/解锁', '音量ボタン同時押しでロック/解除')),
                       selected: _useVolumeComboLock,
                       onSelected: (val) async {
                         await StorageService.setUseVolumeComboLock(val);
@@ -858,14 +843,17 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   ],
                 ),
                 const Divider(height: 20),
-                const Text('페이지 전환 설정 (동시 사용 가능)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(
+                  _tr('페이지 전환 설정 (동시 사용 가능)', 'Page Turn Settings (Multiple allowed)', '翻页方式设置 (可同时启用)', 'ページめくり設定 (同時使用可)'),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
                   children: [
                     FilterChip(
-                      label: const Text('음량 버튼'),
+                      label: Text(_tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン')),
                       selected: _useVolumeTurn,
                       onSelected: (val) async {
                         await StorageService.setUseVolumeTurn(val);
@@ -874,7 +862,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     FilterChip(
-                      label: const Text('페이지 이동 버튼'),
+                      label: Text(_tr('페이지 이동 버튼', 'Page Nav Buttons', '翻页按钮', 'ページ移動ボタン')),
                       selected: _useQuickNavTurn,
                       onSelected: (val) async {
                         await StorageService.setUseQuickNavTurn(val);
@@ -883,7 +871,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     FilterChip(
-                      label: const Text('S펜 버튼'),
+                      label: Text(_tr('S펜 버튼', 'S Pen Button', 'S Pen 按钮', 'Sペンボタン')),
                       selected: _useSpenTurn,
                       onSelected: (val) async {
                         await StorageService.setUseSpenTurn(val);
@@ -894,14 +882,17 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   ],
                 ),
                 const Divider(height: 24),
-                const Text('진행도 UI 위치', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(
+                  _tr('진행도 UI 위치', 'Progress Bar Position', '进度条位置', '進行度バーの位置'),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
                   children: [
                     ChoiceChip(
-                      label: const Text('오른쪽'),
+                      label: Text(_tr('오른쪽', 'Right', '右侧', '右')),
                       selected: _progressBarPos == 'right',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('right');
@@ -910,7 +901,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     ChoiceChip(
-                      label: const Text('왼쪽'),
+                      label: Text(_tr('왼쪽', 'Left', '左侧', '左')),
                       selected: _progressBarPos == 'left',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('left');
@@ -919,7 +910,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     ChoiceChip(
-                      label: const Text('하단'),
+                      label: Text(_tr('하단', 'Bottom', '底部', '下部')),
                       selected: _progressBarPos == 'bottom',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('bottom');
@@ -928,7 +919,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     ChoiceChip(
-                      label: const Text('숨김'),
+                      label: Text(_tr('숨김', 'Hidden', '隐藏', '非表示')),
                       selected: _progressBarPos == 'hidden',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('hidden');
@@ -939,14 +930,17 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   ],
                 ),
                 const Divider(height: 24),
-                const Text('하단 정보 표시', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(
+                  _tr('하단 정보 표시', 'Footer Info Display', '底部信息显示', '下部情報表示'),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
                   children: [
                     ChoiceChip(
-                      label: const Text('진행률'),
+                      label: Text(_tr('진행률', 'Progress %', '进度百分比', '進行率')),
                       selected: _footerInfoMode == 'progress',
                       onSelected: (_) async {
                         await StorageService.setFooterInfoMode('progress');
@@ -955,7 +949,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     ChoiceChip(
-                      label: const Text('페이지 번호'),
+                      label: Text(_tr('페이지 번호', 'Page Number', '页码', 'ページ番号')),
                       selected: _footerInfoMode == 'page',
                       onSelected: (_) async {
                         await StorageService.setFooterInfoMode('page');
@@ -964,7 +958,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     ChoiceChip(
-                      label: const Text('진행률 및 페이지 번호'),
+                      label: Text(_tr('진행률 및 페이지 번호', 'Both Progress & Page', '进度与页码', '進行率とページ番号')),
                       selected: _footerInfoMode == 'both',
                       onSelected: (_) async {
                         await StorageService.setFooterInfoMode('both');
@@ -973,7 +967,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     ChoiceChip(
-                      label: const Text('정보 표시 없음'),
+                      label: Text(_tr('정보 표시 없음', 'None', '不显示', '表示なし')),
                       selected: _footerInfoMode == 'none',
                       onSelected: (_) async {
                         await StorageService.setFooterInfoMode('none');
@@ -1020,7 +1014,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '원본 언어를 선택하면 현재 프로그램 설정 언어($targetLabel)로 번역합니다:',
+                '원본 언어를 선택하면 현재 앱 설정 언어($targetLabel)로 번역합니다:',
                 style: const TextStyle(fontSize: 13),
               ),
               const SizedBox(height: 12),
@@ -1426,7 +1420,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   String _formatFooterText(bool isSpread) {
     if (_footerInfoMode == 'none') return '';
-    final double progPercent = _totalPages > 0 ? ((_currentPage + 1) / _totalPages * 100.0).clamp(0.0, 100.0).toDouble() : 0.0;
+    final int effectivePage = (isSpread && (_currentPage + 2 >= _totalPages)) ? _totalPages : (_currentPage + 1);
+    final double progPercent = _totalPages > 0 ? (effectivePage / _totalPages * 100.0).clamp(0.0, 100.0).toDouble() : 0.0;
     final String progStr = '${progPercent.toStringAsFixed(1)}%';
     final String pageStr = isSpread && (_currentPage + 1 < _totalPages)
         ? '${_currentPage + 1}-${_currentPage + 2} / $_totalPages'
@@ -1455,8 +1450,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       );
     }
 
-    final double sliderVal = _currentPage.toDouble().clamp(0.0, math.max<double>(0.0, (_totalPages - 1).toDouble())).toDouble();
+    final bool isSpreadNow = _isSpreadActive(context);
+    final int displayedPageNum = (isSpreadNow && (_currentPage + 2 >= _totalPages))
+        ? _totalPages
+        : (_currentPage + 1).clamp(1, _totalPages).toInt();
     final double sliderMax = math.max<double>(1.0, (_totalPages - 1).toDouble());
+    final double sliderVal = (displayedPageNum - 1).toDouble().clamp(0.0, sliderMax).toDouble();
     final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
 
     if (_progressBarPos == 'bottom') {
@@ -1501,7 +1500,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   child: Text(
-                    '${_currentPage + 1}/$_totalPages',
+                    '$displayedPageNum/$_totalPages',
                     style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -1562,7 +1561,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
               ),
               Text(
-                '${_currentPage + 1}/$_totalPages',
+                '$displayedPageNum/$_totalPages',
                 style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
               ),
               IconButton(
@@ -1704,7 +1703,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         : const BouncingScrollPhysics(),
                   itemCount: viewItemCount,
                   onPageChanged: (viewIdx) {
-                    final int actualPage = isSpread ? (viewIdx * 2) : viewIdx;
+                    int actualPage = isSpread ? (viewIdx * 2) : viewIdx;
+                    if (isSpread && viewIdx == viewItemCount - 1) {
+                      actualPage = (_totalPages - 1).clamp(0, _totalPages - 1).toInt();
+                    }
                     setState(() => _currentPage = actualPage);
                     _ensurePageDimensionLoaded(actualPage);
                     if (actualPage + 1 < _totalPages) _ensurePageDimensionLoaded(actualPage + 1);
@@ -1908,7 +1910,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               _isMemoMode = false;
                               _isEraserMode = false;
                             }),
-                            child: const Text('완료', style: TextStyle(color: Colors.amber)),
+                            child: Text(_tr('완료', 'Done', '完成', '完了'), style: const TextStyle(color: Colors.amber)),
                           ),
                         ],
                       ),
@@ -1940,16 +1942,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (_previousJumpPage != null)
-                        IconButton(
-                          icon: const Icon(Icons.restore, color: Colors.amber, size: 20),
-                          tooltip: '이전 페이지로 돌아가기',
-                          onPressed: () {
-                            final target = _previousJumpPage!;
-                            _previousJumpPage = null;
-                            _goToPage(target, recordHistory: false, smoothAnimation: true);
-                          },
-                        ),
+
                       IconButton(
                         icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 22),
                         tooltip: '이전 파일로 이동 (같은 그룹)',

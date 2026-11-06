@@ -30,7 +30,13 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import kr.dogfoot.hwplib.reader.HWPReader
+import kr.dogfoot.hwplib.tool.textextractor.TextExtractMethod
+import kr.dogfoot.hwplib.tool.textextractor.TextExtractor
 import java.io.File
+import kr.dogfoot.hwplib.reader.HWPReader
+import kr.dogfoot.hwplib.tool.textextractor.TextExtractMethod
+import kr.dogfoot.hwplib.tool.textextractor.TextExtractor
 import java.io.FileOutputStream
 import kotlin.math.sqrt
 
@@ -288,6 +294,24 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         } catch (e: Exception) {
                             try { outPdf.close() } catch (_: Exception) {}
                             runOnUiThread { result.error("MERGE_PDF_ERR", e.message, null) }
+                        }
+                    }.start()
+                } else if (call.method == "extractHwpText") {
+                    val hwpPath = call.argument<String>("hwpPath")
+                    if (hwpPath == null) {
+                        result.error("INVALID_ARGS", "Missing hwpPath", null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        try {
+                            val hwpFile = HWPReader.fromFile(hwpPath)
+                            val extractedText = TextExtractor.extract(
+                                hwpFile,
+                                TextExtractMethod.InsertControlTextBetweenParagraphText
+                            )
+                            runOnUiThread { result.success(extractedText ?: "") }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.error("HWP_ERR", e.message, null) }
                         }
                     }.start()
                 } else {

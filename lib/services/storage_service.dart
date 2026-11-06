@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -101,11 +102,34 @@ class MemoStroke {
         dxList: (json['x'] as List).map((e) => (e as num).toDouble()).toList(),
         dyList: (json['y'] as List).map((e) => (e as num).toDouble()).toList(),
         colorValue: (json['c'] as num?)?.toInt() ?? 0xFFFFC107,
-        strokeWidth: (json['w'] as num?)?.toDouble() ?? 3.0,
+        strokeWidth: (json['w'] as num?)?.toDouble() ?? 2.0,
       );
 }
 
+
+class AppI18n {
+  static String t(
+    String lang, {
+    required String ko,
+    required String en,
+    required String zh,
+    required String ja,
+  }) {
+    switch (lang) {
+      case 'en':
+        return en;
+      case 'zh':
+        return zh;
+      case 'ja':
+        return ja;
+      default:
+        return ko;
+    }
+  }
+}
+
 class StorageService {
+  static final ValueNotifier<String> appLangNotifier = ValueNotifier<String>('ko');
   static Future<void> saveLastPosition(String bookPath, String pos) async {
     final prefs = await SharedPreferences.getInstance();
     final oldPos = prefs.getString('pos_$bookPath');
@@ -147,13 +171,16 @@ class StorageService {
 
   // 6. 앱 언어 설정 ('ko': 한국어, 'en': 영어, 'zh': 중국어, 'ja': 일본어)
   static Future<void> setAppLanguage(String langCode) async {
+    appLangNotifier.value = langCode;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('app_language_code', langCode);
   }
 
   static Future<String> getAppLanguage() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('app_language_code') ?? 'ko';
+    final code = prefs.getString('app_language_code') ?? 'ko';
+    appLangNotifier.value = code;
+    return code;
   }
 
   // 15. 파일 이름 뒤에 형식(.pdf, .epub 등) 숨기기 설정
