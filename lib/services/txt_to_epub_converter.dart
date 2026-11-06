@@ -251,8 +251,8 @@ class TxtToEpubConverter {
         rootStartSector = startSec;
         rootSize = streamSize;
       } else if (objType == 2) {
-        if (name == 'FileHeader' && streamSize >= 40) {
-          fileHeaderData = readChain(startSec, streamSize);
+        if (name == 'FileHeader' && streamSize >= 36) {
+          sectionStreams['__FileHeader__'] = (startSec, streamSize);
         } else if (name == 'PrvText') {
           prvTextData = (streamSize < miniCutoff && rootStartSector < 0xFFFFFFFE)
               ? null // miniStream에서 아래에서 추출
@@ -302,9 +302,13 @@ class TxtToEpubConverter {
     }
 
     bool isCompressed = true;
-    if (fileHeaderData != null && fileHeaderData.length >= 40) {
-      final flags = ByteData.sublistView(fileHeaderData).getUint32(36, Endian.little);
-      isCompressed = (flags & 0x01) != 0;
+    if (sectionStreams.containsKey('__FileHeader__')) {
+      final (fhSec, fhSize) = sectionStreams['__FileHeader__']!;
+      fileHeaderData = readEntryStream(fhSec, fhSize);
+      if (fileHeaderData.length >= 40) {
+        final flags = ByteData.sublistView(fileHeaderData).getUint32(36, Endian.little);
+        isCompressed = (flags & 0x01) != 0;
+      }
     }
 
     final List<String> extractedParagraphs = [];

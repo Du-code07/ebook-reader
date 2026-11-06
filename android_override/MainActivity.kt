@@ -30,13 +30,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
-import kr.dogfoot.hwplib.reader.HWPReader
-import kr.dogfoot.hwplib.tool.textextractor.TextExtractMethod
-import kr.dogfoot.hwplib.tool.textextractor.TextExtractor
 import java.io.File
-import kr.dogfoot.hwplib.reader.HWPReader
-import kr.dogfoot.hwplib.tool.textextractor.TextExtractMethod
-import kr.dogfoot.hwplib.tool.textextractor.TextExtractor
 import java.io.FileOutputStream
 import kotlin.math.sqrt
 
@@ -304,11 +298,17 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     }
                     Thread {
                         try {
-                            val hwpFile = HWPReader.fromFile(hwpPath)
-                            val extractedText = TextExtractor.extract(
-                                hwpFile,
-                                TextExtractMethod.InsertControlTextBetweenParagraphText
-                            )
+                            val readerCls = Class.forName("kr.dogfoot.hwplib.reader.HWPReader")
+                            val fromFileMethod = readerCls.getMethod("fromFile", String::class.java)
+                            val hwpObj = fromFileMethod.invoke(null, hwpPath)
+                            val methodEnumCls = Class.forName("kr.dogfoot.hwplib.tool.textextractor.TextExtractMethod")
+                            val enumConst = methodEnumCls.enumConstants?.firstOrNull {
+                                it.toString() == "InsertControlTextBetweenParagraphText"
+                            } ?: methodEnumCls.enumConstants?.firstOrNull()
+                            val extractorCls = Class.forName("kr.dogfoot.hwplib.tool.textextractor.TextExtractor")
+                            val hwpFileCls = Class.forName("kr.dogfoot.hwplib.object.HWPFile")
+                            val extractMethod = extractorCls.getMethod("extract", hwpFileCls, methodEnumCls)
+                            val extractedText = extractMethod.invoke(null, hwpObj, enumConst) as? String
                             runOnUiThread { result.success(extractedText ?: "") }
                         } catch (e: Exception) {
                             runOnUiThread { result.error("HWP_ERR", e.message, null) }
