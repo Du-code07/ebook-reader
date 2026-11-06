@@ -11,6 +11,8 @@ import 'package:path_provider/path_provider.dart';
 import '../services/batch_translation_service.dart';
 import '../services/storage_service.dart';
 import '../services/volume_key_service.dart';
+import '../services/txt_to_epub_converter.dart';
+import 'reader_screen.dart';
 
 /// 1. S펜 전용 즉시 승리 제스처 인식기 (Eager Stylus Gesture Recognizer):
 /// S펜(stylus / invertedStylus)이 화면에 닿는 순간(PointerDown) 즉시 GestureArena에서 승리(accepted)를 선언하여
@@ -286,72 +288,251 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
-  Future<void> _initMedia() async {
-    _enableTwoPageInLandscape = await StorageService.getTwoPageLandscape();
-    _isMangaRtlMode = await StorageService.getReadingDirectionRtl();
-    _useVolumeTurn = await StorageService.getUseVolumeTurn();
-    _useQuickNavTurn = await StorageService.getUseQuickNavTurn();
-    _useSpenTurn = await StorageService.getUseSpenTurn();
-    _footerInfoMode = await StorageService.getFooterInfoMode();
-    _progressBarPos = await StorageService.getProgressBarPosition();
-
-    final tempDir = await getTemporaryDirectory();
-    final first = widget.files.first;
-    final lower = first.path.toLowerCase();
-
-    if (widget.isPdf || lower.endsWith('.pdf')) {
-      final outDir = Directory('${tempDir.path}/pdf_${first.uri.pathSegments.last}');
-      final List<dynamic>? renderedPaths = await _pdfChannel.invokeMethod('renderPdfToImages', {
-        'pdfPath': first.path,
-        'outDirPath': outDir.path,
-      });
-      if (renderedPaths != null) {
-        _imagePages = renderedPaths.map((p) => File(p.toString())).toList();
+  int _naturalCompare(String a, String b) {
+    final reg = RegExp(r'(\d+)|(\D+)');
+    final matchesA = reg.allMatches(a.toLowerCase()).toList();
+    final matchesB = reg.allMatches(b.toLowerCase()).toList();
+    final len = matchesA.length < matchesB.length ? matchesA.length : matchesB.length;
+    for (int i = 0; i < len; i++) {
+      final partA = matchesA[i].group(0)!;
+      final partB = matchesB[i].group(0)!;
+      final numA = int.tryParse(partA);
+      final numB = int.tryParse(partB);
+      if (numA != null && numB != null) {
+        final cmp = numA.compareTo(numB);
+        if (cmp != 0) return cmp;
+      } else {
+        final cmp = partA.compareTo(partB);
+        if (cmp != 0) return cmp;
       }
-    } else if (lower.endsWith('.cbz') || lower.endsWith('.zip')) {
-      final bytes = await first.readAsBytes();
-      final archive = ZipDecoder().decodeBytes(bytes);
-      final extractDir = Directory('${tempDir.path}/cbz_${first.uri.pathSegments.last}');
-      await extractDir.create(recursive: true);
-      final extracted = <File>[];
-      for (final f in archive.files) {
-        if (f.isFile &&
-            (f.name.toLowerCase().endsWith('.jpg') ||
-                f.name.toLowerCase().endsWith('.jpeg') ||
-                f.name.toLowerCase().endsWith('.png') ||
-                f.name.toLowerCase().endsWith('.webp'))) {
-          final outFile = File('${extractDir.path}/${f.name.split('/').last}');
-          await outFile.writeAsBytes(f.content as List<int>);
-          extracted.add(outFile);
+    }
+    return matchesA.length.compareTo(matchesB.length);
+  }
+
+  /// 4. 같은 그룹 내의 다음 파일로 즉시 이동
+  Future<void> _openNextFileInSameGroup() async {
+    final currentPath = widget.files.first.path;
+    final currentGroup = await StorageService.getBookGroup(currentPath);
+    final dir = await getApplicationDocumentsDirectory();
+    const supportedExts = ['epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz', 'zip'];
+    const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
+
+    final allFiles = <File>[];
+    for (final e in dir.listSync()) {
+      if (e is File) {
+        final lower = e.path.toLowerCase();
+        if (lower.endsWith('_translated.epub') || lower.endsWith('.converted.epub')) continue;
+        final ext = lower.split('.').last;
+        if (supportedExts.contains(ext)) {
+          final grp = await StorageService.getBookGroup(e.path);
+          if (grp == currentGroup) {
+            allFiles.add(e);
+          }
         }
       }
-      extracted.sort((a, b) => a.path.compareTo(b.path));
-      _imagePages = extracted;
-    } else {
-      _imagePages = widget.files;
     }
 
-    _totalPages = _imagePages.isNotEmpty ? _imagePages.length : 1;
+    allFiles.sort((a, b) => _naturalCompare(
+          a.path.split(Platform.pathSeparator).last,
+          b.path.split(Platform.pathSeparator).last,
+        ));
 
-    final savedPos = await StorageService.getLastPosition(_bookKey);
-    if (savedPos != null) {
-      final savedPage = int.tryParse(savedPos) ?? 0;
-      _currentPage = savedPage.clamp(0, _totalPages - 1).toInt();
+    final currentPathsSet = widget.files.map((f) => f.path).toSet();
+    final curIdx = allFiles.indexWhere((f) => f.path == currentPath);
+    if (curIdx == -1 || allFiles.length <= currentPathsSet.length) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('현재 그룹("$currentGroup")에 이동할 다음 파일이 없습니다.'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+      return;
     }
 
-    _pageController = PageController(initialPage: _currentPage);
-
-    if (_imagePages.isNotEmpty) {
-      _pageImageSizes[_currentPage] = await _getImageDimension(_imagePages[_currentPage]);
-      if (_currentPage + 1 < _imagePages.length) {
-        _ensurePageDimensionLoaded(_currentPage + 1);
+    File? nextFile;
+    for (int offset = 1; offset < allFiles.length; offset++) {
+      final candidate = allFiles[(curIdx + offset) % allFiles.length];
+      if (!currentPathsSet.contains(candidate.path)) {
+        nextFile = candidate;
+        break;
       }
     }
 
+    if (nextFile == null || !mounted) return;
+
+    final nextName = nextFile.path.split(Platform.pathSeparator).last;
+    final nextExt = nextName.split('.').last.toLowerCase();
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('다음 파일 열기: $nextName'),
+        duration: const Duration(milliseconds: 900),
+      ),
+    );
+
+    if (nextExt == 'epub') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ReaderScreen(filePath: nextFile!.path, bookTitle: nextName),
+        ),
+      );
+    } else if (nextExt == 'txt') {
+      final epubFile = await TxtToEpubConverter.convertTxtToEpub(nextFile);
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ReaderScreen(filePath: epubFile.path, bookTitle: nextName),
+        ),
+      );
+    } else if (nextExt == 'pdf') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => UniversalMediaReaderScreen(
+            files: [nextFile!],
+            title: nextName,
+            isPdf: true,
+          ),
+        ),
+      );
+    } else if (imageExts.contains(nextExt)) {
+      final siblingImages = allFiles.where((f) {
+        final fExt = f.path.split('.').last.toLowerCase();
+        return imageExts.contains(fExt);
+      }).toList();
+      final targetList = siblingImages.length > 1 ? siblingImages : [nextFile];
+      final bookKey = targetList.first.path;
+      final clickedIdx = targetList.indexWhere((f) => f.path == nextFile!.path);
+      if (clickedIdx >= 0) {
+        await StorageService.saveLastPosition(bookKey, clickedIdx.toString());
+      }
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => UniversalMediaReaderScreen(
+            files: targetList,
+            title: targetList.length > 1 ? '$nextName 외 ${targetList.length - 1}장' : nextName,
+            isPdf: false,
+            customBookKey: bookKey,
+          ),
+        ),
+      );
+    } else {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => UniversalMediaReaderScreen(
+            files: [nextFile!],
+            title: nextName,
+            isPdf: false,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _initMedia() async {
+    try {
+      _enableTwoPageInLandscape = await StorageService.getTwoPageLandscape();
+      _isMangaRtlMode = await StorageService.getReadingDirectionRtl();
+      _useVolumeTurn = await StorageService.getUseVolumeTurn();
+      _useQuickNavTurn = await StorageService.getUseQuickNavTurn();
+      _useSpenTurn = await StorageService.getUseSpenTurn();
+      _footerInfoMode = await StorageService.getFooterInfoMode();
+      _progressBarPos = await StorageService.getProgressBarPosition();
+
+      final tempDir = await getTemporaryDirectory();
+      final first = widget.files.first;
+      final lower = first.path.toLowerCase();
+      final int safeFileLen = await first.exists() ? await first.length() : 0;
+      final String safeHashKey = '${first.path.hashCode.abs()}_$safeFileLen';
+
+      if (widget.isPdf || lower.endsWith('.pdf')) {
+        final outDir = Directory('${tempDir.path}/pdf_$safeHashKey');
+        final List<dynamic>? renderedPaths = await _pdfChannel.invokeMethod('renderPdfToImages', {
+          'pdfPath': first.path,
+          'outDirPath': outDir.path,
+        });
+        if (renderedPaths != null) {
+          _imagePages = renderedPaths.map((p) => File(p.toString())).toList();
+        }
+      } else if (lower.endsWith('.cbz') || lower.endsWith('.zip')) {
+        final bytes = await first.readAsBytes();
+        final archive = ZipDecoder().decodeBytes(bytes);
+        final extractDir = Directory('${tempDir.path}/cbz_$safeHashKey');
+        await extractDir.create(recursive: true);
+        final extracted = <File>[];
+        int idx = 0;
+        for (final f in archive.files) {
+          final lowerName = f.name.toLowerCase();
+          if (f.isFile &&
+              !lowerName.contains('__macosx') &&
+              !f.name.split('/').last.startsWith('._') &&
+              (lowerName.endsWith('.jpg') ||
+                  lowerName.endsWith('.jpeg') ||
+                  lowerName.endsWith('.png') ||
+                  lowerName.endsWith('.webp'))) {
+            final ext = lowerName.split('.').last;
+            final safeEntryName = 'img_${idx.toString().padLeft(4, '0')}_${f.name.split('/').last.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_')}.$ext';
+            final outFile = File('${extractDir.path}/$safeEntryName');
+            if (!await outFile.exists() || await outFile.length() == 0) {
+              await outFile.writeAsBytes(f.content as List<int>);
+            }
+            extracted.add(outFile);
+            idx++;
+          }
+        }
+        extracted.sort((a, b) => _naturalCompare(
+              a.path.split(Platform.pathSeparator).last,
+              b.path.split(Platform.pathSeparator).last,
+            ));
+        _imagePages = extracted;
+      } else {
+        _imagePages = widget.files;
+      }
+
+      _totalPages = _imagePages.isNotEmpty ? _imagePages.length : 1;
+
+      final savedPos = await StorageService.getLastPosition(_bookKey);
+      if (savedPos != null) {
+        final savedPage = int.tryParse(savedPos) ?? 0;
+        _currentPage = savedPage.clamp(0, _totalPages - 1).toInt();
+      }
+
+      _pageController = PageController(initialPage: _currentPage);
+
+      if (_imagePages.isNotEmpty) {
+        _pageImageSizes[_currentPage] = await _getImageDimension(_imagePages[_currentPage]);
+        if (_currentPage + 1 < _imagePages.length) {
+          _ensurePageDimensionLoaded(_currentPage + 1);
+        }
+      }
+
+      _bindHardwareButtons();
+    } catch (e) {
+      _pageController ??= PageController(initialPage: 0);
+    } finally {
+      if (mounted) {
+        setState(() => _isPreparingPages = false);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _syncControllerToCurrentPage(animate: false);
+        });
+      }
+    }
+
+    // 캐시 및 필기 데이터 비동기 로드
+    bool anyBubbles = false;
     for (int i = 0; i < _imagePages.length; i++) {
       final cached = await StorageService.getImageBubbleCache(_bookKey, i);
       if (cached != null) {
         _bubblesByPage[i] = cached;
+        if (cached.isNotEmpty) anyBubbles = true;
       }
       final strokes = await StorageService.getPageMemoStrokes(_bookKey, i);
       if (strokes.isNotEmpty) {
@@ -362,16 +543,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         _memoNotesByPage[i] = note;
       }
     }
-    if (_bubblesByPage.isNotEmpty) {
-      _showTranslatedBubbles = true;
-    }
-
-    _bindHardwareButtons();
-
-    if (mounted) {
-      setState(() => _isPreparingPages = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _syncControllerToCurrentPage(animate: false);
+    if (mounted && (anyBubbles || _memoStrokesByPage.isNotEmpty || _memoNotesByPage.isNotEmpty)) {
+      setState(() {
+        if (anyBubbles) _showTranslatedBubbles = true;
       });
     }
   }
@@ -1375,6 +1549,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
+        fit: StackFit.expand,
         children: [
           Positioned.fill(
             child: AbsorbPointer(
@@ -1480,16 +1655,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
             ),
 
-          // 백그라운드 번역 진행 중일 때 뷰어 내 미니 진행 표시줄
-          ValueListenableBuilder<Map<String, TranslationTaskInfo>>(
-            valueListenable: BatchTranslationService.activeTasks,
-            builder: (context, tasks, _) {
-              final task = tasks[_bookKey];
-              if (task == null) return const SizedBox.shrink();
-              return Positioned(
-                left: 16,
-                bottom: math.max<double>(bottomInset + 24.0, 28.0) + (_showControls && _progressBarPos == 'bottom' ? 46.0 : 0.0),
-                child: Material(
+          // 백그라운드 번역 진행 중일 때 뷰어 내 미니 진행 표시줄 (항상 Positioned가 Stack의 직계 자식이 되도록 배치!)
+          Positioned(
+            left: 16,
+            bottom: math.max<double>(bottomInset + 24.0, 28.0) + (_showControls && _progressBarPos == 'bottom' ? 46.0 : 0.0),
+            child: ValueListenableBuilder<Map<String, TranslationTaskInfo>>(
+              valueListenable: BatchTranslationService.activeTasks,
+              builder: (context, tasks, _) {
+                final task = tasks[_bookKey];
+                if (task == null) return const SizedBox.shrink();
+                return Material(
                   color: Colors.black87,
                   borderRadius: BorderRadius.circular(20),
                   child: Padding(
@@ -1510,9 +1685,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       ],
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
 
           if (_isMemoMode && !_isTouchLocked)
@@ -1635,6 +1810,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             _goToPage(target, recordHistory: false, smoothAnimation: true);
                           },
                         ),
+                      IconButton(
+                        icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
+                        tooltip: '다음 파일로 이동 (같은 그룹)',
+                        onPressed: _openNextFileInSameGroup,
+                      ),
                       IconButton(
                         icon: const Icon(Icons.screen_lock_portrait, color: Colors.white, size: 20),
                         tooltip: '화면 터치 잠금',

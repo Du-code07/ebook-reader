@@ -5,6 +5,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
+import 'package:path_provider/path_provider.dart';
+import '../services/txt_to_epub_converter.dart';
 import '../services/batch_translation_service.dart';
 import '../services/storage_service.dart';
 import '../services/volume_key_service.dart';
@@ -181,6 +183,146 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         duration: Duration(seconds: 1),
       ),
     );
+  }
+
+  int _naturalCompare(String a, String b) {
+    final reg = RegExp(r'(\d+)|(\D+)');
+    final matchesA = reg.allMatches(a.toLowerCase()).toList();
+    final matchesB = reg.allMatches(b.toLowerCase()).toList();
+    final len = matchesA.length < matchesB.length ? matchesA.length : matchesB.length;
+    for (int i = 0; i < len; i++) {
+      final partA = matchesA[i].group(0)!;
+      final partB = matchesB[i].group(0)!;
+      final numA = int.tryParse(partA);
+      final numB = int.tryParse(partB);
+      if (numA != null && numB != null) {
+        final cmp = numA.compareTo(numB);
+        if (cmp != 0) return cmp;
+      } else {
+        final cmp = partA.compareTo(partB);
+        if (cmp != 0) return cmp;
+      }
+    }
+    return matchesA.length.compareTo(matchesB.length);
+  }
+
+  /// 4. 같은 그룹 내의 다음 파일로 즉시 이동
+  Future<void> _openNextFileInSameGroup() async {
+    final currentPath = widget.filePath;
+    final currentGroup = await StorageService.getBookGroup(currentPath);
+    final dir = await getApplicationDocumentsDirectory();
+    const supportedExts = ['epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz', 'zip'];
+    const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
+
+    final allFiles = <File>[];
+    for (final e in dir.listSync()) {
+      if (e is File) {
+        final lower = e.path.toLowerCase();
+        if (lower.endsWith('_translated.epub') || lower.endsWith('.converted.epub')) continue;
+        final ext = lower.split('.').last;
+        if (supportedExts.contains(ext)) {
+          final grp = await StorageService.getBookGroup(e.path);
+          if (grp == currentGroup) {
+            allFiles.add(e);
+          }
+        }
+      }
+    }
+
+    allFiles.sort((a, b) => _naturalCompare(
+          a.path.split(Platform.pathSeparator).last,
+          b.path.split(Platform.pathSeparator).last,
+        ));
+
+    final curIdx = allFiles.indexWhere((f) => f.path == currentPath);
+    if (curIdx == -1 || allFiles.length <= 1) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('현재 그룹("$currentGroup")에 이동할 다음 파일이 없습니다.'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+      return;
+    }
+
+    final nextFile = allFiles[(curIdx + 1) % allFiles.length];
+    if (!mounted) return;
+
+    final nextName = nextFile.path.split(Platform.pathSeparator).last;
+    final nextExt = nextName.split('.').last.toLowerCase();
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('다음 파일 열기: $nextName'),
+        duration: const Duration(milliseconds: 900),
+      ),
+    );
+
+    if (nextExt == 'epub') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ReaderScreen(filePath: nextFile.path, bookTitle: nextName),
+        ),
+      );
+    } else if (nextExt == 'txt') {
+      final epubFile = await TxtToEpubConverter.convertTxtToEpub(nextFile);
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ReaderScreen(filePath: epubFile.path, bookTitle: nextName),
+        ),
+      );
+    } else if (nextExt == 'pdf') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => UniversalMediaReaderScreen(
+            files: [nextFile],
+            title: nextName,
+            isPdf: true,
+          ),
+        ),
+      );
+    } else if (imageExts.contains(nextExt)) {
+      final siblingImages = allFiles.where((f) {
+        final fExt = f.path.split('.').last.toLowerCase();
+        return imageExts.contains(fExt);
+      }).toList();
+      final targetList = siblingImages.length > 1 ? siblingImages : [nextFile];
+      final bookKey = targetList.first.path;
+      final clickedIdx = targetList.indexWhere((f) => f.path == nextFile.path);
+      if (clickedIdx >= 0) {
+        await StorageService.saveLastPosition(bookKey, clickedIdx.toString());
+      }
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => UniversalMediaReaderScreen(
+            files: targetList,
+            title: targetList.length > 1 ? '$nextName 외 ${targetList.length - 1}장' : nextName,
+            isPdf: false,
+            customBookKey: bookKey,
+          ),
+        ),
+      );
+    } else {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => UniversalMediaReaderScreen(
+            files: [nextFile],
+            title: nextName,
+            isPdf: false,
+          ),
+        ),
+      );
+    }
   }
 
   void _lockTouchScreen() {
@@ -1127,6 +1269,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           }
         },
         child: Stack(
+          fit: StackFit.expand,
           children: [
             // 1. EPUB 뷰어 본문 (S펜 필기 모드에서 S펜이 화면에 닿는 순간 IgnorePointer가 작동하여 WebView 화면 흔들림/넘김을 100% 차단!)
             Positioned.fill(
@@ -1326,16 +1469,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 ),
               ),
 
-            // 4. 백그라운드 번역 진행 중일 때 뷰어 내 미니 진행 표시줄
-            ValueListenableBuilder<Map<String, TranslationTaskInfo>>(
-              valueListenable: BatchTranslationService.activeTasks,
-              builder: (context, tasks, _) {
-                final task = tasks[widget.filePath];
-                if (task == null) return const SizedBox.shrink();
-                return Positioned(
-                  left: 16,
-                  bottom: math.max<double>(bottomPadding + 24.0, 28.0) + (_showControls && _progressBarPos == 'bottom' ? 46.0 : 0.0),
-                  child: Material(
+            // 4. 백그라운드 번역 진행 중일 때 뷰어 내 미니 진행 표시줄 (항상 Positioned가 Stack의 직계 자식이 되도록 배치!)
+            Positioned(
+              left: 16,
+              bottom: math.max<double>(bottomPadding + 24.0, 28.0) + (_showControls && _progressBarPos == 'bottom' ? 46.0 : 0.0),
+              child: ValueListenableBuilder<Map<String, TranslationTaskInfo>>(
+                valueListenable: BatchTranslationService.activeTasks,
+                builder: (context, tasks, _) {
+                  final task = tasks[widget.filePath];
+                  if (task == null) return const SizedBox.shrink();
+                  return Material(
                     color: Colors.black87,
                     borderRadius: BorderRadius.circular(20),
                     child: Padding(
@@ -1356,9 +1499,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         ],
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
 
             // S펜 필기 모드 상단 미니 툴바 (펜 색상 + 지우개 버튼 포함)
@@ -1490,6 +1633,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                               _epubController.display(cfi: target);
                             },
                           ),
+                        IconButton(
+                          icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
+                          tooltip: '다음 파일로 이동 (같은 그룹)',
+                          onPressed: _openNextFileInSameGroup,
+                        ),
                         IconButton(
                           icon: const Icon(Icons.screen_lock_portrait, color: Colors.white, size: 20),
                           tooltip: '화면 터치 잠금',

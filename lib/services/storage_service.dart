@@ -322,7 +322,7 @@ class StorageService {
 
   static Future<List<String>> getGroups() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList('book_groups') ?? ['전체', '소설/문학', '만화/웹툰', 'PDF/문서'];
+    return prefs.getStringList('book_groups_v2') ?? ['전체', 'PDF/문서'];
   }
 
   static Future<void> addGroup(String groupName) async {
@@ -330,7 +330,7 @@ class StorageService {
     final groups = await getGroups();
     if (!groups.contains(groupName)) {
       groups.add(groupName);
-      await prefs.setStringList('book_groups', groups);
+      await prefs.setStringList('book_groups_v2', groups);
     }
   }
 
@@ -339,10 +339,46 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     final groups = await getGroups();
     groups.remove(groupName);
-    await prefs.setStringList('book_groups', groups);
+    await prefs.setStringList('book_groups_v2', groups);
     for (final key in prefs.getKeys().toList()) {
       if (key.startsWith('grp_') && prefs.getString(key) == groupName) {
-        await prefs.setString(key, '미분류');
+        await prefs.setString(key, 'PDF/문서');
+      }
+    }
+  }
+
+  static Future<void> migrateBookMetadata(String oldPath, String newPath) async {
+    if (oldPath == newPath) return;
+    final prefs = await SharedPreferences.getInstance();
+    for (final prefix in ['pos_', 'prev_pos_', 'prog_', 'grp_']) {
+      final val = prefs.get('$prefix$oldPath');
+      if (val != null) {
+        if (val is String) await prefs.setString('$prefix$newPath', val);
+        if (val is double) await prefs.setDouble('$prefix$newPath', val);
+        await prefs.remove('$prefix$oldPath');
+      }
+    }
+    final bms = prefs.getStringList('bm_$oldPath');
+    if (bms != null) {
+      await prefs.setStringList('bm_$newPath', bms);
+      await prefs.remove('bm_$oldPath');
+    }
+    for (final key in prefs.getKeys().toList()) {
+      for (final prefix in [
+        'bubbles_v5_',
+        'memo_strokes_',
+        'memo_note_',
+        'epub_strokes_',
+      ]) {
+        final matchPrefix = '$prefix${oldPath}_';
+        if (key.startsWith(matchPrefix)) {
+          final suffix = key.substring(matchPrefix.length);
+          final strVal = prefs.getString(key);
+          if (strVal != null) {
+            await prefs.setString('$prefix${newPath}_$suffix', strVal);
+          }
+          await prefs.remove(key);
+        }
       }
     }
   }
@@ -354,7 +390,7 @@ class StorageService {
 
   static Future<String> getBookGroup(String bookPath) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('grp_$bookPath') ?? '미분류';
+    return prefs.getString('grp_$bookPath') ?? 'PDF/문서';
   }
 
   static Future<void> removeBookMetadata(String bookPath) async {

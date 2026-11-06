@@ -3,6 +3,7 @@ package com.example.my_ebook_reader
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -89,17 +90,18 @@ class MainActivity: FlutterActivity() {
                             val pagePaths = ArrayList<String>()
 
                             for (i in 0 until renderer.pageCount) {
-                                val pageFile = File(outDir, "page_${String.format("%04d", i)}.png")
-                                if (!pageFile.exists()) {
+                                val pageFile = File(outDir, "page_${String.format("%04d", i)}.jpg")
+                                if (!pageFile.exists() || pageFile.length() == 0L) {
                                     val page = renderer.openPage(i)
-                                    val width = (page.width * 2).coerceAtLeast(1080)
-                                    val height = (page.height * 2).coerceAtLeast(1520)
+                                    val scale = (1440f / page.width.toFloat().coerceAtLeast(1f)).coerceIn(1.5f, 2.5f)
+                                    val width = (page.width * scale).toInt().coerceAtLeast(720)
+                                    val height = (page.height * scale).toInt().coerceAtLeast(960)
                                     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                                     bitmap.eraseColor(Color.WHITE)
                                     page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                                     page.close()
                                     FileOutputStream(pageFile).use { out ->
-                                        bitmap.compress(Bitmap.CompressFormat.PNG, 90, out)
+                                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
                                     }
                                     bitmap.recycle()
                                 }
@@ -110,6 +112,53 @@ class MainActivity: FlutterActivity() {
                             runOnUiThread { result.success(pagePaths) }
                         } catch (e: Exception) {
                             runOnUiThread { result.error("PDF_ERR", e.message, null) }
+                        }
+                    }.start()
+                } else if (call.method == "mergePdfs") {
+                    val inputPaths = call.argument<List<String>>("inputPaths")
+                    val outputPath = call.argument<String>("outputPath")
+                    if (inputPaths == null || inputPaths.isEmpty() || outputPath == null) {
+                        result.error("INVALID_ARGS", "Missing inputPaths or outputPath", null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        val outPdf = PdfDocument()
+                        try {
+                            var globalPageNumber = 1
+                            for (path in inputPaths) {
+                                val f = File(path)
+                                if (!f.exists()) continue
+                                val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+                                val renderer = PdfRenderer(pfd)
+                                for (i in 0 until renderer.pageCount) {
+                                    val srcPage = renderer.openPage(i)
+                                    val scale = (1440f / srcPage.width.toFloat().coerceAtLeast(1f)).coerceIn(1.5f, 2.2f)
+                                    val w = (srcPage.width * scale).toInt().coerceAtLeast(720)
+                                    val h = (srcPage.height * scale).toInt().coerceAtLeast(960)
+                                    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                                    bitmap.eraseColor(Color.WHITE)
+                                    srcPage.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    srcPage.close()
+
+                                    val pageInfo = PdfDocument.PageInfo.Builder(w, h, globalPageNumber++).create()
+                                    val destPage = outPdf.startPage(pageInfo)
+                                    destPage.canvas.drawBitmap(bitmap, 0f, 0f, null)
+                                    outPdf.finishPage(destPage)
+                                    bitmap.recycle()
+                                }
+                                renderer.close()
+                                pfd.close()
+                            }
+                            val outFile = File(outputPath)
+                            outFile.parentFile?.mkdirs()
+                            FileOutputStream(outFile).use { outStream ->
+                                outPdf.writeTo(outStream)
+                            }
+                            outPdf.close()
+                            runOnUiThread { result.success(outFile.absolutePath) }
+                        } catch (e: Exception) {
+                            try { outPdf.close() } catch (_: Exception) {}
+                            runOnUiThread { result.error("MERGE_PDF_ERR", e.message, null) }
                         }
                     }.start()
                 } else {

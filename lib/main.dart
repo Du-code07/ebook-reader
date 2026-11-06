@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'screens/pdf_and_image_viewer.dart';
@@ -80,7 +81,8 @@ class BookshelfScreen extends StatefulWidget {
 class _BookshelfScreenState extends State<BookshelfScreen> {
   List<File> _allBooks = [];
   List<File> _trashedBooks = [];
-  List<String> _groups = ['전체', '소설/문학', '만화/웹툰', 'PDF/문서'];
+  static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
+  List<String> _groups = ['전체', 'PDF/문서'];
   String _selectedGroup = '전체';
   Map<String, String> _bookGroupMap = {};
   Map<String, double> _bookProgressMap = {};
@@ -225,6 +227,40 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       return;
     }
 
+    final pdfPicked = validPicked.where((pf) {
+      final ext = pf.name.split('.').last.toLowerCase();
+      return ext == 'pdf';
+    }).toList();
+
+    if (pdfPicked.length >= 2 && pdfPicked.length == validPicked.length && mounted) {
+      final action = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('PDF ${pdfPicked.length}개 추가 방식 선택'),
+          content: const Text(
+            '선택한 PDF 파일들을 하나로 합쳐서 단일 PDF 파일로 추가할까요?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'separate'),
+              child: const Text('개별 파일로 추가'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.picture_as_pdf, size: 18),
+              onPressed: () => Navigator.pop(ctx, 'merge_pdf'),
+              label: const Text('하나의 PDF로 합치기'),
+            ),
+          ],
+        ),
+      );
+
+      if (action == 'merge_pdf') {
+        final paths = pdfPicked.map((e) => File(e.path!)).toList();
+        await _createMergedPdfFromFiles(paths, deleteSourceAfter: false);
+        return;
+      }
+    }
+
     final imagePicked = validPicked.where((pf) {
       final ext = pf.name.split('.').last.toLowerCase();
       return _imageExts.contains(ext);
@@ -265,9 +301,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     for (final pf in validPicked) {
       if (pf.path == null) continue;
       final saved = await File(pf.path!).copy('${appDir.path}/${pf.name}');
-      if (_selectedGroup != '전체') {
-        await StorageService.setBookGroup(saved.path, _selectedGroup);
-      }
+      final targetGrp = _selectedGroup == '전체' ? 'PDF/문서' : _selectedGroup;
+      await StorageService.setBookGroup(saved.path, targetGrp);
       importedFiles.add(saved);
     }
 
@@ -401,7 +436,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     final zipBytes = ZipEncoder().encode(archive);
     await outFile.writeAsBytes(zipBytes!);
 
-    final targetGroup = _selectedGroup == '전체' ? '만화/웹툰' : _selectedGroup;
+    final targetGroup = _selectedGroup == '전체' ? 'PDF/문서' : _selectedGroup;
     await StorageService.setBookGroup(outFile.path, targetGroup);
 
     if (deleteOriginals) {
@@ -523,6 +558,317 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     if (proceed == true && selectedPaths.length >= 2) {
       final chosen = existingImages.where((f) => selectedPaths.contains(f.path)).toList();
       await _createMangaBookFromImages(chosen, deleteSourceAfter: true);
+    }
+  }
+
+  /// 5. 여러 PDF 파일을 하나의 PDF 파일로 병합하는 기능
+  Future<void> _createMergedPdfFromFiles(List<File> sourcePdfs, {bool deleteSourceAfter = false}) async {
+    final now = DateTime.now();
+    final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+    final rand4 = (1000 + math.Random().nextInt(9000)).toString();
+    final defaultFileName = '통합PDF_${dateStr}_$rand4';
+
+    final titleController = TextEditingController(text: defaultFileName);
+    bool deleteOriginals = deleteSourceAfter;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          title: const Text('PDF 하나로 합치기'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('선택한 ${sourcePdfs.length}개의 PDF를 이름 순서대로 합쳐 하나의 PDF로 만듭니다.'),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: '합쳐진 PDF 파일 이름',
+                    suffixText: '.pdf',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (deleteSourceAfter) ...[
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: deleteOriginals,
+                    title: const Text('합친 후 기존 개별 PDF 파일 휴지통으로 이동', style: TextStyle(fontSize: 13)),
+                    onChanged: (v) => setModalState(() => deleteOriginals = v ?? false),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.picture_as_pdf, size: 18),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('PDF 합치기'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final rawTitle = titleController.text.trim().isEmpty ? defaultFileName : titleController.text.trim();
+    final cleanTitle = rawTitle.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), '');
+    final safeTitle = cleanTitle.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+
+    sourcePdfs.sort((a, b) => _naturalCompare(
+          a.path.split(Platform.pathSeparator).last,
+          b.path.split(Platform.pathSeparator).last,
+        ));
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        title: Text('PDF 병합 중'),
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                'PDF 페이지들을 하나로 합치는 중입니다... 잠시만 기다려 주세요.',
+                style: TextStyle(fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final outPath = '${appDir.path}/$safeTitle.pdf';
+
+      await _pdfChannel.invokeMethod('mergePdfs', {
+        'inputPaths': sourcePdfs.map((f) => f.path).toList(),
+        'outputPath': outPath,
+      });
+
+      final outFile = File(outPath);
+      final targetGroup = _selectedGroup == '전체' ? 'PDF/문서' : _selectedGroup;
+      await StorageService.setBookGroup(outFile.path, targetGroup);
+
+      if (deleteOriginals) {
+        for (final pdf in sourcePdfs) {
+          if (pdf.path != outFile.path && await pdf.exists()) {
+            await _moveFileToTrash(pdf, reloadAfter: false);
+          }
+        }
+      }
+
+      if (mounted) Navigator.pop(context);
+      await _loadLibrary();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('"$safeTitle.pdf" 통합 파일이 생성되었습니다.')),
+        );
+        _openFile(outFile);
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDF 병합 중 오류가 발생했습니다: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showMergeExistingPdfsDialog() async {
+    final existingPdfs = _allBooks.where((f) {
+      final ext = f.path.split('.').last.toLowerCase();
+      return ext == 'pdf';
+    }).toList();
+
+    if (existingPdfs.length < 2) {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+        allowMultiple: true,
+      );
+      if (result != null && result.files.length >= 2) {
+        final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
+        await _createMergedPdfFromFiles(files, deleteSourceAfter: false);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('합칠 PDF 파일을 2개 이상 선택해 주세요.')),
+        );
+      }
+      return;
+    }
+
+    final selectedPaths = existingPdfs.map((e) => e.path).toSet();
+
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          title: const Text('PDF 합치기'),
+          content: SizedBox(
+            width: 420,
+            height: 360,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('선택됨: ${selectedPaths.length}개', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    TextButton.icon(
+                      icon: const Icon(Icons.folder_open, size: 16),
+                      label: const Text('기기에서 바로 선택'),
+                      onPressed: () async {
+                        Navigator.pop(ctx, false);
+                        final result = await FilePicker.platform.pickFiles(
+                          type: FileType.custom,
+                          allowedExtensions: ['pdf'],
+                          allowMultiple: true,
+                        );
+                        if (result != null && result.files.length >= 2) {
+                          final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
+                          await _createMergedPdfFromFiles(files, deleteSourceAfter: false);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: existingPdfs.length,
+                    itemBuilder: (_, idx) {
+                      final f = existingPdfs[idx];
+                      final name = f.path.split(Platform.pathSeparator).last;
+                      final checked = selectedPaths.contains(f.path);
+                      return CheckboxListTile(
+                        dense: true,
+                        value: checked,
+                        title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        onChanged: (v) {
+                          setModalState(() {
+                            if (v == true) {
+                              selectedPaths.add(f.path);
+                            } else {
+                              selectedPaths.remove(f.path);
+                            }
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            ElevatedButton(
+              onPressed: selectedPaths.length >= 2 ? () => Navigator.pop(ctx, true) : null,
+              child: const Text('선택한 PDF 합치기'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (proceed == true && selectedPaths.length >= 2) {
+      final chosen = existingPdfs.where((f) => selectedPaths.contains(f.path)).toList();
+      await _createMergedPdfFromFiles(chosen, deleteSourceAfter: true);
+    }
+  }
+
+  /// 3. 파일 이름 변경 다이얼로그 (연필 아이콘 클릭 시)
+  Future<void> _renameFileDialog(File file) async {
+    final fullName = file.path.split(Platform.pathSeparator).last;
+    final dotIdx = fullName.lastIndexOf('.');
+    final baseName = dotIdx > 0 ? fullName.substring(0, dotIdx) : fullName;
+    final ext = dotIdx > 0 ? fullName.substring(dotIdx + 1) : '';
+
+    final ctrl = TextEditingController(text: baseName);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('파일 이름 변경'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: '새 파일 이름',
+            suffixText: ext.isNotEmpty ? '.$ext' : null,
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('변경'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final rawNewBase = ctrl.text.trim();
+    if (rawNewBase.isEmpty) return;
+
+    final safeNewBase = rawNewBase.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final newFileName = ext.isNotEmpty ? '$safeNewBase.$ext' : safeNewBase;
+    if (newFileName == fullName) return;
+
+    final newPath = '${file.parent.path}/$newFileName';
+    if (await File(newPath).exists()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('같은 이름의 파일이 이미 존재합니다.')),
+        );
+      }
+      return;
+    }
+
+    try {
+      final oldPath = file.path;
+      await file.rename(newPath);
+      await StorageService.migrateBookMetadata(oldPath, newPath);
+
+      // 만약 EPUB 번역본 파일이 함께 존재한다면 같이 이름 변경
+      if (ext.toLowerCase() == 'epub') {
+        final oldTrans = File(oldPath.replaceAll(RegExp(r'\.epub$', caseSensitive: false), '_ja_to_ko_translated.epub'));
+        if (await oldTrans.exists()) {
+          final newTransPath = newPath.replaceAll(RegExp(r'\.epub$', caseSensitive: false), '_ja_to_ko_translated.epub');
+          await oldTrans.rename(newTransPath);
+        }
+      }
+
+      await _loadLibrary();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('파일 이름이 "$newFileName"(으)로 변경되었습니다.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('이름 변경 실패: $e')),
+        );
+      }
     }
   }
 
@@ -949,6 +1295,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   onPressed: widget.onToggleDarkMode,
                 ),
                 IconButton(
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  tooltip: 'PDF 합치기',
+                  onPressed: _showMergeExistingPdfsDialog,
+                ),
+                IconButton(
                   icon: const Icon(Icons.auto_stories_outlined),
                   tooltip: 'JPG 이미지 합치기',
                   onPressed: _showMergeExistingImagesDialog,
@@ -999,10 +1350,22 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   ? Center(
                       child: Padding(
                         padding: const EdgeInsets.all(24.0),
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.auto_stories),
-                          label: const Text('JPG 이미지 합치기'),
-                          onPressed: _showMergeExistingImagesDialog,
+                        child: Wrap(
+                          spacing: 12,
+                          runSpacing: 10,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.picture_as_pdf),
+                              label: const Text('PDF 합치기'),
+                              onPressed: _showMergeExistingPdfsDialog,
+                            ),
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.auto_stories),
+                              label: const Text('JPG 이미지 합치기'),
+                              onPressed: _showMergeExistingImagesDialog,
+                            ),
+                          ],
                         ),
                       ),
                     )
@@ -1013,7 +1376,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       itemBuilder: (context, index) {
                         final file = filteredBooks[index];
                         final fileName = file.path.split(Platform.pathSeparator).last;
-                        final grp = _bookGroupMap[file.path] ?? '미분류';
+                        final grp = _bookGroupMap[file.path] ?? 'PDF/문서';
                         final prog = (_bookProgressMap[file.path] ?? 0.0) * 100;
                         final isSelected = _selectedFilePaths.contains(file.path);
 
@@ -1170,10 +1533,20 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                             ),
                             trailing: _isSelectionMode
                                 ? null
-                                : IconButton(
-                                    icon: const Icon(Icons.drive_file_move_outline),
-                                    tooltip: '그룹 변경',
-                                    onPressed: () => _assignGroupDialog(file),
+                                : Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.edit_outlined),
+                                        tooltip: '파일 이름 변경',
+                                        onPressed: () => _renameFileDialog(file),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.drive_file_move_outline),
+                                        tooltip: '그룹 변경',
+                                        onPressed: () => _assignGroupDialog(file),
+                                      ),
+                                    ],
                                   ),
                             onLongPress: () {
                               setState(() {
