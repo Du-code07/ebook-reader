@@ -608,7 +608,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             ElevatedButton.icon(
               icon: const Icon(Icons.picture_as_pdf, size: 18),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('PDF 합치기'),
+              label: const Text('PDF 합치기'),
             ),
           ],
         ),
