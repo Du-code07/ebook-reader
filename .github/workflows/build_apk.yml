@@ -74,6 +74,25 @@ jobs:
           cp -f /tmp/v7_backup/android_override/MainActivity.kt android/app/src/main/kotlin/com/example/my_ebook_reader/MainActivity.kt
           rm -f android/app/src/main/java/com/example/my_ebook_reader/MainActivity.java
 
+          # 삼성 갤럭시 S펜 에어 액션(Air Actions) 공식 리모트 액션 XML 및 스트링 리소스 생성
+          mkdir -p android/app/src/main/res/xml
+          mkdir -p android/app/src/main/res/values
+          echo '<?xml version="1.0" encoding="utf-8"?>' > android/app/src/main/res/values/spen_strings.xml
+          echo '<resources>' >> android/app/src/main/res/values/spen_strings.xml
+          echo '    <string name="spen_next_page">다음 페이지</string>' >> android/app/src/main/res/values/spen_strings.xml
+          echo '    <string name="spen_prev_page">이전 페이지</string>' >> android/app/src/main/res/values/spen_strings.xml
+          echo '</resources>' >> android/app/src/main/res/values/spen_strings.xml
+
+          echo '<?xml version="1.0" encoding="utf-8"?>' > android/app/src/main/res/xml/remote_action.xml
+          echo '<remote-actions version="1.2">' >> android/app/src/main/res/xml/remote_action.xml
+          echo '    <action id="next_page" label="@string/spen_next_page" priority="1" trigger_key="PAGE_DOWN">' >> android/app/src/main/res/xml/remote_action.xml
+          echo '        <preference name="gesture" value="click"/>' >> android/app/src/main/res/xml/remote_action.xml
+          echo '    </action>' >> android/app/src/main/res/xml/remote_action.xml
+          echo '    <action id="prev_page" label="@string/spen_prev_page" priority="2" trigger_key="PAGE_UP">' >> android/app/src/main/res/xml/remote_action.xml
+          echo '        <preference name="gesture" value="double_click"/>' >> android/app/src/main/res/xml/remote_action.xml
+          echo '    </action>' >> android/app/src/main/res/xml/remote_action.xml
+          echo '</remote-actions>' >> android/app/src/main/res/xml/remote_action.xml
+
           echo "-keep class com.google.mlkit.** { *; }" > android/app/proguard-rules.pro
           echo "-dontwarn com.google.mlkit.**" >> android/app/proguard-rules.pro
 
@@ -138,6 +157,9 @@ jobs:
           if [ -f "$MANIFEST" ]; then
             if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
               sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/> <application/' "$MANIFEST"
+            fi
+            if ! grep -q "com.samsung.android.support.REMOTE_ACTION" "$MANIFEST"; then
+              sed -i 's/<\/activity>/<intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
             fi
             sed -i 's/android:label="[^"]*"/android:label="FReader"/' "$MANIFEST"
           fi
