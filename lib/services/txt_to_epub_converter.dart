@@ -1,18 +1,51 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter/services.dart';
 
+class _DocStyleInfo {
+  double fontSizePt;
+  bool bold;
+  bool italic;
+  bool underline;
+  bool serif;
+  String align;
+  int textColor;
+  double leftIndentPt;
+
+  _DocStyleInfo({
+    this.fontSizePt = 10.5,
+    this.bold = false,
+    this.italic = false,
+    this.underline = false,
+    this.serif = false,
+    this.align = 'left',
+    this.textColor = 0xFF141414,
+    this.leftIndentPt = 0.0,
+  });
+
+  _DocStyleInfo copy() => _DocStyleInfo(
+        fontSizePt: fontSizePt,
+        bold: bold,
+        italic: italic,
+        underline: underline,
+        serif: serif,
+        align: align,
+        textColor: textColor,
+        leftIndentPt: leftIndentPt,
+      );
+}
+
 class TxtToEpubConverter {
   static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
 
-  /// TXT 파일을 EPUB으로 변환 (EPUB 뷰어 열람용)
   static Future<File> convertTxtToEpub(File txtFile) async {
     return convertDocumentToEpub(txtFile);
   }
 
-  /// 2. 워드(.docx, .doc) 및 한글(.hwp, .hwpx) 파일을 표(Table)와 사진(Image)이 모두 포함된 PDF로 변환!
+  /// 2 & 4. 워드(.docx, .doc) 및 한글(.hwp, .hwpx) 파일을 원본 글꼴·형식(정렬/크기/굵기)·양식(표 셀 병합/열 너비/배경색/이미지)을 보존하여 PDF로 변환
   static Future<File> convertDocOrHwpToPdf(File inputFile, {String? targetPdfPath}) async {
     final String outPath = targetPdfPath ??
         inputFile.path.replaceAll(
@@ -70,7 +103,111 @@ class TxtToEpubConverter {
     return outFile;
   }
 
-  /// 워드(.docx)에서 본문 단락(<w:p>), 표(<w:tbl>), 이미지(word/media/*)를 문서 순서대로 정밀 추출
+  static bool _isSerifFontName(String name) {
+    final lower = name.toLowerCase();
+    return lower.contains('바탕') ||
+        lower.contains('명조') ||
+        lower.contains('궁서') ||
+        lower.contains('신명조') ||
+        lower.contains('batang') ||
+        lower.contains('myeongjo') ||
+        lower.contains('gungsuh') ||
+        lower.contains('serif') ||
+        lower.contains('times') ||
+        lower.contains('ming') ||
+        lower.contains('song') ||
+        lower.contains('mincho');
+  }
+
+  static int? _parseHexColor(String? hexStr) {
+    if (hexStr == null) return null;
+    final clean = hexStr.trim().replaceAll('#', '');
+    if (clean.isEmpty || clean.toLowerCase() == 'auto' || clean.toLowerCase() == 'none') {
+      return null;
+    }
+    if (clean.length == 6) {
+      final v = int.tryParse(clean, radix: 16);
+      if (v != null) return 0xFF000000 | v;
+    } else if (clean.length == 8) {
+      final v = int.tryParse(clean, radix: 16);
+      if (v != null) return v;
+    }
+    return null;
+  }
+
+  // =========================================================================
+  // XML 태그 밸런스 파서 (Self-closing 태그 및 중첩 표/단락 100% 정확 분리)
+  // =========================================================================
+  static bool _isExactTagMatch(String xml, int pos, String tag) {
+    if (!xml.startsWith(tag, pos)) return false;
+    final afterIdx = pos + tag.length;
+    if (afterIdx >= xml.length) return false;
+    final ch = xml[afterIdx];
+    return ch == '>' || ch == ' ' || ch == '/' || ch == '\t' || ch == '\r' || ch == '\n';
+  }
+
+  static int _findBalancedXmlTagEnd(String xml, int startIdx, String tagName) {
+    final firstGt = xml.indexOf('>', startIdx);
+    if (firstGt == -1) return -1;
+    if (xml[firstGt - 1] == '/') {
+      return firstGt + 1;
+    }
+
+    final openPattern = '<$tagName';
+    final closePattern = '</$tagName>';
+    int depth = 1;
+    int i = firstGt + 1;
+
+    while (i < xml.length) {
+      final nextOpen = xml.indexOf(openPattern, i);
+      final nextClose = xml.indexOf(closePattern, i);
+      if (nextClose == -1) return -1;
+
+      if (nextOpen != -1 && nextOpen < nextClose) {
+        if (_isExactTagMatch(xml, nextOpen, openPattern)) {
+          final gt = xml.indexOf('>', nextOpen);
+          if (gt == -1) return -1;
+          if (xml[gt - 1] != '/') {
+            depth++;
+          }
+          i = gt + 1;
+          continue;
+        }
+        i = nextOpen + openPattern.length;
+        continue;
+      } else {
+        depth--;
+        if (depth == 0) {
+          return nextClose + closePattern.length;
+        }
+        i = nextClose + closePattern.length;
+      }
+    }
+    return -1;
+  }
+
+  static List<String> _findDirectXmlTagBlocks(String xml, String tagName) {
+    final List<String> results = [];
+    final openPattern = '<$tagName';
+    int i = 0;
+    while (i < xml.length) {
+      final nextIdx = xml.indexOf(openPattern, i);
+      if (nextIdx == -1) break;
+      if (!_isExactTagMatch(xml, nextIdx, openPattern)) {
+        i = nextIdx + openPattern.length;
+        continue;
+      }
+      final endIdx = _findBalancedXmlTagEnd(xml, nextIdx, tagName);
+      if (endIdx == -1) break;
+      results.add(xml.substring(nextIdx, endIdx));
+      i = endIdx;
+    }
+    return results;
+  }
+
+  // =========================================================================
+  // 1. 워드(.docx) 고정밀 파서 (word/styles.xml + 단락 서식 + 표 병합/너비/배경 + 이미지)
+  // =========================================================================
   static List<Map<String, dynamic>> _extractDocxStructuredBlocks(List<int> bytes) {
     final List<Map<String, dynamic>> blocks = [];
     final archive = ZipDecoder().decodeBytes(bytes);
@@ -99,8 +236,7 @@ class TxtToEpubConverter {
     for (final file in archive) {
       if (file.isFile && file.name == 'word/_rels/document.xml.rels') {
         final relXml = utf8.decode(file.content as List<int>, allowMalformed: true);
-        final relMatches = RegExp(r'<Relationship\b[^>]*>', dotAll: true).allMatches(relXml);
-        for (final m in relMatches) {
+        for (final m in RegExp(r'<Relationship\b[^>]*>', dotAll: true).allMatches(relXml)) {
           final tag = m.group(0) ?? '';
           final idMatch = RegExp(r'\bId="([^"]+)"').firstMatch(tag);
           final targetMatch = RegExp(r'\bTarget="([^"]+)"').firstMatch(tag);
@@ -121,48 +257,64 @@ class TxtToEpubConverter {
       }
     }
 
+    // word/styles.xml 파싱 (기본 글꼴 및 스타일별 글자 크기/정렬/굵기)
+    final Map<String, _DocStyleInfo> styleMap = {};
+    final defaultStyle = _DocStyleInfo(fontSizePt: 10.5, serif: false);
+    for (final file in archive) {
+      if (file.isFile && file.name == 'word/styles.xml') {
+        final stylesXml = utf8.decode(file.content as List<int>, allowMalformed: true);
+        final docDefaultsM = RegExp(r'<w:docDefaults>(.*?)</w:docDefaults>', dotAll: true).firstMatch(stylesXml);
+        if (docDefaultsM != null) {
+          _applyDocxPropsToStyle(docDefaultsM.group(1) ?? '', defaultStyle);
+        }
+        for (final sBlock in _findDirectXmlTagBlocks(stylesXml, 'w:style')) {
+          final idM = RegExp(r'\bw:styleId="([^"]+)"').firstMatch(sBlock);
+          if (idM != null) {
+            final st = defaultStyle.copy();
+            _applyDocxPropsToStyle(sBlock, st);
+            styleMap[idM.group(1)!] = st;
+          }
+        }
+      }
+    }
+
     final Set<Uint8List> emittedImages = {};
 
     for (final file in archive) {
       if (file.isFile && file.name == 'word/document.xml') {
         final xml = utf8.decode(file.content as List<int>, allowMalformed: true);
+        final bodyStart = xml.indexOf('<w:body');
+        final bodyXml = bodyStart != -1 ? xml.substring(bodyStart) : xml;
+
         int pos = 0;
-        while (pos < xml.length) {
-          final nextTbl = xml.indexOf('<w:tbl', pos);
-          final nextP = xml.indexOf('<w:p', pos);
+        while (pos < bodyXml.length) {
+          final nextTbl = _findNextExactTag(bodyXml, pos, '<w:tbl');
+          final nextP = _findNextExactTag(bodyXml, pos, '<w:p');
 
           if (nextTbl == -1 && nextP == -1) break;
 
           if (nextTbl != -1 && (nextP == -1 || nextTbl < nextP)) {
-            final endTbl = _findMatchingCloseTag(xml, nextTbl, 'w:tbl');
+            final endTbl = _findBalancedXmlTagEnd(bodyXml, nextTbl, 'w:tbl');
             if (endTbl == -1) break;
-            final tblXml = xml.substring(nextTbl, endTbl);
-            final rows = _parseDocxTableRows(tblXml);
-            if (rows.isNotEmpty) {
-              blocks.add({'type': 'table', 'rows': rows});
-            }
-            for (final rm in RegExp(r'r:(?:embed|id)="(rId[^"]+)"').allMatches(tblXml)) {
-              final rid = rm.group(1)!;
-              final img = rIdToImage[rid];
-              if (img != null && !emittedImages.contains(img)) {
-                emittedImages.add(img);
-                blocks.add({'type': 'image', 'bytes': img});
-              }
+            final tblXml = bodyXml.substring(nextTbl, endTbl);
+            final tableBlock = _parseDocxRichTable(
+              tblXml,
+              defaultStyle,
+              styleMap,
+              rIdToImage,
+              emittedImages,
+            );
+            if (tableBlock != null) {
+              blocks.add(tableBlock);
             }
             pos = endTbl;
           } else {
-            final afterChar = (nextP + 4 < xml.length) ? xml[nextP + 4] : '';
-            if (afterChar != '>' && afterChar != ' ' && afterChar != '/') {
-              pos = nextP + 4;
-              continue;
-            }
-            final endP = _findMatchingCloseTag(xml, nextP, 'w:p');
+            final endP = _findBalancedXmlTagEnd(bodyXml, nextP, 'w:p');
             if (endP == -1) break;
-            final pXml = xml.substring(nextP, endP);
-
-            final pText = _extractDocxParagraphText(pXml);
-            if (pText.isNotEmpty) {
-              blocks.add({'type': 'paragraph', 'text': pText});
+            final pXml = bodyXml.substring(nextP, endP);
+            final pBlock = _parseDocxRichParagraph(pXml, defaultStyle, styleMap);
+            if (pBlock != null) {
+              blocks.add(pBlock);
             }
             for (final rm in RegExp(r'r:(?:embed|id)="(rId[^"]+)"').allMatches(pXml)) {
               final rid = rm.group(1)!;
@@ -188,28 +340,282 @@ class TxtToEpubConverter {
     return blocks;
   }
 
-  static List<List<String>> _parseDocxTableRows(String tblXml) {
-    final List<List<String>> rows = [];
-    final trMatches = RegExp(r'<w:tr[\s>](.*?)</w:tr>', dotAll: true).allMatches(tblXml);
-    for (final tr in trMatches) {
-      final trContent = tr.group(1) ?? '';
-      final List<String> rowCells = [];
-      final tcMatches = RegExp(r'<w:tc[\s>](.*?)</w:tc>', dotAll: true).allMatches(trContent);
-      for (final tc in tcMatches) {
-        final tcContent = tc.group(1) ?? '';
-        final cellParas = <String>[];
-        final pMatches = RegExp(r'<w:p[\s>](.*?)</w:p>', dotAll: true).allMatches(tcContent);
-        for (final pm in pMatches) {
-          final pt = _extractDocxParagraphText(pm.group(0) ?? '');
-          if (pt.isNotEmpty) cellParas.add(pt);
-        }
-        rowCells.add(cellParas.join('\n'));
-      }
-      if (rowCells.isNotEmpty) {
-        rows.add(rowCells);
+  static int _findNextExactTag(String xml, int startPos, String openTag) {
+    int p = startPos;
+    while (p < xml.length) {
+      final idx = xml.indexOf(openTag, p);
+      if (idx == -1) return -1;
+      if (_isExactTagMatch(xml, idx, openTag)) return idx;
+      p = idx + openTag.length;
+    }
+    return -1;
+  }
+
+  static void _applyDocxPropsToStyle(String xmlFragment, _DocStyleInfo style) {
+    final jcM = RegExp(r'<w:jc\s+w:val="([^"]+)"').firstMatch(xmlFragment);
+    if (jcM != null) {
+      final v = jcM.group(1)!.toLowerCase();
+      if (v == 'center') {
+        style.align = 'center';
+      } else if (v == 'right' || v == 'end') {
+        style.align = 'right';
+      } else if (v == 'both' || v == 'distribute') {
+        style.align = 'justify';
+      } else {
+        style.align = 'left';
       }
     }
-    return rows;
+
+    final szM = RegExp(r'<w:sz\s+w:val="(\d+)"').firstMatch(xmlFragment);
+    if (szM != null) {
+      final halfPts = int.tryParse(szM.group(1)!) ?? 21;
+      style.fontSizePt = (halfPts / 2.0).clamp(7.5, 36.0);
+    }
+
+    if (RegExp(r'<w:b(?:\s*/>|\s+w:val="(?:true|1)"\s*/>|>)', dotAll: true).hasMatch(xmlFragment)) {
+      style.bold = true;
+    }
+    if (RegExp(r'<w:i(?:\s*/>|\s+w:val="(?:true|1)"\s*/>|>)', dotAll: true).hasMatch(xmlFragment)) {
+      style.italic = true;
+    }
+    if (RegExp(r'<w:u\s+w:val="(?!none)[^"]+"').hasMatch(xmlFragment)) {
+      style.underline = true;
+    }
+
+    final colorM = RegExp(r'<w:color\s+w:val="([0-9A-Fa-f]{6})"').firstMatch(xmlFragment);
+    if (colorM != null) {
+      final c = _parseHexColor(colorM.group(1));
+      if (c != null) style.textColor = c;
+    }
+
+    final fontM = RegExp(r'<w:rFonts\b[^>]*>').firstMatch(xmlFragment);
+    if (fontM != null) {
+      final tag = fontM.group(0) ?? '';
+      if (_isSerifFontName(tag)) {
+        style.serif = true;
+      }
+    }
+
+    final indM = RegExp(r'<w:ind\b[^>]*w:left="(\d+)"').firstMatch(xmlFragment);
+    if (indM != null) {
+      final twips = int.tryParse(indM.group(1)!) ?? 0;
+      style.leftIndentPt = (twips / 20.0).clamp(0.0, 120.0);
+    }
+  }
+
+  static Map<String, dynamic>? _parseDocxRichParagraph(
+    String pXml,
+    _DocStyleInfo defaultStyle,
+    Map<String, _DocStyleInfo> styleMap,
+  ) {
+    final st = defaultStyle.copy();
+    final pStyleM = RegExp(r'<w:pStyle\s+w:val="([^"]+)"').firstMatch(pXml);
+    if (pStyleM != null) {
+      final base = styleMap[pStyleM.group(1)!];
+      if (base != null) {
+        st.fontSizePt = base.fontSizePt;
+        st.bold = base.bold;
+        st.italic = base.italic;
+        st.underline = base.underline;
+        st.serif = base.serif;
+        st.align = base.align;
+        st.textColor = base.textColor;
+      }
+    }
+    _applyDocxPropsToStyle(pXml, st);
+
+    final text = _extractDocxParagraphText(pXml);
+    if (text.isEmpty) {
+      return null;
+    }
+    return {
+      'type': 'paragraph',
+      'text': text,
+      'fontSizePt': st.fontSizePt,
+      'bold': st.bold,
+      'italic': st.italic,
+      'underline': st.underline,
+      'serif': st.serif,
+      'align': st.align,
+      'textColor': st.textColor,
+      'leftIndentPt': st.leftIndentPt,
+    };
+  }
+
+  static Map<String, dynamic>? _parseDocxRichTable(
+    String tblXml,
+    _DocStyleInfo defaultStyle,
+    Map<String, _DocStyleInfo> styleMap,
+    Map<String, Uint8List> rIdToImage,
+    Set<Uint8List> emittedImages,
+  ) {
+    final List<double> gridColWidths = [];
+    final tblGridM = RegExp(r'<w:tblGrid>(.*?)</w:tblGrid>', dotAll: true).firstMatch(tblXml);
+    if (tblGridM != null) {
+      for (final colM in RegExp(r'<w:gridCol\b[^>]*w:w="(\d+)"').allMatches(tblGridM.group(1) ?? '')) {
+        final w = double.tryParse(colM.group(1)!) ?? 1000.0;
+        gridColWidths.add(math.max(100.0, w));
+      }
+    }
+
+    final trBlocks = _findDirectXmlTagBlocks(tblXml, 'w:tr');
+    if (trBlocks.isEmpty) return null;
+
+    final int numRows = trBlocks.length;
+    int maxCols = gridColWidths.length;
+
+    // 1차 스캔: 총 열 개수(maxCols) 파악
+    for (final trXml in trBlocks) {
+      final tcBlocks = _findDirectXmlTagBlocks(trXml, 'w:tc');
+      int colsInRow = 0;
+      for (final tcXml in tcBlocks) {
+        final spanM = RegExp(r'<w:gridSpan\s+w:val="(\d+)"').firstMatch(tcXml);
+        final span = spanM != null ? (int.tryParse(spanM.group(1)!) ?? 1) : 1;
+        colsInRow += math.max(1, span);
+      }
+      if (colsInRow > maxCols) maxCols = colsInRow;
+    }
+    if (maxCols <= 0) return null;
+
+    final List<double> colWidths = List<double>.filled(maxCols, 1.0);
+    if (gridColWidths.length == maxCols) {
+      for (int i = 0; i < maxCols; i++) {
+        colWidths[i] = gridColWidths[i];
+      }
+    }
+
+    // 2D 점유 및 vMerge(수직 병합) 추적
+    final List<List<Map<String, dynamic>?>> activeVMergeMasterByCol =
+        List.generate(maxCols, (_) => List.filled(numRows, null));
+    final List<Map<String, dynamic>> cells = [];
+
+    for (int r = 0; r < numRows; r++) {
+      final trXml = trBlocks[r];
+      double rowMinHeightPt = 20.0;
+      final trHeightM = RegExp(r'<w:trHeight\b[^>]*w:val="(\d+)"').firstMatch(trXml);
+      if (trHeightM != null) {
+        final twips = int.tryParse(trHeightM.group(1)!) ?? 400;
+        rowMinHeightPt = (twips / 20.0).clamp(16.0, 260.0);
+      }
+
+      final tcBlocks = _findDirectXmlTagBlocks(trXml, 'w:tc');
+      int curCol = 0;
+
+      for (final tcXml in tcBlocks) {
+        if (curCol >= maxCols) break;
+        final tcPrM = RegExp(r'<w:tcPr>(.*?)</w:tcPr>', dotAll: true).firstMatch(tcXml);
+        final tcPrXml = tcPrM?.group(1) ?? '';
+
+        final spanM = RegExp(r'<w:gridSpan\s+w:val="(\d+)"').firstMatch(tcPrXml);
+        final int colSpan = (spanM != null ? (int.tryParse(spanM.group(1)!) ?? 1) : 1)
+            .clamp(1, maxCols - curCol);
+
+        // tcW 열 너비 보정 (tblGrid가 없을 때)
+        if (gridColWidths.length != maxCols && colSpan == 1) {
+          final tcWM = RegExp(r'<w:tcW\b[^>]*w:w="(\d+)"').firstMatch(tcPrXml);
+          if (tcWM != null) {
+            final wVal = double.tryParse(tcWM.group(1)!) ?? 0.0;
+            if (wVal > 50.0) colWidths[curCol] = wVal;
+          }
+        }
+
+        // 수직 병합(<w:vMerge/>) 확인
+        final bool hasVMergeTag = RegExp(r'<w:vMerge\b').hasMatch(tcPrXml);
+        final bool isVMergeRestart = RegExp(r'<w:vMerge\s+w:val="restart"').hasMatch(tcPrXml);
+        final bool isVMergeContinue = hasVMergeTag && !isVMergeRestart;
+
+        if (isVMergeContinue && r > 0 && activeVMergeMasterByCol[curCol][r - 1] != null) {
+          final masterCell = activeVMergeMasterByCol[curCol][r - 1]!;
+          masterCell['rowSpan'] = (masterCell['rowSpan'] as int) + 1;
+          final extraText = _extractDocxCellText(tcXml);
+          if (extraText.isNotEmpty) {
+            final prev = masterCell['text'] as String;
+            masterCell['text'] = prev.isEmpty ? extraText : '$prev\n$extraText';
+          }
+          for (int c = curCol; c < curCol + colSpan && c < maxCols; c++) {
+            activeVMergeMasterByCol[c][r] = masterCell;
+          }
+          curCol += colSpan;
+          continue;
+        }
+
+        int? bgColor;
+        final shdM = RegExp(r'<w:shd\b[^>]*w:fill="([0-9A-Fa-f]{6})"').firstMatch(tcPrXml);
+        if (shdM != null) {
+          final hex = shdM.group(1)!.toUpperCase();
+          if (hex != 'FFFFFF' && hex != '000000') {
+            bgColor = _parseHexColor(hex);
+          }
+        }
+
+        String vAlign = 'middle';
+        final vAlignM = RegExp(r'<w:vAlign\s+w:val="([^"]+)"').firstMatch(tcPrXml);
+        if (vAlignM != null) {
+          final v = vAlignM.group(1)!.toLowerCase();
+          if (v == 'top') vAlign = 'top';
+          if (v == 'bottom') vAlign = 'bottom';
+        }
+
+        final cellStyle = defaultStyle.copy()..fontSizePt = 9.5;
+        _applyDocxPropsToStyle(tcXml, cellStyle);
+
+        final cellText = _extractDocxCellText(tcXml);
+        Uint8List? cellImageBytes;
+        for (final rm in RegExp(r'r:(?:embed|id)="(rId[^"]+)"').allMatches(tcXml)) {
+          final rid = rm.group(1)!;
+          final img = rIdToImage[rid];
+          if (img != null) {
+            emittedImages.add(img);
+            cellImageBytes ??= img;
+          }
+        }
+
+        final cellMap = <String, dynamic>{
+          'row': r,
+          'col': curCol,
+          'rowSpan': 1,
+          'colSpan': colSpan,
+          'text': cellText,
+          'align': cellStyle.align,
+          'vAlign': vAlign,
+          'bold': cellStyle.bold,
+          'serif': cellStyle.serif,
+          'fontSizePt': cellStyle.fontSizePt.clamp(7.5, 22.0),
+          'textColor': cellStyle.textColor,
+          'bgColor': bgColor,
+          'minHeightPt': rowMinHeightPt,
+          if (cellImageBytes != null) 'imageBytes': cellImageBytes,
+        };
+
+        cells.add(cellMap);
+        for (int c = curCol; c < curCol + colSpan && c < maxCols; c++) {
+          activeVMergeMasterByCol[c][r] = cellMap;
+        }
+        curCol += colSpan;
+      }
+    }
+
+    if (cells.isEmpty) return null;
+    return {
+      'type': 'table',
+      'numRows': numRows,
+      'numCols': maxCols,
+      'colWidths': colWidths,
+      'cells': cells,
+    };
+  }
+
+  static String _extractDocxCellText(String tcXml) {
+    final pBlocks = _findDirectXmlTagBlocks(tcXml, 'w:p');
+    if (pBlocks.isEmpty) {
+      return _extractDocxParagraphText(tcXml);
+    }
+    final lines = <String>[];
+    for (final p in pBlocks) {
+      final t = _extractDocxParagraphText(p);
+      if (t.isNotEmpty) lines.add(t);
+    }
+    return lines.join('\n');
   }
 
   static String _extractDocxParagraphText(String pXml) {
@@ -220,21 +626,12 @@ class TxtToEpubConverter {
     for (final tm in RegExp(r'<w:t(?:\s[^>]*)?>(.*?)</w:t>', dotAll: true).allMatches(withBreaks)) {
       buf.write(_unescapeXml(tm.group(1) ?? ''));
     }
-    return buf.toString().trim();
+    return buf.toString().trimRight();
   }
 
-  static int _findMatchingCloseTag(String xml, int startIdx, String tagName) {
-    final selfCloseEnd = xml.indexOf('>', startIdx);
-    if (selfCloseEnd != -1 && xml[selfCloseEnd - 1] == '/') {
-      return selfCloseEnd + 1;
-    }
-    final closeTag = '</$tagName>';
-    final closeIdx = xml.indexOf(closeTag, startIdx);
-    if (closeIdx == -1) return -1;
-    return closeIdx + closeTag.length;
-  }
-
-  /// 한글 HWPX(.hwpx)에서 단락(<hp:p>), 표(<hp:tbl>), 이미지(BinData/*)를 정밀 추출
+  // =========================================================================
+  // 2. 한글 HWPX(.hwpx) 고정밀 파서 (Contents/header.xml + 표 병합/너비/배경 + 이미지)
+  // =========================================================================
   static List<Map<String, dynamic>> _extractHwpxStructuredBlocks(List<int> bytes) {
     final List<Map<String, dynamic>> blocks = [];
     final archive = ZipDecoder().decodeBytes(bytes);
@@ -285,6 +682,78 @@ class TxtToEpubConverter {
       }
     }
 
+    // Contents/header.xml 파싱 (charPr, paraPr, borderFill)
+    final Map<String, _DocStyleInfo> charPrMap = {};
+    final Map<String, String> paraAlignMap = {};
+    final Map<String, int> borderFillBgMap = {};
+    final Map<String, bool> fontIdSerifMap = {};
+
+    for (final file in sortedFiles) {
+      if (file.name.toLowerCase().endsWith('header.xml')) {
+        final hXml = utf8.decode(file.content as List<int>, allowMalformed: true);
+        for (final fM in RegExp(r'<hh:font\b[^>]*id="(\d+)"[^>]*face="([^"]+)"').allMatches(hXml)) {
+          fontIdSerifMap[fM.group(1)!] = _isSerifFontName(fM.group(2)!);
+        }
+        for (final cpBlock in _findDirectXmlTagBlocks(hXml, 'hh:charPr')) {
+          final idM = RegExp(r'\bid="(\d+)"').firstMatch(cpBlock);
+          if (idM != null) {
+            final st = _DocStyleInfo();
+            final hM = RegExp(r'\bheight="(\d+)"').firstMatch(cpBlock);
+            if (hM != null) {
+              st.fontSizePt = ((int.tryParse(hM.group(1)!) ?? 1000) / 100.0).clamp(7.5, 36.0);
+            }
+            final tcM = RegExp(r'\btextColor="#?([0-9A-Fa-f]{6})"').firstMatch(cpBlock);
+            if (tcM != null) {
+              st.textColor = _parseHexColor(tcM.group(1)) ?? 0xFF141414;
+            }
+            if (cpBlock.contains('<hh:bold') || cpBlock.contains('bold="1"') || cpBlock.contains('bold="true"')) {
+              st.bold = true;
+            }
+            if (cpBlock.contains('<hh:italic') || cpBlock.contains('italic="1"')) {
+              st.italic = true;
+            }
+            if (cpBlock.contains('<hh:underline') && !cpBlock.contains('type="NONE"')) {
+              st.underline = true;
+            }
+            final fRefM = RegExp(r'<hh:fontRef\b[^>]*hangul="(\d+)"').firstMatch(cpBlock);
+            if (fRefM != null && fontIdSerifMap[fRefM.group(1)!] == true) {
+              st.serif = true;
+            }
+            charPrMap[idM.group(1)!] = st;
+          }
+        }
+        for (final ppBlock in _findDirectXmlTagBlocks(hXml, 'hh:paraPr')) {
+          final idM = RegExp(r'\bid="(\d+)"').firstMatch(ppBlock);
+          if (idM != null) {
+            final alM = RegExp(r'<hh:align\b[^>]*horizontal="([^"]+)"').firstMatch(ppBlock);
+            if (alM != null) {
+              final h = alM.group(1)!.toUpperCase();
+              if (h == 'CENTER') {
+                paraAlignMap[idM.group(1)!] = 'center';
+              } else if (h == 'RIGHT') {
+                paraAlignMap[idM.group(1)!] = 'right';
+              } else {
+                paraAlignMap[idM.group(1)!] = 'left';
+              }
+            }
+          }
+        }
+        for (final bfBlock in _findDirectXmlTagBlocks(hXml, 'hh:borderFill')) {
+          final idM = RegExp(r'\bid="(\d+)"').firstMatch(bfBlock);
+          if (idM != null) {
+            final fcM = RegExp(r'faceColor="#?([0-9A-Fa-f]{6})"').firstMatch(bfBlock);
+            if (fcM != null) {
+              final hex = fcM.group(1)!.toUpperCase();
+              if (hex != 'FFFFFF' && hex != 'NONE') {
+                final c = _parseHexColor(hex);
+                if (c != null) borderFillBgMap[idM.group(1)!] = c;
+              }
+            }
+          }
+        }
+      }
+    }
+
     final Set<Uint8List> emittedImages = {};
     final sectionFiles = sortedFiles
         .where((f) => f.name.startsWith('Contents/section') && f.name.endsWith('.xml'))
@@ -292,61 +761,48 @@ class TxtToEpubConverter {
 
     for (final secFile in sectionFiles) {
       final xml = utf8.decode(secFile.content as List<int>, allowMalformed: true);
-      int cursor = 0;
-      while (cursor < xml.length) {
-        final nextP = xml.indexOf('<hp:p', cursor);
-        if (nextP == -1) break;
-        final afterP = (nextP + 5 < xml.length) ? xml[nextP + 5] : '';
-        if (afterP != '>' && afterP != ' ' && afterP != '/') {
-          cursor = nextP + 5;
-          continue;
-        }
-        final endP = _findOuterHpParagraphEnd(xml, nextP);
-        if (endP == -1) break;
-        final pBlock = xml.substring(nextP, endP);
-
+      for (final pBlock in _findDirectXmlTagBlocks(xml, 'hp:p')) {
+        final tblBlocks = _findDirectXmlTagBlocks(pBlock, 'hp:tbl');
         String pWithoutTables = pBlock;
-        final tblMatches = RegExp(r'<hp:tbl\b[^>]*>(.*?)</hp:tbl>', dotAll: true).allMatches(pBlock).toList();
-        if (tblMatches.isNotEmpty) {
-          pWithoutTables = pBlock.replaceAll(RegExp(r'<hp:tbl\b[^>]*>.*?</hp:tbl>', dotAll: true), '');
+        for (final tb in tblBlocks) {
+          pWithoutTables = pWithoutTables.replaceFirst(tb, '');
         }
 
+        final pStyle = _resolveHwpxStyle(pWithoutTables, charPrMap, paraAlignMap);
         final pTextBuf = StringBuffer();
         for (final tm in RegExp(r'<hp:t(?:\s[^>]*)?>(.*?)</hp:t>', dotAll: true).allMatches(pWithoutTables)) {
           pTextBuf.write(_unescapeXml(tm.group(1) ?? ''));
         }
-        final pText = pTextBuf.toString().trim();
+        final pText = pTextBuf.toString().trimRight();
         if (pText.isNotEmpty) {
-          blocks.add({'type': 'paragraph', 'text': pText});
+          blocks.add({
+            'type': 'paragraph',
+            'text': pText,
+            'fontSizePt': pStyle.fontSizePt,
+            'bold': pStyle.bold,
+            'italic': pStyle.italic,
+            'underline': pStyle.underline,
+            'serif': pStyle.serif,
+            'align': pStyle.align,
+            'textColor': pStyle.textColor,
+          });
         }
 
-        for (final tblM in tblMatches) {
-          final tblXml = tblM.group(1) ?? '';
-          final List<List<String>> rows = [];
-          for (final trM in RegExp(r'<hp:tr\b[^>]*>(.*?)</hp:tr>', dotAll: true).allMatches(tblXml)) {
-            final trXml = trM.group(1) ?? '';
-            final List<String> cells = [];
-            for (final tcM in RegExp(r'<hp:tc\b[^>]*>(.*?)</hp:tc>', dotAll: true).allMatches(trXml)) {
-              final tcXml = tcM.group(1) ?? '';
-              final cellLines = <String>[];
-              for (final cellPM in RegExp(r'<hp:p\b[^>]*>(.*?)</hp:p>', dotAll: true).allMatches(tcXml)) {
-                final cBuf = StringBuffer();
-                for (final tm in RegExp(r'<hp:t(?:\s[^>]*)?>(.*?)</hp:t>', dotAll: true).allMatches(cellPM.group(1) ?? '')) {
-                  cBuf.write(_unescapeXml(tm.group(1) ?? ''));
-                }
-                final ct = cBuf.toString().trim();
-                if (ct.isNotEmpty) cellLines.add(ct);
-              }
-              cells.add(cellLines.join('\n'));
-            }
-            if (cells.isNotEmpty) rows.add(cells);
-          }
-          if (rows.isNotEmpty) {
-            blocks.add({'type': 'table', 'rows': rows});
+        for (final tblXml in tblBlocks) {
+          final tableBlock = _parseHwpxRichTable(
+            tblXml,
+            charPrMap,
+            paraAlignMap,
+            borderFillBgMap,
+            binDataMap,
+            emittedImages,
+          );
+          if (tableBlock != null) {
+            blocks.add(tableBlock);
           }
         }
 
-        for (final imgM in RegExp(r'(?:binaryItemIDRef|binItemIDRef|binData)="([^"]+)"').allMatches(pBlock)) {
+        for (final imgM in RegExp(r'(?:binaryItemIDRef|binItemIDRef|binData)="([^"]+)"').allMatches(pWithoutTables)) {
           final refId = imgM.group(1)!;
           final img = binDataMap[refId] ?? binDataMap[refId.toLowerCase()];
           if (img != null && !emittedImages.contains(img)) {
@@ -354,8 +810,6 @@ class TxtToEpubConverter {
             blocks.add({'type': 'image', 'bytes': img});
           }
         }
-
-        cursor = endP;
       }
     }
 
@@ -369,38 +823,167 @@ class TxtToEpubConverter {
     return blocks;
   }
 
-  static int _findOuterHpParagraphEnd(String xml, int startIdx) {
-    int depth = 0;
-    int i = startIdx;
-    while (i < xml.length) {
-      final nextOpen = xml.indexOf('<hp:p', i);
-      final nextClose = xml.indexOf('</hp:p>', i);
-      if (nextClose == -1) return -1;
-
-      if (nextOpen != -1 && nextOpen < nextClose) {
-        final afterC = (nextOpen + 5 < xml.length) ? xml[nextOpen + 5] : '';
-        if (afterC == '>' || afterC == ' ' || afterC == '/') {
-          final tagEnd = xml.indexOf('>', nextOpen);
-          if (tagEnd != -1 && xml[tagEnd - 1] != '/') {
-            depth++;
-          }
-          i = (tagEnd != -1) ? tagEnd + 1 : nextOpen + 5;
-          continue;
-        }
-        i = nextOpen + 5;
-        continue;
-      } else {
-        depth--;
-        if (depth <= 0) {
-          return nextClose + '</hp:p>'.length;
-        }
-        i = nextClose + '</hp:p>'.length;
-      }
+  static _DocStyleInfo _resolveHwpxStyle(
+    String xmlFragment,
+    Map<String, _DocStyleInfo> charPrMap,
+    Map<String, String> paraAlignMap,
+  ) {
+    final st = _DocStyleInfo(fontSizePt: 10.0);
+    final ppM = RegExp(r'\bparaPrIDRef="(\d+)"').firstMatch(xmlFragment);
+    if (ppM != null && paraAlignMap.containsKey(ppM.group(1)!)) {
+      st.align = paraAlignMap[ppM.group(1)!]!;
     }
-    return -1;
+    final cpM = RegExp(r'\bcharPrIDRef="(\d+)"').firstMatch(xmlFragment);
+    if (cpM != null && charPrMap.containsKey(cpM.group(1)!)) {
+      final c = charPrMap[cpM.group(1)!]!;
+      st.fontSizePt = c.fontSizePt;
+      st.bold = c.bold;
+      st.italic = c.italic;
+      st.underline = c.underline;
+      st.serif = c.serif;
+      st.textColor = c.textColor;
+    }
+    return st;
   }
 
-  /// HWP 5.0 바이너리(OLE2 Compound File)에서 단락, 표(HWPTAG_TABLE), 사진(BinData/*)을 정밀 추출
+  static Map<String, dynamic>? _parseHwpxRichTable(
+    String tblXml,
+    Map<String, _DocStyleInfo> charPrMap,
+    Map<String, String> paraAlignMap,
+    Map<String, int> borderFillBgMap,
+    Map<String, Uint8List> binDataMap,
+    Set<Uint8List> emittedImages,
+  ) {
+    final firstGt = tblXml.indexOf('>');
+    final tblTag = firstGt != -1 ? tblXml.substring(0, firstGt) : tblXml;
+    int numRows = int.tryParse(RegExp(r'\browCnt="(\d+)"').firstMatch(tblTag)?.group(1) ?? '') ?? 0;
+    int numCols = int.tryParse(RegExp(r'\bcolCnt="(\d+)"').firstMatch(tblTag)?.group(1) ?? '') ?? 0;
+
+    final tcBlocks = _findDirectXmlTagBlocks(tblXml, 'hp:tc');
+    if (tcBlocks.isEmpty) return null;
+
+    for (final tcXml in tcBlocks) {
+      final addrM = RegExp(r'<hp:cellAddr\b[^>]*colAddr="(\d+)"[^>]*rowAddr="(\d+)"').firstMatch(tcXml);
+      final spanM = RegExp(r'<hp:cellSpan\b[^>]*colSpan="(\d+)"[^>]*rowSpan="(\d+)"').firstMatch(tcXml);
+      if (addrM != null) {
+        final c = int.tryParse(addrM.group(1)!) ?? 0;
+        final r = int.tryParse(addrM.group(2)!) ?? 0;
+        final cs = int.tryParse(spanM?.group(1) ?? '1') ?? 1;
+        final rs = int.tryParse(spanM?.group(2) ?? '1') ?? 1;
+        if (c + cs > numCols) numCols = c + cs;
+        if (r + rs > numRows) numRows = r + rs;
+      }
+    }
+    if (numRows <= 0 || numCols <= 0) return null;
+
+    final List<double> colWidths = List<double>.filled(numCols, 0.0);
+    final List<Map<String, dynamic>> cells = [];
+
+    int fallbackRow = 0;
+    int fallbackCol = 0;
+
+    for (final tcXml in tcBlocks) {
+      final addrM = RegExp(r'<hp:cellAddr\b[^>]*colAddr="(\d+)"[^>]*rowAddr="(\d+)"').firstMatch(tcXml);
+      final spanM = RegExp(r'<hp:cellSpan\b[^>]*colSpan="(\d+)"[^>]*rowSpan="(\d+)"').firstMatch(tcXml);
+      final szM = RegExp(r'<hp:cellSz\b[^>]*width="(\d+)"[^>]*height="(\d+)"').firstMatch(tcXml);
+      final bfM = RegExp(r'\bborderFillIDRef="(\d+)"').firstMatch(tcXml);
+
+      final int col = (addrM != null ? (int.tryParse(addrM.group(1)!) ?? fallbackCol) : fallbackCol)
+          .clamp(0, numCols - 1);
+      final int row = (addrM != null ? (int.tryParse(addrM.group(2)!) ?? fallbackRow) : fallbackRow)
+          .clamp(0, numRows - 1);
+      final int colSpan = (spanM != null ? (int.tryParse(spanM.group(1)!) ?? 1) : 1)
+          .clamp(1, numCols - col);
+      final int rowSpan = (spanM != null ? (int.tryParse(spanM.group(2)!) ?? 1) : 1)
+          .clamp(1, numRows - row);
+
+      double minHeightPt = 20.0;
+      if (szM != null) {
+        final wHwp = double.tryParse(szM.group(1)!) ?? 0.0;
+        final hHwp = double.tryParse(szM.group(2)!) ?? 0.0;
+        if (wHwp > 0) {
+          final perColW = wHwp / colSpan;
+          for (int c = col; c < col + colSpan && c < numCols; c++) {
+            if (colWidths[c] <= 0.0 || colSpan == 1) {
+              colWidths[c] = perColW;
+            }
+          }
+        }
+        if (hHwp > 0) {
+          minHeightPt = (hHwp / 100.0).clamp(16.0, 260.0);
+        }
+      }
+
+      int? bgColor;
+      if (bfM != null) {
+        bgColor = borderFillBgMap[bfM.group(1)!];
+      }
+
+      final cellStyle = _resolveHwpxStyle(tcXml, charPrMap, paraAlignMap);
+      final cellParas = _findDirectXmlTagBlocks(tcXml, 'hp:p');
+      final cellLines = <String>[];
+      for (final cp in cellParas) {
+        final cBuf = StringBuffer();
+        for (final tm in RegExp(r'<hp:t(?:\s[^>]*)?>(.*?)</hp:t>', dotAll: true).allMatches(cp)) {
+          cBuf.write(_unescapeXml(tm.group(1) ?? ''));
+        }
+        final ct = cBuf.toString().trimRight();
+        if (ct.isNotEmpty) cellLines.add(ct);
+      }
+
+      Uint8List? cellImage;
+      for (final imgM in RegExp(r'(?:binaryItemIDRef|binItemIDRef|binData)="([^"]+)"').allMatches(tcXml)) {
+        final refId = imgM.group(1)!;
+        final img = binDataMap[refId] ?? binDataMap[refId.toLowerCase()];
+        if (img != null) {
+          emittedImages.add(img);
+          cellImage ??= img;
+        }
+      }
+
+      cells.add({
+        'row': row,
+        'col': col,
+        'rowSpan': rowSpan,
+        'colSpan': colSpan,
+        'text': cellLines.join('\n'),
+        'align': cellStyle.align,
+        'vAlign': 'middle',
+        'bold': cellStyle.bold,
+        'serif': cellStyle.serif,
+        'fontSizePt': cellStyle.fontSizePt.clamp(7.5, 22.0),
+        'textColor': cellStyle.textColor,
+        'bgColor': bgColor,
+        'minHeightPt': minHeightPt,
+        if (cellImage != null) 'imageBytes': cellImage,
+      });
+
+      fallbackCol = col + colSpan;
+      if (fallbackCol >= numCols) {
+        fallbackCol = 0;
+        fallbackRow = row + 1;
+      }
+    }
+
+    for (int i = 0; i < numCols; i++) {
+      if (colWidths[i] <= 0.0) colWidths[i] = 1000.0;
+    }
+
+    return {
+      'type': 'table',
+      'numRows': numRows,
+      'numCols': numCols,
+      'colWidths': colWidths,
+      'cells': cells,
+    };
+  }
+
+  // =========================================================================
+  // 3. 한글 HWP 5.0(.hwp) 바이너리 고정밀 파서
+  //    - DocInfo: 글꼴(HWPTAG_FACE_NAME), 글자모양(HWPTAG_CHAR_SHAPE),
+  //               문단모양(HWPTAG_PARA_SHAPE), 테두리/배경(HWPTAG_BORDER_FILL)
+  //    - BodyText/Section*: 문단 서식 + 표(HWPTAG_TABLE + 셀 HWPTAG_LIST_HEADER 병합/너비/배경) + 그림(BinData)
+  // =========================================================================
   static List<Map<String, dynamic>> _extractHwp5StructuredBlocks(Uint8List bytes) {
     final List<Map<String, dynamic>> blocks = [];
     if (bytes.length < 512) return blocks;
@@ -506,6 +1089,8 @@ class TxtToEpubConverter {
       } else if (objType == 2) {
         if (name == 'FileHeader' && streamSize >= 36) {
           sectionStreams['__FileHeader__'] = (startSec, streamSize);
+        } else if (name == 'DocInfo') {
+          sectionStreams['__DocInfo__'] = (startSec, streamSize);
         } else if (name == 'PrvText') {
           sectionStreams['__PrvText__'] = (startSec, streamSize);
         } else if (name.startsWith('Section')) {
@@ -562,6 +1147,34 @@ class TxtToEpubConverter {
       }
     }
 
+    // DocInfo 파싱 (글꼴, 글자모양, 문단모양, 셀 배경색)
+    final List<bool> fontIsSerifList = [];
+    final List<_DocStyleInfo> charShapes = [];
+    final List<(String, double)> paraShapes = []; // (align, leftIndentPt)
+    final List<int?> borderFillBgColors = [null]; // 1-based indexing
+
+    if (sectionStreams.containsKey('__DocInfo__')) {
+      final (diSec, diSize) = sectionStreams['__DocInfo__']!;
+      Uint8List diBytes = readEntryStream(diSec, diSize);
+      if (diBytes.isNotEmpty && isCompressed) {
+        try {
+          diBytes = Uint8List.fromList(ZLibCodec(raw: true).decoder.convert(diBytes));
+        } catch (_) {
+          try {
+            diBytes = Uint8List.fromList(ZLibCodec(raw: false).decoder.convert(diBytes));
+          } catch (_) {}
+        }
+      }
+      _parseHwpDocInfo(
+        diBytes,
+        fontIsSerifList,
+        charShapes,
+        paraShapes,
+        borderFillBgColors,
+      );
+    }
+
+    // BinData 내장 이미지 복원
     final List<Uint8List> extractedBinImages = [];
     final sortedBinNames = binDataStreams.keys.toList()..sort();
     for (final binName in sortedBinNames) {
@@ -613,6 +1226,9 @@ class TxtToEpubConverter {
       blocks.addAll(
         _parseHwpSectionStructuredRecords(
           secBytes,
+          charShapes,
+          paraShapes,
+          borderFillBgColors,
           extractedBinImages,
           usedBinImageIndices,
         ),
@@ -637,7 +1253,7 @@ class TxtToEpubConverter {
         }
         final prvStr = String.fromCharCodes(units);
         for (final line in prvStr.split(RegExp(r'\r?\n'))) {
-          final t = line.trim();
+          final t = line.trimRight();
           if (t.isNotEmpty) {
             blocks.add({'type': 'paragraph', 'text': t});
           }
@@ -646,6 +1262,110 @@ class TxtToEpubConverter {
     }
 
     return blocks;
+  }
+
+  static void _parseHwpDocInfo(
+    Uint8List data,
+    List<bool> fontIsSerifList,
+    List<_DocStyleInfo> charShapes,
+    List<(String, double)> paraShapes,
+    List<int?> borderFillBgColors,
+  ) {
+    final bd = ByteData.sublistView(data);
+    int offset = 0;
+
+    while (offset + 4 <= data.length) {
+      final header = bd.getUint32(offset, Endian.little);
+      offset += 4;
+      final int tagId = header & 0x3FF;
+      int recSize = (header >> 20) & 0xFFF;
+      if (recSize == 0xFFF) {
+        if (offset + 4 > data.length) break;
+        recSize = bd.getUint32(offset, Endian.little);
+        offset += 4;
+      }
+      if (offset + recSize > data.length) break;
+
+      // HWPTAG_FACE_NAME == 19
+      if (tagId == 19 && recSize >= 3) {
+        final nameLen = bd.getUint16(offset + 1, Endian.little);
+        if (offset + 3 + nameLen * 2 <= data.length) {
+          final units = <int>[];
+          for (int i = 0; i < nameLen; i++) {
+            units.add(bd.getUint16(offset + 3 + i * 2, Endian.little));
+          }
+          final fontName = String.fromCharCodes(units);
+          fontIsSerifList.add(_isSerifFontName(fontName));
+        } else {
+          fontIsSerifList.add(false);
+        }
+      }
+      // HWPTAG_BORDER_FILL == 20
+      else if (tagId == 20 && recSize >= 28) {
+        int? bg;
+        // 테두리 정보 뒤에 위치한 WinBrush 채움 색상 스캔 (type == 1 인 경우 다음 4바이트가 COLORREF 0x00BBGGRR)
+        for (int pos = offset + 18; pos + 8 <= offset + recSize; pos += 2) {
+          final fillType = bd.getUint32(pos, Endian.little);
+          if (fillType == 1 && pos + 8 <= offset + recSize) {
+            final colorRef = bd.getUint32(pos + 4, Endian.little);
+            final r = colorRef & 0xFF;
+            final g = (colorRef >> 8) & 0xFF;
+            final b = (colorRef >> 16) & 0xFF;
+            if (!(r == 255 && g == 255 && b == 255) && !(r == 0 && g == 0 && b == 0)) {
+              bg = 0xFF000000 | (r << 16) | (g << 8) | b;
+              break;
+            }
+          }
+        }
+        borderFillBgColors.add(bg);
+      }
+      // HWPTAG_CHAR_SHAPE == 21
+      else if (tagId == 21 && recSize >= 56) {
+        final hangulFontId = bd.getUint16(offset, Endian.little);
+        final baseSize = bd.getInt32(offset + 42, Endian.little);
+        final attr = bd.getUint32(offset + 46, Endian.little);
+        final colorRef = bd.getUint32(offset + 52, Endian.little);
+        final r = colorRef & 0xFF;
+        final g = (colorRef >> 8) & 0xFF;
+        final b = (colorRef >> 16) & 0xFF;
+        final int argb = (r == 255 && g == 255 && b == 255)
+            ? 0xFF141414
+            : (0xFF000000 | (r << 16) | (g << 8) | b);
+
+        final bool isSerif = (hangulFontId < fontIsSerifList.length)
+            ? fontIsSerifList[hangulFontId]
+            : false;
+
+        charShapes.add(
+          _DocStyleInfo(
+            fontSizePt: (baseSize / 100.0).clamp(7.5, 36.0),
+            italic: (attr & 0x01) != 0,
+            bold: (attr & 0x02) != 0,
+            underline: ((attr >> 2) & 0x03) != 0,
+            serif: isSerif,
+            textColor: argb,
+          ),
+        );
+      }
+      // HWPTAG_PARA_SHAPE == 25
+      else if (tagId == 25 && recSize >= 8) {
+        final prop1 = bd.getUint32(offset, Endian.little);
+        final alignCode = (prop1 >> 2) & 0x07;
+        String align = 'left';
+        if (alignCode == 3) {
+          align = 'center';
+        } else if (alignCode == 2) {
+          align = 'right';
+        } else if (alignCode == 0) {
+          align = 'justify';
+        }
+        final leftMargin = bd.getInt32(offset + 4, Endian.little);
+        final indentPt = (leftMargin / 200.0).clamp(0.0, 100.0);
+        paraShapes.add((align, indentPt));
+      }
+
+      offset += recSize;
+    }
   }
 
   static bool _looksLikeImageHeader(Uint8List data) {
@@ -657,8 +1377,12 @@ class TxtToEpubConverter {
     return false;
   }
 
+  /// HWP 5.0 Section 레코드 스트림에서 단락 서식, 표(셀 병합/열 너비/배경색/셀 이미지), 그림을 정밀 복원
   static List<Map<String, dynamic>> _parseHwpSectionStructuredRecords(
     Uint8List data,
+    List<_DocStyleInfo> charShapes,
+    List<(String, double)> paraShapes,
+    List<int?> borderFillBgColors,
     List<Uint8List> binImages,
     Set<int> usedBinImageIndices,
   ) {
@@ -666,32 +1390,41 @@ class TxtToEpubConverter {
     final bd = ByteData.sublistView(data);
     int offset = 0;
 
-    int? activeTableLevel;
+    int? activeTableCtrlLevel;
     int tableRows = 0;
     int tableCols = 0;
-    List<List<List<String>>>? tableGrid;
-    int currentCellRow = 0;
-    int currentCellCol = -1;
+    int expectedTotalCells = 0;
+    int parsedCellsCount = 0;
+    int? detectedCellAttrOffset;
+    List<double> tableColWidths = [];
+    List<Map<String, dynamic>> tableCells = [];
+    Map<String, dynamic>? currentCellMap;
+
+    int currentParaShapeId = 0;
+    int currentCharShapeId = 0;
 
     void flushActiveTable() {
-      if (tableGrid != null && tableRows > 0 && tableCols > 0) {
-        final List<List<String>> finalRows = [];
-        for (final r in tableGrid!) {
-          final rowStrs = r.map((cellLines) => cellLines.join('\n').trim()).toList();
-          if (rowStrs.any((s) => s.isNotEmpty) || finalRows.isNotEmpty) {
-            finalRows.add(rowStrs);
-          }
+      if (tableCells.isNotEmpty && tableRows > 0 && tableCols > 0) {
+        for (int c = 0; c < tableCols; c++) {
+          if (tableColWidths[c] <= 0.0) tableColWidths[c] = 1000.0;
         }
-        if (finalRows.isNotEmpty) {
-          blocks.add({'type': 'table', 'rows': finalRows});
-        }
+        blocks.add({
+          'type': 'table',
+          'numRows': tableRows,
+          'numCols': tableCols,
+          'colWidths': List<double>.from(tableColWidths),
+          'cells': List<Map<String, dynamic>>.from(tableCells),
+        });
       }
-      activeTableLevel = null;
-      tableGrid = null;
+      activeTableCtrlLevel = null;
       tableRows = 0;
       tableCols = 0;
-      currentCellRow = 0;
-      currentCellCol = -1;
+      expectedTotalCells = 0;
+      parsedCellsCount = 0;
+      detectedCellAttrOffset = null;
+      tableColWidths = [];
+      tableCells = [];
+      currentCellMap = null;
     }
 
     while (offset + 4 <= data.length) {
@@ -709,51 +1442,134 @@ class TxtToEpubConverter {
 
       if (offset + recSize > data.length) break;
 
-      if (activeTableLevel != null && level < activeTableLevel!) {
-        flushActiveTable();
+      // 표 종료 조건:
+      // 1) level이 표 컨트롤 레벨(activeTableCtrlLevel, 보통 1)보다 작아진 경우(예: level 0의 본문 문단 시작)
+      // 2) 또는 expectedTotalCells를 모두 채운 뒤 셀 내부 레벨보다 상위 문단이 시작된 경우
+      if (activeTableCtrlLevel != null) {
+        if (level < activeTableCtrlLevel!) {
+          flushActiveTable();
+        } else if (tagId == 66 &&
+            level == activeTableCtrlLevel! &&
+            expectedTotalCells > 0 &&
+            parsedCellsCount >= expectedTotalCells) {
+          flushActiveTable();
+        }
       }
 
-      if (tagId == 77 && recSize >= 8) {
+      // HWPTAG_PARA_HEADER == 66 (0x42)
+      if (tagId == 66 && recSize >= 10) {
+        currentParaShapeId = bd.getUint16(offset + 8, Endian.little);
+      }
+      // HWPTAG_PARA_CHAR_SHAPE == 68 (0x44)
+      else if (tagId == 68 && recSize >= 8) {
+        currentCharShapeId = bd.getUint32(offset + 4, Endian.little);
+      }
+      // HWPTAG_TABLE == 77 (0x4D)
+      else if (tagId == 77 && recSize >= 18) {
         flushActiveTable();
         final rCount = bd.getUint16(offset + 4, Endian.little);
         final cCount = bd.getUint16(offset + 6, Endian.little);
-        if (rCount > 0 && rCount <= 500 && cCount > 0 && cCount <= 50) {
-          activeTableLevel = level;
+        if (rCount > 0 && rCount <= 500 && cCount > 0 && cCount <= 60) {
+          // 핵심: HWPTAG_TABLE의 부모인 HWPTAG_CTRL_HEADER('tbl ')는 level - 1 (보통 1)에 위치!
+          activeTableCtrlLevel = math.max(1, level - 1);
           tableRows = rCount;
           tableCols = cCount;
-          tableGrid = List.generate(
-            tableRows,
-            (_) => List.generate(tableCols, (_) => <String>[]),
-          );
-          currentCellRow = 0;
-          currentCellCol = -1;
+          tableColWidths = List<double>.filled(tableCols, 0.0);
+          tableCells = [];
+          currentCellMap = null;
+          parsedCellsCount = 0;
+          detectedCellAttrOffset = null;
+
+          int sumCells = 0;
+          if (recSize >= 18 + rCount * 2) {
+            for (int r = 0; r < rCount; r++) {
+              sumCells += bd.getUint16(offset + 18 + r * 2, Endian.little);
+            }
+          }
+          expectedTotalCells = sumCells;
         }
-      } else if (tagId == 72 && activeTableLevel != null && tableGrid != null) {
-        bool matchedCoord = false;
-        if (recSize >= 12) {
-          for (final baseOff in [8, 6]) {
-            if (baseOff + 4 <= recSize) {
-              final cIdx = bd.getUint16(offset + baseOff, Endian.little);
-              final rIdx = bd.getUint16(offset + baseOff + 2, Endian.little);
-              if (rIdx < tableRows && cIdx < tableCols) {
-                currentCellRow = rIdx;
-                currentCellCol = cIdx;
-                matchedCoord = true;
+      }
+      // HWPTAG_LIST_HEADER == 72 (0x48): 표 셀(Cell) 시작
+      else if (tagId == 72 && activeTableCtrlLevel != null && recSize >= 22) {
+        // 첫 번째 셀에서 오프셋 6 vs 오프셋 8 중 (col=0, row=0, colSpan>=1, rowSpan>=1) 위치를 자동 감지
+        if (detectedCellAttrOffset == null) {
+          for (final cand in [6, 8]) {
+            if (cand + 16 <= recSize) {
+              final c = bd.getUint16(offset + cand, Endian.little);
+              final r = bd.getUint16(offset + cand + 2, Endian.little);
+              final cs = bd.getUint16(offset + cand + 4, Endian.little);
+              final rs = bd.getUint16(offset + cand + 6, Endian.little);
+              if (c == 0 && r == 0 && cs >= 1 && cs <= tableCols && rs >= 1 && rs <= tableRows) {
+                detectedCellAttrOffset = cand;
                 break;
               }
             }
           }
+          detectedCellAttrOffset ??= 6;
         }
-        if (!matchedCoord) {
-          currentCellCol++;
-          if (currentCellCol >= tableCols) {
-            currentCellCol = 0;
-            if (currentCellRow + 1 < tableRows) {
-              currentCellRow++;
+
+        final int baseOff = detectedCellAttrOffset!;
+        int cIdx = 0;
+        int rIdx = 0;
+        int cSpan = 1;
+        int rSpan = 1;
+        double cellW = 0.0;
+        double cellH = 20.0;
+        int? cellBgColor;
+
+        if (baseOff + 16 <= recSize) {
+          cIdx = bd.getUint16(offset + baseOff, Endian.little);
+          rIdx = bd.getUint16(offset + baseOff + 2, Endian.little);
+          cSpan = bd.getUint16(offset + baseOff + 4, Endian.little);
+          rSpan = bd.getUint16(offset + baseOff + 6, Endian.little);
+          final wUnit = bd.getUint32(offset + baseOff + 8, Endian.little);
+          final hUnit = bd.getUint32(offset + baseOff + 12, Endian.little);
+          cellW = wUnit.toDouble();
+          cellH = (hUnit / 100.0).clamp(16.0, 260.0);
+        }
+        if (baseOff + 32 <= recSize) {
+          final bfId = bd.getUint16(offset + baseOff + 30, Endian.little);
+          if (bfId > 0 && bfId < borderFillBgColors.length) {
+            cellBgColor = borderFillBgColors[bfId];
+          }
+        }
+
+        rIdx = rIdx.clamp(0, tableRows - 1);
+        cIdx = cIdx.clamp(0, tableCols - 1);
+        cSpan = cSpan.clamp(1, tableCols - cIdx);
+        rSpan = rSpan.clamp(1, tableRows - rIdx);
+
+        if (cellW > 0) {
+          final perCol = cellW / cSpan;
+          for (int c = cIdx; c < cIdx + cSpan && c < tableCols; c++) {
+            if (tableColWidths[c] <= 0.0 || cSpan == 1) {
+              tableColWidths[c] = perCol;
             }
           }
         }
-      } else if (tagId == 85 && binImages.isNotEmpty) {
+
+        final cellMap = <String, dynamic>{
+          'row': rIdx,
+          'col': cIdx,
+          'rowSpan': rSpan,
+          'colSpan': cSpan,
+          'text': '',
+          'align': 'left',
+          'vAlign': 'middle',
+          'bold': false,
+          'serif': false,
+          'fontSizePt': 9.5,
+          'textColor': 0xFF141414,
+          'bgColor': cellBgColor,
+          'minHeightPt': cellH,
+          '_styleInitialized': false,
+        };
+        tableCells.add(cellMap);
+        currentCellMap = cellMap;
+        parsedCellsCount++;
+      }
+      // HWPTAG_SHAPE_COMPONENT_PICTURE == 85 (0x55)
+      else if (tagId == 85 && binImages.isNotEmpty) {
         int? matchedIdx;
         for (int i = 0; i < binImages.length; i++) {
           if (!usedBinImageIndices.contains(i)) {
@@ -763,18 +1579,52 @@ class TxtToEpubConverter {
         }
         if (matchedIdx != null) {
           usedBinImageIndices.add(matchedIdx);
-          blocks.add({'type': 'image', 'bytes': binImages[matchedIdx]});
+          if (activeTableCtrlLevel != null && currentCellMap != null) {
+            currentCellMap!['imageBytes'] ??= binImages[matchedIdx];
+          } else {
+            blocks.add({'type': 'image', 'bytes': binImages[matchedIdx]});
+          }
         }
-      } else if (tagId == 67 && recSize >= 2) {
+      }
+      // HWPTAG_PARA_TEXT == 67 (0x43)
+      else if (tagId == 67 && recSize >= 2) {
         final decodedLines = _decodeHwpParaText(bd, offset, recSize);
+        final _DocStyleInfo cStyle = (currentCharShapeId >= 0 && currentCharShapeId < charShapes.length)
+            ? charShapes[currentCharShapeId]
+            : _DocStyleInfo(fontSizePt: 10.0);
+        final (String pAlign, double pIndent) = (currentParaShapeId >= 0 && currentParaShapeId < paraShapes.length)
+            ? paraShapes[currentParaShapeId]
+            : ('left', 0.0);
+
         if (decodedLines.isNotEmpty) {
-          if (activeTableLevel != null && tableGrid != null) {
-            final r = currentCellRow.clamp(0, tableRows - 1);
-            final c = (currentCellCol < 0 ? 0 : currentCellCol).clamp(0, tableCols - 1);
-            tableGrid![r][c].addAll(decodedLines);
+          if (activeTableCtrlLevel != null && currentCellMap != null) {
+            final joined = decodedLines.join('\n').trim();
+            if (joined.isNotEmpty) {
+              final prev = currentCellMap!['text'] as String;
+              currentCellMap!['text'] = prev.isEmpty ? joined : '$prev\n$joined';
+              if (currentCellMap!['_styleInitialized'] != true) {
+                currentCellMap!['_styleInitialized'] = true;
+                currentCellMap!['align'] = pAlign;
+                currentCellMap!['bold'] = cStyle.bold;
+                currentCellMap!['serif'] = cStyle.serif;
+                currentCellMap!['fontSizePt'] = cStyle.fontSizePt.clamp(7.5, 22.0);
+                currentCellMap!['textColor'] = cStyle.textColor;
+              }
+            }
           } else {
             for (final line in decodedLines) {
-              blocks.add({'type': 'paragraph', 'text': line});
+              blocks.add({
+                'type': 'paragraph',
+                'text': line,
+                'fontSizePt': cStyle.fontSizePt,
+                'bold': cStyle.bold,
+                'italic': cStyle.italic,
+                'underline': cStyle.underline,
+                'serif': cStyle.serif,
+                'align': pAlign,
+                'textColor': cStyle.textColor,
+                'leftIndentPt': pIndent,
+              });
             }
           }
         }
@@ -825,16 +1675,20 @@ class TxtToEpubConverter {
         pos += 14;
       } else if (ch == 10 || ch == 13) {
         buf.write('\n');
+      } else if (ch == 24) {
+        buf.write('-');
+      } else if (ch == 30 || ch == 31) {
+        buf.write(' ');
       } else if (ch >= 32) {
         buf.writeCharCode(ch);
       }
     }
 
-    final text = buf.toString().trim();
+    final text = buf.toString().trimRight();
     if (text.isNotEmpty) {
       for (final sub in text.split('\n')) {
-        final t = sub.trim();
-        if (t.isNotEmpty) lines.add(t);
+        final t = sub.trimRight();
+        if (t.trim().isNotEmpty) lines.add(t);
       }
     }
     return lines;

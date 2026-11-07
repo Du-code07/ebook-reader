@@ -2,6 +2,7 @@ package com.example.my_ebook_reader
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Typeface
 import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.graphics.Rect
@@ -309,10 +310,11 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         try {
                             val pageWidth = 1240
                             val pageHeight = 1754
-                            val marginX = 80f
-                            val marginY = 90f
+                            val marginX = 76f
+                            val marginY = 84f
                             val contentWidth = (pageWidth - 2 * marginX).toInt()
                             val maxBottomY = pageHeight - marginY
+                            val ptScale = 2.25f // 10pt -> 22.5px on 1240px A4 width
 
                             var pageNumber = 1
                             var currentPage: PdfDocument.Page? = null
@@ -330,26 +332,44 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
                             var canvas = startNewPage()
 
-                            val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                                color = Color.rgb(20, 20, 20)
-                                textSize = 27f
+                            fun buildTextPaint(
+                                fontSizePt: Float,
+                                bold: Boolean,
+                                italic: Boolean,
+                                underline: Boolean,
+                                serif: Boolean,
+                                colorInt: Int
+                            ): TextPaint {
+                                val tfStyle = when {
+                                    bold && italic -> Typeface.BOLD_ITALIC
+                                    bold -> Typeface.BOLD
+                                    italic -> Typeface.ITALIC
+                                    else -> Typeface.NORMAL
+                                }
+                                val baseTf = if (serif) Typeface.SERIF else Typeface.SANS_SERIF
+                                return TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                                    typeface = Typeface.create(baseTf, tfStyle)
+                                    isFakeBoldText = bold
+                                    isUnderlineText = underline
+                                    color = colorInt
+                                    textSize = (fontSizePt * ptScale).coerceIn(15f, 76f)
+                                }
                             }
-                            val cellPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                                color = Color.rgb(20, 20, 20)
-                                textSize = 23f
+
+                            fun parseLayoutAlign(alignStr: String?): Layout.Alignment {
+                                return when (alignStr?.lowercase()) {
+                                    "center" -> Layout.Alignment.ALIGN_CENTER
+                                    "right" -> Layout.Alignment.ALIGN_OPPOSITE
+                                    else -> Layout.Alignment.ALIGN_NORMAL
+                                }
                             }
-                            val headerCellPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                                color = Color.rgb(15, 23, 42)
-                                textSize = 23f
-                                isFakeBoldText = true
-                            }
+
                             val tableBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                                color = Color.rgb(100, 116, 139)
+                                color = Color.rgb(71, 85, 105)
                                 style = Paint.Style.STROKE
-                                strokeWidth = 2f
+                                strokeWidth = 1.8f
                             }
-                            val tableHeaderBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                                color = Color.rgb(241, 245, 249)
+                            val cellFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                                 style = Paint.Style.FILL
                             }
 
@@ -357,87 +377,316 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                                 val bType = block["type"] as? String ?: "paragraph"
                                 if (bType == "paragraph") {
                                     val text = (block["text"] as? String ?: "").trimEnd()
+                                    val fontSizePt = (block["fontSizePt"] as? Number)?.toFloat() ?: 10.5f
+                                    val bold = (block["bold"] as? Boolean) ?: false
+                                    val italic = (block["italic"] as? Boolean) ?: false
+                                    val underline = (block["underline"] as? Boolean) ?: false
+                                    val serif = (block["serif"] as? Boolean) ?: false
+                                    val alignStr = block["align"] as? String ?: "left"
+                                    val colorInt = (block["textColor"] as? Number)?.toInt() ?: Color.rgb(20, 20, 20)
+                                    val leftIndentPt = (block["leftIndentPt"] as? Number)?.toFloat() ?: 0f
+                                    val spaceBeforePt = (block["spaceBeforePt"] as? Number)?.toFloat() ?: 0f
+                                    val spaceAfterPt = (block["spaceAfterPt"] as? Number)?.toFloat() ?: 4f
+
+                                    if (spaceBeforePt > 0f) {
+                                        currentY += spaceBeforePt * ptScale * 0.6f
+                                    }
+
                                     if (text.isEmpty()) {
-                                        currentY += 22f
+                                        currentY += (fontSizePt * ptScale * 0.85f).coerceAtLeast(16f)
                                         if (currentY > maxBottomY) {
                                             canvas = startNewPage()
                                         }
                                         continue
                                     }
-                                    val layout = StaticLayout.Builder.obtain(text, 0, text.length, bodyPaint, contentWidth)
-                                        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+
+                                    val indentPx = (leftIndentPt * ptScale).coerceIn(0f, contentWidth * 0.45f)
+                                    val availW = (contentWidth - indentPx.toInt()).coerceAtLeast(120)
+                                    val tPaint = buildTextPaint(fontSizePt, bold, italic, underline, serif, colorInt)
+                                    val layoutAlign = parseLayoutAlign(alignStr)
+
+                                    val layout = StaticLayout.Builder.obtain(text, 0, text.length, tPaint, availW)
+                                        .setAlignment(layoutAlign)
                                         .setLineSpacing(0f, 1.35f)
                                         .setIncludePad(false)
                                         .build()
 
-                                    for (lineIdx in 0 until layout.lineCount) {
-                                        val lineTop = layout.getLineTop(lineIdx).toFloat()
-                                        val lineBottom = layout.getLineBottom(lineIdx).toFloat()
-                                        val lineH = (lineBottom - lineTop).coerceAtLeast(28f)
-                                        if (currentY + lineH > maxBottomY && currentY > marginY + 1f) {
-                                            canvas = startNewPage()
+                                    val totalH = layout.height.toFloat()
+                                    if (currentY + totalH <= maxBottomY) {
+                                        canvas.save()
+                                        canvas.translate(marginX + indentPx, currentY)
+                                        layout.draw(canvas)
+                                        canvas.restore()
+                                        currentY += totalH + (spaceAfterPt * ptScale * 0.55f).coerceAtLeast(8f)
+                                    } else {
+                                        for (lineIdx in 0 until layout.lineCount) {
+                                            val lineTop = layout.getLineTop(lineIdx).toFloat()
+                                            val lineBottom = layout.getLineBottom(lineIdx).toFloat()
+                                            val lineH = (lineBottom - lineTop).coerceAtLeast(22f)
+                                            if (currentY + lineH > maxBottomY && currentY > marginY + 1f) {
+                                                canvas = startNewPage()
+                                            }
+                                            canvas.save()
+                                            canvas.clipRect(
+                                                marginX + indentPx,
+                                                currentY,
+                                                marginX + indentPx + availW,
+                                                currentY + lineH + 4f
+                                            )
+                                            canvas.translate(marginX + indentPx, currentY - lineTop)
+                                            layout.draw(canvas)
+                                            canvas.restore()
+                                            currentY += lineH
                                         }
-                                        val lineStart = layout.getLineStart(lineIdx)
-                                        val lineEnd = layout.getLineEnd(lineIdx)
-                                        val lineStr = text.substring(lineStart, lineEnd).trimEnd('\r', '\n')
-                                        if (lineStr.isNotEmpty()) {
-                                            canvas.drawText(lineStr, marginX, currentY - bodyPaint.ascent(), bodyPaint)
-                                        }
-                                        currentY += lineH
+                                        currentY += (spaceAfterPt * ptScale * 0.55f).coerceAtLeast(8f)
                                     }
-                                    currentY += 16f
                                 } else if (bType == "table") {
                                     @Suppress("UNCHECKED_CAST")
-                                    val rows = block["rows"] as? List<List<String>> ?: emptyList()
-                                    if (rows.isEmpty()) continue
-                                    var numCols = 1
-                                    for (r in rows) {
-                                        if (r.size > numCols) numCols = r.size
-                                    }
-                                    val colW = contentWidth.toFloat() / numCols.toFloat()
-                                    val cellPadX = 12f
-                                    val cellPadY = 12f
-                                    val cellTextW = (colW - 2 * cellPadX).toInt().coerceAtLeast(40)
+                                    val rawCells = block["cells"] as? List<Map<String, Any?>>
+                                    if (rawCells != null && rawCells.isNotEmpty()) {
+                                        val numRows = ((block["numRows"] as? Number)?.toInt() ?: 1).coerceAtLeast(1)
+                                        val numCols = ((block["numCols"] as? Number)?.toInt() ?: 1).coerceAtLeast(1)
+                                        @Suppress("UNCHECKED_CAST")
+                                        val rawColWidths = block["colWidths"] as? List<Number>
+                                        val colW = FloatArray(numCols)
+                                        if (rawColWidths != null && rawColWidths.size == numCols) {
+                                            var sumW = 0f
+                                            for (n in rawColWidths) sumW += n.toFloat().coerceAtLeast(1f)
+                                            if (sumW <= 0f) sumW = numCols.toFloat()
+                                            for (c in 0 until numCols) {
+                                                colW[c] = (rawColWidths[c].toFloat().coerceAtLeast(1f) / sumW) * contentWidth.toFloat()
+                                            }
+                                        } else {
+                                            val eqW = contentWidth.toFloat() / numCols.toFloat()
+                                            for (c in 0 until numCols) colW[c] = eqW
+                                        }
 
-                                    currentY += 8f
-                                    for ((rIdx, row) in rows.withIndex()) {
-                                        val tPaint = if (rIdx == 0 && rows.size > 1) headerCellPaint else cellPaint
-                                        val cellLayouts = ArrayList<StaticLayout>(numCols)
-                                        var maxCellH = 32f
-                                        for (cIdx in 0 until numCols) {
-                                            val cellText = if (cIdx < row.size) row[cIdx].trim() else ""
-                                            val sl = StaticLayout.Builder.obtain(cellText, 0, cellText.length, tPaint, cellTextW)
-                                                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                                                .setLineSpacing(0f, 1.25f)
+                                        val colLeft = FloatArray(numCols + 1)
+                                        colLeft[0] = marginX
+                                        for (c in 0 until numCols) {
+                                            colLeft[c + 1] = colLeft[c] + colW[c]
+                                        }
+
+                                        val cellPadX = 10f
+                                        val cellPadY = 9f
+
+                                        class PreparedCell(
+                                            val row: Int,
+                                            val col: Int,
+                                            val rowSpan: Int,
+                                            val colSpan: Int,
+                                            val layout: StaticLayout,
+                                            val vAlign: String,
+                                            val bgColor: Int?,
+                                            val minHeightPx: Float,
+                                            val cellBitmap: Bitmap?,
+                                            val imgDrawW: Float,
+                                            val imgDrawH: Float
+                                        )
+
+                                        val preparedCells = ArrayList<PreparedCell>(rawCells.size)
+                                        val rowHeights = FloatArray(numRows) { 38f }
+
+                                        for (rc in rawCells) {
+                                            val r = ((rc["row"] as? Number)?.toInt() ?: 0).coerceIn(0, numRows - 1)
+                                            val c = ((rc["col"] as? Number)?.toInt() ?: 0).coerceIn(0, numCols - 1)
+                                            val rSpan = ((rc["rowSpan"] as? Number)?.toInt() ?: 1).coerceIn(1, numRows - r)
+                                            val cSpan = ((rc["colSpan"] as? Number)?.toInt() ?: 1).coerceIn(1, numCols - c)
+                                            val cellText = (rc["text"] as? String ?: "").trim()
+                                            val alignStr = rc["align"] as? String ?: "left"
+                                            val vAlignStr = rc["vAlign"] as? String ?: "middle"
+                                            val bold = (rc["bold"] as? Boolean) ?: false
+                                            val serif = (rc["serif"] as? Boolean) ?: false
+                                            val fontSizePt = (rc["fontSizePt"] as? Number)?.toFloat() ?: 9.5f
+                                            val textColor = (rc["textColor"] as? Number)?.toInt() ?: Color.rgb(20, 20, 20)
+                                            val bgColor = (rc["bgColor"] as? Number)?.toInt()
+                                            val minHeightPt = (rc["minHeightPt"] as? Number)?.toFloat() ?: 0f
+                                            val minHeightPx = (minHeightPt * ptScale * 0.75f).coerceIn(34f, 450f)
+
+                                            val spanW = colLeft[c + cSpan] - colLeft[c]
+                                            val innerW = (spanW - 2 * cellPadX).toInt().coerceAtLeast(28)
+                                            val cPaint = buildTextPaint(fontSizePt, bold, false, false, serif, textColor)
+                                            val sl = StaticLayout.Builder.obtain(cellText, 0, cellText.length, cPaint, innerW)
+                                                .setAlignment(parseLayoutAlign(alignStr))
+                                                .setLineSpacing(0f, 1.22f)
                                                 .setIncludePad(false)
                                                 .build()
-                                            cellLayouts.add(sl)
-                                            val h = sl.height.toFloat()
-                                            if (h > maxCellH) maxCellH = h
-                                        }
-                                        val rowH = (maxCellH + 2 * cellPadY).coerceAtMost(pageHeight - 2 * marginY - 20f)
-                                        if (currentY + rowH > maxBottomY && currentY > marginY + 1f) {
-                                            canvas = startNewPage()
-                                        }
-                                        for (cIdx in 0 until numCols) {
-                                            val left = marginX + cIdx * colW
-                                            val top = currentY
-                                            val right = left + colW
-                                            val bottom = top + rowH
-                                            val rect = RectF(left, top, right, bottom)
-                                            if (rIdx == 0 && rows.size > 1) {
-                                                canvas.drawRect(rect, tableHeaderBgPaint)
+
+                                            var bmp: Bitmap? = null
+                                            var iW = 0f
+                                            var iH = 0f
+                                            val imgBytes = rc["imageBytes"] as? ByteArray
+                                            if (imgBytes != null && imgBytes.isNotEmpty()) {
+                                                bmp = BitmapFactory.decodeByteArray(imgBytes, 0, imgBytes.size)
+                                                if (bmp != null && bmp.width > 0 && bmp.height > 0) {
+                                                    val maxW = innerW.toFloat()
+                                                    val maxH = 260f
+                                                    var sc = maxW / bmp.width.toFloat()
+                                                    if (sc > 1.8f) sc = 1.8f
+                                                    if (bmp.height * sc > maxH) sc = maxH / bmp.height.toFloat()
+                                                    iW = (bmp.width * sc).coerceAtLeast(1f)
+                                                    iH = (bmp.height * sc).coerceAtLeast(1f)
+                                                }
                                             }
-                                            canvas.drawRect(rect, tableBorderPaint)
-                                            canvas.save()
-                                            canvas.clipRect(left + 2f, top + 2f, right - 2f, bottom - 2f)
-                                            canvas.translate(left + cellPadX, top + cellPadY)
-                                            cellLayouts[cIdx].draw(canvas)
-                                            canvas.restore()
+
+                                            val neededH = (if (cellText.isNotEmpty()) sl.height.toFloat() else 0f) +
+                                                (if (iH > 0f) iH + 6f else 0f) + 2 * cellPadY
+                                            val totalCellH = maxOf(neededH, minHeightPx)
+
+                                            if (rSpan == 1) {
+                                                if (totalCellH > rowHeights[r]) {
+                                                    rowHeights[r] = totalCellH.coerceAtMost(pageHeight - 2 * marginY - 30f)
+                                                }
+                                            }
+
+                                            preparedCells.add(
+                                                PreparedCell(
+                                                    r, c, rSpan, cSpan, sl, vAlignStr, bgColor, totalCellH, bmp, iW, iH
+                                                )
+                                            )
                                         }
-                                        currentY += rowH
+
+                                        // Pass 2: distribute height for rowSpan > 1 cells
+                                        for (pc in preparedCells) {
+                                            if (pc.rowSpan > 1) {
+                                                var curSum = 0f
+                                                for (rr in pc.row until (pc.row + pc.rowSpan)) {
+                                                    curSum += rowHeights[rr]
+                                                }
+                                                if (pc.minHeightPx > curSum) {
+                                                    val extraPerRow = (pc.minHeightPx - curSum) / pc.rowSpan.toFloat()
+                                                    for (rr in pc.row until (pc.row + pc.rowSpan)) {
+                                                        rowHeights[rr] += extraPerRow
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        currentY += 6f
+                                        // Render row-by-row (or chunk of rows per page)
+                                        var rowStart = 0
+                                        while (rowStart < numRows) {
+                                            if (currentY + rowHeights[rowStart] > maxBottomY && currentY > marginY + 1f) {
+                                                canvas = startNewPage()
+                                            }
+                                            var rowEnd = rowStart
+                                            var chunkH = 0f
+                                            while (rowEnd < numRows) {
+                                                val rh = rowHeights[rowEnd]
+                                                if (rowEnd > rowStart && currentY + chunkH + rh > maxBottomY) {
+                                                    break
+                                                }
+                                                chunkH += rh
+                                                rowEnd++
+                                            }
+
+                                            val rowTopY = FloatArray(numRows + 1)
+                                            rowTopY[rowStart] = currentY
+                                            for (rr in rowStart until rowEnd) {
+                                                rowTopY[rr + 1] = rowTopY[rr] + rowHeights[rr]
+                                            }
+
+                                            for (pc in preparedCells) {
+                                                val cellEndRow = pc.row + pc.rowSpan
+                                                if (cellEndRow <= rowStart || pc.row >= rowEnd) continue
+                                                val drawR0 = maxOf(pc.row, rowStart)
+                                                val drawR1 = minOf(cellEndRow, rowEnd)
+                                                val left = colLeft[pc.col]
+                                                val right = colLeft[pc.col + pc.colSpan]
+                                                val top = rowTopY[drawR0]
+                                                val bottom = rowTopY[drawR1]
+                                                val rect = RectF(left, top, right, bottom)
+
+                                                if (pc.bgColor != null) {
+                                                    cellFillPaint.color = pc.bgColor
+                                                    canvas.drawRect(rect, cellFillPaint)
+                                                }
+                                                canvas.drawRect(rect, tableBorderPaint)
+
+                                                if (pc.row == drawR0) {
+                                                    val boxH = bottom - top
+                                                    val contentH = (if (pc.layout.text.isNotEmpty()) pc.layout.height.toFloat() else 0f) +
+                                                        (if (pc.imgDrawH > 0f) pc.imgDrawH + 4f else 0f)
+                                                    val offsetY = when (pc.vAlign.lowercase()) {
+                                                        "bottom" -> maxOf(cellPadY, boxH - contentH - cellPadY)
+                                                        "middle", "center" -> maxOf(cellPadY, (boxH - contentH) / 2f)
+                                                        else -> cellPadY
+                                                    }
+                                                    canvas.save()
+                                                    canvas.clipRect(left + 2f, top + 2f, right - 2f, bottom - 2f)
+                                                    var curCellY = top + offsetY
+                                                    if (pc.cellBitmap != null && pc.imgDrawW > 0f && pc.imgDrawH > 0f) {
+                                                        val imgLeft = left + ((right - left) - pc.imgDrawW) / 2f
+                                                        val imgRect = RectF(imgLeft, curCellY, imgLeft + pc.imgDrawW, curCellY + pc.imgDrawH)
+                                                        canvas.drawBitmap(pc.cellBitmap, null, imgRect, Paint(Paint.FILTER_BITMAP_FLAG))
+                                                        curCellY += pc.imgDrawH + 4f
+                                                    }
+                                                    if (pc.layout.text.isNotEmpty()) {
+                                                        canvas.translate(left + cellPadX, curCellY)
+                                                        pc.layout.draw(canvas)
+                                                    }
+                                                    canvas.restore()
+                                                }
+                                            }
+
+                                            currentY += chunkH
+                                            rowStart = rowEnd
+                                        }
+
+                                        for (pc in preparedCells) {
+                                            pc.cellBitmap?.recycle()
+                                        }
+                                        currentY += 16f
+                                    } else {
+                                        @Suppress("UNCHECKED_CAST")
+                                        val rows = block["rows"] as? List<List<String>> ?: emptyList()
+                                        if (rows.isEmpty()) continue
+                                        var numCols = 1
+                                        for (r in rows) {
+                                            if (r.size > numCols) numCols = r.size
+                                        }
+                                        val colW = contentWidth.toFloat() / numCols.toFloat()
+                                        val cellPadX = 10f
+                                        val cellPadY = 10f
+                                        val cellTextW = (colW - 2 * cellPadX).toInt().coerceAtLeast(32)
+                                        val cellPaint = buildTextPaint(9.5f, false, false, false, false, Color.rgb(20, 20, 20))
+
+                                        currentY += 6f
+                                        for (row in rows) {
+                                            val cellLayouts = ArrayList<StaticLayout>(numCols)
+                                            var maxCellH = 32f
+                                            for (cIdx in 0 until numCols) {
+                                                val cellText = if (cIdx < row.size) row[cIdx].trim() else ""
+                                                val sl = StaticLayout.Builder.obtain(cellText, 0, cellText.length, cellPaint, cellTextW)
+                                                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                                                    .setLineSpacing(0f, 1.22f)
+                                                    .setIncludePad(false)
+                                                    .build()
+                                                cellLayouts.add(sl)
+                                                val h = sl.height.toFloat()
+                                                if (h > maxCellH) maxCellH = h
+                                            }
+                                            val rowH = (maxCellH + 2 * cellPadY).coerceAtMost(pageHeight - 2 * marginY - 20f)
+                                            if (currentY + rowH > maxBottomY && currentY > marginY + 1f) {
+                                                canvas = startNewPage()
+                                            }
+                                            for (cIdx in 0 until numCols) {
+                                                val left = marginX + cIdx * colW
+                                                val top = currentY
+                                                val right = left + colW
+                                                val bottom = top + rowH
+                                                val rect = RectF(left, top, right, bottom)
+                                                canvas.drawRect(rect, tableBorderPaint)
+                                                canvas.save()
+                                                canvas.clipRect(left + 2f, top + 2f, right - 2f, bottom - 2f)
+                                                canvas.translate(left + cellPadX, top + cellPadY)
+                                                cellLayouts[cIdx].draw(canvas)
+                                                canvas.restore()
+                                            }
+                                            currentY += rowH
+                                        }
+                                        currentY += 16f
                                     }
-                                    currentY += 20f
                                 } else if (bType == "image") {
                                     val imgBytes = block["bytes"] as? ByteArray
                                     if (imgBytes != null && imgBytes.isNotEmpty()) {

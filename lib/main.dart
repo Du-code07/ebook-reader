@@ -495,9 +495,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           _selectedFilePaths.add(hitPath);
         } else {
           _selectedFilePaths.remove(hitPath);
-          if (_selectedFilePaths.isEmpty) {
-            _isSelectionMode = false;
-          }
         }
       });
     }
@@ -2196,10 +2193,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                           if ((event.position - _pointerDownGlobalPos!).distance > 8.0) {
                             setState(() {
                               _isDragSelecting = true;
-                              _dragTargetSelectState = true;
                               if (_pointerDownRowPath != null) {
-                                _selectedFilePaths.add(_pointerDownRowPath!);
+                                final alreadySelected = _selectedFilePaths.contains(_pointerDownRowPath!);
+                                _dragTargetSelectState = !alreadySelected;
+                                if (_dragTargetSelectState) {
+                                  _selectedFilePaths.add(_pointerDownRowPath!);
+                                } else {
+                                  _selectedFilePaths.remove(_pointerDownRowPath!);
+                                }
                                 _lastDragTouchedPath = _pointerDownRowPath;
+                              } else {
+                                _dragTargetSelectState = true;
                               }
                             });
                           }
@@ -2439,11 +2443,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                   ),
                             onLongPress: () {
                               setState(() {
+                                final bool targetSelect = !_isSelectionMode ? true : !isSelected;
                                 _isSelectionMode = true;
                                 _isDragSelecting = true;
-                                _dragTargetSelectState = true;
+                                _dragTargetSelectState = targetSelect;
                                 _lastDragTouchedPath = file.path;
-                                _selectedFilePaths.add(file.path);
+                                if (targetSelect) {
+                                  _selectedFilePaths.add(file.path);
+                                } else {
+                                  _selectedFilePaths.remove(file.path);
+                                }
                               });
                             },
                             onTap: () {

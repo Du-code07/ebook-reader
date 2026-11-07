@@ -286,8 +286,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       SnackBar(
         content: Text(
           nextLocked
-              ? (byVolume ? '음량 버튼 동시 입력으로 화면이 잠겼습니다.' : '흔들기 감지로 화면이 잠겼습니다.')
-              : (byVolume ? '음량 버튼 동시 입력으로 화면 잠금이 해제되었습니다.' : '흔들기 감지로 화면 잠금이 해제되었습니다.'),
+              ? (byVolume ? _tr('음량 버튼 동시 입력으로 화면이 잠겼습니다.', 'Screen locked via volume buttons.', '已通过同时按音量键锁定屏幕。', '音量ボタン同時押しで画面をロックしました。') : _tr('흔들기 감지로 화면이 잠겼습니다.', 'Screen locked by shake.', '已通过摇晃锁定屏幕。', 'シェイクロックで画面をロックしました。'))
+              : (byVolume ? _tr('음량 버튼 동시 입력으로 화면 잠금이 해제되었습니다.', 'Screen unlocked via volume buttons.', '已通过同时按音量键解锁屏幕。', '音量ボタン同時押しで画面ロックを解除しました。') : _tr('흔들기 감지로 화면 잠금이 해제되었습니다.', 'Screen unlocked by shake.', '已通过摇晃解锁屏幕。', 'シェイクで画面ロックを解除しました。')),
         ),
         duration: const Duration(seconds: 1),
       ),
@@ -722,36 +722,91 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
+  /// 5. PC 그림판 방식 부분 지우개: 선 전체를 통째로 삭제하지 않고 지우개가 닿은 반경(radius) 부분만 정밀하게 도려내어 분할!
   Future<void> _eraseStrokeAt(int pageIndex, Offset localPos, double drawWidth, double drawHeight) async {
     final strokes = _memoStrokesByPage[pageIndex];
     if (strokes == null || strokes.isEmpty || drawWidth <= 0 || drawHeight <= 0) return;
 
-    const double hitRadius = 22.0;
-    bool removedAny = false;
-    final remaining = <MemoStroke>[];
+    final double hitRadius = math.max<double>(14.0, _penWidth * 3.0);
+    bool modifiedAny = false;
+    final nextStrokes = <MemoStroke>[];
 
     for (final s in strokes) {
-      bool hit = false;
+      if (s.dxList.isEmpty) continue;
+      // 1단계: 원본 점들을 픽셀 좌표로 변환 후 3.5px 간격으로 조밀하게 보간
+      final densePts = <Offset>[];
       for (int i = 0; i < s.dxList.length; i++) {
-        final px = s.dxList[i] * drawWidth;
-        final py = s.dyList[i] * drawHeight;
-        if ((Offset(px, py) - localPos).distance <= hitRadius) {
-          hit = true;
+        final p0 = Offset(s.dxList[i] * drawWidth, s.dyList[i] * drawHeight);
+        densePts.add(p0);
+        if (i + 1 < s.dxList.length) {
+          final p1 = Offset(s.dxList[i + 1] * drawWidth, s.dyList[i + 1] * drawHeight);
+          final dist = (p1 - p0).distance;
+          if (dist > 3.5) {
+            final steps = (dist / 3.5).ceil();
+            for (int k = 1; k < steps; k++) {
+              final t = k / steps;
+              densePts.add(Offset(p0.dx + (p1.dx - p0.dx) * t, p0.dy + (p1.dy - p0.dy) * t));
+            }
+          }
+        }
+      }
+
+      // 2단계: 지우개 반경에 닿은 점이 하나라도 있는지 확인
+      bool anyHit = false;
+      for (final pt in densePts) {
+        if ((pt - localPos).distance <= hitRadius) {
+          anyHit = true;
           break;
         }
       }
-      if (hit) {
-        removedAny = true;
-      } else {
-        remaining.add(s);
+
+      if (!anyHit) {
+        nextStrokes.add(s);
+        continue;
       }
+
+      modifiedAny = true;
+      // 3단계: 지우개 원 바깥에 남아 있는 연속 구간(segment)들만 별도 선으로 분할 보존
+      List<Offset> currentRun = [];
+      void flushRun() {
+        if (currentRun.isEmpty) return;
+        if (currentRun.length == 1) {
+          currentRun.add(currentRun.first + const Offset(0.2, 0.2));
+        }
+        // 저장 용량 최적화를 위해 너무 촘촘한 점은 1.8px 간격으로 경량화
+        final compact = <Offset>[currentRun.first];
+        for (int i = 1; i < currentRun.length - 1; i++) {
+          if ((currentRun[i] - compact.last).distance >= 1.8) {
+            compact.add(currentRun[i]);
+          }
+        }
+        compact.add(currentRun.last);
+        nextStrokes.add(
+          MemoStroke(
+            dxList: compact.map((p) => (p.dx / drawWidth).clamp(0.0, 1.0).toDouble()).toList(),
+            dyList: compact.map((p) => (p.dy / drawHeight).clamp(0.0, 1.0).toDouble()).toList(),
+            colorValue: s.colorValue,
+            strokeWidth: s.strokeWidth,
+          ),
+        );
+        currentRun = [];
+      }
+
+      for (final pt in densePts) {
+        if ((pt - localPos).distance <= hitRadius) {
+          flushRun();
+        } else {
+          currentRun.add(pt);
+        }
+      }
+      flushRun();
     }
 
-    if (removedAny) {
+    if (modifiedAny) {
       setState(() {
-        _memoStrokesByPage[pageIndex] = remaining;
+        _memoStrokesByPage[pageIndex] = nextStrokes;
       });
-      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, remaining);
+      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, nextStrokes);
     }
   }
 
@@ -785,7 +840,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               },
               child: const Text('메모/필기 모두 지우기', style: TextStyle(color: Colors.redAccent)),
             ),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
           ElevatedButton(
             onPressed: () async {
               final text = ctrl.text.trim();
@@ -799,7 +854,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               });
               if (ctx.mounted) Navigator.pop(ctx);
             },
-            child: const Text('저장'),
+            child: Text(_tr('저장', 'Save', '保存', '保存')),
           ),
         ],
       ),
@@ -999,32 +1054,39 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   Future<void> _showLanguageAndTranslateDialog({bool forceRetranslate = false}) async {
     if (BatchTranslationService.isBookTranslating(_bookKey)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('현재 백그라운드에서 번역이 진행 중입니다.')),
+        SnackBar(
+          content: Text(
+            _tr(
+              '현재 백그라운드에서 사전 번역이 진행 중입니다.',
+              'Pre-translation is currently running in the background.',
+              '后台正在进行预先翻译。',
+              '現在バックグラウンドで事前翻訳が進行中です。',
+            ),
+          ),
+        ),
       );
       return;
     }
 
     final targetLang = await StorageService.getAppLanguage();
-    final targetLangLabels = {
-      'ko': '한국어 (Korean)',
-      'en': '영어 (English)',
-      'zh': '중국어 (Chinese)',
-      'ja': '일본어 (Japanese)',
-    };
-    final targetLabel = targetLangLabels[targetLang] ?? '한국어 (Korean)';
 
     if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('Google ML Kit 공식 번역'),
+          title: Text(_tr('사전 번역', 'Pre-Translation', '预先翻译', '事前翻訳')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '원본 언어를 선택하면 현재 앱 설정 언어($targetLabel)로 번역합니다:',
+                _tr(
+                  '원본 언어를 선택하면 현재 앱 설정 언어로 번역합니다:',
+                  'Select source language to translate into App Language:',
+                  '选择原文语言后将翻译为当前应用设置语言：',
+                  '原文言語を選択すると現在のアプリ設定言語に翻訳します：',
+                ),
                 style: const TextStyle(fontSize: 13),
               ),
               const SizedBox(height: 12),
@@ -1033,7 +1095,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 runSpacing: 6,
                 children: [
                   ChoiceChip(
-                    label: const Text('일본어 (Japanese)'),
+                    label: Text(_tr('일본어 (Japanese)', 'Japanese', '日语 (Japanese)', '日本語 (Japanese)')),
                     selected: _sourceLangCode == 'ja',
                     onSelected: (_) {
                       setModalState(() {
@@ -1043,7 +1105,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     },
                   ),
                   ChoiceChip(
-                    label: const Text('중국어 (Chinese)'),
+                    label: Text(_tr('중국어 (Chinese)', 'Chinese', '中文 (Chinese)', '中国語 (Chinese)')),
                     selected: _sourceLangCode == 'zh',
                     onSelected: (_) {
                       setModalState(() {
@@ -1053,7 +1115,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     },
                   ),
                   ChoiceChip(
-                    label: const Text('한국어 (Korean)'),
+                    label: Text(_tr('한국어 (Korean)', 'Korean', '韩语 (Korean)', '韓国語 (Korean)')),
                     selected: _sourceLangCode == 'ko',
                     onSelected: (_) {
                       setModalState(() {
@@ -1067,10 +1129,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
+            ),
             ElevatedButton.icon(
               icon: const Icon(Icons.translate, size: 18),
-              label: const Text('번역 시작'),
+              label: Text(_tr('번역 시작', 'Start Translation', '开始翻译', '翻訳開始')),
               onPressed: () => Navigator.pop(ctx, true),
             ),
           ],
@@ -1086,7 +1151,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
-  /// 1 & 4. Google ML Kit 공식 번역기로 설정 언어(targetLang)로 백그라운드 번역
+  /// 1 & 4. 사전 번역(설정 언어 targetLang) 백그라운드 실행
   void _startBackgroundBatchTranslation({
     bool forceRetranslate = false,
     required String targetLang,
@@ -1097,9 +1162,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final TextRecognitionScript scr = _selectedScript;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Google ML Kit 백그라운드 번역이 시작되었습니다. (뒤로가기를 눌러도 유지됩니다)'),
-        duration: Duration(seconds: 2),
+      SnackBar(
+        content: Text(
+          _tr(
+            '백그라운드 사전 번역이 시작되었습니다. (뒤로가기를 눌러도 유지됩니다)',
+            'Background pre-translation started. (Continues even if you go back)',
+            '后台预先翻译已开始。（返回书架后仍会继续）',
+            'バックグラウンド事前翻訳を開始しました。(戻っても継続します)',
+          ),
+        ),
+        duration: const Duration(seconds: 2),
       ),
     );
 
@@ -1124,7 +1196,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       await _reloadBubbleCachesFromStorage();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('번역이 완료되었습니다.')),
+          SnackBar(
+            content: Text(
+              _tr('번역이 완료되었습니다.', 'Translation completed.', '翻译已完成。', '翻訳が完了しました。'),
+            ),
+          ),
         );
       }
     });
@@ -1370,10 +1446,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              title: const Text('북마크 목록', style: TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(_tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.bold)),
               trailing: ElevatedButton.icon(
                 icon: const Icon(Icons.bookmark_add, size: 18),
-                label: const Text('현재 페이지 북마크 추가'),
+                label: Text(_tr('현재 페이지 북마크 추가', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),
                 onPressed: () async {
                   final now = DateTime.now();
                   await StorageService.addBookmark(
@@ -1392,9 +1468,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ),
             const Divider(height: 1),
             if (bookmarks.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24.0),
-                child: Text('저장된 북마크가 없습니다.'),
+              Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Text(_tr('저장된 북마크가 없습니다.', 'No saved bookmarks.', '暂无保存的书签。', '保存されたブックマークはありません。')),
               )
             else
               Flexible(
@@ -1809,7 +1885,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          '번역 ${(task.progress * 100).toStringAsFixed(0)}% (${task.current}/${task.total})',
+                          '${_tr("사전 번역", "Trans", "翻译", "翻訳")} ${(task.progress * 100).toStringAsFixed(0)}% (${task.current}/${task.total})',
                           style: const TextStyle(color: Colors.white, fontSize: 11),
                         ),
                       ],
@@ -1912,17 +1988,17 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               color: _isEraserMode ? Colors.amber : Colors.white,
                               size: 18,
                             ),
-                            tooltip: 'S펜 지우개',
+                            tooltip: _tr('부분 지우개 (그림판 방식)', 'Partial Eraser', '局部橡皮擦', '部分消しゴム'),
                             onPressed: () => setState(() => _isEraserMode = !_isEraserMode),
                           ),
                           IconButton(
                             icon: const Icon(Icons.note_alt_outlined, color: Colors.white, size: 18),
-                            tooltip: '텍스트 메모 입력',
+                            tooltip: _tr('텍스트 메모 입력', 'Text Memo', '输入文字笔记', 'テキストメモ入力'),
                             onPressed: _showMemoTextDialog,
                           ),
                           IconButton(
                             icon: const Icon(Icons.delete_sweep_outlined, color: Colors.redAccent, size: 18),
-                            tooltip: '현재 페이지 필기 전체 지우기',
+                            tooltip: _tr('현재 페이지 필기 전체 지우기', 'Clear Page Strokes', '清空当前页手写', ' 현재ページの手書きを全消去'),
                             onPressed: () async {
                               setState(() => _memoStrokesByPage.remove(_currentPage));
                               await StorageService.savePageMemoStrokes(_bookKey, _currentPage, []);
@@ -1983,7 +2059,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                           color: _isMemoMode ? Colors.amber : Colors.white,
                           size: 20,
                         ),
-                        tooltip: 'S펜 메모',
+                        tooltip: _tr('S펜 메모', 'S Pen Memo', 'S Pen 笔记', 'Sペンメモ'),
                         onPressed: () {
                           setState(() {
                             _isMemoMode = !_isMemoMode;
@@ -2007,7 +2083,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       ),
                       IconButton(
                         icon: _buildDualDirectionIcon(),
-                        tooltip: _isMangaRtlMode ? '(오른쪽 -> 왼쪽)' : '방향(왼쪽 -> 오른쪽)',
+                        tooltip: _isMangaRtlMode
+                            ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
+                            : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
                         onPressed: () async {
                           final nextRtl = !_isMangaRtlMode;
                           await StorageService.setReadingDirectionRtl(nextRtl);
@@ -2015,7 +2093,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text(nextRtl ? '(오른쪽 -> 왼쪽)' : '방향(왼쪽 -> 오른쪽)'),
+                                content: Text(
+                                  nextRtl
+                                      ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
+                                      : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
+                                ),
                                 duration: const Duration(milliseconds: 900),
                               ),
                             );
@@ -2030,7 +2112,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             color: _showTranslatedBubbles ? Colors.amber : Colors.white,
                             size: 20,
                           ),
-                          tooltip: '번역',
+                          tooltip: _tr('사전 번역', 'Pre-Translate', '预先翻译', '事前翻訳'),
                           onPressed: () {
                             if (_bubblesByPage.isEmpty) {
                               _showLanguageAndTranslateDialog(forceRetranslate: false);
@@ -2043,17 +2125,17 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       if (_bubblesByPage.isNotEmpty)
                         IconButton(
                           icon: const Icon(Icons.refresh, color: Colors.white70, size: 19),
-                          tooltip: '다시 번역',
+                          tooltip: _tr('다시 번역', 'Retranslate', '重新翻译', '再翻訳'),
                           onPressed: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
                         ),
                       IconButton(
                         icon: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
-                        tooltip: '북마크',
+                        tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
                         onPressed: _showBookmarkSheet,
                       ),
                       IconButton(
                         icon: const Icon(Icons.tune, color: Colors.white, size: 20),
-                        tooltip: '뷰어 표시 설정',
+                        tooltip: _tr('뷰어 표시 설정', 'Viewer Settings', '阅读器显示设置', 'ビューア表示設定'),
                         onPressed: _showViewerSettingsSheet,
                       ),
                     ],

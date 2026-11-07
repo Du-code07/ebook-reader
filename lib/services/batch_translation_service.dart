@@ -269,7 +269,8 @@ class BatchTranslationService {
 
       if (file.name.endsWith('.xhtml') || file.name.endsWith('.html') || file.name.endsWith('.htm')) {
         processed++;
-        final msg = '사전 번역 중 ($processed / $total)...';
+        final lang = StorageService.appLangNotifier.value;
+        final msg = lang == 'en' ? 'Pre-translating ($processed / $total)...' : (lang == 'zh' ? '正在预先翻译 ($processed / $total)...' : (lang == 'ja' ? '事前翻訳中 ($processed / $total)...' : '사전 번역 중 ($processed / $total)...'));
         _updateTaskProgress(bookKey, processed, total, msg);
         onProgress?.call(processed, total, msg);
         final content = utf8.decode(file.content as List<int>, allowMalformed: true);
@@ -474,7 +475,8 @@ class BatchTranslationService {
 
     try {
       for (int i = 0; i < imageFiles.length; i++) {
-        final msg = '사전 번역 중 (${i + 1} / ${imageFiles.length})...';
+        final lang = StorageService.appLangNotifier.value;
+        final msg = lang == 'en' ? 'Pre-translating (${i + 1} / ${imageFiles.length})...' : (lang == 'zh' ? '正在预先翻译 (${i + 1} / ${imageFiles.length})...' : (lang == 'ja' ? '事前翻訳中 (${i + 1} / ${imageFiles.length})...' : '사전 번역 중 (${i + 1} / ${imageFiles.length})...'));
         _updateTaskProgress(bookKey, i + 1, imageFiles.length, msg);
         onProgress?.call(i + 1, imageFiles.length, msg);
         if (!forceRetranslate) {
