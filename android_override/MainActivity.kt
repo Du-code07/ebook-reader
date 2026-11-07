@@ -162,12 +162,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        hideSystemStatusBar()
-        mainHandler.postDelayed({ hideSystemStatusBar() }, 120L)
-    }
-
     override fun onPostResume() {
         super.onPostResume()
         hideSystemStatusBar()
@@ -1355,6 +1349,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     override fun onResume() {
         super.onResume()
+        hideSystemStatusBar()
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 120L)
         try {
             accelerometer?.let {
                 sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
