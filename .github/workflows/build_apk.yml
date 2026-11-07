@@ -24,7 +24,7 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: 4. Generate Android Platform Files & Patch SDK Versions (compileSdk 36 / minSdk 24)
+      - name: 4. Generate Android Platform Files & Configure FReader Store Release (com.freader.my_ebook_reader)
         run: |
           if [ ! -f "lib/screens/pdf_and_image_viewer.dart" ]; then
             FOUND_PUBSPEC=$(find . -maxdepth 3 -name "pubspec.yaml" | grep -v "^\./pubspec\.yaml$" | head -n 1)
@@ -40,39 +40,31 @@ jobs:
             exit 1
           fi
 
-          # Dart 컴파일 전 자동 오타/타입 및 진행도 UI 숨김(Stack Positioned) 완벽 보정
-          if [ -f "lib/services/storage_service.dart" ]; then
-            sed -i 's/jsonEncode(bubbles.map((e) => e.toJson())).toList()/jsonEncode(bubbles.map((e) => e.toJson()).toList())/g' lib/services/storage_service.dart
-          fi
-          if [ -f "lib/screens/pdf_and_image_viewer.dart" ]; then
-            sed -i "s/if (_progressBarPos == 'hidden') return const SizedBox.shrink();/if (_progressBarPos == 'hidden') return const Positioned(left: 0, bottom: 0, width: 0, height: 0, child: SizedBox.shrink());/g" lib/screens/pdf_and_image_viewer.dart
-            sed -i 's/left: boxLeft,/left: boxLeft.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
-            sed -i 's/math.max<int>(1, b.translatedText.length \* 1.8)/math.max<double>(1.0, b.translatedText.length * 1.8)/g' lib/screens/pdf_and_image_viewer.dart
-            sed -i 's/top: boxTop,/top: boxTop.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
-            sed -i 's/width: boxW,/width: boxW.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
-            sed -i 's/height: boxH,/height: boxH.toDouble(),/g' lib/screens/pdf_and_image_viewer.dart
-            sed -i 's/bottom: math.max(bottomInset + 4, 8),/bottom: math.max<double>(bottomInset + 4.0, 8.0),/g' lib/screens/pdf_and_image_viewer.dart
-            sed -i 's/bottom: math.max(bottomInset + 26, 28),/bottom: math.max<double>(bottomInset + 26.0, 28.0),/g' lib/screens/pdf_and_image_viewer.dart
-          fi
-          if [ -f "lib/screens/reader_screen.dart" ]; then
-            sed -i "s/if (_progressBarPos == 'hidden') return const SizedBox.shrink();/if (_progressBarPos == 'hidden') return const Positioned(left: 0, bottom: 0, width: 0, height: 0, child: SizedBox.shrink());/g" lib/screens/reader_screen.dart
-          fi
-
           rm -f sample_japanese_test_book.epub
           mkdir -p /tmp/v7_backup
           cp -rf lib /tmp/v7_backup/
           cp -f pubspec.yaml /tmp/v7_backup/
           cp -rf android_override /tmp/v7_backup/
 
-          flutter create . --project-name my_ebook_reader --org com.example
+          # 구글 플레이 스토어 정식 등록이 가능한 고유 패키지명(com.freader.my_ebook_reader)으로 생성
+          flutter create . --project-name my_ebook_reader --org com.freader
 
           rm -rf lib test
           cp -rf /tmp/v7_backup/lib .
           cp -f /tmp/v7_backup/pubspec.yaml .
 
-          mkdir -p android/app/src/main/kotlin/com/example/my_ebook_reader
-          cp -f /tmp/v7_backup/android_override/MainActivity.kt android/app/src/main/kotlin/com/example/my_ebook_reader/MainActivity.kt
-          rm -f android/app/src/main/java/com/example/my_ebook_reader/MainActivity.java
+          mkdir -p android/app/src/main/kotlin/com/freader/my_ebook_reader
+          cp -f /tmp/v7_backup/android_override/MainActivity.kt android/app/src/main/kotlin/com/freader/my_ebook_reader/MainActivity.kt
+          sed -i 's/^package com\.example\.my_ebook_reader/package com.freader.my_ebook_reader/' android/app/src/main/kotlin/com/freader/my_ebook_reader/MainActivity.kt
+          rm -rf android/app/src/main/kotlin/com/example
+          rm -rf android/app/src/main/java/com/example
+
+          # 정식 릴리스 서명 키스토어(CN=FReader) 배치
+          if [ -f "/tmp/v7_backup/android_override/freader_release.keystore" ]; then
+            cp -f /tmp/v7_backup/android_override/freader_release.keystore android/app/freader_release.keystore
+          else
+            echo "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" | base64 -d > android/app/freader_release.keystore
+          fi
 
           # 삼성 갤럭시 S펜 에어 액션(Air Actions) 공식 리모트 액션 XML 및 스트링 리소스 생성
           mkdir -p android/app/src/main/res/xml
@@ -102,8 +94,27 @@ jobs:
             sed -i 's/minSdkVersion .*/minSdkVersion 24/g' android/app/build.gradle
             sed -i 's/minSdk = .*/minSdk = 24/g' android/app/build.gradle
             sed -i 's/minSdk .*/minSdk 24/g' android/app/build.gradle
+            sed -i 's/signingConfig = signingConfigs.debug/signingConfig = signingConfigs.release/g' android/app/build.gradle
+            sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.release/g' android/app/build.gradle
             echo "" >> android/app/build.gradle
-            echo "android { buildTypes { release { minifyEnabled false; shrinkResources false; proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro' } } }" >> android/app/build.gradle
+            echo "android {" >> android/app/build.gradle
+            echo "    signingConfigs {" >> android/app/build.gradle
+            echo "        release {" >> android/app/build.gradle
+            echo "            storeFile file('freader_release.keystore')" >> android/app/build.gradle
+            echo "            storePassword 'freader2026!'" >> android/app/build.gradle
+            echo "            keyAlias 'freader_key'" >> android/app/build.gradle
+            echo "            keyPassword 'freader2026!'" >> android/app/build.gradle
+            echo "        }" >> android/app/build.gradle
+            echo "    }" >> android/app/build.gradle
+            echo "    buildTypes {" >> android/app/build.gradle
+            echo "        release {" >> android/app/build.gradle
+            echo "            signingConfig signingConfigs.release" >> android/app/build.gradle
+            echo "            minifyEnabled false" >> android/app/build.gradle
+            echo "            shrinkResources false" >> android/app/build.gradle
+            echo "            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'" >> android/app/build.gradle
+            echo "        }" >> android/app/build.gradle
+            echo "    }" >> android/app/build.gradle
+            echo "}" >> android/app/build.gradle
             echo "dependencies {" >> android/app/build.gradle
             echo "    implementation 'com.google.mlkit:text-recognition-japanese:16.0.1'" >> android/app/build.gradle
             echo "    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'" >> android/app/build.gradle
@@ -116,8 +127,26 @@ jobs:
           if [ -f android/app/build.gradle.kts ]; then
             sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts
             sed -i 's/minSdk = .*/minSdk = 24/g' android/app/build.gradle.kts
+            sed -i 's/signingConfig = signingConfigs.getByName("debug")/signingConfig = signingConfigs.getByName("release")/g' android/app/build.gradle.kts
             echo "" >> android/app/build.gradle.kts
-            echo 'android { buildTypes { getByName("release") { isMinifyEnabled = false; isShrinkResources = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } } }' >> android/app/build.gradle.kts
+            echo 'android {' >> android/app/build.gradle.kts
+            echo '    signingConfigs {' >> android/app/build.gradle.kts
+            echo '        create("release") {' >> android/app/build.gradle.kts
+            echo '            storeFile = file("freader_release.keystore")' >> android/app/build.gradle.kts
+            echo '            storePassword = "freader2026!"' >> android/app/build.gradle.kts
+            echo '            keyAlias = "freader_key"' >> android/app/build.gradle.kts
+            echo '            keyPassword = "freader2026!"' >> android/app/build.gradle.kts
+            echo '        }' >> android/app/build.gradle.kts
+            echo '    }' >> android/app/build.gradle.kts
+            echo '    buildTypes {' >> android/app/build.gradle.kts
+            echo '        getByName("release") {' >> android/app/build.gradle.kts
+            echo '            signingConfig = signingConfigs.getByName("release")' >> android/app/build.gradle.kts
+            echo '            isMinifyEnabled = false' >> android/app/build.gradle.kts
+            echo '            isShrinkResources = false' >> android/app/build.gradle.kts
+            echo '            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")' >> android/app/build.gradle.kts
+            echo '        }' >> android/app/build.gradle.kts
+            echo '    }' >> android/app/build.gradle.kts
+            echo '}' >> android/app/build.gradle.kts
             echo "dependencies {" >> android/app/build.gradle.kts
             echo '    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")' >> android/app/build.gradle.kts
             echo '    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")' >> android/app/build.gradle.kts
@@ -163,13 +192,12 @@ jobs:
             if ! grep -q "com.samsung.android.support.REMOTE_ACTION" "$MANIFEST"; then
               sed -i 's/<\/activity>/<intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
             fi
-            if ! grep -q "com.example.my_ebook_reader.scanprovider" "$MANIFEST"; then
-              sed -i 's/<\/application>/<provider android:name=".ScanFileProvider" android:authorities="com.example.my_ebook_reader.scanprovider" android:exported="false" android:grantUriPermissions="true"\/><\/application>/' "$MANIFEST"
+            if ! grep -q "scanprovider" "$MANIFEST"; then
+              sed -i 's/<\/application>/<provider android:name=".ScanFileProvider" android:authorities="${applicationId}.scanprovider" android:exported="false" android:grantUriPermissions="true"\/><\/application>/' "$MANIFEST"
             fi
             sed -i 's/android:label="[^"]*"/android:label="FReader" android:resizeableActivity="true"/' "$MANIFEST"
           fi
 
-          # 태블릿(OneUI / Android 12L~16)에서도 상태표시줄이 완전히 숨겨지도록 Fullscreen 및 Cutout 스타일 적용
           for STYLE_FILE in android/app/src/main/res/values/styles.xml android/app/src/main/res/values-night/styles.xml; do
             if [ -f "$STYLE_FILE" ]; then
               if ! grep -q "android:windowFullscreen" "$STYLE_FILE"; then
@@ -178,20 +206,21 @@ jobs:
             fi
           done
 
-      - name: 5. Install Fixed Signing Key & Build Updatable Release APK
+      - name: 5. Build Release APK (Direct Install/Update) & AAB (Google Play Store)
         run: |
-          mkdir -p ~/.android
-          if [ -f "android_override/freader_fixed.keystore" ]; then
-            cp -f android_override/freader_fixed.keystore ~/.android/debug.keystore
-          else
-            echo "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" | base64 -d > ~/.android/debug.keystore
-          fi
           BUILD_NUM=$((100 + ${{ github.run_number }}))
           flutter pub get
           flutter build apk --release --no-tree-shake-icons --build-number=$BUILD_NUM
+          flutter build appbundle --release --no-tree-shake-icons --build-number=$BUILD_NUM
 
-      - name: 6. Upload APK Artifact
+      - name: 6. Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: my-ebook-reader-release-apk
+          name: FReader-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: 7. Upload Google Play Store AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FReader-google-play-aab
+          path: build/app/outputs/bundle/release/app-release.aab
