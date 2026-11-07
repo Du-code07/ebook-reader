@@ -225,7 +225,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   double _penWidth = 2.0;
 
   String _footerInfoMode = 'both';
-  String _progressBarPos = 'right';
+  String _progressBarPos = 'bottom';
 
   TextRecognitionScript _selectedScript = TextRecognitionScript.japanese;
   String _sourceLangCode = 'ja';
@@ -298,32 +298,17 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Future<void> _toggleScreenOrientation() async {
-    final Size beforeSize = MediaQuery.of(context).size;
-    final bool isPhysicallyLandscape = beforeSize.width > beforeSize.height;
-    final bool isEffectivelyLandscape = (_manualQuarterTurns % 2 == 1)
-        ? !isPhysicallyLandscape
-        : isPhysicallyLandscape;
-    final bool nextLandscape = !isEffectivelyLandscape;
+    final Size currentSize = MediaQuery.of(context).size;
+    final bool currentlyLandscape = currentSize.width > currentSize.height;
+    final bool nextLandscape = !currentlyLandscape;
     _forcedLandscape = nextLandscape;
+    StorageService.desiredLandscapeNotifier.value = nextLandscape;
 
     try {
       await _pdfChannel.invokeMethod('setScreenOrientation', {
         'mode': nextLandscape ? 'landscape' : 'portrait',
       });
     } catch (_) {}
-
-    await Future.delayed(const Duration(milliseconds: 220));
-    if (!mounted) return;
-    final Size afterSize = MediaQuery.of(context).size;
-    final bool nowPhysicallyLandscape = afterSize.width > afterSize.height;
-    setState(() {
-      if (nowPhysicallyLandscape == nextLandscape) {
-        _manualQuarterTurns = 0;
-      } else {
-        // 태블릿 시스템 설정에서 화면 회전이 강제 고정된 경우 뷰 자체를 90도 회전!
-        _manualQuarterTurns = (_manualQuarterTurns == 0) ? 1 : 0;
-      }
-    });
   }
 
   Future<Size> _getImageDimension(File file) async {
@@ -385,7 +370,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     for (final e in dir.listSync()) {
       if (e is File) {
         final lower = e.path.toLowerCase();
-        if (lower.endsWith('_translated.epub') || lower.endsWith('.converted.epub')) continue;
+        if (lower.endsWith('_translated.epub') || lower.endsWith('.converted.epub') || lower.endsWith('_converted.epub')) continue;
         final ext = lower.split('.').last;
         if (supportedExts.contains(ext)) {
           final grp = await StorageService.getBookGroup(e.path);
@@ -511,7 +496,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   Future<void> _initMedia() async {
     try {
       _enableTwoPageInLandscape = await StorageService.getTwoPageLandscape();
-      _isMangaRtlMode = await StorageService.getReadingDirectionRtl();
+      _isMangaRtlMode = await StorageService.getBookReadingDirectionRtl(_bookKey);
       _useShakeLock = await StorageService.getUseShakeLock();
       _useVolumeComboLock = await StorageService.getUseVolumeComboLock();
       _useVolumeTurn = await StorageService.getUseVolumeTurn();
@@ -650,9 +635,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   bool _isSpreadActive(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final bool isLandscapeNow = (_manualQuarterTurns % 2 == 1)
-        ? (size.height > size.width)
-        : (size.width > size.height);
+    final bool isLandscapeNow = size.width > size.height;
     return _enableTwoPageInLandscape && isLandscapeNow && _totalPages > 1;
   }
 
@@ -1546,7 +1529,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
               ),
             ),
-            if (_showTranslatedBubbles && bubbles.isNotEmpty)
+            if (false && _showTranslatedBubbles && bubbles.isNotEmpty)
               ...bubbles.map((b) {
                 final double boxW = (b.widthRatio * drawWidth).clamp(12.0, drawWidth).toDouble();
                 final double boxH = (b.heightRatio * drawHeight).clamp(12.0, drawHeight).toDouble();
@@ -1887,9 +1870,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       );
     }
 
+    final double topInset = MediaQuery.of(context).padding.top;
+    final double safeTopOffset = topInset + (_showControls && _isMemoMode ? 122.0 : (_showControls || _isMemoMode ? 66.0 : 16.0));
     return Positioned(
       key: ValueKey('progress_bar_$_progressBarPos'),
-      top: 76.0,
+      top: safeTopOffset,
       bottom: _useQuickNavTurn && _progressBarPos == 'right' ? (baseBottom + 48.0) : (baseBottom + 8.0),
       left: _progressBarPos == 'left' ? 8.0 : null,
       right: _progressBarPos == 'right' ? 8.0 : null,
@@ -1987,8 +1972,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   void dispose() {
-    _pdfChannel.invokeMethod('setScreenOrientation', {'mode': 'unspecified'});
-    SystemChrome.setPreferredOrientations([]);
+    // 서재로 완전히 복귀할 때 방향이 초기화됨
     _zoomController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     BatchTranslationService.translationCompletedEvent.removeListener(_onBackgroundTranslationFinished);
@@ -2034,9 +2018,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       },
       child: Scaffold(
       backgroundColor: Colors.black,
-      body: RotatedBox(
-        quarterTurns: _manualQuarterTurns,
-        child: Stack(
+      body: Stack(
         fit: StackFit.expand,
         children: [
           Positioned.fill(
@@ -2180,44 +2162,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
             ),
 
-          // 백그라운드 번역 진행 중일 때 뷰어 내 미니 진행 표시줄 (항상 Positioned가 Stack의 직계 자식이 되도록 배치!)
-          Positioned(
-            left: 16,
-            bottom: math.max<double>(bottomInset + 24.0, 28.0) + (_showControls && _progressBarPos == 'bottom' ? 46.0 : 0.0),
-            child: ValueListenableBuilder<Map<String, TranslationTaskInfo>>(
-              valueListenable: BatchTranslationService.activeTasks,
-              builder: (context, tasks, _) {
-                final task = tasks[_bookKey];
-                if (task == null) return const SizedBox.shrink();
-                return Material(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(20),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${_tr("번역", "Trans", "翻译", "翻訳")} ${(task.progress * 100).toStringAsFixed(0)}% (${task.current}/${task.total})',
-                          style: const TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-
           if (_isMemoMode && !_isTouchLocked)
             Positioned(
-              top: (_showControls ? 54.0 : 8.0) + MediaQuery.of(context).padding.top,
+              top: (_showControls ? 58.0 : 10.0) + MediaQuery.of(context).padding.top,
               left: 12,
               right: 12,
               child: Center(
@@ -2232,16 +2179,22 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          IconButton(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            constraints: const BoxConstraints(),
-                            icon: Icon(
-                              Icons.touch_app,
-                              color: _allowFingerDrawing ? Colors.white : Colors.amber,
-                              size: 20,
+                          Container(
+                            decoration: BoxDecoration(
+                              color: _allowFingerDrawing ? Colors.amber.withOpacity(0.22) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(14),
                             ),
-                            tooltip: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
-                            onPressed: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
+                            child: IconButton(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                              constraints: const BoxConstraints(),
+                              icon: Icon(
+                                Icons.touch_app,
+                                color: _allowFingerDrawing ? Colors.amber : Colors.white,
+                                size: 20,
+                              ),
+                              tooltip: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
+                              onPressed: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
+                            ),
                           ),
                           const SizedBox(width: 6),
                           ...[
@@ -2418,7 +2371,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             padding: btnPadding,
                             constraints: btnConstraints,
                             icon: const Icon(Icons.screen_rotation, color: Colors.white, size: 19),
-                            tooltip: _tr('화면 가로/세로 전환', 'Rotate Screen', '横/竖屏切换', '画面縦横切替'),
+                            tooltip: _tr('화면 회전', 'Rotate Screen', '旋转屏幕', '画面回転'),
                             onPressed: _toggleScreenOrientation,
                           ),
                           IconButton(
@@ -2465,7 +2418,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                                 : _tr('읽기 방향 전환 (좌 → 우)', 'Reading Direction (L → R)', '切换阅读方向 (左 → 右)', '読書方向切替 (左 → 右)'),
                             onPressed: () async {
                               final nextRtl = !_isMangaRtlMode;
-                              await StorageService.setReadingDirectionRtl(nextRtl);
+                              await StorageService.setBookReadingDirectionRtl(_bookKey, nextRtl);
                               setState(() => _isMangaRtlMode = nextRtl);
                               if (mounted) {
                                 ScaffoldMessenger.of(context).clearSnackBars();
@@ -2485,44 +2438,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                                 );
                               }
                             },
-                          ),
-                          GestureDetector(
-                            onLongPress: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
-                            child: IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: Icon(
-                                _showTranslatedBubbles ? Icons.chat_bubble : Icons.translate,
-                                color: _showTranslatedBubbles ? Colors.amber : Colors.white,
-                                size: 20,
-                              ),
-                              tooltip: _tr('번역', 'Translate', '翻译', '翻訳'),
-                              onPressed: () {
-                                if (_bubblesByPage.isEmpty) {
-                                  _showLanguageAndTranslateDialog(forceRetranslate: false);
-                                } else {
-                                  setState(() => _showTranslatedBubbles = !_showTranslatedBubbles);
-                                }
-                              },
-                            ),
-                          ),
-                          if (_bubblesByPage.isNotEmpty)
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.refresh, color: Colors.white70, size: 19),
-                              tooltip: _tr('다시 번역', 'Retranslate', '重新翻译', '再翻訳'),
-                              onPressed: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
-                            ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: btnPadding,
-                            constraints: btnConstraints,
-                            icon: const Icon(Icons.ios_share, color: Colors.white, size: 19),
-                            tooltip: _tr('파일 내보내기', 'Export File', '导出文件', 'ファイル出力'),
-                            onPressed: _exportDocumentWithAnnotations,
                           ),
                           IconButton(
                             visualDensity: VisualDensity.compact,
@@ -2589,7 +2504,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           if (_useQuickNavTurn && !_isTouchLocked && _totalPages > 1)
             _buildQuickNavButtons(bottomInset),
         ],
-      ),
       ),
       ),
     );

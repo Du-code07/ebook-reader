@@ -31,15 +31,43 @@ class MyEbookApp extends StatefulWidget {
   State<MyEbookApp> createState() => _MyEbookAppState();
 }
 
-class _MyEbookAppState extends State<MyEbookApp> {
+class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateMixin {
   late bool _isDarkMode;
   late String _appLang;
+  late final AnimationController _rotationAnimController;
+  late final Animation<double> _rotationFadeAnim;
+  late final Animation<double> _rotationScaleAnim;
 
   @override
   void initState() {
     super.initState();
     _isDarkMode = widget.initialDark;
     _appLang = widget.initialLang;
+    _rotationAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 240),
+      value: 1.0,
+    );
+    _rotationFadeAnim = Tween<double>(begin: 0.72, end: 1.0).animate(
+      CurvedAnimation(parent: _rotationAnimController, curve: Curves.easeOutCubic),
+    );
+    _rotationScaleAnim = Tween<double>(begin: 0.96, end: 1.0).animate(
+      CurvedAnimation(parent: _rotationAnimController, curve: Curves.easeOutCubic),
+    );
+    StorageService.desiredLandscapeNotifier.addListener(_onDesiredOrientationChanged);
+  }
+
+  void _onDesiredOrientationChanged() {
+    if (mounted) {
+      _rotationAnimController.forward(from: 0.0);
+    }
+  }
+
+  @override
+  void dispose() {
+    StorageService.desiredLandscapeNotifier.removeListener(_onDesiredOrientationChanged);
+    _rotationAnimController.dispose();
+    super.dispose();
   }
 
   void _toggleDarkMode() async {
@@ -69,6 +97,58 @@ class _MyEbookAppState extends State<MyEbookApp> {
         brightness: Brightness.dark,
         colorSchemeSeed: Colors.indigo,
       ),
+      // 8. 태블릿 화면 회전 시 Navigator와 Overlay(툴팁/아이콘 이름, 뷰어 표시 설정 바텀시트, 다이얼로그)까지
+      // 모두 동일한 방향으로 부드럽게 회전되도록 MaterialApp.builder 최상단에서 통합 처리!
+      builder: (context, child) {
+        return ValueListenableBuilder<bool?>(
+          valueListenable: StorageService.desiredLandscapeNotifier,
+          builder: (context, desiredLandscape, _) {
+            final mq = MediaQuery.of(context);
+            final bool physicalIsLandscape = mq.size.width > mq.size.height;
+            final bool needsSoftwareRotation =
+                desiredLandscape != null && physicalIsLandscape != desiredLandscape;
+            final int quarterTurns = needsSoftwareRotation ? 1 : 0;
+
+            final MediaQueryData effectiveMq = needsSoftwareRotation
+                ? mq.copyWith(
+                    size: Size(mq.size.height, mq.size.width),
+                    padding: EdgeInsets.only(
+                      top: mq.padding.left,
+                      right: mq.padding.top,
+                      bottom: mq.padding.right,
+                      left: mq.padding.bottom,
+                    ),
+                    viewPadding: EdgeInsets.only(
+                      top: mq.viewPadding.left,
+                      right: mq.viewPadding.top,
+                      bottom: mq.viewPadding.right,
+                      left: mq.viewPadding.bottom,
+                    ),
+                    viewInsets: EdgeInsets.only(
+                      top: mq.viewInsets.left,
+                      right: mq.viewInsets.top,
+                      bottom: mq.viewInsets.right,
+                      left: mq.viewInsets.bottom,
+                    ),
+                  )
+                : mq;
+
+            return FadeTransition(
+              opacity: _rotationFadeAnim,
+              child: ScaleTransition(
+                scale: _rotationScaleAnim,
+                child: RotatedBox(
+                  quarterTurns: quarterTurns,
+                  child: MediaQuery(
+                    data: effectiveMq,
+                    child: child ?? const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
       home: BookshelfScreen(
         isDarkMode: _isDarkMode,
         appLang: _appLang,
@@ -304,15 +384,15 @@ class UserManualScreen extends StatelessWidget {
                     const SizedBox(width: 12),
                     const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
                     const SizedBox(width: 12),
+                    const Icon(Icons.lock_outline, color: Colors.white, size: 19),
+                    const SizedBox(width: 12),
+                    const Icon(Icons.screen_rotation, color: Colors.white, size: 19),
+                    const SizedBox(width: 12),
                     const Icon(Icons.draw_outlined, color: Colors.amber, size: 20),
                     const SizedBox(width: 12),
                     const Icon(Icons.menu_book, color: Colors.amber, size: 20),
                     const SizedBox(width: 12),
                     _buildDualDirectionSampleIcon(),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.translate, color: Colors.white, size: 20),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.refresh, color: Colors.white70, size: 19),
                     const SizedBox(width: 12),
                     const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
                     const SizedBox(width: 12),
@@ -354,14 +434,14 @@ class UserManualScreen extends StatelessWidget {
               desc: _tr('태블릿 가로 화면에서 한 화면에 2페이지씩 나란히 보여줄지 1페이지만 보여줄지 전환합니다.', 'Toggles between 2-page side-by-side spread and single-page view in landscape orientation.', '在横屏模式下切换双页并排显示或单页显示。', '横画面で2ページ見開き表示と1ページ表示を切り替えます。'),
             ),
             _buildIconGuideRow(
-              iconWidget: _buildDualDirectionSampleIcon(),
-              title: _tr('읽기 방향 전환 (좌→우 / 우→좌)', 'Reading Direction (LTR / RTL)', '阅读方向切换 (左→右 / 右→左)', '読み방향切替 (左→右 / 右→左)'),
-              desc: _tr('일반 도서 방향(왼쪽→오른쪽)과 일본 만화 방향(오른쪽→왼쪽)을 전환하고 기억합니다.', 'Switches and remembers Left-to-Right vs. Right-to-Left (manga) reading direction.', '切换并记住从左到右或从右到左（漫画）的翻页方向。', '左→右(一般)と右→左(マンガ)のページめくり方向を切り替えて記憶します。'),
+              iconWidget: const Icon(Icons.screen_rotation, color: Colors.white, size: 22),
+              title: _tr('화면 회전', 'Rotate Screen', '旋转屏幕', '画面回転'),
+              desc: _tr('뷰어 화면을 가로 또는 세로 방향으로 부드럽게 회전합니다.', 'Smoothly rotates the viewer between landscape and portrait orientations.', '平滑切换横屏或竖屏阅读方向。', 'ビューア画面を縦向き・横向きに滑らかに回転します。'),
             ),
             _buildIconGuideRow(
-              iconWidget: const Icon(Icons.translate, color: Colors.white, size: 22),
-              title: _tr('Google ML Kit 공식 번역 (번역 / 원문 전환)', 'Google ML Kit Official Translation', 'Google ML Kit 官方翻译', 'Google ML Kit 公式翻訳'),
-              desc: _tr('일본어·중국어·한국어 문서를 현재 설정된 앱 언어로 백그라운드 번역합니다. 이미 번역된 경우 누르면 번역본/원문을 전환하며, 옆의 새로고침(↻) 아이콘으로 재번역할 수 있습니다.', 'Translates JA/ZH/KO into your app language in the background using Google ML Kit. Tap to toggle translation, or tap Refresh (↻) to re-translate.', '使用 Google ML Kit 将日/中/韩文档后台翻译为当前应用语言。', 'Google ML Kitで日本語・中国語・韓国語を設定言語へバックグラウンド翻訳します。'),
+              iconWidget: _buildDualDirectionSampleIcon(),
+              title: _tr('읽기 방향 전환 (좌 → 우 / 우 → 좌)', 'Reading Direction (L → R / R → L)', '阅读方向切换 (左 → 右 / 右 → 左)', '読書方向切替 (左 → 右 / 右 → 左)'),
+              desc: _tr('일반 도서 방향(좌 → 우, 기본값)과 만화 방향(우 → 좌)을 전환하며, 각 파일마다 설정한 읽기 방향을 개별적으로 기억합니다.', 'Switches between L → R (default) and R → L reading direction and remembers it for each file individually.', '切换左 → 右（默认）与右 → 左方向，并为每个文件单独记忆。', '左 → 右(基本)と右 → 左を切り替え、ファイルごとに記憶します。'),
             ),
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 22),
@@ -383,9 +463,9 @@ class UserManualScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _buildIconGuideRow(
-              iconWidget: const Icon(Icons.touch_app, color: Colors.white, size: 22),
+              iconWidget: const Icon(Icons.touch_app, color: Colors.amber, size: 22),
               title: _tr('손으로 글씨 쓰기 (한 손가락 모양 아이콘)', 'Finger Writing (One-Finger Icon)', '手指书写（单指图标）', '指で手書き（指差しアイコン）'),
-              desc: _tr('S펜 필기 바에서 색상 원 왼쪽의 한 손가락 아이콘을 누르면 아이콘이 흰색으로 바뀌며 손가락으로 글씨를 쓸 수 있습니다. 손으로 글씨를 쓰는 동안에는 손터치 페이지 넘김이 자동으로 잠깁니다.', 'Tap the one-finger icon to the left of the colors to turn it white and write with your finger. Touch page turning is automatically locked while finger writing is active.', '点击颜色左侧的单指图标使其变为白色即可用手指书写，书写期间自动锁定触屏翻页。', '色の左にある指アイコンを押すと白色に変わり指で手書きできます。手書き中は指でのページめくりが自動ロックされます。'),
+              desc: _tr('S펜 필기 바에서 색상 원 왼쪽의 한 손가락 아이콘을 누르면 아이콘에 색상(노란색)이 켜지며 손가락으로 글씨를 쓸 수 있습니다. 손으로 글씨를 쓰는 동안에는 손터치 페이지 넘김이 자동으로 잠깁니다.', 'Tap the one-finger icon to the left of the colors to light it up in color and write with your finger. Touch page turning is automatically locked while finger writing is active.', '点击颜色左侧的单指图标使其亮起颜色即可用手指书写，书写期间自动锁定触屏翻页。', '色の左にある指アイコンを押すと色が点灯し指で手書きできます。手書き中は指でのページめくりが自動ロックされます。'),
             ),
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.cleaning_services_outlined, color: Colors.amber, size: 22),
@@ -465,13 +545,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   String? _pointerDownRowPath;
   Offset? _pointerDownGlobalPos;
 
-  // 10 & 11. 워드(.docx, .doc), 한글(.hwpx, .hwp), 메모장(.txt, .yml, .yaml) 뷰어 열람 지원
+  // 10, 11 & 13. 워드(.docx, .doc), 한글(.hwpx, .hwp), 메모장(.txt) 뷰어 열람 지원 (YML 제외)
   static const _supportedExts = [
-    'epub', 'txt', 'yml', 'yaml', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+    'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
     'docx', 'doc', 'hwpx', 'hwp'
   ];
   static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
-  static const _docConvertExts = ['txt', 'yml', 'yaml', 'docx', 'doc', 'hwpx', 'hwp'];
+  static const _docConvertExts = ['txt', 'docx', 'doc', 'hwpx', 'hwp'];
 
   String? _findFileRowPathAtGlobalPos(Offset globalPos) {
     for (final entry in _fileRowKeys.entries) {
@@ -688,7 +768,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       }
       final safeKey = path.hashCode.toUnsigned(32).toString();
       final stat = await file.stat();
-      final thumbPath = '${thumbDir.path}/thumb_${safeKey}_${stat.size}.jpg';
+      final thumbPath = '${thumbDir.path}/thumb_hq26_${safeKey}_${stat.size}.jpg';
       final thumbFile = File(thumbPath);
 
       if (await thumbFile.exists() && await thumbFile.length() > 64) {
@@ -704,7 +784,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           {
             'filePath': path,
             'outPath': thumbPath,
-            'maxWidth': 480,
+            'maxWidth': 1080,
           },
         );
         if (rendered != null && File(rendered).existsSync()) {
@@ -1038,7 +1118,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     await _loadLibrary();
     if (mounted) {
-      _openFile(outFile);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _tr(
+              '통합 파일이 서재에 생성되었습니다: $safeTitle.cbz',
+              'Merged file created in bookshelf: $safeTitle.cbz',
+              '合并文件已添加到书架：$safeTitle.cbz',
+              '結合ファイルが書斎に作成されました: $safeTitle.cbz',
+            ),
+          ),
+        ),
+      );
     }
   }
 
@@ -1311,7 +1402,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       await _loadLibrary();
 
       if (mounted) {
-        _openFile(outFile);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _tr(
+                '합쳐진 PDF 파일이 서재에 생성되었습니다: $safeTitle.pdf',
+                'Merged PDF created in bookshelf: $safeTitle.pdf',
+                '合并后的 PDF 已添加到书架：$safeTitle.pdf',
+                '結合されたPDFが書斎に作成されました: $safeTitle.pdf',
+              ),
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -1592,6 +1694,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         ),
       );
     }
+
+    // 뷰어 종료 후 서재로 돌아올 때 화면 회전 상태 초기화
+    if (StorageService.desiredLandscapeNotifier.value != null) {
+      StorageService.desiredLandscapeNotifier.value = null;
+    }
+    try {
+      await _pdfChannel.invokeMethod('setScreenOrientation', {'mode': 'unspecified'});
+    } catch (_) {}
+    SystemChrome.setPreferredOrientations([]);
 
     _loadLibrary();
   }
@@ -1975,10 +2086,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 children: [
                   Text(
                     tDialog(
-                      '1. 언어 설정 (표시 언어 및 번역 타겟 언어)',
-                      '1. Language (Display & Translation Target)',
-                      '1. 语言设置 (界面与翻译目标语言)',
-                      '1. 言語設定 (表示および翻訳先言語)',
+                      '1. 언어 설정',
+                      '1. Language',
+                      '1. 语言设置',
+                      '1. 言語設定',
                     ),
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   ),
@@ -2019,7 +2130,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                           size: 16,
                           color: viewMode == 'grid' ? Colors.amber : null,
                         ),
-                        label: Text(tDialog('썸네일형 (2×2 첫 페이지)', 'Thumbnail Grid (2×2)', '缩略图 (2×2 首页)', 'サムネイル表示 (2×2)')),
+                        label: Text(tDialog('표지형 (썸네일)', 'Cover View (Thumbnail)', '封面视图 (缩略图)', '表紙表示 (サムネイル)')),
                         selected: viewMode == 'grid',
                         onSelected: (_) async {
                           await StorageService.setBookshelfViewMode('grid');
@@ -2095,14 +2206,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     );
   }
 
-  /// 13. 썸네일 그리드 카드 (파일 첫 페이지 썸네일, 우측 상단 즐겨찾기 별 아이콘, 점 3개 메뉴[이름 변경/그룹 이동], 하단 그룹 이름 및 진행률, 길게 눌러 드래그 다중 선택)
+  /// 1, 3, 10, 11, 13. 표지형(썸네일) 그리드 카드:
+  /// - 고화질 첫 페이지 썸네일 (FilterQuality.high)
+  /// - 휴대폰 한 화면에 9개(3×3) 들어가는 크기
+  /// - 우측 상단 즐겨찾기 별 아이콘, 하단 점 3개(이름 변경 / 그룹 이동 / 휴지통 이동)
+  /// - 진행바 및 진행률(%) 제거 (#11)
+  /// - 그룹 이름은 [전체] 탭에서만 표시하고 개별 그룹 탭에서는 숨김 (#10)
   Widget _buildGridBookCard(File file) {
     final rowKey = _fileRowKeys.putIfAbsent(file.path, () => GlobalKey());
     final rawFileName = file.path.split(Platform.pathSeparator).last;
     final displayFileName = _formatDisplayFileName(rawFileName);
     final grp = _bookGroupMap[file.path] ?? '미분류';
     final grpDisplay = _localizeGroupName(grp);
-    final prog = (_bookProgressMap[file.path] ?? 0.0) * 100;
+    final bool showGroupLabel = _selectedGroup == '전체';
     final isSelected = _selectedFilePaths.contains(file.path);
     final isFavorite = _favoritePaths.contains(file.path);
     final lowerExt = rawFileName.split('.').last.toLowerCase();
@@ -2112,7 +2228,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         ? Icons.picture_as_pdf
         : (lowerExt == 'docx' || lowerExt == 'doc' || lowerExt == 'hwpx' || lowerExt == 'hwp')
             ? Icons.description_outlined
-            : (lowerExt == 'epub' || lowerExt == 'txt' || lowerExt == 'yml' || lowerExt == 'yaml')
+            : (lowerExt == 'epub' || lowerExt == 'txt')
                 ? Icons.menu_book
                 : lowerExt == 'cbz'
                     ? Icons.auto_stories
@@ -2157,9 +2273,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             margin: EdgeInsets.zero,
             clipBehavior: Clip.antiAlias,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(10),
               side: isSelected
-                  ? const BorderSide(color: Colors.amber, width: 2.5)
+                  ? const BorderSide(color: Colors.amber, width: 2.2)
                   : BorderSide(
                       color: widget.isDarkMode ? Colors.white12 : Colors.black12,
                       width: 1.0,
@@ -2168,7 +2284,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 상단: 파일 첫 페이지 썸네일 영역 + 우측 상단 즐겨찾기 버튼
+                // 상단: 고화질 파일 첫 페이지 썸네일 영역 + 우측 상단 즐겨찾기 버튼
                 Expanded(
                   child: Stack(
                     fit: StackFit.expand,
@@ -2181,27 +2297,27 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                 fit: BoxFit.cover,
                                 alignment: Alignment.topCenter,
                                 gaplessPlayback: true,
-                                cacheWidth: 480,
+                                filterQuality: FilterQuality.high,
                                 errorBuilder: (_, __, ___) => Center(
-                                  child: Icon(fallbackIcon, size: 46, color: Colors.indigo),
+                                  child: Icon(fallbackIcon, size: 34, color: Colors.indigo),
                                 ),
                               )
                             : Center(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(fallbackIcon, size: 44, color: Colors.indigo),
-                                    const SizedBox(height: 6),
+                                    Icon(fallbackIcon, size: 32, color: Colors.indigo),
+                                    const SizedBox(height: 4),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: Colors.indigo.withOpacity(0.12),
-                                        borderRadius: BorderRadius.circular(6),
+                                        borderRadius: BorderRadius.circular(5),
                                       ),
                                       child: Text(
                                         lowerExt.toUpperCase(),
                                         style: const TextStyle(
-                                          fontSize: 11,
+                                          fontSize: 10,
                                           fontWeight: FontWeight.bold,
                                           color: Colors.indigo,
                                         ),
@@ -2211,39 +2327,42 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                 ),
                               ),
                       ),
-                      // 선택 모드일 때 좌측 상단 체크박스 표시
                       if (_isSelectionMode)
                         Positioned(
-                          top: 6,
-                          left: 6,
+                          top: 4,
+                          left: 4,
                           child: Container(
                             decoration: BoxDecoration(
                               color: Colors.black54,
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(6),
                             ),
-                            child: Checkbox(
-                              value: isSelected,
-                              visualDensity: VisualDensity.compact,
-                              side: const BorderSide(color: Colors.white, width: 1.5),
-                              onChanged: (v) {
-                                setState(() {
-                                  if (v == true) {
-                                    _selectedFilePaths.add(file.path);
-                                  } else {
-                                    _selectedFilePaths.remove(file.path);
-                                    if (_selectedFilePaths.isEmpty) {
-                                      _isSelectionMode = false;
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: Checkbox(
+                                value: isSelected,
+                                visualDensity: VisualDensity.compact,
+                                side: const BorderSide(color: Colors.white, width: 1.5),
+                                onChanged: (v) {
+                                  setState(() {
+                                    if (v == true) {
+                                      _selectedFilePaths.add(file.path);
+                                    } else {
+                                      _selectedFilePaths.remove(file.path);
+                                      if (_selectedFilePaths.isEmpty) {
+                                        _isSelectionMode = false;
+                                      }
                                     }
-                                  }
-                                });
-                              },
+                                  });
+                                },
+                              ),
                             ),
                           ),
                         ),
-                      // 13. 즐겨찾기 버튼은 썸네일 우측 상단에 위치
+                      // 우측 상단 즐겨찾기 버튼
                       Positioned(
-                        top: 6,
-                        right: 6,
+                        top: 4,
+                        right: 4,
                         child: Material(
                           color: Colors.black45,
                           shape: const CircleBorder(),
@@ -2254,11 +2373,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                               await _loadLibrary();
                             },
                             child: Padding(
-                              padding: const EdgeInsets.all(6.0),
+                              padding: const EdgeInsets.all(4.5),
                               child: Icon(
                                 isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
                                 color: isFavorite ? Colors.amber : Colors.white,
-                                size: 22,
+                                size: 18,
                               ),
                             ),
                           ),
@@ -2267,9 +2386,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                     ],
                   ),
                 ),
-                // 하단: 파일 제목 + 점 3개(편집/파일 이동) 아이콘 + 그룹 이름 및 진행률
+                // 하단: 파일 제목 + 점 3개(이름 변경/그룹 이동) 아이콘 + ([전체] 탭일 때만 그룹 이름 표시)
                 Container(
-                  padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+                  padding: const EdgeInsets.fromLTRB(7, 4, 2, 5),
                   color: widget.isDarkMode ? const Color(0xFF0F172A) : Colors.white,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -2283,121 +2402,81 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 13,
+                                fontSize: 11.5,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
                           if (!_isSelectionMode)
-                            PopupMenuButton<String>(
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(minWidth: 130),
-                              icon: const Icon(Icons.more_vert, size: 19),
-                              tooltip: _tr('메뉴', 'More', '更多', 'メニュー'),
-                              onSelected: (action) {
-                                if (action == 'rename') {
-                                  _renameFileDialog(file);
-                                } else if (action == 'move_group') {
-                                  _assignGroupDialog(file);
-                                } else if (action == 'trash') {
-                                  _moveFileToTrash(file);
-                                }
-                              },
-                              itemBuilder: (ctx) => [
-                                PopupMenuItem<String>(
-                                  value: 'rename',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.edit_outlined, size: 18),
-                                      const SizedBox(width: 8),
-                                      Text(_tr('이름 변경', 'Rename', '重命名', '名前変更')),
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem<String>(
-                                  value: 'move_group',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.drive_file_move_outline, size: 18),
-                                      const SizedBox(width: 8),
-                                      Text(_tr('그룹 이동', 'Move Group', '移动分组', 'グループ移動')),
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem<String>(
-                                  value: 'trash',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        _tr('휴지통 이동', 'Move to Trash', '移至回收站', 'ゴミ箱へ移動'),
-                                        style: const TextStyle(color: Colors.redAccent),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      ValueListenableBuilder<Map<String, TranslationTaskInfo>>(
-                        valueListenable: BatchTranslationService.activeTasks,
-                        builder: (context, activeTasks, _) {
-                          TranslationTaskInfo? task = activeTasks[file.path];
-                          if (task == null && _imageExts.contains(lowerExt)) {
-                            final currentGroup = _bookGroupMap[file.path];
-                            final firstSibling = _allBooks.firstWhere(
-                              (f) =>
-                                  _imageExts.contains(f.path.split('.').last.toLowerCase()) &&
-                                  _bookGroupMap[f.path] == currentGroup,
-                              orElse: () => file,
-                            );
-                            task = activeTasks[firstSibling.path];
-                          }
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      '[$grpDisplay]',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: widget.isDarkMode ? Colors.white70 : Colors.black54,
-                                      ),
+                            SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: PopupMenuButton<String>(
+                                padding: EdgeInsets.zero,
+                                iconSize: 17,
+                                constraints: const BoxConstraints(minWidth: 125),
+                                icon: const Icon(Icons.more_vert, size: 17),
+                                tooltip: _tr('메뉴', 'More', '更多', 'メニュー'),
+                                onSelected: (action) {
+                                  if (action == 'rename') {
+                                    _renameFileDialog(file);
+                                  } else if (action == 'move_group') {
+                                    _assignGroupDialog(file);
+                                  } else if (action == 'trash') {
+                                    _moveFileToTrash(file);
+                                  }
+                                },
+                                itemBuilder: (ctx) => [
+                                  PopupMenuItem<String>(
+                                    value: 'rename',
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.edit_outlined, size: 18),
+                                        const SizedBox(width: 8),
+                                        Text(_tr('이름 변경', 'Rename', '重命名', '名前変更')),
+                                      ],
                                     ),
                                   ),
-                                  Text(
-                                    task != null
-                                        ? '${_tr("번역", "Trans", "翻译", "翻訳")} ${(task.progress * 100).toStringAsFixed(0)}%'
-                                        : '${prog.toStringAsFixed(1)}%',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: widget.isDarkMode ? Colors.amber : const Color(0xFF0F766E),
+                                  PopupMenuItem<String>(
+                                    value: 'move_group',
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.drive_file_move_outline, size: 18),
+                                        const SizedBox(width: 8),
+                                        Text(_tr('그룹 이동', 'Move Group', '移动分组', 'グループ移動')),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem<String>(
+                                    value: 'trash',
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          _tr('휴지통 이동', 'Move to Trash', '移至回收站', 'ゴミ箱へ移動'),
+                                          style: const TextStyle(color: Colors.redAccent),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 4),
-                              LinearProgressIndicator(
-                                value: task != null
-                                    ? task.progress.clamp(0.0, 1.0).toDouble()
-                                    : (prog / 100.0).clamp(0.0, 1.0),
-                                minHeight: 3.5,
-                                color: widget.isDarkMode ? Colors.amber : const Color(0xFF0F766E),
-                                backgroundColor: widget.isDarkMode ? Colors.white12 : Colors.black12,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ],
-                          );
-                        },
+                            ),
+                        ],
                       ),
+                      if (showGroupLabel) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          '[$grpDisplay]',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: widget.isDarkMode ? Colors.white60 : Colors.black54,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -2599,15 +2678,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       child: _bookshelfViewMode == 'grid'
                           ? LayoutBuilder(
                               builder: (context, constraints) {
-                                // 휴대폰 기준 가로 2개, 세로 2개 (화면에 4개 정도 나오게) 비율 자동 계산
-                                const int crossCount = 2;
-                                const double hPad = 12.0;
-                                const double vPad = 10.0;
-                                const double crossSpacing = 12.0;
-                                const double mainSpacing = 12.0;
-                                final double cellW = ((constraints.maxWidth - (hPad * 2) - crossSpacing) / crossCount).clamp(120.0, 600.0);
-                                final double targetCellH = ((constraints.maxHeight - (vPad * 2) - mainSpacing) / 2.0).clamp(215.0, 390.0);
-                                final double childAspect = (cellW / targetCellH).clamp(0.58, 1.05);
+                                // 3. 휴대폰 기준 한 페이지에 9개(가로 3개 × 세로 3개)가 들어갈 정도로 크기 자동 조절
+                                const int crossCount = 3;
+                                const double hPad = 10.0;
+                                const double vPad = 8.0;
+                                const double crossSpacing = 8.0;
+                                const double mainSpacing = 8.0;
+                                final double cellW = ((constraints.maxWidth - (hPad * 2) - (crossSpacing * (crossCount - 1))) / crossCount).clamp(80.0, 420.0);
+                                final double targetCellH = ((constraints.maxHeight - (vPad * 2) - (mainSpacing * 2)) / 3.0).clamp(130.0, 290.0);
+                                final double childAspect = (cellW / targetCellH).clamp(0.50, 0.98);
 
                                 return GridView.builder(
                                   controller: _bookshelfScrollController,
@@ -2702,111 +2781,31 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                         ? Icons.picture_as_pdf
                                         : (lowerExt == 'docx' || lowerExt == 'doc' || lowerExt == 'hwpx' || lowerExt == 'hwp')
                                             ? Icons.description_outlined
-                                            : (lowerExt == 'epub' || lowerExt == 'txt' || lowerExt == 'yml' || lowerExt == 'yaml')
+                                            : (lowerExt == 'epub' || lowerExt == 'txt')
                                                 ? Icons.menu_book
                                                 : lowerExt == 'cbz'
                                                     ? Icons.auto_stories
                                                     : Icons.image,
                                     color: Colors.indigo,
                                   ),
-                            title: ValueListenableBuilder<Map<String, TranslationTaskInfo>>(
-                              valueListenable: BatchTranslationService.activeTasks,
-                              builder: (context, activeTasks, _) {
-                                TranslationTaskInfo? task = activeTasks[file.path];
-                                if (task == null && _imageExts.contains(lowerExt)) {
-                                  final currentGroup = _bookGroupMap[file.path];
-                                  final firstSibling = _allBooks.firstWhere(
-                                    (f) =>
-                                        _imageExts.contains(f.path.split('.').last.toLowerCase()) &&
-                                        _bookGroupMap[f.path] == currentGroup,
-                                    orElse: () => file,
-                                  );
-                                  task = activeTasks[firstSibling.path];
-                                }
-                                return Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        displayFileName,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    if (task != null) ...[
-                                      const SizedBox(width: 8),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                        decoration: BoxDecoration(
-                                          color: badgeBg,
-                                          borderRadius: BorderRadius.circular(12),
-                                          border: Border.all(color: badgeBorder, width: 1),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            SizedBox(
-                                              width: 11,
-                                              height: 11,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: badgeFg,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 5),
-                                            Text(
-                                              '${_tr("번역", "Trans", "翻译", "翻訳")} ${(task.progress * 100).toStringAsFixed(0)}% (${task.current}/${task.total})',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.bold,
-                                                color: badgeFg,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                );
-                              },
+                            title: Text(
+                              displayFileName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: ValueListenableBuilder<Map<String, TranslationTaskInfo>>(
-                              valueListenable: BatchTranslationService.activeTasks,
-                              builder: (context, activeTasks, _) {
-                                TranslationTaskInfo? task = activeTasks[file.path];
-                                if (task == null && _imageExts.contains(lowerExt)) {
-                                  final currentGroup = _bookGroupMap[file.path];
-                                  final firstSibling = _allBooks.firstWhere(
-                                    (f) =>
-                                        _imageExts.contains(f.path.split('.').last.toLowerCase()) &&
-                                        _bookGroupMap[f.path] == currentGroup,
-                                    orElse: () => file,
-                                  );
-                                  task = activeTasks[firstSibling.path];
-                                }
+                            subtitle: Builder(
+                              builder: (context) {
                                 final grpDisplay = _localizeGroupName(grp);
                                 final progLabel = _tr('진행률', 'Progress', '进度', '進行率');
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      task != null
-                                          ? '[$grpDisplay]  •  $progLabel ${prog.toStringAsFixed(1)}%  •  ${_tr("번역 중", "Translating", "正在翻译", "翻訳中")} (${task.current}/${task.total})'
-                                          : '[$grpDisplay]  •  $progLabel ${prog.toStringAsFixed(1)}%',
-                                      style: const TextStyle(fontSize: 12),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    if (task != null) ...[
-                                      const SizedBox(height: 4),
-                                      LinearProgressIndicator(
-                                        value: task.progress.clamp(0.0, 1.0).toDouble(),
-                                        minHeight: 5,
-                                        color: progressBarColor,
-                                        backgroundColor: widget.isDarkMode ? Colors.white12 : Colors.black12,
-                                        borderRadius: BorderRadius.circular(2),
-                                      ),
-                                    ],
-                                  ],
+                                // 10. [전체]에서만 그룹 이름 표시, 특정 그룹 선택 시 그룹 이름 표시 제거
+                                final subText = _selectedGroup == '전체'
+                                    ? '[$grpDisplay]  •  $progLabel ${prog.toStringAsFixed(1)}%'
+                                    : '$progLabel ${prog.toStringAsFixed(1)}%';
+                                return Text(
+                                  subText,
+                                  style: const TextStyle(fontSize: 12),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 );
                               },
                             ),

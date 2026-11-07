@@ -130,6 +130,7 @@ class AppI18n {
 
 class StorageService {
   static final ValueNotifier<String> appLangNotifier = ValueNotifier<String>('ko');
+  static final ValueNotifier<bool?> desiredLandscapeNotifier = ValueNotifier<bool?>(null);
   static Future<void> saveLastPosition(String bookPath, String pos) async {
     final prefs = await SharedPreferences.getInstance();
     final oldPos = prefs.getString('pos_$bookPath');
@@ -267,6 +268,13 @@ class StorageService {
     return prefs.getBool('two_page_landscape') ?? true;
   }
 
+  static String _normalizeBookKey(String bookPath) {
+    return bookPath.replaceAll(
+      RegExp(r'(_v25_converted|\.v2\.converted|\.converted)\.epub$', caseSensitive: false),
+      '',
+    );
+  }
+
   static Future<void> setReadingDirectionRtl(bool isRtl) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('reading_direction_rtl', isRtl);
@@ -275,6 +283,19 @@ class StorageService {
   static Future<bool> getReadingDirectionRtl() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool('reading_direction_rtl') ?? false;
+  }
+
+  // 12. 파일마다 읽기 방향 기억하기 (처음 여는 파일은 좌->우(false)가 기본값)
+  static Future<void> setBookReadingDirectionRtl(String bookPath, bool isRtl) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _normalizeBookKey(bookPath);
+    await prefs.setBool('reading_dir_rtl_v26_$key', isRtl);
+  }
+
+  static Future<bool> getBookReadingDirectionRtl(String bookPath) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _normalizeBookKey(bookPath);
+    return prefs.getBool('reading_dir_rtl_v26_$key') ?? false;
   }
 
   static Future<void> setUseVolumeTurn(bool enabled) async {
@@ -327,14 +348,15 @@ class StorageService {
     return prefs.getString('footer_info_mode') ?? 'both';
   }
 
+  // 9. 진행바 UI 하단('bottom')을 기본값으로 설정
   static Future<void> setProgressBarPosition(String pos) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('progress_bar_pos', pos);
+    await prefs.setString('progress_bar_pos_v26', pos);
   }
 
   static Future<String> getProgressBarPosition() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('progress_bar_pos') ?? 'right';
+    return prefs.getString('progress_bar_pos_v26') ?? 'bottom';
   }
 
   static Future<void> savePageMemoStrokes(
@@ -449,6 +471,13 @@ class StorageService {
   static Future<void> migrateBookMetadata(String oldPath, String newPath) async {
     if (oldPath == newPath) return;
     final prefs = await SharedPreferences.getInstance();
+    final oldNorm = _normalizeBookKey(oldPath);
+    final newNorm = _normalizeBookKey(newPath);
+    final oldRtl = prefs.getBool('reading_dir_rtl_v26_$oldNorm');
+    if (oldRtl != null) {
+      await prefs.setBool('reading_dir_rtl_v26_$newNorm', oldRtl);
+      await prefs.remove('reading_dir_rtl_v26_$oldNorm');
+    }
     for (final prefix in ['pos_', 'prev_pos_', 'prog_', 'grp_']) {
       final val = prefs.get('$prefix$oldPath');
       if (val != null) {
@@ -490,6 +519,7 @@ class StorageService {
 
   static Future<void> removeBookMetadata(String bookPath) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('reading_dir_rtl_v26_${_normalizeBookKey(bookPath)}');
     await prefs.remove('pos_$bookPath');
     await prefs.remove('prev_pos_$bookPath');
     await prefs.remove('prog_$bookPath');

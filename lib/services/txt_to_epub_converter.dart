@@ -1893,7 +1893,7 @@ class TxtToEpubConverter {
   /// 10 & 11. TXT/YML 메모장(UTF-8, UTF-16, CP949/EUC-KR 자동 감지) 및 워드(.docx)/한글(.hwp, .hwpx) 문서를 EPUB 2.0으로 변환 (이전 버전 방식 복구)
   static Future<File> convertDocumentToEpub(File inputFile) async {
     final epubPath = inputFile.path.replaceAll(
-      RegExp(r'\.(txt|yml|yaml|docx|doc|hwpx|hwp)$', caseSensitive: false),
+      RegExp(r'\.(txt|docx|doc|hwpx|hwp)$', caseSensitive: false),
       '_v25_converted.epub',
     );
     final outFile = File(epubPath);
@@ -1906,7 +1906,7 @@ class TxtToEpubConverter {
         .replaceAll(RegExp(r'\.[^.]+$'), '');
 
     List<String> lines = [];
-    if (ext == 'txt' || ext == 'yml' || ext == 'yaml') {
+    if (ext == 'txt') {
       String? content;
       try {
         content = await _pdfChannel.invokeMethod<String>(

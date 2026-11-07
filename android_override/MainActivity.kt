@@ -265,16 +265,17 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             val renderer = PdfRenderer(pfd)
                             if (renderer.pageCount > 0) {
                                 val page = renderer.openPage(0)
-                                val targetW = 480
+                                val requestedW = call.argument<Int>("maxWidth") ?: 1080
+                                val targetW = requestedW.coerceIn(720, 1440)
                                 val scale = targetW.toFloat() / page.width.toFloat().coerceAtLeast(1f)
                                 val w = targetW
-                                val h = (page.height * scale).toInt().coerceIn(320, 960)
+                                val h = (page.height * scale).toInt().coerceIn(640, 2048)
                                 val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                                 bitmap.eraseColor(Color.WHITE)
                                 page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                                 page.close()
                                 FileOutputStream(thumbFile).use { out ->
-                                    bitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
+                                    bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                 }
                                 bitmap.recycle()
                             }
