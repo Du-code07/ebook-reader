@@ -80,6 +80,7 @@ class ReaderScreen extends StatefulWidget {
 }
 
 class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver {
+  static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final EpubController _epubController = EpubController();
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
