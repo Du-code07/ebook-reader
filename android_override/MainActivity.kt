@@ -1,4 +1,4 @@
-package com.example.my_ebook_reader
+package com.freader.my_ebook_reader
 
 import android.app.Activity
 import android.content.ClipData

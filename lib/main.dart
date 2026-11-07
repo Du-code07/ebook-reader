@@ -3101,7 +3101,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
               ],
             )
           : AppBar(
-              title: const Text('MY'),
+              title: const Text('FReader'),
               actions: [
                 IconButton(
                   icon: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode),
