@@ -185,14 +185,15 @@ class StorageService {
   }
 
   // 15. 파일 이름 뒤에 형식(.pdf, .epub 등) 숨기기 설정
+  // 3. 파일 보여주는 형식 기본값을 목록형('list')으로 변경
   static Future<void> setBookshelfViewMode(String mode) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('bookshelf_view_mode', mode);
+    await prefs.setString('bookshelf_view_mode_v27', mode);
   }
 
   static Future<String> getBookshelfViewMode() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('bookshelf_view_mode') ?? 'grid';
+    return prefs.getString('bookshelf_view_mode_v27') ?? 'list';
   }
 
   static Future<void> setHideFileExtension(bool hide) async {
@@ -227,15 +228,15 @@ class StorageService {
     return isNowFav;
   }
 
-  // 3. 화면 잠금 버튼 설정 (흔들어서 잠그고 끄기 / 음량 버튼 동시에 눌러서 끄고 켜기)
+  // 2. 흔들어서 끄기 기본값에서 비활성(false)으로 설정
   static Future<void> setUseShakeLock(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('use_shake_lock', enabled);
+    await prefs.setBool('use_shake_lock_v27', enabled);
   }
 
   static Future<bool> getUseShakeLock() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('use_shake_lock') ?? true;
+    return prefs.getBool('use_shake_lock_v27') ?? false;
   }
 
   static Future<void> setUseVolumeComboLock(bool enabled) async {

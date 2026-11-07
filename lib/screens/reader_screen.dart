@@ -101,7 +101,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   bool _showControls = false;
   bool _isTouchLocked = false;
-  bool _useShakeLock = true;
+  bool _useShakeLock = false;
   bool _useVolumeComboLock = true;
   bool _useSwipeTurn = true;
   bool _useVolumeTurn = true;
@@ -1375,6 +1375,71 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _epubController.setFontSize(fontSize: _fontSize.toDouble());
   }
 
+  /// 1. 뷰어 표시에서 페이지 번호를 누르고 숫자를 입력하면 해당 페이지로 이동 (설정에서 페이지 번호가 활성화된 경우만 작동)
+  Future<void> _showJumpToPageDialog() async {
+    if (_isTouchLocked || !(_footerInfoMode == 'page' || _footerInfoMode == 'both')) return;
+    final int totalEstPages = (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
+    final int curEstPage = ((_progress * totalEstPages).round()).clamp(1, totalEstPages).toInt();
+    final ctrl = TextEditingController(text: '$curEstPage');
+    ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
+
+    final targetPageOneBased = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          _tr(
+            '페이지 이동 (1 ~ $totalEstPages)',
+            'Go to Page (1 - $totalEstPages)',
+            '跳转到页码 (1 ~ $totalEstPages)',
+            'ページ移動 (1 ~ $totalEstPages)',
+          ),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            hintText: '1 ~ $totalEstPages',
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (val) {
+            final parsed = int.tryParse(val.trim());
+            Navigator.pop(ctx, parsed);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final parsed = int.tryParse(ctrl.text.trim());
+              Navigator.pop(ctx, parsed);
+            },
+            child: Text(_tr('이동', 'Go', '跳转', '移動')),
+          ),
+        ],
+      ),
+    );
+
+    if (targetPageOneBased != null && mounted) {
+      final int clamped = targetPageOneBased.clamp(1, totalEstPages).toInt();
+      final double targetProg = totalEstPages <= 1
+          ? 0.0
+          : ((clamped - 1) / totalEstPages).clamp(0.0, 1.0).toDouble();
+      if (_currentCfi != null) {
+        setState(() => _previousJumpCfi = _currentCfi);
+      }
+      setState(() {
+        _progress = targetProg;
+        _activeStrokePoints.clear();
+      });
+      _epubController.toProgressPercentage(targetProg);
+    }
+  }
+
   String _formatEpubFooterText() {
     if (_footerInfoMode == 'none') return '';
     final int totalEstPages = (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
@@ -1586,10 +1651,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     BatchTranslationService.translationCompletedEvent.removeListener(_onBackgroundTranslationFinished);
     WidgetsBinding.instance.removeObserver(this);
     _volumeKeyService.stopListening();
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.manual,
-      overlays: SystemUiOverlay.values,
-    );
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     super.dispose();
   }
 
@@ -1881,14 +1943,24 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 right: 20,
                 bottom: math.max<double>(bottomPadding + 4.0, 8.0),
                 child: IgnorePointer(
+                  ignoring: _isTouchLocked || !(_footerInfoMode == 'page' || _footerInfoMode == 'both'),
                   child: Align(
                     alignment: Alignment.centerRight,
-                    child: Text(
-                      footerText,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: footerTextColor,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both')
+                          ? _showJumpToPageDialog
+                          : null,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        child: Text(
+                          footerText,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: footerTextColor,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1913,22 +1985,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                color: _allowFingerDrawing ? Colors.amber.withOpacity(0.22) : Colors.transparent,
-                                borderRadius: BorderRadius.circular(14),
+                            IconButton(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              constraints: const BoxConstraints(),
+                              splashColor: Colors.transparent,
+                              highlightColor: Colors.transparent,
+                              hoverColor: Colors.transparent,
+                              icon: Icon(
+                                Icons.touch_app,
+                                color: _allowFingerDrawing ? Colors.amber : Colors.white,
+                                size: 20,
                               ),
-                              child: IconButton(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                constraints: const BoxConstraints(),
-                                icon: Icon(
-                                  Icons.touch_app,
-                                  color: _allowFingerDrawing ? Colors.amber : Colors.white,
-                                  size: 20,
-                                ),
-                                tooltip: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
-                                onPressed: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
-                              ),
+                              tooltip: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
+                              onPressed: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
                             ),
                             const SizedBox(width: 6),
                             ...[

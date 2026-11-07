@@ -199,7 +199,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _lastIsSpreadMode = false;
 
   bool _isTouchLocked = false;
-  bool _useShakeLock = true;
+  bool _useShakeLock = false;
   bool _useVolumeComboLock = true;
 
   bool _useSwipeTurn = true;
@@ -1769,6 +1769,59 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
+  /// 1. 뷰어 표시에서 페이지 번호를 누르고 숫자를 입력하면 해당 페이지로 이동 (설정에서 페이지 번호가 활성화된 경우만 작동)
+  Future<void> _showJumpToPageDialog() async {
+    if (_isTouchLocked || !(_footerInfoMode == 'page' || _footerInfoMode == 'both')) return;
+    final ctrl = TextEditingController(text: '${_currentPage + 1}');
+    ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
+
+    final targetPageOneBased = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          _tr(
+            '페이지 이동 (1 ~ $_totalPages)',
+            'Go to Page (1 - $_totalPages)',
+            '跳转到页码 (1 ~ $_totalPages)',
+            'ページ移動 (1 ~ $_totalPages)',
+          ),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            hintText: '1 ~ $_totalPages',
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (val) {
+            final parsed = int.tryParse(val.trim());
+            Navigator.pop(ctx, parsed);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final parsed = int.tryParse(ctrl.text.trim());
+              Navigator.pop(ctx, parsed);
+            },
+            child: Text(_tr('이동', 'Go', '跳转', '移動')),
+          ),
+        ],
+      ),
+    );
+
+    if (targetPageOneBased != null && mounted) {
+      final clampedPage = (targetPageOneBased - 1).clamp(0, _totalPages - 1).toInt();
+      _goToPage(clampedPage, recordHistory: true, smoothAnimation: false);
+    }
+  }
+
   String _formatFooterText(bool isSpread) {
     if (_footerInfoMode == 'none') return '';
     final int effectivePage = (isSpread && (_currentPage + 2 >= _totalPages)) ? _totalPages : (_currentPage + 1);
@@ -1848,11 +1901,17 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: Text(
-                    '$displayedPageNum/$_totalPages',
-                    style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both')
+                      ? _showJumpToPageDialog
+                      : null,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    child: Text(
+                      '$displayedPageNum/$_totalPages',
+                      style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
                 IconButton(
@@ -1913,9 +1972,18 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   ),
                 ),
               ),
-              Text(
-                '$displayedPageNum/$_totalPages',
-                style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both')
+                    ? _showJumpToPageDialog
+                    : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                  child: Text(
+                    '$displayedPageNum/$_totalPages',
+                    style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
+                  ),
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.vertical_align_bottom, color: Colors.white, size: 18),
@@ -1978,10 +2046,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     BatchTranslationService.translationCompletedEvent.removeListener(_onBackgroundTranslationFinished);
     _volumeKeyService.stopListening();
     _pageController?.dispose();
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.manual,
-      overlays: SystemUiOverlay.values,
-    );
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     super.dispose();
   }
 
@@ -2148,14 +2213,24 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               right: 20,
               bottom: math.max<double>(bottomInset + 4.0, 8.0),
               child: IgnorePointer(
+                ignoring: _isTouchLocked || !(_footerInfoMode == 'page' || _footerInfoMode == 'both'),
                 child: Align(
                   alignment: Alignment.centerRight,
-                  child: Text(
-                    footerText,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                      shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both')
+                        ? _showJumpToPageDialog
+                        : null,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                      child: Text(
+                        footerText,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -2179,22 +2254,19 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              color: _allowFingerDrawing ? Colors.amber.withOpacity(0.22) : Colors.transparent,
-                              borderRadius: BorderRadius.circular(14),
+                          IconButton(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            constraints: const BoxConstraints(),
+                            splashColor: Colors.transparent,
+                            highlightColor: Colors.transparent,
+                            hoverColor: Colors.transparent,
+                            icon: Icon(
+                              Icons.touch_app,
+                              color: _allowFingerDrawing ? Colors.amber : Colors.white,
+                              size: 20,
                             ),
-                            child: IconButton(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                              constraints: const BoxConstraints(),
-                              icon: Icon(
-                                Icons.touch_app,
-                                color: _allowFingerDrawing ? Colors.amber : Colors.white,
-                                size: 20,
-                              ),
-                              tooltip: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
-                              onPressed: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
-                            ),
+                            tooltip: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
+                            onPressed: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
                           ),
                           const SizedBox(width: 6),
                           ...[

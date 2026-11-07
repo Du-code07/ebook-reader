@@ -13,6 +13,7 @@ import 'services/txt_to_epub_converter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   final initialDark = await StorageService.getDarkMode();
   final initialLang = await StorageService.getAppLanguage();
   runApp(MyEbookApp(initialDark: initialDark, initialLang: initialLang));
@@ -531,7 +532,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   Map<String, double> _bookProgressMap = {};
   Set<String> _favoritePaths = {};
   bool _hideFileExtension = false;
-  String _bookshelfViewMode = 'grid'; // 'grid' (썸네일형 2x2) or 'list' (목록형)
+  String _bookshelfViewMode = 'list'; // 기본값: 'list' (목록형)
   final Map<String, String?> _thumbnailPathCache = {};
   final Set<String> _thumbnailGeneratingPaths = {};
 
