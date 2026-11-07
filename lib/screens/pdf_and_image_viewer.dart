@@ -203,8 +203,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _useVolumeComboLock = true;
 
   bool _useVolumeTurn = true;
+  bool _useSwipeTurn = true;
   bool _useQuickNavTurn = false;
-  bool _useSpenTurn = true;
+  bool _useSpenTurn = false;
+  bool _isLandscapeForced = false;
 
   bool _isMemoMode = false;
   bool _isEraserMode = false;
@@ -484,6 +486,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _useVolumeComboLock = await StorageService.getUseVolumeComboLock();
       _useVolumeTurn = await StorageService.getUseVolumeTurn();
       _useQuickNavTurn = await StorageService.getUseQuickNavTurn();
+      _useSwipeTurn = await StorageService.getUseSwipeTurn();
       _useSpenTurn = await StorageService.getUseSpenTurn();
       _footerInfoMode = await StorageService.getFooterInfoMode();
       _progressBarPos = await StorageService.getProgressBarPosition();
@@ -810,6 +813,154 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
+  Future<void> _exportDocumentWithAnnotations() async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final now = DateTime.now();
+      final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
+      final baseTitle = widget.title.replaceAll(RegExp(r'\.[^.]+$'), '');
+      final exportFileName = '${baseTitle}_메모포함_$dateStr.pdf';
+      final exportFile = File('${appDir.path}/$exportFileName');
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          content: Row(
+            children: [
+              const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  _tr(
+                    '메모와 필기를 포함하여 PDF로 내보내는 중...',
+                    'Exporting PDF with memos and drawings...',
+                    '正在导出包含笔记与手写的 PDF...',
+                    'メモと手書きを含めてPDFを出力中...',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final tempAnnotatedImages = <String>[];
+      for (int i = 0; i < _imagePages.length; i++) {
+        final imgFile = _imagePages[i];
+        if (!imgFile.existsSync()) continue;
+        final rawBytes = await imgFile.readAsBytes();
+        final codec = await ui.instantiateImageCodec(rawBytes);
+        final frame = await codec.getNextFrame();
+        final uiImg = frame.image;
+        final int w = uiImg.width;
+        final int h = uiImg.height;
+
+        final recorder = ui.PictureRecorder();
+        final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
+        canvas.drawImage(uiImg, Offset.zero, Paint());
+
+        final strokes = _memoStrokesByPage[i] ?? [];
+        for (final s in strokes) {
+          if (s.dxList.isEmpty) continue;
+          final paint = Paint()
+            ..color = Color(s.colorValue)
+            ..strokeWidth = math.max(2.0, s.strokeWidth * (w / 720.0))
+            ..strokeCap = StrokeCap.round
+            ..strokeJoin = StrokeJoin.round
+            ..style = PaintingStyle.stroke;
+          final path = Path();
+          path.moveTo(s.dxList[0] * w, s.dyList[0] * h);
+          for (int k = 1; k < s.dxList.length; k++) {
+            path.lineTo(s.dxList[k] * w, s.dyList[k] * h);
+          }
+          canvas.drawPath(path, paint);
+        }
+
+        final memoText = _memoNotesByPage[i];
+        if (memoText != null && memoText.trim().isNotEmpty) {
+          final boxPaint = Paint()
+            ..color = const Color(0xEEFFF9C4)
+            ..style = PaintingStyle.fill;
+          final borderPaint = Paint()
+            ..color = const Color(0xFFFBC02D)
+            ..strokeWidth = 3.0
+            ..style = PaintingStyle.stroke;
+          final textPainter = TextPainter(
+            text: TextSpan(
+              text: '📝 ${memoText.trim()}',
+              style: TextStyle(
+                color: const Color(0xFF212121),
+                fontSize: math.max(16.0, w * 0.022),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+          )..layout(maxWidth: w * 0.75);
+
+          final boxW = textPainter.width + 24.0;
+          final boxH = textPainter.height + 20.0;
+          final boxRect = RRect.fromRectAndRadius(
+            Rect.fromLTWH(24.0, 24.0, boxW, boxH),
+            const Radius.circular(10.0),
+          );
+          canvas.drawRRect(boxRect, boxPaint);
+          canvas.drawRRect(boxRect, borderPaint);
+          textPainter.paint(canvas, const Offset(36.0, 34.0));
+        }
+
+        final picture = recorder.endRecording();
+        final renderedImg = await picture.toImage(w, h);
+        final byteData = await renderedImg.toByteData(format: ui.ImageByteFormat.png);
+        if (byteData == null) continue;
+        final pngPath = '${appDir.path}/temp_annotated_${i}_$now.png';
+        await File(pngPath).writeAsBytes(byteData.buffer.asUint8List());
+        tempAnnotatedImages.add(pngPath);
+      }
+
+      final blocks = tempAnnotatedImages.map((p) => {
+        'type': 'image',
+        'bytes': File(p).readAsBytesSync(),
+      }).toList();
+
+      for (final p in tempAnnotatedImages) {
+        try { File(p).deleteSync(); } catch (_) {}
+      }
+
+      final resPath = await _pdfChannel.invokeMethod<String>('renderStructuredDocToPdf', {
+        'outputPath': exportFile.path,
+        'blocks': blocks,
+      });
+
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        if (resPath != null && File(resPath).existsSync()) {
+          await StorageService.setBookGroup(resPath, 'PDF/문서');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                _tr(
+                  '메모가 포함된 PDF 파일이 서재에 저장되었습니다: $exportFileName',
+                  'Saved annotated PDF to bookshelf: $exportFileName',
+                  '已将包含笔记的 PDF 文件保存至书架：$exportFileName',
+                  'メモ付きPDFが書斎に保存されました: $exportFileName',
+                ),
+              ),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('내보내기 오류: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _showMemoTextDialog() async {
     final currentNote = _memoNotesByPage[_currentPage] ?? '';
     final ctrl = TextEditingController(text: currentNote);
@@ -879,7 +1030,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  _tr('화면 잠금 설정 (동시 사용 가능)', 'Screen Lock Settings (Multiple allowed)', '屏幕锁定设置 (可同时启用)', '画面ロック設定 (同時使用可)'),
+                  _tr('화면 잠금 끄기 설정 (동시 사용 가능)', 'Screen Unlock Settings (Multiple allowed)', '解除屏幕锁定设置 (可同时启用)', '画面ロック解除設定 (同時使用可)'),
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 6),
@@ -888,7 +1039,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   runSpacing: 6,
                   children: [
                     FilterChip(
-                      label: Text(_tr('흔들어서 잠그고 끄기', 'Shake to Lock/Unlock', '摇晃锁定/解锁', '振ってロック/解除')),
+                      label: Text(_tr('흔들어서 끄기', 'Shake to Unlock', '摇晃关闭锁定', '振って解除')),
                       selected: _useShakeLock,
                       onSelected: (val) async {
                         await StorageService.setUseShakeLock(val);
@@ -897,7 +1048,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     FilterChip(
-                      label: Text(_tr('음량 버튼 동시에 눌러서 끄고 켜기', 'Press Both Volume Keys to Lock/Unlock', '同时按音量键锁定/解锁', '音量ボタン同時押しでロック/解除')),
+                      label: Text(_tr('음량 버튼 동시에 눌러서 끄기', 'Vol Up+Down to Unlock', '同时按音量键关闭锁定', '音量キー同時押しで解除')),
                       selected: _useVolumeComboLock,
                       onSelected: (val) async {
                         await StorageService.setUseVolumeComboLock(val);
@@ -918,6 +1069,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   runSpacing: 6,
                   children: [
                     FilterChip(
+                      label: Text(_tr('화면 옆으로 밀기 (기본값)', 'Swipe to Turn (Default)', '横向滑动翻页 (默认)', '画面スワイプ (基本)')),
+                      selected: _useSwipeTurn,
+                      onSelected: (val) async {
+                        await StorageService.setUseSwipeTurn(val);
+                        setState(() => _useSwipeTurn = val);
+                        setModalState(() {});
+                      },
+                    ),
+                    FilterChip(
                       label: Text(_tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン')),
                       selected: _useVolumeTurn,
                       onSelected: (val) async {
@@ -927,7 +1087,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     FilterChip(
-                      label: Text(_tr('페이지 이동 버튼', 'Page Nav Buttons', '翻页按钮', 'ページ移動ボタン')),
+                      label: Text(_tr('페이지 이동 버튼 (화면 우측 하단 ← / →)', 'On-screen Page Buttons (← / →)', '屏幕翻页按钮 (← / →)', '画面移動ボタン (← / →)')),
                       selected: _useQuickNavTurn,
                       onSelected: (val) async {
                         await StorageService.setUseQuickNavTurn(val);
@@ -936,7 +1096,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     FilterChip(
-                      label: Text(_tr('S펜 버튼', 'S Pen Button', 'S Pen 按钮', 'Sペンボタン')),
+                      label: Text(_tr('S펜 버튼 (한 번: 다음 / 두 번: 이전)', 'S Pen Button', 'S Pen 笔按键', 'Sペンボタン')),
                       selected: _useSpenTurn,
                       onSelected: (val) async {
                         await StorageService.setUseSpenTurn(val);
@@ -945,6 +1105,18 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                   ],
+                ),
+                const Divider(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.picture_as_pdf, color: Colors.indigo),
+                    label: Text(_tr('메모/필기 포함 PDF로 내보내기', 'Export PDF with Annotations', '导出包含笔记的 PDF', 'メモ付きPDFを出力')),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _exportDocumentWithAnnotations();
+                    },
+                  ),
                 ),
                 const Divider(height: 24),
                 Text(
@@ -1090,41 +1262,56 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 style: const TextStyle(fontSize: 13),
               ),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  ChoiceChip(
-                    label: Text(_tr('일본어 (Japanese)', 'Japanese', '日语 (Japanese)', '日本語 (Japanese)')),
-                    selected: _sourceLangCode == 'ja',
-                    onSelected: (_) {
-                      setModalState(() {
-                        _sourceLangCode = 'ja';
-                        _selectedScript = TextRecognitionScript.japanese;
-                      });
+              Builder(
+                builder: (context) {
+                  final allOptions = <Map<String, dynamic>>[
+                    {
+                      'code': 'ja',
+                      'label': _tr('일본어 (Japanese)', 'Japanese', '日语 (Japanese)', '日本語 (Japanese)'),
+                      'script': TextRecognitionScript.japanese,
                     },
-                  ),
-                  ChoiceChip(
-                    label: Text(_tr('중국어 (Chinese)', 'Chinese', '中文 (Chinese)', '中国語 (Chinese)')),
-                    selected: _sourceLangCode == 'zh',
-                    onSelected: (_) {
-                      setModalState(() {
-                        _sourceLangCode = 'zh';
-                        _selectedScript = TextRecognitionScript.chinese;
-                      });
+                    {
+                      'code': 'zh',
+                      'label': _tr('중국어 (Chinese)', 'Chinese', '中文 (Chinese)', '中国語 (Chinese)'),
+                      'script': TextRecognitionScript.chinese,
                     },
-                  ),
-                  ChoiceChip(
-                    label: Text(_tr('한국어 (Korean)', 'Korean', '韩语 (Korean)', '韓国語 (Korean)')),
-                    selected: _sourceLangCode == 'ko',
-                    onSelected: (_) {
-                      setModalState(() {
-                        _sourceLangCode = 'ko';
-                        _selectedScript = TextRecognitionScript.korean;
-                      });
+                    {
+                      'code': 'en',
+                      'label': _tr('영어 (English)', 'English', '英语 (English)', '英語 (English)'),
+                      'script': TextRecognitionScript.latin,
                     },
-                  ),
-                ],
+                    {
+                      'code': 'ko',
+                      'label': _tr('한국어 (Korean)', 'Korean', '韩语 (Korean)', '韓国語 (Korean)'),
+                      'script': TextRecognitionScript.korean,
+                    },
+                  ];
+                  final availableOptions = allOptions.where((opt) => opt['code'] != targetLang).toList();
+                  if (!availableOptions.any((opt) => opt['code'] == _sourceLangCode) && availableOptions.isNotEmpty) {
+                    _sourceLangCode = availableOptions.first['code'] as String;
+                    _selectedScript = availableOptions.first['script'] as TextRecognitionScript;
+                  }
+
+                  return Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: availableOptions.map((opt) {
+                      final code = opt['code'] as String;
+                      final label = opt['label'] as String;
+                      final scr = opt['script'] as TextRecognitionScript;
+                      return ChoiceChip(
+                        label: Text(label),
+                        selected: _sourceLangCode == code,
+                        onSelected: (_) {
+                          setModalState(() {
+                            _sourceLangCode = code;
+                            _selectedScript = scr;
+                          });
+                        },
+                      );
+                    }).toList(),
+                  );
+                },
               ),
             ],
           ),
@@ -1707,6 +1894,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   void dispose() {
+    SystemChrome.setPreferredOrientations([]);
     WidgetsBinding.instance.removeObserver(this);
     BatchTranslationService.translationCompletedEvent.removeListener(_onBackgroundTranslationFinished);
     _volumeKeyService.stopListening();
@@ -1786,7 +1974,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     key: ValueKey('pageview_spread_$isSpread'),
                     controller: _pageController,
                     reverse: _isMangaRtlMode,
-                    physics: (_isTouchLocked || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)))
+                    physics: (_isTouchLocked || !_useSwipeTurn || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)))
                         ? const NeverScrollableScrollPhysics()
                         : const BouncingScrollPhysics(),
                   itemCount: viewItemCount,
@@ -1805,9 +1993,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     if (!isSpread) {
                       return InteractiveViewer(
                         panEnabled: !_isMemoMode,
-                        scaleEnabled: !_isMemoMode,
+                        scaleEnabled: !_isMemoMode && !_isTouchLocked,
                         minScale: 1.0,
-                        maxScale: 3.5,
+                        maxScale: 4.5,
                         child: _buildSinglePagePanel(viewIdx),
                       );
                     }
@@ -1898,7 +2086,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
           if (_isMemoMode && !_isTouchLocked)
             Positioned(
-              top: _showControls ? 58 : 12,
+              top: (_showControls ? 54.0 : 8.0) + MediaQuery.of(context).padding.top,
               left: 12,
               right: 12,
               child: Center(
@@ -2027,118 +2215,225 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               right: 0,
               child: Material(
                 color: Colors.black87,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                      Expanded(
-                        child: Text(
-                          widget.title,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: LayoutBuilder(
+                      builder: (context, barConstraints) {
+                        final bool isWide = barConstraints.maxWidth >= 560;
+                        const btnConstraints = BoxConstraints(minWidth: 32, minHeight: 38);
+                        const btnPadding = EdgeInsets.symmetric(horizontal: 4, vertical: 4);
 
-                      IconButton(
-                        icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 22),
-                        tooltip: '이전 파일로 이동 (같은 그룹)',
-                        onPressed: () => _openAdjacentFileInSameGroup(-1),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
-                        tooltip: '다음 파일로 이동 (같은 그룹)',
-                        onPressed: () => _openAdjacentFileInSameGroup(1),
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.draw_outlined,
-                          color: _isMemoMode ? Colors.amber : Colors.white,
-                          size: 20,
-                        ),
-                        tooltip: _tr('S펜 메모', 'S Pen Memo', 'S Pen 笔记', 'Sペンメモ'),
-                        onPressed: () {
-                          setState(() {
-                            _isMemoMode = !_isMemoMode;
-                            _isEraserMode = false;
-                            if (!_isMemoMode) _allowFingerDrawing = false;
-                          });
-                        },
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
-                          color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
-                          size: 20,
-                        ),
-                        tooltip: '가로 모드 2페이지 보기 설정',
-                        onPressed: () async {
-                          final nextVal = !_enableTwoPageInLandscape;
-                          await StorageService.setTwoPageLandscape(nextVal);
-                          setState(() => _enableTwoPageInLandscape = nextVal);
-                        },
-                      ),
-                      IconButton(
-                        icon: _buildDualDirectionIcon(),
-                        tooltip: _isMangaRtlMode
-                            ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
-                            : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
-                        onPressed: () async {
-                          final nextRtl = !_isMangaRtlMode;
-                          await StorageService.setReadingDirectionRtl(nextRtl);
-                          setState(() => _isMangaRtlMode = nextRtl);
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  nextRtl
-                                      ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
-                                      : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
-                                ),
-                                duration: const Duration(milliseconds: 900),
+                        final rowWidget = Row(
+                          mainAxisAlignment: isWide ? MainAxisAlignment.start : MainAxisAlignment.spaceBetween,
+                          children: [
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                              onPressed: () => Navigator.pop(context),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: Icon(
+                                _isTouchLocked ? Icons.lock : Icons.lock_open,
+                                color: _isTouchLocked ? Colors.redAccent : Colors.white,
+                                size: 20,
                               ),
-                            );
-                          }
-                        },
-                      ),
-                      GestureDetector(
-                        onLongPress: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
-                        child: IconButton(
-                          icon: Icon(
-                            _showTranslatedBubbles ? Icons.chat_bubble : Icons.translate,
-                            color: _showTranslatedBubbles ? Colors.amber : Colors.white,
-                            size: 20,
+                              tooltip: _isTouchLocked
+                                  ? _tr('화면 잠금 끄기', 'Unlock Screen', '关闭锁定', 'ロック解除')
+                                  : _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
+                              onPressed: () {
+                                setState(() => _isTouchLocked = !_isTouchLocked);
+                                if (_isTouchLocked && mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        _tr(
+                                          '화면이 잠겼습니다. (흔들거나 음량 버튼 동시에 누르면 잠금 해제)',
+                                          'Screen locked. (Shake or press Vol Up+Down to unlock)',
+                                          '屏幕已锁定。（摇晃或同时按音量键即可解锁）',
+                                          '画面をロックしました。(振るか音量キー同時押しで解除)',
+                                        ),
+                                      ),
+                                      duration: const Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.screen_rotation, color: Colors.white, size: 20),
+                              tooltip: _tr('가로/세로 화면 전환', 'Rotate Screen', '横/竖屏切换', '画面回転切替'),
+                              onPressed: () {
+                                final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+                                if (isLandscape) {
+                                  SystemChrome.setPreferredOrientations([
+                                    DeviceOrientation.portraitUp,
+                                    DeviceOrientation.portraitDown,
+                                  ]);
+                                } else {
+                                  SystemChrome.setPreferredOrientations([
+                                    DeviceOrientation.landscapeLeft,
+                                    DeviceOrientation.landscapeRight,
+                                  ]);
+                                }
+                              },
+                            ),
+                            if (isWide)
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                                  child: Text(
+                                    widget.title,
+                                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 22),
+                              tooltip: _tr('이전 파일로 이동', 'Previous File', '上一个文件', '前のファイル'),
+                              onPressed: () => _openAdjacentFileInSameGroup(-1),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
+                              tooltip: _tr('다음 파일로 이동 (같은 그룹)', 'Next File in Group', '同组下一个文件', '同グループの次のファイル'),
+                              onPressed: () => _openAdjacentFileInSameGroup(1),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: Icon(
+                                Icons.draw_outlined,
+                                color: _isMemoMode ? Colors.amber : Colors.white,
+                                size: 20,
+                              ),
+                              tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
+                              onPressed: () {
+                                setState(() {
+                                  _isMemoMode = !_isMemoMode;
+                                  _isEraserMode = false;
+                                  if (!_isMemoMode) _allowFingerDrawing = false;
+                                });
+                              },
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: Icon(
+                                _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
+                                color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
+                                size: 20,
+                              ),
+                              tooltip: _tr('가로 모드 2페이지 보기', '2-Page Spread', '双页显示', '2ページ表示'),
+                              onPressed: () async {
+                                final nextVal = !_enableTwoPageInLandscape;
+                                await StorageService.setTwoPageLandscape(nextVal);
+                                setState(() => _enableTwoPageInLandscape = nextVal);
+                              },
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: _buildDualDirectionIcon(),
+                              tooltip: _isMangaRtlMode
+                                  ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
+                                  : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
+                              onPressed: () async {
+                                final nextRtl = !_isMangaRtlMode;
+                                await StorageService.setReadingDirectionRtl(nextRtl);
+                                setState(() => _isMangaRtlMode = nextRtl);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        nextRtl
+                                            ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
+                                            : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
+                                      ),
+                                      duration: const Duration(milliseconds: 900),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                            GestureDetector(
+                              onLongPress: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
+                              child: IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: Icon(
+                                  _showTranslatedBubbles ? Icons.chat_bubble : Icons.translate,
+                                  color: _showTranslatedBubbles ? Colors.amber : Colors.white,
+                                  size: 20,
+                                ),
+                                tooltip: _tr('번역', 'Translate', '翻译', '翻訳'),
+                                onPressed: () {
+                                  if (_bubblesByPage.isEmpty) {
+                                    _showLanguageAndTranslateDialog(forceRetranslate: false);
+                                  } else {
+                                    setState(() => _showTranslatedBubbles = !_showTranslatedBubbles);
+                                  }
+                                },
+                              ),
+                            ),
+                            if (_bubblesByPage.isNotEmpty)
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.refresh, color: Colors.white70, size: 19),
+                                tooltip: _tr('다시 번역', 'Retranslate', '重新翻译', '再翻訳'),
+                                onPressed: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
+                              ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
+                              tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
+                              onPressed: _showBookmarkSheet,
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.tune, color: Colors.white, size: 20),
+                              tooltip: _tr('뷰어 표시 설정', 'Viewer Settings', '阅读器显示设置', 'ビューア表示設定'),
+                              onPressed: _showViewerSettingsSheet,
+                            ),
+                          ],
+                        );
+
+                        if (isWide) return rowWidget;
+                        return FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.center,
+                          child: SizedBox(
+                            width: barConstraints.maxWidth,
+                            child: rowWidget,
                           ),
-                          tooltip: _tr('사전 번역', 'Pre-Translate', '预先翻译', '事前翻訳'),
-                          onPressed: () {
-                            if (_bubblesByPage.isEmpty) {
-                              _showLanguageAndTranslateDialog(forceRetranslate: false);
-                            } else {
-                              setState(() => _showTranslatedBubbles = !_showTranslatedBubbles);
-                            }
-                          },
-                        ),
-                      ),
-                      if (_bubblesByPage.isNotEmpty)
-                        IconButton(
-                          icon: const Icon(Icons.refresh, color: Colors.white70, size: 19),
-                          tooltip: _tr('다시 번역', 'Retranslate', '重新翻译', '再翻訳'),
-                          onPressed: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
-                        ),
-                      IconButton(
-                        icon: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
-                        tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
-                        onPressed: _showBookmarkSheet,
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.tune, color: Colors.white, size: 20),
-                        tooltip: _tr('뷰어 표시 설정', 'Viewer Settings', '阅读器显示设置', 'ビューア表示設定'),
-                        onPressed: _showViewerSettingsSheet,
-                      ),
-                    ],
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),

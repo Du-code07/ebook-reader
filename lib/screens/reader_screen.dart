@@ -103,8 +103,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _useShakeLock = true;
   bool _useVolumeComboLock = true;
   bool _useVolumeTurn = true;
+  bool _useSwipeTurn = true;
   bool _useQuickNavTurn = false;
-  bool _useSpenTurn = true;
+  bool _useSpenTurn = false;
+  bool _isLandscapeForced = false;
 
   // 1 & 3. S펜 전용 페이지별 필기 및 지우개 상태 (필기 모드에서 S펜이 닿으면 화면 이동 100% 차단 + 해당 페이지에서만 필기 표시)
   bool _isMemoMode = false;
@@ -398,6 +400,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final volComboLock = await StorageService.getUseVolumeComboLock();
     final volTurn = await StorageService.getUseVolumeTurn();
     final quickTurn = await StorageService.getUseQuickNavTurn();
+    final swipeTurn = await StorageService.getUseSwipeTurn();
     final spenTurn = await StorageService.getUseSpenTurn();
     final memo = await StorageService.getPageMemoNote(widget.filePath, 0);
 
@@ -429,6 +432,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _useVolumeComboLock = volComboLock;
       _useVolumeTurn = volTurn;
       _useQuickNavTurn = quickTurn;
+      _useSwipeTurn = swipeTurn;
       _useSpenTurn = spenTurn;
       _bookMemoNote = memo;
       _epubStrokes = strokes;
@@ -618,6 +622,72 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
   }
 
+  Future<void> _exportDocumentWithAnnotations() async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final now = DateTime.now();
+      final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
+      final baseTitle = widget.bookTitle.replaceAll(RegExp(r'\.[^.]+$'), '');
+      final exportFileName = '${baseTitle}_메모포함_$dateStr.pdf';
+      final exportFile = File('${appDir.path}/$exportFileName');
+
+      final blocks = <Map<String, dynamic>>[];
+      blocks.add({
+        'type': 'paragraph',
+        'text': '📖 ${widget.bookTitle}',
+        'fontSizePt': 16.0,
+        'bold': true,
+      });
+
+      if (_bookMemoNote.trim().isNotEmpty) {
+        blocks.add({
+          'type': 'paragraph',
+          'text': '📝 [전체 메모]\n${_bookMemoNote.trim()}',
+          'fontSizePt': 11.5,
+          'bold': false,
+        });
+      }
+
+      final allSavedStrokes = await StorageService.getEpubLocationStrokes(widget.filePath, _currentPageLocationKey);
+      if (allSavedStrokes.isNotEmpty) {
+        blocks.add({
+          'type': 'paragraph',
+          'text': '✏️ [필기 내역: ${allSavedStrokes.length}개의 획 저장됨]',
+          'fontSizePt': 10.5,
+          'italic': true,
+        });
+      }
+
+      await _pdfChannel.invokeMethod<String>('renderStructuredDocToPdf', {
+        'outputPath': exportFile.path,
+        'blocks': blocks,
+      });
+
+      if (mounted) {
+        await StorageService.setBookGroup(exportFile.path, 'PDF/문서');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _tr(
+                '메모가 포함된 PDF 파일이 서재에 저장되었습니다: $exportFileName',
+                'Saved annotated PDF to bookshelf: $exportFileName',
+                '已将包含笔记的 PDF 文件保存至书架：$exportFileName',
+                'メモ付きPDFが書斎に保存されました: $exportFileName',
+              ),
+            ),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('내보내기 오류: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _showEpubMemoDialog() async {
     final ctrl = TextEditingController(text: _bookMemoNote);
     await showDialog(
@@ -746,7 +816,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 ),
                 const Divider(height: 16),
                 Text(
-                  _tr('화면 잠금 설정 (동시 사용 가능)', 'Screen Lock Settings (Multiple allowed)', '屏幕锁定设置 (可同时启用)', '画面ロック設定 (同時使用可)'),
+                  _tr('화면 잠금 끄기 설정 (동시 사용 가능)', 'Screen Unlock Settings (Multiple allowed)', '解除屏幕锁定设置 (可同时启用)', '画面ロック解除設定 (同時使用可)'),
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 6),
@@ -755,7 +825,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   runSpacing: 6,
                   children: [
                     FilterChip(
-                      label: Text(_tr('흔들어서 잠그고 끄기', 'Shake to Lock/Unlock', '摇晃锁定/解锁', '振ってロック/解除')),
+                      label: Text(_tr('흔들어서 끄기', 'Shake to Unlock', '摇晃关闭锁定', '振って解除')),
                       selected: _useShakeLock,
                       onSelected: (val) async {
                         await StorageService.setUseShakeLock(val);
@@ -764,7 +834,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       },
                     ),
                     FilterChip(
-                      label: Text(_tr('음량 버튼 동시에 눌러서 끄고 켜기', 'Press Both Volume Keys to Lock/Unlock', '同时按音量键锁定/解锁', '音量ボタン同時押しでロック/解除')),
+                      label: Text(_tr('음량 버튼 동시에 눌러서 끄기', 'Vol Up+Down to Unlock', '同时按音量键关闭锁定', '音量キー同時押しで解除')),
                       selected: _useVolumeComboLock,
                       onSelected: (val) async {
                         await StorageService.setUseVolumeComboLock(val);
@@ -784,6 +854,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   spacing: 8,
                   runSpacing: 6,
                   children: [
+                    FilterChip(
+                      label: Text(_tr('화면 옆으로 밀기 (기본값)', 'Swipe to Turn (Default)', '横向滑动翻页 (默认)', '画面スワイプ (基本)')),
+                      selected: _useSwipeTurn,
+                      onSelected: (val) async {
+                        await StorageService.setUseSwipeTurn(val);
+                        setState(() => _useSwipeTurn = val);
+                        setModalState(() {});
+                      },
+                    ),
                     FilterChip(
                       label: Text(_tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン')),
                       selected: _useVolumeTurn,
@@ -812,6 +891,18 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       },
                     ),
                   ],
+                ),
+                const Divider(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.picture_as_pdf, color: Colors.indigo),
+                    label: Text(_tr('메모/필기 포함 PDF로 내보내기', 'Export PDF with Annotations', '导出包含笔记的 PDF', 'メモ付きPDFを出力')),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _exportDocumentWithAnnotations();
+                    },
+                  ),
                 ),
                 const Divider(height: 24),
                 Text(
@@ -988,26 +1079,33 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 style: const TextStyle(fontSize: 13),
               ),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  ChoiceChip(
-                    label: Text(_tr('일본어 (Japanese)', 'Japanese', '日语 (Japanese)', '日本語 (Japanese)')),
-                    selected: selectedSource == 'ja',
-                    onSelected: (_) => setModalState(() => selectedSource = 'ja'),
-                  ),
-                  ChoiceChip(
-                    label: Text(_tr('중국어 (Chinese)', 'Chinese', '中文 (Chinese)', '中国語 (Chinese)')),
-                    selected: selectedSource == 'zh',
-                    onSelected: (_) => setModalState(() => selectedSource = 'zh'),
-                  ),
-                  ChoiceChip(
-                    label: Text(_tr('한국어 (Korean)', 'Korean', '韩语 (Korean)', '韓国語 (Korean)')),
-                    selected: selectedSource == 'ko',
-                    onSelected: (_) => setModalState(() => selectedSource = 'ko'),
-                  ),
-                ],
+              Builder(
+                builder: (context) {
+                  final allOptions = <Map<String, String>>[
+                    {'code': 'ja', 'label': _tr('일본어 (Japanese)', 'Japanese', '日语 (Japanese)', '日本語 (Japanese)')},
+                    {'code': 'zh', 'label': _tr('중국어 (Chinese)', 'Chinese', '中文 (Chinese)', '中国語 (Chinese)')},
+                    {'code': 'en', 'label': _tr('영어 (English)', 'English', '英语 (English)', '英語 (English)')},
+                    {'code': 'ko', 'label': _tr('한국어 (Korean)', 'Korean', '韩语 (Korean)', '韓国語 (Korean)')},
+                  ];
+                  final availableOptions = allOptions.where((opt) => opt['code'] != targetLang).toList();
+                  if (!availableOptions.any((opt) => opt['code'] == selectedSource) && availableOptions.isNotEmpty) {
+                    selectedSource = availableOptions.first['code']!;
+                  }
+
+                  return Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: availableOptions.map((opt) {
+                      final code = opt['code']!;
+                      final label = opt['label']!;
+                      return ChoiceChip(
+                        label: Text(label),
+                        selected: selectedSource == code,
+                        onSelected: (_) => setModalState(() => selectedSource = code),
+                      );
+                    }).toList(),
+                  );
+                },
               ),
             ],
           ),
@@ -1259,7 +1357,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 6. 진행도 UI의 화살표를 맨 처음(0.0)과 맨 마지막(1.0)으로 즉시 이동하는 용도로 변경!
   /// + 하단 배치 시 우측 하단 페이지 이동 버튼과 절대 겹치지 않도록 슬림/컴팩트 사이즈로 축소 및 여백 확보!
   Widget _buildEpubProgressBar(double bottomInset) {
-    if (!_showControls || _isTouchLocked || _progressBarPos == 'hidden') {
+    if (!_showControls || _isTouchLocked || _progressBarPos == 'hidden' || (_chapters.length <= 1 && _progress <= 0.0)) {
       return const Positioned(
         key: ValueKey('epub_progress_bar_hidden'),
         left: 0,
@@ -1526,7 +1624,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   bottom: (bottomPadding > 0 ? bottomPadding : 8.0) + 20.0,
                 ),
                 child: IgnorePointer(
-                  ignoring: _isTouchLocked || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)),
+                  ignoring: _isTouchLocked || !_useSwipeTurn || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)),
                   child: Listener(
                     behavior: HitTestBehavior.translucent,
                     onPointerDown: _handlePointerDown,
@@ -1765,7 +1863,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             // S펜 필기 모드 상단 미니 툴바 (펜 색상 + 지우개 버튼 포함)
             if (_isMemoMode && !_isTouchLocked)
               Positioned(
-                top: _showControls ? 58 : 12,
+                top: (_showControls ? 54.0 : 8.0) + MediaQuery.of(context).padding.top,
                 left: 12,
                 right: 12,
                 child: Center(
@@ -1897,118 +1995,228 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 right: 0,
                 child: Material(
                   color: Colors.black87,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back, color: Colors.white),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.list, color: Colors.white, size: 20),
-                          tooltip: '목차',
-                          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                        ),
-                        Expanded(
-                          child: Text(
-                            widget.bookTitle,
-                            style: const TextStyle(color: Colors.white, fontSize: 14),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                      child: LayoutBuilder(
+                        builder: (context, barConstraints) {
+                          final bool isWide = barConstraints.maxWidth >= 560;
+                          const btnConstraints = BoxConstraints(minWidth: 31, minHeight: 38);
+                          const btnPadding = EdgeInsets.symmetric(horizontal: 3, vertical: 4);
 
-                        IconButton(
-                          icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 22),
-                          tooltip: '이전 파일로 이동 (같은 그룹)',
-                          onPressed: () => _openAdjacentFileInSameGroup(-1),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
-                          tooltip: '다음 파일로 이동 (같은 그룹)',
-                          onPressed: () => _openAdjacentFileInSameGroup(1),
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            Icons.draw_outlined,
-                            color: _isMemoMode ? Colors.amber : Colors.white,
-                            size: 20,
-                          ),
-                          tooltip: _tr('S펜 메모', 'S Pen Memo', 'S Pen 笔记', 'Sペンメモ'),
-                          onPressed: () {
-                            setState(() {
-                              _isMemoMode = !_isMemoMode;
-                              _isEraserMode = false;
-                              if (!_isMemoMode) _allowFingerDrawing = false;
-                              _isStylusDown = false;
-                            });
-                          },
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
-                            color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
-                            size: 20,
-                          ),
-                          tooltip: '가로 모드 2페이지 보기 설정',
-                          onPressed: () async {
-                            final nextVal = !_enableTwoPageInLandscape;
-                            await StorageService.setTwoPageLandscape(nextVal);
-                            setState(() {
-                              _initialCfi = _currentCfi;
-                              _enableTwoPageInLandscape = nextVal;
-                            });
-                          },
-                        ),
-                        IconButton(
-                          icon: _buildDualDirectionIcon(),
-                          tooltip: _isMangaRtlMode
-                              ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
-                              : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
-                          onPressed: () async {
-                            final nextRtl = !_isMangaRtlMode;
-                            await StorageService.setReadingDirectionRtl(nextRtl);
-                            setState(() => _isMangaRtlMode = nextRtl);
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    nextRtl
-                                        ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
-                                        : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
-                                  ),
-                                  duration: const Duration(milliseconds: 900),
+                          final rowWidget = Row(
+                            mainAxisAlignment: isWide ? MainAxisAlignment.start : MainAxisAlignment.spaceBetween,
+                            children: [
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                                onPressed: () => Navigator.pop(context),
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: Icon(
+                                  _isTouchLocked ? Icons.lock : Icons.lock_open,
+                                  color: _isTouchLocked ? Colors.redAccent : Colors.white,
+                                  size: 20,
                                 ),
-                              );
-                            }
-                          },
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            _isTranslatedFileActive ? Icons.chat_bubble : Icons.translate,
-                            color: _isTranslatedFileActive ? Colors.amber : Colors.white,
-                            size: 20,
-                          ),
-                          tooltip: _tr('사전 번역', 'Pre-Translate', '预先翻译', '事前翻訳'),
-                          onPressed: () => _handleBatchTranslateBook(forceRetranslate: false),
-                        ),
-                        if (_isTranslatedFileActive)
-                          IconButton(
-                            icon: const Icon(Icons.refresh, color: Colors.white70, size: 19),
-                            tooltip: _tr('다시 번역', 'Retranslate', '重新翻译', '再翻訳'),
-                            onPressed: () => _handleBatchTranslateBook(forceRetranslate: true),
-                          ),
-                        IconButton(
-                          icon: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
-                          tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
-                          onPressed: _openBookmarkSheet,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.tune, color: Colors.white, size: 20),
-                          tooltip: _tr('뷰어 표시 설정', 'Viewer Settings', '阅读器显示设置', 'ビューア表示設定'),
-                          onPressed: _showViewerSettingsSheet,
-                        ),
-                      ],
+                                tooltip: _isTouchLocked
+                                    ? _tr('화면 잠금 끄기', 'Unlock Screen', '关闭锁定', 'ロック解除')
+                                    : _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
+                                onPressed: () {
+                                  setState(() => _isTouchLocked = !_isTouchLocked);
+                                  if (_isTouchLocked && mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          _tr(
+                                            '화면이 잠겼습니다. (흔들거나 음량 버튼 동시에 누르면 잠금 해제)',
+                                            'Screen locked. (Shake or press Vol Up+Down to unlock)',
+                                            '屏幕已锁定。（摇晃或同时按音量键即可解锁）',
+                                            '画面をロックしました。(振るか音量キー同時押しで解除)',
+                                          ),
+                                        ),
+                                        duration: const Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.screen_rotation, color: Colors.white, size: 20),
+                                tooltip: _tr('가로/세로 화면 전환', 'Rotate Screen', '横/竖屏切换', '画面回転切替'),
+                                onPressed: () {
+                                  final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+                                  if (isLandscape) {
+                                    SystemChrome.setPreferredOrientations([
+                                      DeviceOrientation.portraitUp,
+                                      DeviceOrientation.portraitDown,
+                                    ]);
+                                  } else {
+                                    SystemChrome.setPreferredOrientations([
+                                      DeviceOrientation.landscapeLeft,
+                                      DeviceOrientation.landscapeRight,
+                                    ]);
+                                  }
+                                },
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.list, color: Colors.white, size: 20),
+                                tooltip: _tr('목차', 'Contents', '目录', '目次'),
+                                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                              ),
+                              if (isWide)
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                                    child: Text(
+                                      widget.bookTitle,
+                                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 22),
+                                tooltip: _tr('이전 파일로 이동', 'Previous File', '上一个文件', '前のファイル'),
+                                onPressed: () => _openAdjacentFileInSameGroup(-1),
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
+                                tooltip: _tr('다음 파일로 이동', 'Next File', '下一个文件', '次のファイル'),
+                                onPressed: () => _openAdjacentFileInSameGroup(1),
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: Icon(
+                                  Icons.draw_outlined,
+                                  color: _isMemoMode ? Colors.amber : Colors.white,
+                                  size: 20,
+                                ),
+                                tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
+                                onPressed: () {
+                                  setState(() {
+                                    _isMemoMode = !_isMemoMode;
+                                    _isEraserMode = false;
+                                    if (!_isMemoMode) _allowFingerDrawing = false;
+                                    _isStylusDown = false;
+                                  });
+                                },
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: Icon(
+                                  _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
+                                  color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
+                                  size: 20,
+                                ),
+                                tooltip: _tr('가로 모드 2페이지 보기', '2-Page Spread', '双页显示', '2ページ表示'),
+                                onPressed: () async {
+                                  final nextVal = !_enableTwoPageInLandscape;
+                                  await StorageService.setTwoPageLandscape(nextVal);
+                                  setState(() {
+                                    _initialCfi = _currentCfi;
+                                    _enableTwoPageInLandscape = nextVal;
+                                  });
+                                },
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: _buildDualDirectionIcon(),
+                                tooltip: _isMangaRtlMode
+                                    ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
+                                    : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
+                                onPressed: () async {
+                                  final nextRtl = !_isMangaRtlMode;
+                                  await StorageService.setReadingDirectionRtl(nextRtl);
+                                  setState(() => _isMangaRtlMode = nextRtl);
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          nextRtl
+                                              ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
+                                              : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
+                                        ),
+                                        duration: const Duration(milliseconds: 900),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: Icon(
+                                  _isTranslatedFileActive ? Icons.chat_bubble : Icons.translate,
+                                  color: _isTranslatedFileActive ? Colors.amber : Colors.white,
+                                  size: 20,
+                                ),
+                                tooltip: _tr('번역', 'Translate', '翻译', '翻訳'),
+                                onPressed: () => _handleBatchTranslateBook(forceRetranslate: false),
+                              ),
+                              if (_isTranslatedFileActive)
+                                IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: btnPadding,
+                                  constraints: btnConstraints,
+                                  icon: const Icon(Icons.refresh, color: Colors.white70, size: 19),
+                                  tooltip: _tr('다시 번역', 'Retranslate', '重新翻译', '再翻訳'),
+                                  onPressed: () => _handleBatchTranslateBook(forceRetranslate: true),
+                                ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
+                                tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
+                                onPressed: _openBookmarkSheet,
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.tune, color: Colors.white, size: 20),
+                                tooltip: _tr('뷰어 표시 설정', 'Viewer Settings', '阅读器显示设置', 'ビューア表示設定'),
+                                onPressed: _showViewerSettingsSheet,
+                              ),
+                            ],
+                          );
+
+                          if (isWide) return rowWidget;
+                          return FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.center,
+                            child: SizedBox(
+                              width: barConstraints.maxWidth,
+                              child: rowWidget,
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ),

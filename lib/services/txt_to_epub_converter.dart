@@ -1697,7 +1697,7 @@ class TxtToEpubConverter {
   /// TXT 등 일반 텍스트 문서를 EPUB 2.0으로 변환
   static Future<File> convertDocumentToEpub(File inputFile) async {
     final epubPath = inputFile.path.replaceAll(
-      RegExp(r'\.(txt|docx|doc|hwpx|hwp)$', caseSensitive: false),
+      RegExp(r'\.(txt|yml|yaml|docx|doc|hwpx|hwp)$', caseSensitive: false),
       '_converted.epub',
     );
     final outFile = File(epubPath);
@@ -1710,7 +1710,7 @@ class TxtToEpubConverter {
         .replaceAll(RegExp(r'\.[^.]+$'), '');
 
     List<String> lines = [];
-    if (ext == 'txt') {
+    if (ext == 'txt' || ext == 'yml' || ext == 'yaml') {
       String content;
       try {
         content = utf8.decode(bytes);

@@ -292,9 +292,19 @@ class StorageService {
     await prefs.setBool('use_spen_turn', enabled);
   }
 
+  static Future<void> setUseSwipeTurn(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('use_swipe_turn', enabled);
+  }
+
+  static Future<bool> getUseSwipeTurn() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('use_swipe_turn') ?? true;
+  }
+
   static Future<bool> getUseSpenTurn() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('use_spen_turn') ?? true;
+    return prefs.getBool('use_spen_turn') ?? false;
   }
 
   static Future<void> setFooterInfoMode(String mode) async {

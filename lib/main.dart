@@ -464,12 +464,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
   // 7 & 8. 삼성 노트(.sdocx, .spd) 및 .zip 제외 / 워드(.docx, .doc) 및 한글(.hwpx, .hwp)은 PDF로 변환하여 업로드!
   static const _supportedExts = [
-    'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+    'epub', 'txt', 'yml', 'yaml', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
     'docx', 'doc', 'hwpx', 'hwp'
   ];
   static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
   static const _pdfConvertDocExts = ['docx', 'doc', 'hwpx', 'hwp'];
-  static const _docConvertExts = ['txt'];
+  static const _docConvertExts = ['txt', 'yml', 'yaml'];
 
   String? _findFileRowPathAtGlobalPos(Offset globalPos) {
     for (final entry in _fileRowKeys.entries) {
@@ -674,10 +674,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           SnackBar(
             content: Text(
               _tr(
-                '지원되는 파일 형식(EPUB, PDF, JPG, PNG, TXT, CBZ, 워드, 한글)을 선택해 주세요.',
-                'Please select supported files (EPUB, PDF, JPG, PNG, TXT, CBZ, Word, HWP).',
-                '请选择受支持的文件格式 (EPUB, PDF, JPG, PNG, TXT, CBZ, Word, HWP)。',
-                '対応ファイル形式(EPUB, PDF, JPG, PNG, TXT, CBZ, Word, HWP)を選択してください。',
+                '지원되는 파일 형식(EPUB, PDF, JPG, PNG, TXT, YML, CBZ, 워드, 한글)을 선택해 주세요.',
+                'Please select supported files (EPUB, PDF, JPG, PNG, TXT, YML, CBZ, Word, HWP).',
+                '请选择受支持的文件格式 (EPUB, PDF, JPG, PNG, TXT, YML, CBZ, Word, HWP)。',
+                '対応ファイル形式(EPUB, PDF, JPG, PNG, TXT, YML, CBZ, Word, HWP)を選択してください。',
               ),
             ),
           ),
@@ -2302,7 +2302,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                         ? Icons.picture_as_pdf
                                         : (lowerExt == 'docx' || lowerExt == 'doc' || lowerExt == 'hwpx' || lowerExt == 'hwp')
                                             ? Icons.description_outlined
-                                            : (lowerExt == 'epub' || lowerExt == 'txt')
+                                            : (lowerExt == 'epub' || lowerExt == 'txt' || lowerExt == 'yml' || lowerExt == 'yaml')
                                                 ? Icons.menu_book
                                                 : lowerExt == 'cbz'
                                                     ? Icons.auto_stories
@@ -2430,7 +2430,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                       IconButton(
                                         visualDensity: VisualDensity.compact,
                                         icon: const Icon(Icons.edit_outlined),
-                                        tooltip: _tr('파일 이름 변경', 'Rename', '重命名', '名前変更'),
+                                        tooltip: _tr('이름 변경', 'Rename', '重命名', '名前変更'),
                                         onPressed: () => _renameFileDialog(file),
                                       ),
                                       IconButton(
