@@ -259,14 +259,15 @@ class StorageService {
     return prefs.getString('epub_bg_theme') ?? 'white';
   }
 
+  // 2. 가로 모드 2페이지 보기는 꺼짐(false)을 기본값으로 설정
   static Future<void> setTwoPageLandscape(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('two_page_landscape', enabled);
+    await prefs.setBool('two_page_landscape_v30', enabled);
   }
 
   static Future<bool> getTwoPageLandscape() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('two_page_landscape') ?? true;
+    return prefs.getBool('two_page_landscape_v30') ?? false;
   }
 
   static String _normalizeBookKey(String bookPath) {

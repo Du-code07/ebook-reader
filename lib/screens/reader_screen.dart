@@ -94,7 +94,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   String? _selectedCfiRange;
   bool _isLoading = true;
   String _epubBgTheme = 'white'; // 'white', 'sepia', 'dark'
-  bool _enableTwoPageInLandscape = true;
+  bool _enableTwoPageInLandscape = false;
   bool _isMangaRtlMode = false;
   int _fontSize = 18;
   List<EpubChapter> _chapters = [];

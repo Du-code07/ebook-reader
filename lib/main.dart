@@ -4,6 +4,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
 import 'screens/pdf_and_image_viewer.dart';
 import 'screens/reader_screen.dart';
@@ -831,7 +832,58 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
   }
 
-  /// 1. 스캔 기능: 카메라로 책/종이를 촬영하여 글자를 깔끔하게 보정하고 순서대로 번호(1, 2, 3...)를 매긴 뒤 PDF 파일로 형성
+  /// 1. OSS-DocumentScanner & Simple Scan PDF 방식 스캔 엔진:
+  /// - ML Kit 온디바이스 글자 영역 인식 + 적분 영상 기반 Sauvola 적응형 이진화로
+  ///   스캔본의 글자/표만 추출해 순백색(#FFFFFF) 빈 종이에 여백 없이(Zero-Margin) 배치!
+  Future<File> _processRawScanToPureTextPage(File rawFile, String filterMode) async {
+    final List<Map<String, int>> textBoxes = [];
+    if (filterMode != 'magic_color') {
+      final recognizer = TextRecognizer(script: TextRecognitionScript.korean);
+      try {
+        final inputImage = InputImage.fromFilePath(rawFile.path);
+        final recognized = await recognizer.processImage(inputImage);
+        for (final block in recognized.blocks) {
+          final r = block.boundingBox;
+          textBoxes.add({
+            'left': r.left.round(),
+            'top': r.top.round(),
+            'right': r.right.round(),
+            'bottom': r.bottom.round(),
+          });
+          for (final line in block.lines) {
+            final lr = line.boundingBox;
+            textBoxes.add({
+              'left': lr.left.round(),
+              'top': lr.top.round(),
+              'right': lr.right.round(),
+              'bottom': lr.bottom.round(),
+            });
+          }
+        }
+      } catch (_) {
+      } finally {
+        try {
+          await recognizer.close();
+        } catch (_) {}
+      }
+    }
+
+    try {
+      final String? processedPath = await _pdfChannel.invokeMethod<String>(
+        'processScannedPageWithTextIsolation',
+        {
+          'imagePath': rawFile.path,
+          'filterMode': filterMode,
+          'textBoxes': textBoxes,
+        },
+      );
+      if (processedPath != null && File(processedPath).existsSync()) {
+        return File(processedPath);
+      }
+    } catch (_) {}
+    return rawFile;
+  }
+
   Future<void> _openDocumentScannerDialog() async {
     final now = DateTime.now();
     final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
@@ -839,7 +891,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     final defaultTitle = '스캔_${dateStr}_$rand4';
     final titleController = TextEditingController(text: defaultTitle);
 
+    // 원본 촬영 파일과 보정된 결과 파일을 함께 관리하여 필터 변경 시 즉시 재적용 가능
+    final List<File> rawCapturedPages = [];
     final List<File> scannedPages = [];
+    String selectedFilterMode = 'text_only_zero_margin'; // 기본값: 글자만 인식해 빈 종이에 여백 없이 배치
     bool isCapturing = false;
     bool isBuildingPdf = false;
     bool autoLaunchedFirstCamera = false;
@@ -848,10 +903,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       if (isCapturing || isBuildingPdf) return;
       setModalState(() => isCapturing = true);
       try {
-        final String? scannedPath = await _pdfChannel.invokeMethod<String>('captureAndScanDocumentPage');
-        if (scannedPath != null && File(scannedPath).existsSync()) {
+        final String? rawPath = await _pdfChannel.invokeMethod<String>('captureAndScanDocumentPage');
+        if (rawPath != null && File(rawPath).existsSync()) {
+          final rawFile = File(rawPath);
+          final processedFile = await _processRawScanToPureTextPage(rawFile, selectedFilterMode);
           setModalState(() {
-            scannedPages.add(File(scannedPath));
+            rawCapturedPages.add(rawFile);
+            scannedPages.add(processedFile);
           });
         }
       } catch (e) {
@@ -860,6 +918,50 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             SnackBar(content: Text('${_tr("카메라 스캔 오류", "Camera Scan Error", "扫描错误", "スキャンエラー")}: $e')),
           );
         }
+      } finally {
+        setModalState(() => isCapturing = false);
+      }
+    }
+
+    Future<void> importImagesFromGalleryForScan(StateSetter setModalState) async {
+      if (isCapturing || isBuildingPdf) return;
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: true,
+      );
+      if (picked == null || picked.files.isEmpty) return;
+      setModalState(() => isCapturing = true);
+      try {
+        for (final pf in picked.files) {
+          if (pf.path == null) continue;
+          final rawFile = File(pf.path!);
+          if (!rawFile.existsSync()) continue;
+          final processedFile = await _processRawScanToPureTextPage(rawFile, selectedFilterMode);
+          rawCapturedPages.add(rawFile);
+          scannedPages.add(processedFile);
+        }
+      } finally {
+        setModalState(() => isCapturing = false);
+      }
+    }
+
+    Future<void> reapplyFilterToAllPages(String newMode, StateSetter setModalState) async {
+      if (isCapturing || isBuildingPdf || selectedFilterMode == newMode) return;
+      setModalState(() {
+        selectedFilterMode = newMode;
+        isCapturing = true;
+      });
+      try {
+        final List<File> updated = [];
+        for (int i = 0; i < rawCapturedPages.length; i++) {
+          final res = await _processRawScanToPureTextPage(rawCapturedPages[i], newMode);
+          updated.add(res);
+        }
+        setModalState(() {
+          scannedPages
+            ..clear()
+            ..addAll(updated);
+        });
       } finally {
         setModalState(() => isCapturing = false);
       }
@@ -879,6 +981,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           }
 
           return AlertDialog(
+            titlePadding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
+            contentPadding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
             title: Row(
               children: [
                 const Icon(Icons.document_scanner_outlined, color: Colors.indigo, size: 22),
@@ -886,19 +990,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 Expanded(
                   child: Text(
                     _tr(
-                      '문서 스캔 (${scannedPages.length}장)',
-                      'Document Scan (${scannedPages.length})',
+                      '심플 문서 스캔 (${scannedPages.length}장)',
+                      'Simple Document Scan (${scannedPages.length})',
                       '文档扫描 (${scannedPages.length}页)',
-                      '文書スキャン (${scannedPages.length}枚)',
+                      'シンプル文書スキャン (${scannedPages.length}枚)',
                     ),
-                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
             ),
             content: SizedBox(
-              width: 460,
-              height: 430,
+              width: 480,
+              height: 470,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -912,7 +1016,45 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       border: const OutlineInputBorder(),
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
+                  // OSS-DocumentScanner & Simple Scan 필터 모드 선택 칩
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        ChoiceChip(
+                          visualDensity: VisualDensity.compact,
+                          label: Text(
+                            _tr('글자만 추출 (여백 없음)', 'Text Only (Zero Margin)', '仅提取文字 (无边距)', '文字のみ抽出 (余白なし)'),
+                            style: const TextStyle(fontSize: 11.5),
+                          ),
+                          selected: selectedFilterMode == 'text_only_zero_margin',
+                          onSelected: (_) => reapplyFilterToAllPages('text_only_zero_margin', setModalState),
+                        ),
+                        const SizedBox(width: 6),
+                        ChoiceChip(
+                          visualDensity: VisualDensity.compact,
+                          label: Text(
+                            _tr('백지 흑백 (전체 면)', 'Clean B&W (Full Page)', '净白黑白 (全页)', '白紙モノクロ (全面)'),
+                            style: const TextStyle(fontSize: 11.5),
+                          ),
+                          selected: selectedFilterMode == 'full_bw',
+                          onSelected: (_) => reapplyFilterToAllPages('full_bw', setModalState),
+                        ),
+                        const SizedBox(width: 6),
+                        ChoiceChip(
+                          visualDensity: VisualDensity.compact,
+                          label: Text(
+                            _tr('매직 컬러', 'Magic Color', '增强彩色', 'マジックカラー'),
+                            style: const TextStyle(fontSize: 11.5),
+                          ),
+                          selected: selectedFilterMode == 'magic_color',
+                          onSelected: (_) => reapplyFilterToAllPages('magic_color', setModalState),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   Expanded(
                     child: isCapturing
                         ? Center(
@@ -923,10 +1065,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                 const SizedBox(height: 14),
                                 Text(
                                   _tr(
-                                    '촬영한 문서를 스캔 보정(글자 선명화·배경 정돈) 중입니다...',
-                                    'Enhancing scanned page (sharpening text & cleaning background)...',
-                                    '正在优化扫描页面（文字锐化与背景净白）...',
-                                    '撮影した文書をスキャン補正中...',
+                                    '스캔본의 글자만 인식하여\n빈 종이에 여백 없이 깔끔하게 배치 중입니다...',
+                                    'Isolating text onto a blank white page\nwith zero margins...',
+                                    '正在识别文字并无边距排版至空白页...',
+                                    '文字のみを認識して白紙に余白なしで配置中...',
                                   ),
                                   textAlign: TextAlign.center,
                                   style: const TextStyle(fontSize: 13),
@@ -939,17 +1081,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.camera_alt_outlined, size: 48, color: Colors.grey),
+                                    const Icon(Icons.document_scanner_outlined, size: 48, color: Colors.grey),
                                     const SizedBox(height: 10),
                                     Text(
                                       _tr(
-                                        '아래 [카메라로 촬영] 버튼을 눌러\n책이나 종이를 순서대로 촬영해 주세요.',
-                                        'Tap [Capture Page] below to photograph\nbook pages or paper in order.',
-                                        '请点击下方【拍照扫描】按钮\n按顺序拍摄书页或纸张。',
-                                        '下の[カメラで撮影]ボタンを押して\n本や紙を順番に撮影してください。',
+                                        '아래 [카메라 촬영] 버튼을 눌러 종이나 책을 찍으면\n글자만 깔끔하게 인식해 빈 종이에 여백 없이 담아줍니다.',
+                                        'Tap [Camera] below to photograph a page.\nOnly the text will be extracted onto a blank sheet without margins.',
+                                        '点击下方【拍照扫描】拍摄书页或纸张，\n将仅提取文字并无边距排入空白纸张。',
+                                        '下の[カメラ撮影]で本や紙を撮影すると、\n文字だけを認識して白紙に余白なしで配置します。',
                                       ),
                                       textAlign: TextAlign.center,
-                                      style: const TextStyle(fontSize: 13, color: Colors.grey),
+                                      style: const TextStyle(fontSize: 12.5, color: Colors.grey),
                                     ),
                                   ],
                                 ),
@@ -959,13 +1101,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                   crossAxisCount: 2,
                                   crossAxisSpacing: 10,
                                   mainAxisSpacing: 10,
-                                  childAspectRatio: 0.74,
+                                  childAspectRatio: 0.72,
                                 ),
                                 itemCount: scannedPages.length,
                                 itemBuilder: (_, idx) {
                                   final pageFile = scannedPages[idx];
                                   final pageNum = idx + 1;
                                   return Card(
+                                    color: Colors.white,
                                     clipBehavior: Clip.antiAlias,
                                     margin: EdgeInsets.zero,
                                     shape: RoundedRectangleBorder(
@@ -975,18 +1118,21 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                     child: Stack(
                                       fit: StackFit.expand,
                                       children: [
-                                        Image.file(
-                                          pageFile,
-                                          fit: BoxFit.cover,
-                                          gaplessPlayback: true,
-                                          filterQuality: FilterQuality.high,
+                                        Container(
+                                          color: Colors.white,
+                                          child: Image.file(
+                                            pageFile,
+                                            fit: BoxFit.contain,
+                                            gaplessPlayback: true,
+                                            filterQuality: FilterQuality.high,
+                                          ),
                                         ),
                                         // 좌측 상단 순서 번호 배지 (#1, #2, #3...)
                                         Positioned(
                                           top: 6,
                                           left: 6,
                                           child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
                                             decoration: BoxDecoration(
                                               color: Colors.indigo.withOpacity(0.92),
                                               borderRadius: BorderRadius.circular(12),
@@ -1001,27 +1147,60 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                             ),
                                           ),
                                         ),
-                                        // 우측 상단 삭제 버튼 (삭제 시 번호 자동 재정렬)
+                                        // 우측 상단 90도 회전(↻) 및 삭제(✕) 버튼
                                         Positioned(
                                           top: 4,
                                           right: 4,
-                                          child: Material(
-                                            color: Colors.black54,
-                                            shape: const CircleBorder(),
-                                            child: InkWell(
-                                              customBorder: const CircleBorder(),
-                                              onTap: isBuildingPdf
-                                                  ? null
-                                                  : () {
-                                                      setModalState(() {
-                                                        scannedPages.removeAt(idx);
-                                                      });
-                                                    },
-                                              child: const Padding(
-                                                padding: EdgeInsets.all(5.0),
-                                                child: Icon(Icons.close, size: 16, color: Colors.white),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Material(
+                                                color: Colors.black54,
+                                                shape: const CircleBorder(),
+                                                child: InkWell(
+                                                  customBorder: const CircleBorder(),
+                                                  onTap: isBuildingPdf
+                                                      ? null
+                                                      : () async {
+                                                          final String? rotPath = await _pdfChannel.invokeMethod<String>(
+                                                            'rotateScannedPageImage',
+                                                            {'imagePath': pageFile.path},
+                                                          );
+                                                          if (rotPath != null && File(rotPath).existsSync()) {
+                                                            setModalState(() {
+                                                              scannedPages[idx] = File(rotPath);
+                                                            });
+                                                          }
+                                                        },
+                                                  child: const Padding(
+                                                    padding: EdgeInsets.all(5.0),
+                                                    child: Icon(Icons.rotate_right, size: 16, color: Colors.white),
+                                                  ),
+                                                ),
                                               ),
-                                            ),
+                                              const SizedBox(width: 4),
+                                              Material(
+                                                color: Colors.black54,
+                                                shape: const CircleBorder(),
+                                                child: InkWell(
+                                                  customBorder: const CircleBorder(),
+                                                  onTap: isBuildingPdf
+                                                      ? null
+                                                      : () {
+                                                          setModalState(() {
+                                                            if (idx < rawCapturedPages.length) {
+                                                              rawCapturedPages.removeAt(idx);
+                                                            }
+                                                            scannedPages.removeAt(idx);
+                                                          });
+                                                        },
+                                                  child: const Padding(
+                                                    padding: EdgeInsets.all(5.0),
+                                                    child: Icon(Icons.close, size: 16, color: Colors.white),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
                                         // 하단 순서 변경 버튼 (◀ / ▶)
@@ -1043,6 +1222,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                                   onPressed: (idx > 0 && !isBuildingPdf)
                                                       ? () {
                                                           setModalState(() {
+                                                            if (idx < rawCapturedPages.length) {
+                                                              final rItem = rawCapturedPages.removeAt(idx);
+                                                              rawCapturedPages.insert(idx - 1, rItem);
+                                                            }
                                                             final item = scannedPages.removeAt(idx);
                                                             scannedPages.insert(idx - 1, item);
                                                           });
@@ -1065,6 +1248,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                                   onPressed: (idx < scannedPages.length - 1 && !isBuildingPdf)
                                                       ? () {
                                                           setModalState(() {
+                                                            if (idx < rawCapturedPages.length - 1) {
+                                                              final rItem = rawCapturedPages.removeAt(idx);
+                                                              rawCapturedPages.insert(idx + 1, rItem);
+                                                            }
                                                             final item = scannedPages.removeAt(idx);
                                                             scannedPages.insert(idx + 1, item);
                                                           });
@@ -1081,17 +1268,35 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                 },
                               ),
                   ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.camera_alt_outlined),
-                    label: Text(
-                      scannedPages.isEmpty
-                          ? _tr('카메라로 촬영 (#1번 찍기)', 'Capture Page #1', '拍照扫描 (第1页)', 'カメラで撮影 (#1枚目)')
-                          : _tr('추가 촬영 (#${scannedPages.length + 1}번 찍기)', 'Capture Page #${scannedPages.length + 1}', '继续拍摄 (第${scannedPages.length + 1}页)', '追加撮影 (#${scannedPages.length + 1}枚目)'),
-                    ),
-                    onPressed: (isCapturing || isBuildingPdf)
-                        ? null
-                        : () => triggerCameraCapture(setModalState),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                          label: Text(
+                            scannedPages.isEmpty
+                                ? _tr('카메라 촬영 (#1)', 'Camera (#1)', '拍照 (#1)', 'カメラ (#1)')
+                                : _tr('추가 촬영 (#${scannedPages.length + 1})', 'Add Shot (#${scannedPages.length + 1})', '继续拍 (#${scannedPages.length + 1})', '追加撮影 (#${scannedPages.length + 1})'),
+                            style: const TextStyle(fontSize: 12.5),
+                          ),
+                          onPressed: (isCapturing || isBuildingPdf)
+                              ? null
+                              : () => triggerCameraCapture(setModalState),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.photo_library_outlined, size: 18),
+                        label: Text(
+                          _tr('사진 선택', 'Gallery', '相册', '写真選択'),
+                          style: const TextStyle(fontSize: 12.5),
+                        ),
+                        onPressed: (isCapturing || isBuildingPdf)
+                            ? null
+                            : () => importImagesFromGalleryForScan(setModalState),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1144,9 +1349,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                           if (createdPath != null && File(createdPath).existsSync()) {
                             final targetGroup = _selectedGroup == '전체' ? 'PDF/문서' : _selectedGroup;
                             await StorageService.setBookGroup(createdPath, targetGroup);
-                            for (final tempImg in scannedPages) {
+                            for (final tempImg in [...scannedPages, ...rawCapturedPages]) {
                               try {
-                                if (await tempImg.exists()) await tempImg.delete();
+                                if (tempImg.path.contains('camera_scans') && await tempImg.exists()) {
+                                  await tempImg.delete();
+                                }
                               } catch (_) {}
                             }
                             if (ctx.mounted) Navigator.pop(ctx);
@@ -1156,10 +1363,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                 SnackBar(
                                   content: Text(
                                     _tr(
-                                      '스캔된 PDF 파일이 생성되었습니다: $cleanName.pdf',
-                                      'Scanned PDF created: $cleanName.pdf',
-                                      '已生成扫描 PDF 文件：$cleanName.pdf',
-                                      'スキャンPDFが作成されました: $cleanName.pdf',
+                                      '여백 없는 깔끔한 스캔 PDF 파일이 생성되었습니다: $cleanName.pdf',
+                                      'Clean zero-margin scanned PDF created: $cleanName.pdf',
+                                      '已生成无边距清晰扫描 PDF 文件：$cleanName.pdf',
+                                      '余白なしの鮮明なスキャンPDFが作成されました: $cleanName.pdf',
                                     ),
                                   ),
                                 ),

@@ -195,7 +195,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _showControls = false;
   bool _showTranslatedBubbles = false;
   bool _isMangaRtlMode = false;
-  bool _enableTwoPageInLandscape = true;
+  bool _enableTwoPageInLandscape = false;
   bool _lastIsSpreadMode = false;
 
   bool _isTouchLocked = false;

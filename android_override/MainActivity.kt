@@ -107,8 +107,14 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private val CAMERA_SCAN_REQUEST_CODE = 9481
     private var pendingCameraResult: MethodChannel.Result? = null
     private var pendingCameraRawFile: File? = null
+    private val autoHideStatusBarRunnable = Runnable { hideSystemStatusBar() }
 
-    // 2. 태블릿(OneUI / Android 12L~16 대화면 모드)에서도 상단 상태표시줄을 강제로 숨기는 통합 메서드
+    private fun scheduleAutoHideStatusBar(delayMs: Long = 1500L) {
+        mainHandler.removeCallbacks(autoHideStatusBarRunnable)
+        mainHandler.postDelayed(autoHideStatusBarRunnable, delayMs)
+    }
+
+    // 2 & 3. 태블릿(OneUI / Android 12L~16 대화면 모드)에서 상태표시줄을 숨기고, 손으로 끌어내렸을 때도 자동으로 다시 올라가게 처리
     private fun hideSystemStatusBar() {
         try {
             window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
@@ -127,12 +133,12 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
                 window.insetsController?.let { controller ->
+                    controller.systemBarsBehavior =
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                     controller.hide(
                         android.view.WindowInsets.Type.statusBars() or
                             android.view.WindowInsets.Type.navigationBars()
                     )
-                    controller.systemBarsBehavior =
-                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
             }
 
@@ -154,10 +160,26 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         } catch (_: Exception) {}
         super.onCreate(savedInstanceState)
         hideSystemStatusBar()
+
+        // Android 11~16 태블릿에서 상단 상태표시줄을 손으로 내려서 나타났을 때 자동으로 다시 올라가도록 WindowInsets 감지
+        window.decorView.setOnApplyWindowInsetsListener { v, insets ->
+            val statusBarVisible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.isVisible(android.view.WindowInsets.Type.statusBars())
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetTop > 0
+            }
+            if (statusBarVisible) {
+                scheduleAutoHideStatusBar(1500L)
+                mainHandler.postDelayed({ hideSystemStatusBar() }, 2800L)
+            }
+            v.onApplyWindowInsets(insets)
+        }
+
         @Suppress("DEPRECATION")
         window.decorView.setOnSystemUiVisibilityChangeListener { visibility ->
             if ((visibility and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0) {
-                mainHandler.postDelayed({ hideSystemStatusBar() }, 50L)
+                scheduleAutoHideStatusBar(1200L)
             }
         }
     }
@@ -351,6 +373,78 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         pendingCameraRawFile = null
                         result.error("CAMERA_ERR", e.message, null)
                     }
+                } else if (call.method == "processScannedPageWithTextIsolation") {
+                    val imagePath = call.argument<String>("imagePath")
+                    val filterMode = call.argument<String>("filterMode") ?: "text_only_zero_margin"
+                    val rawBoxes = call.argument<List<Map<String, Any>>>("textBoxes")
+                    if (imagePath == null || !File(imagePath).exists()) {
+                        result.error("INVALID_ARGS", "Missing imagePath", null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        try {
+                            val srcFile = File(imagePath)
+                            val srcBmp = decodeAndOrientCameraBitmap(srcFile)
+                            if (srcBmp == null) {
+                                runOnUiThread { result.success(imagePath) }
+                                return@Thread
+                            }
+                            val boxes = ArrayList<Rect>()
+                            if (rawBoxes != null) {
+                                for (b in rawBoxes) {
+                                    val l = (b["left"] as? Number)?.toInt() ?: 0
+                                    val t = (b["top"] as? Number)?.toInt() ?: 0
+                                    val r = (b["right"] as? Number)?.toInt() ?: 0
+                                    val bot = (b["bottom"] as? Number)?.toInt() ?: 0
+                                    if (r > l && bot > t) {
+                                        boxes.add(Rect(l, t, r, bot))
+                                    }
+                                }
+                            }
+                            val processedBmp = extractPureTextOnBlankPage(srcBmp, boxes, filterMode)
+                            if (processedBmp !== srcBmp) {
+                                srcBmp.recycle()
+                            }
+                            val scanDir = File(cacheDir, "camera_scans")
+                            if (!scanDir.exists()) scanDir.mkdirs()
+                            val outFile = File(scanDir, "pure_scan_${System.currentTimeMillis()}.jpg")
+                            FileOutputStream(outFile).use { out ->
+                                processedBmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                            }
+                            processedBmp.recycle()
+                            runOnUiThread { result.success(outFile.absolutePath) }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.success(imagePath) }
+                        }
+                    }.start()
+                } else if (call.method == "rotateScannedPageImage") {
+                    val imagePath = call.argument<String>("imagePath")
+                    if (imagePath == null || !File(imagePath).exists()) {
+                        result.success(imagePath)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        try {
+                            val f = File(imagePath)
+                            val bmp = BitmapFactory.decodeFile(f.absolutePath)
+                            if (bmp == null) {
+                                runOnUiThread { result.success(imagePath) }
+                                return@Thread
+                            }
+                            val matrix = Matrix().apply { postRotate(90f) }
+                            val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                            if (rotated !== bmp) bmp.recycle()
+                            val outFile = File(f.parentFile, "rot_${System.currentTimeMillis()}.jpg")
+                            FileOutputStream(outFile).use { out ->
+                                rotated.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                            }
+                            rotated.recycle()
+                            try { f.delete() } catch (_: Exception) {}
+                            runOnUiThread { result.success(outFile.absolutePath) }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.success(imagePath) }
+                        }
+                    }.start()
                 } else if (call.method == "createScannedPdfFromImages") {
                     val imagePaths = call.argument<List<String>>("imagePaths")
                     val outputPath = call.argument<String>("outputPath")
@@ -366,25 +460,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                                 val f = File(imgPath)
                                 if (!f.exists()) continue
                                 val bmp = BitmapFactory.decodeFile(f.absolutePath) ?: continue
-                                // A4 고해상도 비율(1240 x 1754) 또는 이미지 비율에 맞춰 깔끔한 여백과 함께 PDF 페이지 생성
+                                // 스캔본의 글만 인식해서 빈 종이에 여백 없이(0px margin) 꽉 차게 배치!
                                 val pageW = 1240
-                                val pageH = 1754
-                                val margin = 36f
-                                val availW = pageW - margin * 2f
-                                val availH = pageH - margin * 2f
-                                val scale = minOf(
-                                    availW / bmp.width.toFloat().coerceAtLeast(1f),
-                                    availH / bmp.height.toFloat().coerceAtLeast(1f)
-                                )
-                                val drawW = bmp.width * scale
-                                val drawH = bmp.height * scale
-                                val left = (pageW - drawW) / 2f
-                                val top = (pageH - drawH) / 2f
+                                val aspect = bmp.height.toFloat() / bmp.width.toFloat().coerceAtLeast(1f)
+                                val pageH = (pageW * aspect).toInt().coerceIn(360, 3400)
 
                                 val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, pageNum++).create()
                                 val page = pdfDoc.startPage(pageInfo)
                                 page.canvas.drawColor(Color.WHITE)
-                                val dstRect = RectF(left, top, left + drawW, top + drawH)
+                                val dstRect = RectF(0f, 0f, pageW.toFloat(), pageH.toFloat())
                                 val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
                                 page.canvas.drawBitmap(bmp, null, dstRect, paint)
                                 pdfDoc.finishPage(page)
@@ -1408,6 +1492,10 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        if (ev != null && (ev.actionMasked == MotionEvent.ACTION_DOWN || ev.actionMasked == MotionEvent.ACTION_UP)) {
+            hideSystemStatusBar()
+            scheduleAutoHideStatusBar(1200L)
+        }
         if (isVolumeInterceptEnabled) {
             checkStylusButtonEvent(ev)
         }
@@ -1604,18 +1692,19 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         return@Thread
                     }
 
-                    val scannedBitmap = enhanceScannedDocumentBitmap(srcBitmap)
-                    if (scannedBitmap !== srcBitmap) {
+                    // 먼저 종이 영역 자동 감지 및 회전 보정된 이미지를 저장하여 ML Kit 텍스트 영역 인식 후 순수 글자 추출 수행
+                    val croppedPaper = cropToDetectedPaperRegion(srcBitmap)
+                    if (croppedPaper !== srcBitmap) {
                         srcBitmap.recycle()
                     }
 
                     val scanDir = File(cacheDir, "camera_scans")
                     if (!scanDir.exists()) scanDir.mkdirs()
-                    val cleanFile = File(scanDir, "scanned_page_${System.currentTimeMillis()}.jpg")
+                    val cleanFile = File(scanDir, "scanned_raw_${System.currentTimeMillis()}.jpg")
                     FileOutputStream(cleanFile).use { out ->
-                        scannedBitmap.compress(Bitmap.CompressFormat.JPEG, 94, out)
+                        croppedPaper.compress(Bitmap.CompressFormat.JPEG, 95, out)
                     }
-                    scannedBitmap.recycle()
+                    croppedPaper.recycle()
                     try {
                         if (rawFile != null && rawFile.exists()) rawFile.delete()
                     } catch (_: Exception) {}
@@ -1669,6 +1758,325 @@ class MainActivity : FlutterActivity(), SensorEventListener {
      * 1. 다른 전문 문서 스캔 앱(CamScanner / Adobe Scan 등)처럼 촬영된 책이나 종이 문서의
      * 그림자·조명 얼룩을 제거해 배경을 깨끗한 흰색으로 정돈하고 글자 획을 또렷하게 보정하는 필터
      */
+    /**
+     * OSS-DocumentScanner & Simple Scan 스타일:
+     * 1단계 - 어두운 책상/배경 테두리를 자동으로 감지하여 실제 종이(문서) 영역만 추출
+     */
+    private fun cropToDetectedPaperRegion(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w < 120 || h < 120) return src
+
+        val step = 4
+        val sw = w / step
+        val sh = h / step
+        val smallLum = IntArray(sw * sh)
+        val rowBuf = IntArray(w)
+        val hist = IntArray(256)
+
+        for (sy in 0 until sh) {
+            src.getPixels(rowBuf, 0, w, 0, sy * step, w, 1)
+            for (sx in 0 until sw) {
+                val px = rowBuf[sx * step]
+                val r = (px shr 16) and 0xFF
+                val g = (px shr 8) and 0xFF
+                val b = px and 0xFF
+                val l = (r * 77 + g * 150 + b * 29) shr 8
+                smallLum[sy * sw + sx] = l
+                hist[l]++
+            }
+        }
+
+        // 중앙부(25%~75%)의 밝기를 기준으로 종이 밝기 문턱값 계산
+        var centerSum = 0L
+        var centerCnt = 0
+        for (sy in (sh / 4) until (sh * 3 / 4)) {
+            for (sx in (sw / 4) until (sw * 3 / 4)) {
+                centerSum += smallLum[sy * sw + sx]
+                centerCnt++
+            }
+        }
+        val centerMean = if (centerCnt > 0) (centerSum / centerCnt).toInt() else 170
+        val paperThresh = (centerMean * 0.68).toInt().coerceIn(75, 185)
+
+        val rowBrightRatio = FloatArray(sh)
+        val colBrightRatio = FloatArray(sw)
+        for (sy in 0 until sh) {
+            var bright = 0
+            for (sx in 0 until sw) {
+                if (smallLum[sy * sw + sx] >= paperThresh) bright++
+            }
+            rowBrightRatio[sy] = bright.toFloat() / sw.toFloat()
+        }
+        for (sx in 0 until sw) {
+            var bright = 0
+            for (sy in 0 until sh) {
+                if (smallLum[sy * sw + sx] >= paperThresh) bright++
+            }
+            colBrightRatio[sx] = bright.toFloat() / sh.toFloat()
+        }
+
+        var topSy = 0
+        while (topSy < sh / 3 && rowBrightRatio[topSy] < 0.38f) topSy++
+        var botSy = sh - 1
+        while (botSy > (sh * 2) / 3 && rowBrightRatio[botSy] < 0.38f) botSy--
+        var leftSx = 0
+        while (leftSx < sw / 3 && colBrightRatio[leftSx] < 0.38f) leftSx++
+        var rightSx = sw - 1
+        while (rightSx > (sw * 2) / 3 && colBrightRatio[rightSx] < 0.38f) rightSx--
+
+        val cropL = (leftSx * step).coerceIn(0, w / 3)
+        val cropT = (topSy * step).coerceIn(0, h / 3)
+        val cropR = (rightSx * step).coerceIn((w * 2) / 3, w)
+        val cropB = (botSy * step).coerceIn((h * 2) / 3, h)
+
+        val cw = cropR - cropL
+        val ch = cropB - cropT
+        if (cw <= w * 0.45 || ch <= h * 0.45 || (cw >= w - 16 && ch >= h - 16)) {
+            return src
+        }
+        return Bitmap.createBitmap(src, cropL, cropT, cw, ch)
+    }
+
+    /**
+     * OSS-DocumentScanner & Simple Scan 스타일 핵심 엔진:
+     * 2단계 - 적분 영상(Integral Image) 기반 Sauvola 적응형 이진화 + ML Kit 글자 영역 마스킹 + 여백 제로(Zero-Margin) 타이트 크롭
+     * -> 스캔본의 글자/표만 선명한 흑색 잉크로 인식해 순백색(#FFFFFF) 빈 종이에 여백 없이 꽉 채워 배치!
+     */
+    private fun extractPureTextOnBlankPage(
+        src: Bitmap,
+        ocrBoxes: List<Rect>,
+        filterMode: String
+    ): Bitmap {
+        if (filterMode == "magic_color") {
+            return enhanceScannedDocumentBitmap(src)
+        }
+
+        val w = src.width
+        val h = src.height
+        if (w < 32 || h < 32) return src
+
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        val lum = IntArray(w * h)
+        for (i in pixels.indices) {
+            val px = pixels[i]
+            val r = (px shr 16) and 0xFF
+            val g = (px shr 8) and 0xFF
+            val b = px and 0xFF
+            lum[i] = (r * 77 + g * 150 + b * 29) shr 8
+        }
+
+        // 적분 영상 (Integral Image & Squared Integral Image) 생성 -> O(1) 로컬 평균 및 표준편차 계산
+        val stride = w + 1
+        val intSum = IntArray(stride * (h + 1))
+        val intSqSum = LongArray(stride * (h + 1))
+
+        for (y in 1..h) {
+            var rowSum = 0
+            var rowSqSum = 0L
+            val srcRowOff = (y - 1) * w
+            val curIntOff = y * stride
+            val prevIntOff = (y - 1) * stride
+            for (x in 1..w) {
+                val v = lum[srcRowOff + (x - 1)]
+                rowSum += v
+                rowSqSum += (v * v).toLong()
+                intSum[curIntOff + x] = intSum[prevIntOff + x] + rowSum
+                intSqSum[curIntOff + x] = intSqSum[prevIntOff + x] + rowSqSum
+            }
+        }
+
+        // ML Kit OCR 텍스트 박스들을 약간 확장하여 글자 보호 마스크 구성
+        val hasOcr = ocrBoxes.isNotEmpty()
+        val padX = (w * 0.022f).toInt().coerceAtLeast(12)
+        val padY = (h * 0.014f).toInt().coerceAtLeast(10)
+        val expandedBoxes = ArrayList<Rect>(ocrBoxes.size)
+        var ocrUnionLeft = w
+        var ocrUnionTop = h
+        var ocrUnionRight = 0
+        var ocrUnionBottom = 0
+
+        for (b in ocrBoxes) {
+            // 테두리 1% 이내의 카메라 노이즈 오인식 박스는 제외
+            if (b.width() < 4 || b.height() < 4) continue
+            val el = (b.left - padX).coerceIn(0, w - 1)
+            val et = (b.top - padY).coerceIn(0, h - 1)
+            val er = (b.right + padX).coerceIn(1, w)
+            val eb = (b.bottom + padY).coerceIn(1, h)
+            expandedBoxes.add(Rect(el, et, er, eb))
+            if (el < ocrUnionLeft) ocrUnionLeft = el
+            if (et < ocrUnionTop) ocrUnionTop = et
+            if (er > ocrUnionRight) ocrUnionRight = er
+            if (eb > ocrUnionBottom) ocrUnionBottom = eb
+        }
+
+        // 픽셀별 텍스트 마스크 배열 (OCR 박스가 있으면 해당 영역을 1로 표시)
+        val inOcrRegion = BooleanArray(w * h)
+        if (expandedBoxes.isNotEmpty()) {
+            for (eb in expandedBoxes) {
+                for (y in eb.top until eb.bottom) {
+                    val ro = y * w
+                    for (x in eb.left until eb.right) {
+                        inOcrRegion[ro + x] = true
+                    }
+                }
+            }
+        }
+
+        val winRadius = (minOf(w, h) / 38).coerceIn(14, 42)
+        // 가장자리 2% 영역은 손가락/책 모서리 그림자가 자주 찍히므로 OCR 박스가 아닌 경우 자동 마스킹
+        val borderMarginX = (w * 0.02f).toInt().coerceAtLeast(6)
+        val borderMarginY = (h * 0.02f).toInt().coerceAtLeast(6)
+
+        val inkGray = IntArray(w * h) { 255 }
+
+        for (y in 0 until h) {
+            val y0 = (y - winRadius).coerceAtLeast(0)
+            val y1 = (y + winRadius + 1).coerceAtMost(h)
+            val rowOff = y * w
+            val y0Off = y0 * stride
+            val y1Off = y1 * stride
+            val isBorderY = (y < borderMarginY || y >= h - borderMarginY)
+
+            for (x in 0 until w) {
+                val idx = rowOff + x
+                val isOcrPx = inOcrRegion[idx]
+
+                if (!isOcrPx && (isBorderY || x < borderMarginX || x >= w - borderMarginX)) {
+                    inkGray[idx] = 255
+                    continue
+                }
+
+                // OCR이 글자를 찾은 페이지에서 OCR 전체 범위 바깥쪽 여백에 있는 잡티/배경은 순백색(#FFFFFF)으로 즉시 제거
+                if (expandedBoxes.isNotEmpty() && !isOcrPx) {
+                    if (x < ocrUnionLeft - padX * 2 ||
+                        x > ocrUnionRight + padX * 2 ||
+                        y < ocrUnionTop - padY * 2 ||
+                        y > ocrUnionBottom + padY * 2
+                    ) {
+                        inkGray[idx] = 255
+                        continue
+                    }
+                }
+
+                val x0 = (x - winRadius).coerceAtLeast(0)
+                val x1 = (x + winRadius + 1).coerceAtMost(w)
+                val area = (x1 - x0) * (y1 - y0)
+
+                val sum = intSum[y1Off + x1] - intSum[y0Off + x1] - intSum[y1Off + x0] + intSum[y0Off + x0]
+                val sqSum = intSqSum[y1Off + x1] - intSqSum[y0Off + x1] - intSqSum[y1Off + x0] + intSqSum[y0Off + x0]
+
+                val mean = sum.toDouble() / area.toDouble()
+                val variance = (sqSum.toDouble() / area.toDouble()) - (mean * mean)
+                val std = sqrt(variance.coerceAtLeast(0.0))
+
+                // Sauvola 적응형 문턱값: 글자 영역 내부는 세밀한 획까지 보존하고, 비글자 영역은 강한 대비의 표/선만 보존
+                val minStd = if (isOcrPx) 6.5 else 13.5
+                if (std < minStd) {
+                    inkGray[idx] = 255
+                    continue
+                }
+
+                val k = if (isOcrPx) 0.105 else 0.165
+                val threshold = mean * (1.0 - k * (1.0 - (std / 128.0).coerceIn(0.0, 0.85)))
+                val v = lum[idx].toDouble()
+
+                if (v >= threshold) {
+                    inkGray[idx] = 255
+                } else {
+                    // 글자 획 내부는 진한 흑색(#0A0A0A)으로, 경계 1px은 부드럽게 안티앨리어싱하여 인쇄본처럼 정돈
+                    val depth = (threshold - v) / (threshold * 0.26).coerceAtLeast(7.0)
+                    val gVal = (255.0 * (1.0 - depth.coerceIn(0.0, 1.0) * 0.95)).toInt().coerceIn(8, 255)
+                    inkGray[idx] = if (gVal > 225) 255 else gVal
+                }
+            }
+        }
+
+        // 3x3 고립 점 노이즈 제거 (Despeckle: 종이 위 미세 먼지/카메라 센서 노이즈 완벽 제거)
+        val outPixels = IntArray(w * h) { Color.WHITE }
+        var inkMinX = w
+        var inkMinY = h
+        var inkMaxX = 0
+        var inkMaxY = 0
+        var totalInkPixels = 0
+
+        for (y in 1 until (h - 1)) {
+            val ro = y * w
+            for (x in 1 until (w - 1)) {
+                val idx = ro + x
+                val g = inkGray[idx]
+                if (g == 255) continue
+
+                var darkNeighbors = 0
+                if (inkGray[idx - 1] < 220) darkNeighbors++
+                if (inkGray[idx + 1] < 220) darkNeighbors++
+                if (inkGray[idx - w] < 220) darkNeighbors++
+                if (inkGray[idx + w] < 220) darkNeighbors++
+                if (inkGray[idx - w - 1] < 220) darkNeighbors++
+                if (inkGray[idx - w + 1] < 220) darkNeighbors++
+                if (inkGray[idx + w - 1] < 220) darkNeighbors++
+                if (inkGray[idx + w + 1] < 220) darkNeighbors++
+
+                if (darkNeighbors >= 2) {
+                    outPixels[idx] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
+                    totalInkPixels++
+                    if (x < inkMinX) inkMinX = x
+                    if (x > inkMaxX) inkMaxX = x
+                    if (y < inkMinY) inkMinY = y
+                    if (y > inkMaxY) inkMaxY = y
+                }
+            }
+        }
+
+        val fullWhiteBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        fullWhiteBmp.setPixels(outPixels, 0, w, 0, 0, w, h)
+
+        if (filterMode != "text_only_zero_margin") {
+            return fullWhiteBmp
+        }
+
+        // 3단계: 인식된 글자 영역에 맞춰 빈 여백을 완전히 제거(Zero-Margin Crop)하여 빈 종이에 글자만 꽉 차게 배치!
+        var cropL: Int
+        var cropT: Int
+        var cropR: Int
+        var cropB: Int
+
+        if (expandedBoxes.isNotEmpty() && ocrUnionRight > ocrUnionLeft && ocrUnionBottom > ocrUnionTop) {
+            cropL = minOf(ocrUnionLeft, if (totalInkPixels > 100) inkMinX else ocrUnionLeft)
+            cropT = minOf(ocrUnionTop, if (totalInkPixels > 100) inkMinY else ocrUnionTop)
+            cropR = maxOf(ocrUnionRight, if (totalInkPixels > 100) inkMaxX else ocrUnionRight)
+            cropB = maxOf(ocrUnionBottom, if (totalInkPixels > 100) inkMaxY else ocrUnionBottom)
+        } else if (totalInkPixels > 80 && inkMaxX > inkMinX && inkMaxY > inkMinY) {
+            cropL = inkMinX
+            cropT = inkMinY
+            cropR = inkMaxX
+            cropB = inkMaxY
+        } else {
+            return fullWhiteBmp
+        }
+
+        // 첫 글자/마지막 글자 획이 잘리지 않도록 최소 6px 보호 간격만 적용 (여백 제로 느낌)
+        val safePad = 6
+        cropL = (cropL - safePad).coerceIn(0, w - 1)
+        cropT = (cropT - safePad).coerceIn(0, h - 1)
+        cropR = (cropR + safePad).coerceIn(cropL + 1, w)
+        cropB = (cropB + safePad).coerceIn(cropT + 1, h)
+
+        val cw = cropR - cropL
+        val ch = cropB - cropT
+        if (cw < 64 || ch < 64) {
+            return fullWhiteBmp
+        }
+
+        val cropped = Bitmap.createBitmap(fullWhiteBmp, cropL, cropT, cw, ch)
+        if (cropped !== fullWhiteBmp) {
+            fullWhiteBmp.recycle()
+        }
+        return cropped
+    }
+
     private fun enhanceScannedDocumentBitmap(src: Bitmap): Bitmap {
         val w = src.width
         val h = src.height

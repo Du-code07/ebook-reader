@@ -1,7 +1,7 @@
 name: my_ebook_reader
 description: All-in-one Android eBook, PDF, and Comic Reader with Batch Translation, Speech Bubble Overlay, Bookmarks, Reading Timer, and File Grouping.
 publish_to: 'none'
-version: 2.1.0+1
+version: 2.30.0+100
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
