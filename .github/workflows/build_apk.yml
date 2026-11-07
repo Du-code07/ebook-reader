@@ -46,7 +46,7 @@ jobs:
           cp -f pubspec.yaml /tmp/v7_backup/
           cp -rf android_override /tmp/v7_backup/
 
-          # 구글 플레이 스토어 정식 등록이 가능한 고유 패키지명(com.freader.my_ebook_reader)으로 생성
+          rm -rf android
           flutter create . --project-name my_ebook_reader --org com.freader
 
           rm -rf lib test
@@ -63,7 +63,7 @@ jobs:
           if [ -f "/tmp/v7_backup/android_override/freader_release.keystore" ]; then
             cp -f /tmp/v7_backup/android_override/freader_release.keystore android/app/freader_release.keystore
           else
-            echo "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" | base64 -d > android/app/freader_release.keystore
+            echo "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" | base64 -d > android/app/freader_release.keystore
           fi
 
           # 삼성 갤럭시 S펜 에어 액션(Air Actions) 공식 리모트 액션 XML 및 스트링 리소스 생성
@@ -85,8 +85,7 @@ jobs:
           echo '    </action>' >> android/app/src/main/res/xml/remote_action.xml
           echo '</remote-actions>' >> android/app/src/main/res/xml/remote_action.xml
 
-          echo "-keep class com.google.mlkit.** { *; }" > android/app/proguard-rules.pro
-          echo "-dontwarn com.google.mlkit.**" >> android/app/proguard-rules.pro
+          touch android/app/proguard-rules.pro
 
           if [ -f android/app/build.gradle ]; then
             sed -i 's/compileSdk .*/compileSdk 36/g' android/app/build.gradle
@@ -94,8 +93,6 @@ jobs:
             sed -i 's/minSdkVersion .*/minSdkVersion 24/g' android/app/build.gradle
             sed -i 's/minSdk = .*/minSdk = 24/g' android/app/build.gradle
             sed -i 's/minSdk .*/minSdk 24/g' android/app/build.gradle
-            sed -i 's/signingConfig = signingConfigs.debug/signingConfig = signingConfigs.release/g' android/app/build.gradle
-            sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.release/g' android/app/build.gradle
             echo "" >> android/app/build.gradle
             echo "android {" >> android/app/build.gradle
             echo "    signingConfigs {" >> android/app/build.gradle
@@ -115,19 +112,11 @@ jobs:
             echo "        }" >> android/app/build.gradle
             echo "    }" >> android/app/build.gradle
             echo "}" >> android/app/build.gradle
-            echo "dependencies {" >> android/app/build.gradle
-            echo "    implementation 'com.google.mlkit:text-recognition-japanese:16.0.1'" >> android/app/build.gradle
-            echo "    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'" >> android/app/build.gradle
-            echo "    implementation 'com.google.mlkit:text-recognition-korean:16.0.1'" >> android/app/build.gradle
-            echo "    implementation 'com.google.mlkit:text-recognition-devanagari:16.0.1'" >> android/app/build.gradle
-            echo "    implementation 'com.google.mlkit:translate:17.0.3'" >> android/app/build.gradle
-            echo "}" >> android/app/build.gradle
           fi
 
           if [ -f android/app/build.gradle.kts ]; then
             sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts
             sed -i 's/minSdk = .*/minSdk = 24/g' android/app/build.gradle.kts
-            sed -i 's/signingConfig = signingConfigs.getByName("debug")/signingConfig = signingConfigs.getByName("release")/g' android/app/build.gradle.kts
             echo "" >> android/app/build.gradle.kts
             echo 'android {' >> android/app/build.gradle.kts
             echo '    signingConfigs {' >> android/app/build.gradle.kts
@@ -147,13 +136,6 @@ jobs:
             echo '        }' >> android/app/build.gradle.kts
             echo '    }' >> android/app/build.gradle.kts
             echo '}' >> android/app/build.gradle.kts
-            echo "dependencies {" >> android/app/build.gradle.kts
-            echo '    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")' >> android/app/build.gradle.kts
-            echo '    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")' >> android/app/build.gradle.kts
-            echo '    implementation("com.google.mlkit:text-recognition-korean:16.0.1")' >> android/app/build.gradle.kts
-            echo '    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")' >> android/app/build.gradle.kts
-            echo '    implementation("com.google.mlkit:translate:17.0.3")' >> android/app/build.gradle.kts
-            echo "}" >> android/app/build.gradle.kts
           fi
 
           if [ -f android/build.gradle ]; then
@@ -186,16 +168,11 @@ jobs:
 
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
-              sed -i 's/<application/<queries><intent><action android:name="android.media.action.IMAGE_CAPTURE"\/><\/intent><\/queries><uses-permission android:name="android.permission.INTERNET"\/> <application/' "$MANIFEST"
-            fi
             if ! grep -q "com.samsung.android.support.REMOTE_ACTION" "$MANIFEST"; then
-              sed -i 's/<\/activity>/<intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
+              sed -i 's/<\/activity>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
             fi
-            if ! grep -q "scanprovider" "$MANIFEST"; then
-              sed -i 's/<\/application>/<provider android:name=".ScanFileProvider" android:authorities="${applicationId}.scanprovider" android:exported="false" android:grantUriPermissions="true"\/><\/application>/' "$MANIFEST"
-            fi
-            sed -i 's/android:label="[^"]*"/android:label="FReader" android:resizeableActivity="true"/' "$MANIFEST"
+            # 태블릿에서도 화면 회전 시 OS 창과 상태표시줄 자체가 회전되어 항상 화면 위쪽에 오도록 resizeableActivity="false" 적용
+            sed -i 's/android:label="[^"]*"/android:label="FReader" android:resizeableActivity="false"/g' "$MANIFEST"
           fi
 
           for STYLE_FILE in android/app/src/main/res/values/styles.xml android/app/src/main/res/values-night/styles.xml; do
@@ -208,7 +185,7 @@ jobs:
 
       - name: 5. Build Release APK (Direct Install/Update) & AAB (Google Play Store)
         run: |
-          BUILD_NUM=$((100 + ${{ github.run_number }}))
+          BUILD_NUM=$((120 + ${{ github.run_number }}))
           flutter pub get
           flutter build apk --release --no-tree-shake-icons --build-number=$BUILD_NUM
           flutter build appbundle --release --no-tree-shake-icons --build-number=$BUILD_NUM
