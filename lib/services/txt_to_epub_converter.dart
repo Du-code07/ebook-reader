@@ -164,8 +164,7 @@ class TxtToEpubConverter {
         if (italic) buf.write('font-style:italic;');
         if (underline) buf.write('text-decoration:underline;');
         if (indentPx > 0) buf.write('padding-left:${indentPx.toStringAsFixed(0)}px;');
-        buf.write('">${_escapeXml(text)}</p>
-');
+        buf.writeln('">${_escapeXml(text)}</p>');
       } else if (bType == 'table') {
         final rawCells = b['cells'] as List<dynamic>?;
         if (rawCells != null && rawCells.isNotEmpty) {
