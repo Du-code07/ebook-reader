@@ -1,8 +1,19 @@
 package com.example.my_ebook_reader
 
+import android.app.Activity
+import android.content.ClipData
+import android.content.ContentProvider
 import android.content.Context
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import android.database.Cursor
+import android.database.MatrixCursor
+import android.graphics.Matrix
+import android.media.ExifInterface
+import android.net.Uri
+import android.view.WindowManager
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -93,19 +104,44 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
+    private val CAMERA_SCAN_REQUEST_CODE = 9481
+    private var pendingCameraResult: MethodChannel.Result? = null
+    private var pendingCameraRawFile: File? = null
+
+    // 2. 태블릿(OneUI / Android 12L~16 대화면 모드)에서도 상단 상태표시줄을 강제로 숨기는 통합 메서드
     private fun hideSystemStatusBar() {
         try {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val lp = window.attributes
+                lp.layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                } else {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+                window.attributes = lp
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.setDecorFitsSystemWindows(false)
                 window.insetsController?.let { controller ->
-                    controller.hide(android.view.WindowInsets.Type.statusBars())
+                    controller.hide(
+                        android.view.WindowInsets.Type.statusBars() or
+                            android.view.WindowInsets.Type.navigationBars()
+                    )
                     controller.systemBarsBehavior =
                         android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
             }
+
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                     or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                     or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                     or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
             )
@@ -118,12 +154,36 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         } catch (_: Exception) {}
         super.onCreate(savedInstanceState)
         hideSystemStatusBar()
+        @Suppress("DEPRECATION")
+        window.decorView.setOnSystemUiVisibilityChangeListener { visibility ->
+            if ((visibility and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0) {
+                mainHandler.postDelayed({ hideSystemStatusBar() }, 50L)
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideSystemStatusBar()
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 120L)
+    }
+
+    override fun onPostResume() {
+        super.onPostResume()
+        hideSystemStatusBar()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        hideSystemStatusBar()
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 150L)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             hideSystemStatusBar()
+            mainHandler.postDelayed({ hideSystemStatusBar() }, 100L)
         }
     }
 
@@ -268,7 +328,87 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
             .setMethodCallHandler { call, result ->
-                if (call.method == "renderPdfFirstPageThumbnail") {
+                if (call.method == "captureAndScanDocumentPage") {
+                    if (pendingCameraResult != null) {
+                        result.error("BUSY", "Camera scan already in progress", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val scanDir = File(cacheDir, "camera_scans")
+                        if (!scanDir.exists()) scanDir.mkdirs()
+                        val rawFile = File(scanDir, "raw_capture_${System.currentTimeMillis()}.jpg")
+                        pendingCameraRawFile = rawFile
+                        pendingCameraResult = result
+
+                        val authority = "${applicationContext.packageName}.scanprovider"
+                        val contentUri = Uri.parse("content://$authority/${rawFile.name}")
+
+                        val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                            putExtra(MediaStore.EXTRA_OUTPUT, contentUri)
+                            clipData = ClipData.newRawUri("", contentUri)
+                            addFlags(
+                                Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            )
+                        }
+                        startActivityForResult(cameraIntent, CAMERA_SCAN_REQUEST_CODE)
+                    } catch (e: Exception) {
+                        pendingCameraResult = null
+                        pendingCameraRawFile = null
+                        result.error("CAMERA_ERR", e.message, null)
+                    }
+                } else if (call.method == "createScannedPdfFromImages") {
+                    val imagePaths = call.argument<List<String>>("imagePaths")
+                    val outputPath = call.argument<String>("outputPath")
+                    if (imagePaths.isNullOrEmpty() || outputPath == null) {
+                        result.error("INVALID_ARGS", "Missing imagePaths or outputPath", null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        val pdfDoc = PdfDocument()
+                        try {
+                            var pageNum = 1
+                            for (imgPath in imagePaths) {
+                                val f = File(imgPath)
+                                if (!f.exists()) continue
+                                val bmp = BitmapFactory.decodeFile(f.absolutePath) ?: continue
+                                // A4 고해상도 비율(1240 x 1754) 또는 이미지 비율에 맞춰 깔끔한 여백과 함께 PDF 페이지 생성
+                                val pageW = 1240
+                                val pageH = 1754
+                                val margin = 36f
+                                val availW = pageW - margin * 2f
+                                val availH = pageH - margin * 2f
+                                val scale = minOf(
+                                    availW / bmp.width.toFloat().coerceAtLeast(1f),
+                                    availH / bmp.height.toFloat().coerceAtLeast(1f)
+                                )
+                                val drawW = bmp.width * scale
+                                val drawH = bmp.height * scale
+                                val left = (pageW - drawW) / 2f
+                                val top = (pageH - drawH) / 2f
+
+                                val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, pageNum++).create()
+                                val page = pdfDoc.startPage(pageInfo)
+                                page.canvas.drawColor(Color.WHITE)
+                                val dstRect = RectF(left, top, left + drawW, top + drawH)
+                                val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+                                page.canvas.drawBitmap(bmp, null, dstRect, paint)
+                                pdfDoc.finishPage(page)
+                                bmp.recycle()
+                            }
+                            val outFile = File(outputPath)
+                            outFile.parentFile?.mkdirs()
+                            FileOutputStream(outFile).use { out ->
+                                pdfDoc.writeTo(out)
+                            }
+                            pdfDoc.close()
+                            runOnUiThread { result.success(outFile.absolutePath) }
+                        } catch (e: Exception) {
+                            try { pdfDoc.close() } catch (_: Exception) {}
+                            runOnUiThread { result.error("CREATE_SCAN_PDF_ERR", e.message, null) }
+                        }
+                    }.start()
+                } else if (call.method == "renderPdfFirstPageThumbnail") {
                     val pdfPath = call.argument<String>("pdfPath") ?: call.argument<String>("filePath")
                     val thumbPath = call.argument<String>("thumbPath") ?: call.argument<String>("outPath")
                     if (pdfPath == null || thumbPath == null) {
@@ -1436,4 +1576,314 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
         return super.dispatchKeyEvent(event)
     }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        hideSystemStatusBar()
+        if (requestCode == CAMERA_SCAN_REQUEST_CODE) {
+            val callback = pendingCameraResult
+            val rawFile = pendingCameraRawFile
+            pendingCameraResult = null
+            pendingCameraRawFile = null
+
+            if (callback == null) return
+            if (resultCode != Activity.RESULT_OK) {
+                callback.success(null)
+                return
+            }
+
+            Thread {
+                try {
+                    var srcBitmap: Bitmap? = null
+                    if (rawFile != null && rawFile.exists() && rawFile.length() > 128L) {
+                        srcBitmap = decodeAndOrientCameraBitmap(rawFile)
+                    }
+                    if (srcBitmap == null && data != null) {
+                        @Suppress("DEPRECATION")
+                        srcBitmap = data.extras?.get("data") as? Bitmap
+                    }
+                    if (srcBitmap == null) {
+                        runOnUiThread { callback.success(null) }
+                        return@Thread
+                    }
+
+                    val scannedBitmap = enhanceScannedDocumentBitmap(srcBitmap)
+                    if (scannedBitmap !== srcBitmap) {
+                        srcBitmap.recycle()
+                    }
+
+                    val scanDir = File(cacheDir, "camera_scans")
+                    if (!scanDir.exists()) scanDir.mkdirs()
+                    val cleanFile = File(scanDir, "scanned_page_${System.currentTimeMillis()}.jpg")
+                    FileOutputStream(cleanFile).use { out ->
+                        scannedBitmap.compress(Bitmap.CompressFormat.JPEG, 94, out)
+                    }
+                    scannedBitmap.recycle()
+                    try {
+                        if (rawFile != null && rawFile.exists()) rawFile.delete()
+                    } catch (_: Exception) {}
+
+                    runOnUiThread {
+                        hideSystemStatusBar()
+                        callback.success(cleanFile.absolutePath)
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        hideSystemStatusBar()
+                        callback.error("SCAN_PROCESS_ERR", e.message, null)
+                    }
+                }
+            }.start()
+        }
+    }
+
+    private fun decodeAndOrientCameraBitmap(file: File): Bitmap? {
+        val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, boundsOpts)
+        val maxDim = 2200
+        var sampleSize = 1
+        while (boundsOpts.outWidth / sampleSize > maxDim || boundsOpts.outHeight / sampleSize > maxDim) {
+            sampleSize *= 2
+        }
+        val decodeOpts = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val raw = BitmapFactory.decodeFile(file.absolutePath, decodeOpts) ?: return null
+
+        var rotateDeg = 0f
+        try {
+            val exif = ExifInterface(file.absolutePath)
+            when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> rotateDeg = 90f
+                ExifInterface.ORIENTATION_ROTATE_180 -> rotateDeg = 180f
+                ExifInterface.ORIENTATION_ROTATE_270 -> rotateDeg = 270f
+            }
+        } catch (_: Exception) {}
+
+        if (rotateDeg == 0f) return raw
+        val matrix = Matrix().apply { postRotate(rotateDeg) }
+        val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+        if (rotated !== raw) raw.recycle()
+        return rotated
+    }
+
+    /**
+     * 1. 다른 전문 문서 스캔 앱(CamScanner / Adobe Scan 등)처럼 촬영된 책이나 종이 문서의
+     * 그림자·조명 얼룩을 제거해 배경을 깨끗한 흰색으로 정돈하고 글자 획을 또렷하게 보정하는 필터
+     */
+    private fun enhanceScannedDocumentBitmap(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w <= 16 || h <= 16) return src
+
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        val lum = IntArray(w * h)
+        for (i in pixels.indices) {
+            val px = pixels[i]
+            val r = (px shr 16) and 0xFF
+            val g = (px shr 8) and 0xFF
+            val b = px and 0xFF
+            lum[i] = (r * 77 + g * 150 + b * 29) shr 8
+        }
+
+        // 2D 로컬 배경 조명(종이 밝기) 추정 격자 (조명 그라데이션 및 책 가운데 그림자 완벽 제거)
+        val gridCols = 16
+        val gridRows = 20
+        val bgGrid = IntArray(gridCols * gridRows)
+        val hist = IntArray(256)
+
+        for (gy in 0 until gridRows) {
+            val y0 = (gy * h) / gridRows
+            val y1 = ((gy + 1) * h) / gridRows
+            for (gx in 0 until gridCols) {
+                val x0 = (gx * w) / gridCols
+                val x1 = ((gx + 1) * w) / gridCols
+                java.util.Arrays.fill(hist, 0)
+                var count = 0
+                var y = y0
+                while (y < y1) {
+                    val rowOff = y * w
+                    var x = x0
+                    while (x < x1) {
+                        hist[lum[rowOff + x]]++
+                        count++
+                        x += 2
+                    }
+                    y += 2
+                }
+                // 상위 15%(85th percentile) 밝기를 해당 영역의 종이 배경 밝기로 채택
+                val targetRank = (count * 85) / 100
+                var acc = 0
+                var bgVal = 210
+                for (v in 0..255) {
+                    acc += hist[v]
+                    if (acc >= targetRank) {
+                        bgVal = v.coerceAtLeast(75)
+                        break
+                    }
+                }
+                bgGrid[gy * gridCols + gx] = bgVal
+            }
+        }
+
+        // 격자 스무딩 (3x3 평균 필터로 블록 경계 현상 제거)
+        val smoothGrid = IntArray(gridCols * gridRows)
+        for (gy in 0 until gridRows) {
+            for (gx in 0 until gridCols) {
+                var sum = 0
+                var cnt = 0
+                for (dy in -1..1) {
+                    val ny = (gy + dy).coerceIn(0, gridRows - 1)
+                    for (dx in -1..1) {
+                        val nx = (gx + dx).coerceIn(0, gridCols - 1)
+                        sum += bgGrid[ny * gridCols + nx]
+                        cnt++
+                    }
+                }
+                smoothGrid[gy * gridCols + gx] = sum / cnt
+            }
+        }
+
+        // 픽셀별 배경 조명 정규화 + S-커브 대비 강화 (종이는 순백색으로, 글씨는 진하고 선명하게)
+        val normLum = IntArray(w * h)
+        for (y in 0 until h) {
+            val fy = (y.toFloat() / h.toFloat()) * (gridRows - 1)
+            val gy0 = fy.toInt().coerceIn(0, gridRows - 1)
+            val gy1 = (gy0 + 1).coerceIn(0, gridRows - 1)
+            val ty = fy - gy0
+            val rowOff = y * w
+
+            for (x in 0 until w) {
+                val fx = (x.toFloat() / w.toFloat()) * (gridCols - 1)
+                val gx0 = fx.toInt().coerceIn(0, gridCols - 1)
+                val gx1 = (gx0 + 1).coerceIn(0, gridCols - 1)
+                val tx = fx - gx0
+
+                val b00 = smoothGrid[gy0 * gridCols + gx0]
+                val b10 = smoothGrid[gy0 * gridCols + gx1]
+                val b01 = smoothGrid[gy1 * gridCols + gx0]
+                val b11 = smoothGrid[gy1 * gridCols + gx1]
+
+                val topBg = b00 + (b10 - b00) * tx
+                val botBg = b01 + (b11 - b01) * tx
+                val localBg = (topBg + (botBg - topBg) * ty).toInt().coerceAtLeast(65)
+
+                val idx = rowOff + x
+                val rawL = lum[idx]
+                val rel = ((rawL * 255) / localBg).coerceIn(0, 255)
+
+                // 종이 배경(rel >= 208)은 깨끗한 흰색(255)으로, 글씨(rel < 208)는 선명하게 다크닝
+                val enhanced = if (rel >= 210) {
+                    255
+                } else if (rel <= 95) {
+                    ((rel * 35) / 95).coerceIn(0, 255)
+                } else {
+                    val t = (rel - 95).toFloat() / (210f - 95f)
+                    val sCurve = t * t * (3f - 2f * t)
+                    (35f + sCurve * 220f).toInt().coerceIn(0, 255)
+                }
+                normLum[idx] = enhanced
+            }
+        }
+
+        // 글자 윤곽선 샤프닝(Unsharp Mask) 및 컬러 잉크 보존 합성
+        val outPixels = IntArray(w * h)
+        for (y in 0 until h) {
+            val rowOff = y * w
+            val isEdgeY = (y == 0 || y == h - 1)
+            for (x in 0 until w) {
+                val idx = rowOff + x
+                val center = normLum[idx]
+                val sharpL = if (isEdgeY || x == 0 || x == w - 1 || center == 255) {
+                    center
+                } else {
+                    val neighbors = (
+                        normLum[idx - 1] +
+                            normLum[idx + 1] +
+                            normLum[idx - w] +
+                            normLum[idx + w]
+                        ) shr 2
+                    (center + ((center - neighbors) * 3) / 4).coerceIn(0, 255)
+                }
+
+                if (sharpL >= 246) {
+                    outPixels[idx] = Color.WHITE
+                } else {
+                    val px = pixels[idx]
+                    val r = (px shr 16) and 0xFF
+                    val g = (px shr 8) and 0xFF
+                    val b = px and 0xFF
+                    val maxC = maxOf(r, g, b)
+                    val minC = minOf(r, g, b)
+                    // 무채색(검은 글씨/연필/표)은 깔끔한 모노톤 잉크로, 컬러 형광펜/도표는 색감 유지
+                    if (maxC - minC < 38) {
+                        outPixels[idx] = (0xFF shl 24) or (sharpL shl 16) or (sharpL shl 8) or sharpL
+                    } else {
+                        val origL = lum[idx].coerceAtLeast(1)
+                        val nr = ((r * sharpL) / origL).coerceIn(0, 255)
+                        val ng = ((g * sharpL) / origL).coerceIn(0, 255)
+                        val nb = ((b * sharpL) / origL).coerceIn(0, 255)
+                        outPixels[idx] = (0xFF shl 24) or (nr shl 16) or (ng shl 8) or nb
+                    }
+                }
+            }
+        }
+
+        val outBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        outBmp.setPixels(outPixels, 0, w, 0, 0, w, h)
+        return outBmp
+    }
+}
+
+class ScanFileProvider : ContentProvider() {
+    override fun onCreate(): Boolean = true
+
+    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
+        val ctx = context ?: return null
+        val fileName = uri.lastPathSegment ?: return null
+        val scanDir = File(ctx.cacheDir, "camera_scans")
+        if (!scanDir.exists()) scanDir.mkdirs()
+        val targetFile = File(scanDir, fileName)
+        if (!targetFile.exists()) {
+            targetFile.createNewFile()
+        }
+        val pfdMode = if (mode.contains("w")) {
+            ParcelFileDescriptor.MODE_READ_WRITE or
+                ParcelFileDescriptor.MODE_CREATE or
+                ParcelFileDescriptor.MODE_TRUNCATE
+        } else {
+            ParcelFileDescriptor.MODE_READ_ONLY
+        }
+        return ParcelFileDescriptor.open(targetFile, pfdMode)
+    }
+
+    override fun query(
+        uri: Uri,
+        projection: Array<out String>?,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+        sortOrder: String?
+    ): Cursor {
+        val name = uri.lastPathSegment ?: "scan.jpg"
+        val cols = projection ?: arrayOf("_display_name", "_size")
+        val cursor = MatrixCursor(cols, 1)
+        val row = Array<Any?>(cols.size) { i ->
+            when (cols[i]) {
+                "_display_name" -> name
+                "_size" -> 0L
+                else -> null
+            }
+        }
+        cursor.addRow(row)
+        return cursor
+    }
+
+    override fun getType(uri: Uri): String = "image/jpeg"
+    override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+    override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
+    override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
 }
