@@ -47,6 +47,10 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 import java.io.FileOutputStream
 import kotlin.math.sqrt
 
@@ -62,6 +66,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var isVolUpPressed = false
     private var isVolDownPressed = false
     private var comboTriggered = false
+    private var lastVolKeyDownTime = 0L
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingVolUpRunnable: Runnable? = null
     private var pendingVolDownRunnable: Runnable? = null
@@ -236,7 +241,65 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
             .setMethodCallHandler { call, result ->
-                if (call.method == "renderPdfToImages") {
+                if (call.method == "renderPdfFirstPageThumbnail") {
+                    val pdfPath = call.argument<String>("pdfPath")
+                    val thumbPath = call.argument<String>("thumbPath")
+                    if (pdfPath == null || thumbPath == null) {
+                        result.error("INVALID_ARGS", "Missing paths", null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        try {
+                            val thumbFile = File(thumbPath)
+                            if (thumbFile.exists() && thumbFile.length() > 100L) {
+                                runOnUiThread { result.success(thumbFile.absolutePath) }
+                                return@Thread
+                            }
+                            thumbFile.parentFile?.mkdirs()
+                            val pdfFile = File(pdfPath)
+                            if (!pdfFile.exists()) {
+                                runOnUiThread { result.success(null) }
+                                return@Thread
+                            }
+                            val pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
+                            val renderer = PdfRenderer(pfd)
+                            if (renderer.pageCount > 0) {
+                                val page = renderer.openPage(0)
+                                val targetW = 480
+                                val scale = targetW.toFloat() / page.width.toFloat().coerceAtLeast(1f)
+                                val w = targetW
+                                val h = (page.height * scale).toInt().coerceIn(320, 960)
+                                val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                                bitmap.eraseColor(Color.WHITE)
+                                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                page.close()
+                                FileOutputStream(thumbFile).use { out ->
+                                    bitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
+                                }
+                                bitmap.recycle()
+                            }
+                            renderer.close()
+                            pfd.close()
+                            runOnUiThread {
+                                result.success(if (thumbFile.exists()) thumbFile.absolutePath else null)
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.success(null) }
+                        }
+                    }.start()
+                } else if (call.method == "decodeTextBytes") {
+                    val rawBytes = call.argument<ByteArray>("bytes")
+                    if (rawBytes == null || rawBytes.isEmpty()) {
+                        result.success("")
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val decoded = decodeKoreanTextBytesSmart(rawBytes)
+                        result.success(decoded)
+                    } catch (e: Exception) {
+                        result.success(String(rawBytes, Charsets.UTF_8))
+                    }
+                } else if (call.method == "renderPdfToImages") {
                     val pdfPath = call.argument<String>("pdfPath")
                     val outDirPath = call.argument<String>("outDirPath")
                     if (pdfPath == null || outDirPath == null) {
@@ -1187,30 +1250,100 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         return super.dispatchTouchEvent(ev)
     }
 
+    private fun decodeKoreanTextBytesSmart(bytes: ByteArray): String {
+        // 1. UTF-8 / UTF-16 BOM 체크
+        if (bytes.size >= 3 &&
+            (bytes[0].toInt() and 0xFF) == 0xEF &&
+            (bytes[1].toInt() and 0xFF) == 0xBB &&
+            (bytes[2].toInt() and 0xFF) == 0xBF
+        ) {
+            return String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
+        }
+        if (bytes.size >= 2 &&
+            (bytes[0].toInt() and 0xFF) == 0xFF &&
+            (bytes[1].toInt() and 0xFF) == 0xFE
+        ) {
+            return String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
+        }
+        if (bytes.size >= 2 &&
+            (bytes[0].toInt() and 0xFF) == 0xFE &&
+            (bytes[1].toInt() and 0xFF) == 0xFF
+        ) {
+            return String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
+        }
+
+        // 2. 엄격한 UTF-8 디코딩 시도 (에러 발생 시 Windows 메모장 한글 인코딩인 MS949/CP949로 즉시 전환!)
+        try {
+            val utf8Decoder = Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+            return utf8Decoder.decode(ByteBuffer.wrap(bytes)).toString()
+        } catch (_: CharacterCodingException) {}
+
+        // 3. 한국어 Windows 메모장 기본 ANSI 인코딩(MS949 / CP949 / EUC-KR) 디코딩
+        for (csName in listOf("MS949", "CP949", "EUC-KR", "x-windows-949")) {
+            try {
+                if (Charset.isSupported(csName)) {
+                    return String(bytes, Charset.forName(csName))
+                }
+            } catch (_: Exception) {}
+        }
+
+        return String(bytes, Charsets.UTF_8)
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (isVolumeInterceptEnabled &&
+            (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+        ) {
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        if (isVolumeInterceptEnabled &&
+            (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+        ) {
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val keyCode = event.keyCode
         val action = event.action
 
         if (isVolumeInterceptEnabled) {
-            // 1. 음량 버튼 동시 입력 시 화면 잠금 토글(VOL_BOTH_UNLOCK) 및 단독 입력 시 페이지 넘김
+            val now = SystemClock.uptimeMillis()
+            // 만약 이전 키 이벤트에서 ACTION_UP이 누락되어 상태가 남았을 경우 450ms 경과 시 자동 초기화
+            if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && (now - lastVolKeyDownTime > 450L)) {
+                isVolUpPressed = false
+                isVolDownPressed = false
+                comboTriggered = false
+            }
+
             if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                    isVolUpPressed = true
-                    if (isVolDownPressed) {
-                        comboTriggered = true
-                        pendingVolDownRunnable?.let { mainHandler.removeCallbacks(it) }
-                        pendingVolUpRunnable?.let { mainHandler.removeCallbacks(it) }
-                        eventSink?.success("VOL_BOTH_UNLOCK")
-                        return true
-                    }
-                    val r = Runnable {
-                        if (!comboTriggered) {
-                            eventSink?.success("UP")
+                if (action == KeyEvent.ACTION_DOWN) {
+                    lastVolKeyDownTime = now
+                    if (event.repeatCount == 0) {
+                        isVolUpPressed = true
+                        if (isVolDownPressed) {
+                            comboTriggered = true
+                            pendingVolDownRunnable?.let { mainHandler.removeCallbacks(it) }
+                            pendingVolUpRunnable?.let { mainHandler.removeCallbacks(it) }
+                            eventSink?.success("VOL_BOTH_UNLOCK")
+                            return true
                         }
+                        val r = Runnable {
+                            if (!comboTriggered) {
+                                eventSink?.success("UP")
+                            }
+                        }
+                        pendingVolUpRunnable = r
+                        mainHandler.postDelayed(r, 70L)
                     }
-                    pendingVolUpRunnable = r
-                    mainHandler.postDelayed(r, 85L)
-                } else if (action == KeyEvent.ACTION_UP) {
+                } else if (action == KeyEvent.ACTION_UP || action == KeyEvent.ACTION_CANCEL) {
                     isVolUpPressed = false
                     if (!isVolDownPressed) comboTriggered = false
                 }
@@ -1218,23 +1351,26 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             }
 
             if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                    isVolDownPressed = true
-                    if (isVolUpPressed) {
-                        comboTriggered = true
-                        pendingVolUpRunnable?.let { mainHandler.removeCallbacks(it) }
-                        pendingVolDownRunnable?.let { mainHandler.removeCallbacks(it) }
-                        eventSink?.success("VOL_BOTH_UNLOCK")
-                        return true
-                    }
-                    val r = Runnable {
-                        if (!comboTriggered) {
-                            eventSink?.success("DOWN")
+                if (action == KeyEvent.ACTION_DOWN) {
+                    lastVolKeyDownTime = now
+                    if (event.repeatCount == 0) {
+                        isVolDownPressed = true
+                        if (isVolUpPressed) {
+                            comboTriggered = true
+                            pendingVolUpRunnable?.let { mainHandler.removeCallbacks(it) }
+                            pendingVolDownRunnable?.let { mainHandler.removeCallbacks(it) }
+                            eventSink?.success("VOL_BOTH_UNLOCK")
+                            return true
                         }
+                        val r = Runnable {
+                            if (!comboTriggered) {
+                                eventSink?.success("DOWN")
+                            }
+                        }
+                        pendingVolDownRunnable = r
+                        mainHandler.postDelayed(r, 70L)
                     }
-                    pendingVolDownRunnable = r
-                    mainHandler.postDelayed(r, 85L)
-                } else if (action == KeyEvent.ACTION_UP) {
+                } else if (action == KeyEvent.ACTION_UP || action == KeyEvent.ACTION_CANCEL) {
                     isVolDownPressed = false
                     if (!isVolUpPressed) comboTriggered = false
                 }

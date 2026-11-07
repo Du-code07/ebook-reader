@@ -1890,11 +1890,11 @@ class TxtToEpubConverter {
     return lines;
   }
 
-  /// TXT 등 일반 텍스트 문서를 EPUB 2.0으로 변환
+  /// 10 & 11. TXT/YML 메모장(UTF-8, UTF-16, CP949/EUC-KR 자동 감지) 및 워드(.docx)/한글(.hwp, .hwpx) 문서를 EPUB 2.0으로 변환 (이전 버전 방식 복구)
   static Future<File> convertDocumentToEpub(File inputFile) async {
     final epubPath = inputFile.path.replaceAll(
       RegExp(r'\.(txt|yml|yaml|docx|doc|hwpx|hwp)$', caseSensitive: false),
-      '_converted.epub',
+      '_v25_converted.epub',
     );
     final outFile = File(epubPath);
 
@@ -1907,22 +1907,71 @@ class TxtToEpubConverter {
 
     List<String> lines = [];
     if (ext == 'txt' || ext == 'yml' || ext == 'yaml') {
-      String content;
+      String? content;
       try {
-        content = utf8.decode(bytes);
-      } catch (_) {
-        content = latin1.decode(bytes, allowInvalid: true);
+        content = await _pdfChannel.invokeMethod<String>(
+          'decodeTextBytes',
+          {'bytes': Uint8List.fromList(bytes)},
+        );
+      } catch (_) {}
+      if (content == null || content.isEmpty) {
+        try {
+          content = utf8.decode(bytes);
+        } catch (_) {
+          content = utf8.decode(bytes, allowMalformed: true);
+        }
       }
       lines = content.split(RegExp(r'\r?\n'));
+    } else if (ext == 'docx') {
+      final blocks = _extractDocxStructuredBlocks(bytes);
+      lines = _blocksToReadableLines(blocks);
+    } else if (ext == 'hwpx') {
+      final blocks = _extractHwpxStructuredBlocks(bytes);
+      lines = _blocksToReadableLines(blocks);
+    } else if (ext == 'hwp') {
+      final blocks = _extractHwp5StructuredBlocks(Uint8List.fromList(bytes));
+      lines = _blocksToReadableLines(blocks);
     } else {
       lines = _extractReadableStringsFromBinary(bytes);
     }
 
     if (lines.isEmpty) {
+      lines = _extractReadableStringsFromBinary(bytes);
+    }
+    if (lines.isEmpty) {
       lines = ['[$title] 문서에서 표시할 수 있는 텍스트를 찾지 못했습니다.'];
     }
 
     return _buildEpubArchive(outFile, title, lines);
+  }
+
+  static List<String> _blocksToReadableLines(List<Map<String, dynamic>> blocks) {
+    final List<String> lines = [];
+    for (final b in blocks) {
+      final bType = b['type'] as String? ?? 'paragraph';
+      if (bType == 'paragraph') {
+        final t = (b['text'] as String? ?? '').trimRight();
+        if (t.isNotEmpty) lines.add(t);
+      } else if (bType == 'table') {
+        final rawCells = b['cells'] as List<dynamic>?;
+        if (rawCells != null && rawCells.isNotEmpty) {
+          final int numRows = ((b['numRows'] as num?)?.toInt() ?? 1).clamp(1, 500);
+          final Map<int, List<String>> rowMap = {};
+          for (final rc in rawCells) {
+            final cell = rc as Map<String, dynamic>;
+            final int r = ((cell['row'] as num?)?.toInt() ?? 0).clamp(0, numRows - 1);
+            final String ct = (cell['text'] as String? ?? '').trim().replaceAll('\n', ' ');
+            if (ct.isNotEmpty) {
+              rowMap.putIfAbsent(r, () => []).add(ct);
+            }
+          }
+          for (final r in rowMap.keys.toList()..sort()) {
+            lines.add('│ ${rowMap[r]!.join("  │  ")} │');
+          }
+        }
+      }
+    }
+    return lines;
   }
 
   static List<String> _extractReadableStringsFromBinary(List<int> bytes) {

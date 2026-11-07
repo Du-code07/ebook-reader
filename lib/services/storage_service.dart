@@ -184,6 +184,16 @@ class StorageService {
   }
 
   // 15. 파일 이름 뒤에 형식(.pdf, .epub 등) 숨기기 설정
+  static Future<void> setBookshelfViewMode(String mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('bookshelf_view_mode', mode);
+  }
+
+  static Future<String> getBookshelfViewMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('bookshelf_view_mode') ?? 'grid';
+  }
+
   static Future<void> setHideFileExtension(bool hide) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('hide_file_extension', hide);

@@ -383,14 +383,14 @@ class UserManualScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _buildIconGuideRow(
-              iconWidget: const Icon(Icons.draw, color: Colors.white, size: 22),
-              title: _tr('손으로 글씨 쓰기 토글 (색상 왼쪽 펜 아이콘)', 'Finger Writing Toggle (Pen Icon Left of Colors)', '手指书写开关（颜色左侧画笔图标）', '指で手書き切替（色パレット左のペンアイコン）'),
-              desc: _tr('S펜 필기 바에서 색상 원 왼쪽의 펜 아이콘을 누르면 아이콘이 흰색으로 바뀌며 손가락으로 글씨를 쓸 수 있습니다. 손으로 글씨를 쓰는 동안에는 손터치 페이지 넘김이 자동으로 잠깁니다.', 'Tap the pen icon to the left of the colors to turn it white and write with your finger. Touch page turning is automatically locked while finger writing is active.', '点击颜色左侧的画笔图标使其变为白色即可用手指书写，书写期间自动锁定触屏翻页。', '色の左にあるペンアイコンを押すと白色に変わり指で手書きできます。手書き中は指でのページめくりが自動ロックされます。'),
-          ),
+              iconWidget: const Icon(Icons.touch_app, color: Colors.white, size: 22),
+              title: _tr('손으로 글씨 쓰기 (한 손가락 모양 아이콘)', 'Finger Writing (One-Finger Icon)', '手指书写（单指图标）', '指で手書き（指差しアイコン）'),
+              desc: _tr('S펜 필기 바에서 색상 원 왼쪽의 한 손가락 아이콘을 누르면 아이콘이 흰색으로 바뀌며 손가락으로 글씨를 쓸 수 있습니다. 손으로 글씨를 쓰는 동안에는 손터치 페이지 넘김이 자동으로 잠깁니다.', 'Tap the one-finger icon to the left of the colors to turn it white and write with your finger. Touch page turning is automatically locked while finger writing is active.', '点击颜色左侧的单指图标使其变为白色即可用手指书写，书写期间自动锁定触屏翻页。', '色の左にある指アイコンを押すと白色に変わり指で手書きできます。手書き中は指でのページめくりが自動ロックされます。'),
+            ),
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.cleaning_services_outlined, color: Colors.amber, size: 22),
-              title: _tr('S펜 지우개 / 색상(6색) / 선 굵기 조절(기본 2.0)', 'S Pen Eraser, 6 Colors & Width Slider (Default 2.0)', 'S Pen 橡皮擦、6种颜色与粗细调节 (默认 2.0)', 'Sペン消しゴム・6色パレット・太さ調節 (基本 2.0)'),
-              desc: _tr('노란·빨간·하늘·초록·흰색·검은색 펜 선택과 선 굵기 슬라이더(기본 2.0pt), S펜 지우개(🧹), 텍스트 메모(📝), 현재 페이지 필기 전체 지우기(🗑)를 제공합니다.', 'Pick from 6 colors (including White & Black), adjust stroke width (default 2.0), toggle Eraser, add text notes, or clear page strokes.', '支持6种颜色（含黑白）、线条粗细滑块（默认 2.0）、橡皮擦、文字备注及清空当前页手写。', '6色(白・黒含む)、太さスライダー(基本2.0)、消しゴム、テキストメモ、ページ手書き全消去が使えます。'),
+              title: _tr('지우개 / 색상(6색) / 필기 전체 지우기', 'Eraser, 6 Colors & Clear All Strokes', '橡皮擦、6种颜色与清空手写', '消しゴム・6色パレット・手書き全消去'),
+              desc: _tr('노란·빨간·하늘·초록·흰색·검은색 펜 선택과 선 굵기 슬라이더(기본 2.0pt), 부드러운 부분 지우개(🧹), 텍스트 메모(📝), 필기 전체 지우기(🗑, 2페이지 보기 시 양쪽 페이지 모두 삭제)를 제공합니다.', 'Pick from 6 colors, adjust stroke width, smooth partial Eraser, text notes, or Clear All Strokes (clears both pages in 2-page mode).', '支持6种颜色、粗细滑块、平滑局部橡皮擦、文字备注及清空手写（双页模式下同时清空两页）。', '6色、太さスライダー、滑らかな消しゴム、テキストメモ、手書き全消去(2ページ表示時は両ページ消去)が使えます。'),
             ),
             _buildIconGuideRow(
               iconWidget: const Row(
@@ -451,6 +451,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   Map<String, double> _bookProgressMap = {};
   Set<String> _favoritePaths = {};
   bool _hideFileExtension = false;
+  String _bookshelfViewMode = 'grid'; // 'grid' (썸네일형 2x2) or 'list' (목록형)
+  final Map<String, String?> _thumbnailPathCache = {};
+  final Set<String> _thumbnailGeneratingPaths = {};
 
   bool _isSelectionMode = false;
   final Set<String> _selectedFilePaths = {};
@@ -462,14 +465,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   String? _pointerDownRowPath;
   Offset? _pointerDownGlobalPos;
 
-  // 7 & 8. 삼성 노트(.sdocx, .spd) 및 .zip 제외 / 워드(.docx, .doc) 및 한글(.hwpx, .hwp)은 PDF로 변환하여 업로드!
+  // 10 & 11. 워드(.docx, .doc), 한글(.hwpx, .hwp), 메모장(.txt, .yml, .yaml) 뷰어 열람 지원
   static const _supportedExts = [
     'epub', 'txt', 'yml', 'yaml', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
     'docx', 'doc', 'hwpx', 'hwp'
   ];
   static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
-  static const _pdfConvertDocExts = ['docx', 'doc', 'hwpx', 'hwp'];
-  static const _docConvertExts = ['txt', 'yml', 'yaml'];
+  static const _docConvertExts = ['txt', 'yml', 'yaml', 'docx', 'doc', 'hwpx', 'hwp'];
 
   String? _findFileRowPathAtGlobalPos(Offset globalPos) {
     for (final entry in _fileRowKeys.entries) {
@@ -591,7 +593,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     for (final e in entities) {
       if (e is File) {
         final lower = e.path.toLowerCase();
-        if (lower.endsWith('_translated.epub') || lower.endsWith('.converted.epub')) continue;
+        if (lower.endsWith('_translated.epub') ||
+            lower.endsWith('.converted.epub') ||
+            lower.endsWith('_converted.epub')) continue;
         final ext = lower.split('.').last;
         if (_supportedExts.contains(ext)) {
           files.add(e);
@@ -609,6 +613,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     final favs = await StorageService.getFavoriteBooks();
     final hideExt = await StorageService.getHideFileExtension();
+    final viewMode = await StorageService.getBookshelfViewMode();
 
     files.sort((a, b) {
       final aFav = favs.contains(a.path);
@@ -641,6 +646,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         _groups = groups;
         _favoritePaths = favs;
         _hideFileExtension = hideExt;
+        _bookshelfViewMode = viewMode;
         if (!_groups.contains(_selectedGroup)) {
           _selectedGroup = '전체';
         }
@@ -651,6 +657,86 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           _isSelectionMode = false;
         }
       });
+      for (final f in files) {
+        _ensureBookThumbnail(f);
+      }
+    }
+  }
+
+  /// 13. 각 파일의 가장 첫 페이지를 썸네일 이미지로 생성 및 캐싱
+  Future<void> _ensureBookThumbnail(File file) async {
+    final path = file.path;
+    if (_thumbnailPathCache.containsKey(path) && _thumbnailPathCache[path] != null) {
+      if (File(_thumbnailPathCache[path]!).existsSync()) return;
+    }
+    if (_thumbnailGeneratingPaths.contains(path)) return;
+    _thumbnailGeneratingPaths.add(path);
+
+    try {
+      final ext = path.split('.').last.toLowerCase();
+      if (_imageExts.contains(ext)) {
+        if (mounted) {
+          setState(() => _thumbnailPathCache[path] = path);
+        }
+        return;
+      }
+
+      final appDir = await getApplicationDocumentsDirectory();
+      final thumbDir = Directory('${appDir.path}/.thumbnails');
+      if (!await thumbDir.exists()) {
+        await thumbDir.create(recursive: true);
+      }
+      final safeKey = path.hashCode.toUnsigned(32).toString();
+      final stat = await file.stat();
+      final thumbPath = '${thumbDir.path}/thumb_${safeKey}_${stat.size}.jpg';
+      final thumbFile = File(thumbPath);
+
+      if (await thumbFile.exists() && await thumbFile.length() > 64) {
+        if (mounted) {
+          setState(() => _thumbnailPathCache[path] = thumbPath);
+        }
+        return;
+      }
+
+      if (ext == 'pdf') {
+        final rendered = await _pdfChannel.invokeMethod<String>(
+          'renderPdfFirstPageThumbnail',
+          {
+            'filePath': path,
+            'outPath': thumbPath,
+            'maxWidth': 480,
+          },
+        );
+        if (rendered != null && File(rendered).existsSync()) {
+          if (mounted) {
+            setState(() => _thumbnailPathCache[path] = rendered);
+          }
+          return;
+        }
+      } else if (ext == 'cbz' || ext == 'epub') {
+        final bytes = await file.readAsBytes();
+        final archive = ZipDecoder().decodeBytes(bytes);
+        final imgEntries = archive.files.where((af) {
+          if (!af.isFile) return false;
+          final n = af.name.toLowerCase();
+          return n.endsWith('.jpg') || n.endsWith('.jpeg') || n.endsWith('.png') || n.endsWith('.webp');
+        }).toList();
+        if (imgEntries.isNotEmpty) {
+          imgEntries.sort((a, b) => _naturalCompare(a.name, b.name));
+          final firstImg = imgEntries.first;
+          final content = firstImg.content as List<int>;
+          await thumbFile.writeAsBytes(content, flush: true);
+          if (mounted) {
+            setState(() => _thumbnailPathCache[path] = thumbPath);
+          }
+          return;
+        }
+      }
+      _thumbnailPathCache[path] = null;
+    } catch (_) {
+      _thumbnailPathCache[path] = null;
+    } finally {
+      _thumbnailGeneratingPaths.remove(path);
     }
   }
 
@@ -767,68 +853,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     final appDir = await getApplicationDocumentsDirectory();
     final importedFiles = <File>[];
 
-    final hasDocOrHwp = validPicked.any((pf) {
-      final ext = pf.name.split('.').last.toLowerCase();
-      return _pdfConvertDocExts.contains(ext);
-    });
-
-    if (hasDocOrHwp && mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => AlertDialog(
-          content: Row(
-            children: [
-              const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2.5),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  _tr(
-                    '워드/한글 문서를 표·사진 포함 PDF로 변환 중...',
-                    'Converting Word/HWP to PDF (with tables & images)...',
-                    '正在将 Word/HWP 文档转换为包含表格与图片的 PDF...',
-                    'Word/HWP文書を表・画像付きPDFに変換中...',
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    try {
-      for (final pf in validPicked) {
-        if (pf.path == null) continue;
-        final ext = pf.name.split('.').last.toLowerCase();
-        final targetGrp = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
-
-        if (_pdfConvertDocExts.contains(ext)) {
-          final baseName = pf.name.replaceAll(
-            RegExp(r'\.(docx|doc|hwpx|hwp)$', caseSensitive: false),
-            '',
-          );
-          final targetPdfPath = '${appDir.path}/$baseName.pdf';
-          final convertedPdf = await TxtToEpubConverter.convertDocOrHwpToPdf(
-            File(pf.path!),
-            targetPdfPath: targetPdfPath,
-          );
-          await StorageService.setBookGroup(convertedPdf.path, targetGrp);
-          importedFiles.add(convertedPdf);
-        } else {
-          final saved = await File(pf.path!).copy('${appDir.path}/${pf.name}');
-          await StorageService.setBookGroup(saved.path, targetGrp);
-          importedFiles.add(saved);
-        }
-      }
-    } finally {
-      if (hasDocOrHwp && mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
+    for (final pf in validPicked) {
+      if (pf.path == null) continue;
+      final targetGrp = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
+      final saved = await File(pf.path!).copy('${appDir.path}/${pf.name}');
+      await StorageService.setBookGroup(saved.path, targetGrp);
+      importedFiles.add(saved);
     }
 
     await _loadLibrary();
@@ -1502,19 +1532,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           builder: (_) => ReaderScreen(filePath: file.path, bookTitle: displayName),
         ),
       );
-    } else if (_pdfConvertDocExts.contains(ext)) {
-      final pdfFile = await TxtToEpubConverter.convertDocOrHwpToPdf(file);
-      if (!mounted) return;
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => UniversalMediaReaderScreen(
-            files: [pdfFile],
-            title: displayName,
-            isPdf: true,
-          ),
-        ),
-      );
     } else if (_docConvertExts.contains(ext)) {
       final epubFile = await TxtToEpubConverter.convertDocumentToEpub(file);
       if (!mounted) return;
@@ -1933,6 +1950,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   Future<void> _showGlobalSettingsDialog() async {
     String currentLang = widget.appLang;
     bool hideExt = _hideFileExtension;
+    String viewMode = _bookshelfViewMode;
 
     if (!mounted) return;
     await showDialog(
@@ -1987,9 +2005,45 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   ),
                   const Divider(height: 24),
                   Text(
-                    tDialog('2. 파일 표시 설정', '2. File Display', '2. 文件显示设置', '2. ファイル表示設定'),
+                    tDialog('2. 파일 보여주는 형식', '2. Bookshelf View Mode', '2. 文件显示样式', '2. ファイル表示形式'),
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      ChoiceChip(
+                        avatar: Icon(
+                          Icons.grid_view_rounded,
+                          size: 16,
+                          color: viewMode == 'grid' ? Colors.amber : null,
+                        ),
+                        label: Text(tDialog('썸네일형 (2×2 첫 페이지)', 'Thumbnail Grid (2×2)', '缩略图 (2×2 首页)', 'サムネイル表示 (2×2)')),
+                        selected: viewMode == 'grid',
+                        onSelected: (_) async {
+                          await StorageService.setBookshelfViewMode('grid');
+                          setModalState(() => viewMode = 'grid');
+                          setState(() => _bookshelfViewMode = 'grid');
+                        },
+                      ),
+                      ChoiceChip(
+                        avatar: Icon(
+                          Icons.view_list_rounded,
+                          size: 16,
+                          color: viewMode == 'list' ? Colors.amber : null,
+                        ),
+                        label: Text(tDialog('목록형 (리스트)', 'List View', '列表视图', 'リスト表示')),
+                        selected: viewMode == 'list',
+                        onSelected: (_) async {
+                          await StorageService.setBookshelfViewMode('list');
+                          setModalState(() => viewMode = 'list');
+                          setState(() => _bookshelfViewMode = 'list');
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     dense: true,
@@ -2037,6 +2091,320 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// 13. 썸네일 그리드 카드 (파일 첫 페이지 썸네일, 우측 상단 즐겨찾기 별 아이콘, 점 3개 메뉴[이름 변경/그룹 이동], 하단 그룹 이름 및 진행률, 길게 눌러 드래그 다중 선택)
+  Widget _buildGridBookCard(File file) {
+    final rowKey = _fileRowKeys.putIfAbsent(file.path, () => GlobalKey());
+    final rawFileName = file.path.split(Platform.pathSeparator).last;
+    final displayFileName = _formatDisplayFileName(rawFileName);
+    final grp = _bookGroupMap[file.path] ?? '미분류';
+    final grpDisplay = _localizeGroupName(grp);
+    final prog = (_bookProgressMap[file.path] ?? 0.0) * 100;
+    final isSelected = _selectedFilePaths.contains(file.path);
+    final isFavorite = _favoritePaths.contains(file.path);
+    final lowerExt = rawFileName.split('.').last.toLowerCase();
+    final thumbPath = _thumbnailPathCache[file.path];
+
+    final IconData fallbackIcon = lowerExt == 'pdf'
+        ? Icons.picture_as_pdf
+        : (lowerExt == 'docx' || lowerExt == 'doc' || lowerExt == 'hwpx' || lowerExt == 'hwp')
+            ? Icons.description_outlined
+            : (lowerExt == 'epub' || lowerExt == 'txt' || lowerExt == 'yml' || lowerExt == 'yaml')
+                ? Icons.menu_book
+                : lowerExt == 'cbz'
+                    ? Icons.auto_stories
+                    : Icons.image;
+
+    return RepaintBoundary(
+      child: Container(
+        key: rowKey,
+        child: GestureDetector(
+          onLongPress: () {
+            setState(() {
+              final bool targetSelect = !_isSelectionMode ? true : !isSelected;
+              _isSelectionMode = true;
+              _isDragSelecting = true;
+              _dragTargetSelectState = targetSelect;
+              _lastDragTouchedPath = file.path;
+              if (targetSelect) {
+                _selectedFilePaths.add(file.path);
+              } else {
+                _selectedFilePaths.remove(file.path);
+              }
+            });
+          },
+          onTap: () {
+            if (_isSelectionMode) {
+              setState(() {
+                if (isSelected) {
+                  _selectedFilePaths.remove(file.path);
+                  if (_selectedFilePaths.isEmpty) {
+                    _isSelectionMode = false;
+                  }
+                } else {
+                  _selectedFilePaths.add(file.path);
+                }
+              });
+            } else {
+              _openFile(file);
+            }
+          },
+          child: Card(
+            elevation: isSelected ? 4 : 2,
+            margin: EdgeInsets.zero,
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: isSelected
+                  ? const BorderSide(color: Colors.amber, width: 2.5)
+                  : BorderSide(
+                      color: widget.isDarkMode ? Colors.white12 : Colors.black12,
+                      width: 1.0,
+                    ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 상단: 파일 첫 페이지 썸네일 영역 + 우측 상단 즐겨찾기 버튼
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Container(
+                        color: widget.isDarkMode ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                        child: (thumbPath != null && File(thumbPath).existsSync())
+                            ? Image.file(
+                                File(thumbPath),
+                                fit: BoxFit.cover,
+                                alignment: Alignment.topCenter,
+                                gaplessPlayback: true,
+                                cacheWidth: 480,
+                                errorBuilder: (_, __, ___) => Center(
+                                  child: Icon(fallbackIcon, size: 46, color: Colors.indigo),
+                                ),
+                              )
+                            : Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(fallbackIcon, size: 44, color: Colors.indigo),
+                                    const SizedBox(height: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.indigo.withOpacity(0.12),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        lowerExt.toUpperCase(),
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.indigo,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                      ),
+                      // 선택 모드일 때 좌측 상단 체크박스 표시
+                      if (_isSelectionMode)
+                        Positioned(
+                          top: 6,
+                          left: 6,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Checkbox(
+                              value: isSelected,
+                              visualDensity: VisualDensity.compact,
+                              side: const BorderSide(color: Colors.white, width: 1.5),
+                              onChanged: (v) {
+                                setState(() {
+                                  if (v == true) {
+                                    _selectedFilePaths.add(file.path);
+                                  } else {
+                                    _selectedFilePaths.remove(file.path);
+                                    if (_selectedFilePaths.isEmpty) {
+                                      _isSelectionMode = false;
+                                    }
+                                  }
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                      // 13. 즐겨찾기 버튼은 썸네일 우측 상단에 위치
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Material(
+                          color: Colors.black45,
+                          shape: const CircleBorder(),
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: () async {
+                              await StorageService.toggleFavoriteBook(file.path);
+                              await _loadLibrary();
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(6.0),
+                              child: Icon(
+                                isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+                                color: isFavorite ? Colors.amber : Colors.white,
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // 하단: 파일 제목 + 점 3개(편집/파일 이동) 아이콘 + 그룹 이름 및 진행률
+                Container(
+                  padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+                  color: widget.isDarkMode ? const Color(0xFF0F172A) : Colors.white,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              displayFileName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          if (!_isSelectionMode)
+                            PopupMenuButton<String>(
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 130),
+                              icon: const Icon(Icons.more_vert, size: 19),
+                              tooltip: _tr('메뉴', 'More', '更多', 'メニュー'),
+                              onSelected: (action) {
+                                if (action == 'rename') {
+                                  _renameFileDialog(file);
+                                } else if (action == 'move_group') {
+                                  _assignGroupDialog(file);
+                                } else if (action == 'trash') {
+                                  _moveFileToTrash(file);
+                                }
+                              },
+                              itemBuilder: (ctx) => [
+                                PopupMenuItem<String>(
+                                  value: 'rename',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.edit_outlined, size: 18),
+                                      const SizedBox(width: 8),
+                                      Text(_tr('이름 변경', 'Rename', '重命名', '名前変更')),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem<String>(
+                                  value: 'move_group',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.drive_file_move_outline, size: 18),
+                                      const SizedBox(width: 8),
+                                      Text(_tr('그룹 이동', 'Move Group', '移动分组', 'グループ移動')),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem<String>(
+                                  value: 'trash',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _tr('휴지통 이동', 'Move to Trash', '移至回收站', 'ゴミ箱へ移動'),
+                                        style: const TextStyle(color: Colors.redAccent),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      ValueListenableBuilder<Map<String, TranslationTaskInfo>>(
+                        valueListenable: BatchTranslationService.activeTasks,
+                        builder: (context, activeTasks, _) {
+                          TranslationTaskInfo? task = activeTasks[file.path];
+                          if (task == null && _imageExts.contains(lowerExt)) {
+                            final currentGroup = _bookGroupMap[file.path];
+                            final firstSibling = _allBooks.firstWhere(
+                              (f) =>
+                                  _imageExts.contains(f.path.split('.').last.toLowerCase()) &&
+                                  _bookGroupMap[f.path] == currentGroup,
+                              orElse: () => file,
+                            );
+                            task = activeTasks[firstSibling.path];
+                          }
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '[$grpDisplay]',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: widget.isDarkMode ? Colors.white70 : Colors.black54,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    task != null
+                                        ? '${_tr("번역", "Trans", "翻译", "翻訳")} ${(task.progress * 100).toStringAsFixed(0)}%'
+                                        : '${prog.toStringAsFixed(1)}%',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: widget.isDarkMode ? Colors.amber : const Color(0xFF0F766E),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              LinearProgressIndicator(
+                                value: task != null
+                                    ? task.progress.clamp(0.0, 1.0).toDouble()
+                                    : (prog / 100.0).clamp(0.0, 1.0),
+                                minHeight: 3.5,
+                                color: widget.isDarkMode ? Colors.amber : const Color(0xFF0F766E),
+                                backgroundColor: widget.isDarkMode ? Colors.white12 : Colors.black12,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2228,7 +2596,39 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         _pointerDownRowPath = null;
                         _lastDragTouchedPath = null;
                       },
-                      child: ListView.separated(
+                      child: _bookshelfViewMode == 'grid'
+                          ? LayoutBuilder(
+                              builder: (context, constraints) {
+                                // 휴대폰 기준 가로 2개, 세로 2개 (화면에 4개 정도 나오게) 비율 자동 계산
+                                const int crossCount = 2;
+                                const double hPad = 12.0;
+                                const double vPad = 10.0;
+                                const double crossSpacing = 12.0;
+                                const double mainSpacing = 12.0;
+                                final double cellW = ((constraints.maxWidth - (hPad * 2) - crossSpacing) / crossCount).clamp(120.0, 600.0);
+                                final double targetCellH = ((constraints.maxHeight - (vPad * 2) - mainSpacing) / 2.0).clamp(215.0, 390.0);
+                                final double childAspect = (cellW / targetCellH).clamp(0.58, 1.05);
+
+                                return GridView.builder(
+                                  controller: _bookshelfScrollController,
+                                  physics: _isSelectionMode
+                                      ? const NeverScrollableScrollPhysics()
+                                      : const AlwaysScrollableScrollPhysics(),
+                                  padding: const EdgeInsets.fromLTRB(hPad, vPad, hPad, 88),
+                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: crossCount,
+                                    crossAxisSpacing: crossSpacing,
+                                    mainAxisSpacing: mainSpacing,
+                                    childAspectRatio: childAspect,
+                                  ),
+                                  itemCount: filteredBooks.length,
+                                  itemBuilder: (context, index) {
+                                    return _buildGridBookCard(filteredBooks[index]);
+                                  },
+                                );
+                              },
+                            )
+                          : ListView.separated(
                         controller: _bookshelfScrollController,
                         physics: _isSelectionMode
                             ? const NeverScrollableScrollPhysics()

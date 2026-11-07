@@ -207,6 +207,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _useQuickNavTurn = false;
   bool _useSpenTurn = false;
   bool? _forcedLandscape;
+  int _manualQuarterTurns = 0;
+  Offset? _lastEraserPos;
   final Set<int> _activeTouchPointerIds = {};
   final TransformationController _zoomController = TransformationController();
   double _currentZoomScale = 1.0;
@@ -296,20 +298,32 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Future<void> _toggleScreenOrientation() async {
-    final bool currentlyLandscape =
-        _forcedLandscape ?? (MediaQuery.of(context).orientation == Orientation.landscape);
-    final bool nextLandscape = !currentlyLandscape;
-    setState(() => _forcedLandscape = nextLandscape);
+    final Size beforeSize = MediaQuery.of(context).size;
+    final bool isPhysicallyLandscape = beforeSize.width > beforeSize.height;
+    final bool isEffectivelyLandscape = (_manualQuarterTurns % 2 == 1)
+        ? !isPhysicallyLandscape
+        : isPhysicallyLandscape;
+    final bool nextLandscape = !isEffectivelyLandscape;
+    _forcedLandscape = nextLandscape;
+
     try {
       await _pdfChannel.invokeMethod('setScreenOrientation', {
         'mode': nextLandscape ? 'landscape' : 'portrait',
       });
     } catch (_) {}
-    await SystemChrome.setPreferredOrientations(
-      nextLandscape
-          ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
-          : [DeviceOrientation.portraitUp],
-    );
+
+    await Future.delayed(const Duration(milliseconds: 220));
+    if (!mounted) return;
+    final Size afterSize = MediaQuery.of(context).size;
+    final bool nowPhysicallyLandscape = afterSize.width > afterSize.height;
+    setState(() {
+      if (nowPhysicallyLandscape == nextLandscape) {
+        _manualQuarterTurns = 0;
+      } else {
+        // 태블릿 시스템 설정에서 화면 회전이 강제 고정된 경우 뷰 자체를 90도 회전!
+        _manualQuarterTurns = (_manualQuarterTurns == 0) ? 1 : 0;
+      }
+    });
   }
 
   Future<Size> _getImageDimension(File file) async {
@@ -636,7 +650,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   bool _isSpreadActive(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    return _enableTwoPageInLandscape && size.width > size.height && _totalPages > 1;
+    final bool isLandscapeNow = (_manualQuarterTurns % 2 == 1)
+        ? (size.height > size.width)
+        : (size.width > size.height);
+    return _enableTwoPageInLandscape && isLandscapeNow && _totalPages > 1;
   }
 
   void _syncControllerToCurrentPage({bool animate = true}) {
@@ -741,18 +758,54 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  /// 5. PC 그림판 방식 부분 지우개: 선 전체를 통째로 삭제하지 않고 지우개가 닿은 반경(radius) 부분만 정밀하게 도려내어 분할!
-  Future<void> _eraseStrokeAt(int pageIndex, Offset localPos, double drawWidth, double drawHeight) async {
-    final strokes = _memoStrokesByPage[pageIndex];
-    if (strokes == null || strokes.isEmpty || drawWidth <= 0 || drawHeight <= 0) return;
+  double _distToEraserSegment(Offset p, Offset a, Offset b) {
+    final ab = b - a;
+    final lenSq = ab.dx * ab.dx + ab.dy * ab.dy;
+    if (lenSq < 0.0001) return (p - a).distance;
+    final t = (((p.dx - a.dx) * ab.dx + (p.dy - a.dy) * ab.dy) / lenSq).clamp(0.0, 1.0);
+    final proj = Offset(a.dx + ab.dx * t, a.dy + ab.dy * t);
+    return (p - proj).distance;
+  }
 
-    final double hitRadius = math.max<double>(14.0, _penWidth * 3.0);
+  /// 2 & 5. 삼성 노트 스타일 초고속 캡슐 지우개 (드래그 중 디스크 I/O 제거 + 이전 좌표~현재 좌표 연속 캡슐 판정으로 끊김 0%)
+  void _eraseStrokeAt(int pageIndex, Offset localPos, double drawWidth, double drawHeight) {
+    final strokes = _memoStrokesByPage[pageIndex];
+    if (strokes == null || strokes.isEmpty || drawWidth <= 0 || drawHeight <= 0) {
+      _lastEraserPos = localPos;
+      return;
+    }
+
+    final Offset prevPos = _lastEraserPos ?? localPos;
+    _lastEraserPos = localPos;
+
+    final double hitRadius = math.max<double>(15.0, _penWidth * 3.2);
+    final double minEraserX = math.min(prevPos.dx, localPos.dx) - hitRadius;
+    final double maxEraserX = math.max(prevPos.dx, localPos.dx) + hitRadius;
+    final double minEraserY = math.min(prevPos.dy, localPos.dy) - hitRadius;
+    final double maxEraserY = math.max(prevPos.dy, localPos.dy) + hitRadius;
+
     bool modifiedAny = false;
     final nextStrokes = <MemoStroke>[];
 
     for (final s in strokes) {
       if (s.dxList.isEmpty) continue;
-      // 1단계: 원본 점들을 픽셀 좌표로 변환 후 3.5px 간격으로 조밀하게 보간
+
+      // 바운딩 박스 고속 사전 필터링 (멀리 떨어진 선은 연산 생략)
+      double sMinX = double.infinity, sMaxX = double.negativeInfinity;
+      double sMinY = double.infinity, sMaxY = double.negativeInfinity;
+      for (int i = 0; i < s.dxList.length; i++) {
+        final px = s.dxList[i] * drawWidth;
+        final py = s.dyList[i] * drawHeight;
+        if (px < sMinX) sMinX = px;
+        if (px > sMaxX) sMaxX = px;
+        if (py < sMinY) sMinY = py;
+        if (py > sMaxY) sMaxY = py;
+      }
+      if (sMaxX < minEraserX || sMinX > maxEraserX || sMaxY < minEraserY || sMinY > maxEraserY) {
+        nextStrokes.add(s);
+        continue;
+      }
+
       final densePts = <Offset>[];
       for (int i = 0; i < s.dxList.length; i++) {
         final p0 = Offset(s.dxList[i] * drawWidth, s.dyList[i] * drawHeight);
@@ -760,8 +813,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         if (i + 1 < s.dxList.length) {
           final p1 = Offset(s.dxList[i + 1] * drawWidth, s.dyList[i + 1] * drawHeight);
           final dist = (p1 - p0).distance;
-          if (dist > 3.5) {
-            final steps = (dist / 3.5).ceil();
+          if (dist > 4.0) {
+            final steps = (dist / 4.0).ceil();
             for (int k = 1; k < steps; k++) {
               final t = k / steps;
               densePts.add(Offset(p0.dx + (p1.dx - p0.dx) * t, p0.dy + (p1.dy - p0.dy) * t));
@@ -770,10 +823,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         }
       }
 
-      // 2단계: 지우개 반경에 닿은 점이 하나라도 있는지 확인
       bool anyHit = false;
       for (final pt in densePts) {
-        if ((pt - localPos).distance <= hitRadius) {
+        if (_distToEraserSegment(pt, prevPos, localPos) <= hitRadius) {
           anyHit = true;
           break;
         }
@@ -785,17 +837,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       }
 
       modifiedAny = true;
-      // 3단계: 지우개 원 바깥에 남아 있는 연속 구간(segment)들만 별도 선으로 분할 보존
       List<Offset> currentRun = [];
       void flushRun() {
         if (currentRun.isEmpty) return;
         if (currentRun.length == 1) {
           currentRun.add(currentRun.first + const Offset(0.2, 0.2));
         }
-        // 저장 용량 최적화를 위해 너무 촘촘한 점은 1.8px 간격으로 경량화
         final compact = <Offset>[currentRun.first];
         for (int i = 1; i < currentRun.length - 1; i++) {
-          if ((currentRun[i] - compact.last).distance >= 1.8) {
+          if ((currentRun[i] - compact.last).distance >= 2.2) {
             compact.add(currentRun[i]);
           }
         }
@@ -812,7 +862,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       }
 
       for (final pt in densePts) {
-        if ((pt - localPos).distance <= hitRadius) {
+        if (_distToEraserSegment(pt, prevPos, localPos) <= hitRadius) {
           flushRun();
         } else {
           currentRun.add(pt);
@@ -825,7 +875,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       setState(() {
         _memoStrokesByPage[pageIndex] = nextStrokes;
       });
-      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, nextStrokes);
     }
   }
 
@@ -1131,18 +1180,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     ),
                   ],
                 ),
-                const Divider(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.ios_share, size: 18),
-                    label: Text(_tr('메모 포함 파일 내보내기 (PDF)', 'Export File with Memos (PDF)', '导出包含笔记的文件 (PDF)', 'メモ付きファイルを出力 (PDF)')),
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      _exportDocumentWithAnnotations();
-                    },
-                  ),
-                ),
+
                 const Divider(height: 24),
                 Text(
                   _tr('진행도 UI 위치', 'Progress Bar Position', '进度条位置', '進行度バーの位置'),
@@ -1450,7 +1488,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  Widget _buildSinglePagePanel(int pageIndex) {
+  Widget _buildSinglePagePanel(int pageIndex, {int spreadSide = 0}) {
     if (pageIndex < 0 || pageIndex >= _imagePages.length) {
       return const SizedBox.expand();
     }
@@ -1471,20 +1509,42 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           final fitted = applyBoxFit(BoxFit.contain, imgSize, constraints.biggest);
           drawWidth = fitted.destination.width;
           drawHeight = fitted.destination.height;
-          drawLeft = (constraints.maxWidth - drawWidth) / 2.0;
+          // 9. 2페이지 보기 모드에서 왼쪽 페이지는 중앙 쪽(우측)으로, 오른쪽 페이지는 중앙 쪽(좌측)으로 붙여 가운데 여백 최소화!
+          if (spreadSide == -1) {
+            drawLeft = (constraints.maxWidth - drawWidth - 2.0).clamp(0.0, constraints.maxWidth);
+          } else if (spreadSide == 1) {
+            drawLeft = 2.0.clamp(0.0, math.max<double>(0.0, constraints.maxWidth - drawWidth));
+          } else {
+            drawLeft = (constraints.maxWidth - drawWidth) / 2.0;
+          }
           drawTop = (constraints.maxHeight - drawHeight) / 2.0;
         } else {
           _ensurePageDimensionLoaded(pageIndex);
         }
 
+        final Alignment pageAlign = spreadSide == -1
+            ? Alignment.centerRight
+            : (spreadSide == 1 ? Alignment.centerLeft : Alignment.center);
+
         return Stack(
           fit: StackFit.expand,
           children: [
-            Image.file(
-              _imagePages[pageIndex],
-              fit: BoxFit.contain,
-              width: constraints.maxWidth,
-              height: constraints.maxHeight,
+            RepaintBoundary(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  right: spreadSide == -1 ? 2.0 : 0.0,
+                  left: spreadSide == 1 ? 2.0 : 0.0,
+                ),
+                child: Image.file(
+                  _imagePages[pageIndex],
+                  fit: BoxFit.contain,
+                  alignment: pageAlign,
+                  gaplessPlayback: true,
+                  filterQuality: FilterQuality.medium,
+                  width: constraints.maxWidth,
+                  height: constraints.maxHeight,
+                ),
+              ),
             ),
             if (_showTranslatedBubbles && bubbles.isNotEmpty)
               ...bubbles.map((b) {
@@ -1548,6 +1608,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     final bool useEraser =
                         _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
                     if (useEraser) {
+                      _lastEraserPos = event.localPosition;
                       _eraseStrokeAt(pageIndex, event.localPosition, drawWidth, drawHeight);
                     } else {
                       setState(() {
@@ -1570,10 +1631,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     }
                   },
                   onStylusUp: (event) async {
+                    _lastEraserPos = null;
                     final bool useEraser =
                         _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
-                    if (!useEraser &&
-                        _activeStrokePoints.isNotEmpty &&
+                    if (useEraser) {
+                      final list = _memoStrokesByPage[pageIndex] ?? [];
+                      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
+                    } else if (_activeStrokePoints.isNotEmpty &&
                         drawWidth > 0 &&
                         drawHeight > 0) {
                       final stroke = MemoStroke(
@@ -1595,15 +1659,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
                     }
                   },
-                  onStylusCancel: (_) {
+                  onStylusCancel: (_) async {
+                    _lastEraserPos = null;
                     setState(() => _activeStrokePoints.clear());
+                    final list = _memoStrokesByPage[pageIndex] ?? [];
+                    await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
                   },
-                  child: CustomPaint(
-                    painter: _MemoCanvasPainter(
-                      strokes: strokes,
-                      currentPoints: pageIndex == _activeDrawingPageIndex ? _activeStrokePoints : const [],
-                      currentColor: _penColor,
-                      currentWidth: _penWidth,
+                  child: RepaintBoundary(
+                    child: CustomPaint(
+                      painter: _MemoCanvasPainter(
+                        strokes: strokes,
+                        currentPoints: pageIndex == _activeDrawingPageIndex ? _activeStrokePoints : const [],
+                        currentColor: _penColor,
+                        currentWidth: _penWidth,
+                      ),
                     ),
                   ),
                 ),
@@ -1965,7 +2034,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       },
       child: Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
+      body: RotatedBox(
+        quarterTurns: _manualQuarterTurns,
+        child: Stack(
         fit: StackFit.expand,
         children: [
           Positioned.fill(
@@ -2007,13 +2078,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   }
                 },
                 child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
                   onTap: _toggleControls,
-                  onDoubleTap: () {
-                    if (_currentZoomScale > 1.03) {
-                      _zoomController.value = Matrix4.identity();
-                      setState(() => _currentZoomScale = 1.0);
-                    }
-                  },
                   child: PageView.builder(
                     key: ValueKey('pageview_spread_$isSpread'),
                     controller: _pageController,
@@ -2049,15 +2115,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       final int firstPage = viewIdx * 2;
                       final int secondPage = firstPage + 1;
                       final Widget leftPanel = _isMangaRtlMode
-                          ? (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand())
-                          : _buildSinglePagePanel(firstPage);
+                          ? (secondPage < _totalPages ? _buildSinglePagePanel(secondPage, spreadSide: -1) : const SizedBox.expand())
+                          : _buildSinglePagePanel(firstPage, spreadSide: -1);
                       final Widget rightPanel = _isMangaRtlMode
-                          ? _buildSinglePagePanel(firstPage)
-                          : (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand());
+                          ? _buildSinglePagePanel(firstPage, spreadSide: 1)
+                          : (secondPage < _totalPages ? _buildSinglePagePanel(secondPage, spreadSide: 1) : const SizedBox.expand());
                       pageChild = Row(
                         children: [
                           Expanded(child: leftPanel),
-                          Container(width: 1, color: Colors.white12),
                           Expanded(child: rightPanel),
                         ],
                       );
@@ -2171,16 +2236,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             padding: const EdgeInsets.symmetric(horizontal: 4),
                             constraints: const BoxConstraints(),
                             icon: Icon(
-                              _isEraserMode ? Icons.auto_fix_normal : Icons.draw,
+                              Icons.touch_app,
                               color: _allowFingerDrawing ? Colors.white : Colors.amber,
                               size: 20,
                             ),
-                            tooltip: _tr(
-                              '손으로 글씨 쓰기 (활성 시 흰색 / 페이지 넘김 잠금)',
-                              'Finger Writing (White when active / Locks page turn)',
-                              '手指书写（开启时变白 / 锁定翻页）',
-                              '指で手書き（ONで白色 / ページめくりロック）',
-                            ),
+                            tooltip: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
                             onPressed: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
                           ),
                           const SizedBox(width: 6),
@@ -2242,7 +2302,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               color: _isEraserMode ? Colors.amber : Colors.white,
                               size: 18,
                             ),
-                            tooltip: _tr('부분 지우개 (그림판 방식)', 'Partial Eraser', '局部橡皮擦', '部分消しゴム'),
+                            tooltip: _tr('지우개', 'Eraser', '橡皮擦', '消しゴム'),
                             onPressed: () => setState(() => _isEraserMode = !_isEraserMode),
                           ),
                           IconButton(
@@ -2251,16 +2311,26 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             onPressed: _showMemoTextDialog,
                           ),
                           IconButton(
-                            icon: const Icon(Icons.ios_share, color: Colors.lightBlueAccent, size: 18),
-                            tooltip: _tr('메모 포함 파일 내보내기', 'Export with Memos', '导出含笔记文件', 'メモ付き出力'),
-                            onPressed: _exportDocumentWithAnnotations,
-                          ),
-                          IconButton(
                             icon: const Icon(Icons.delete_sweep_outlined, color: Colors.redAccent, size: 18),
-                            tooltip: _tr('현재 페이지 필기 전체 지우기', 'Clear Page Strokes', '清空当前页手写', ' 현재ページの手書きを全消去'),
+                            tooltip: _tr('필기 전체 지우기', 'Clear All Strokes', '清空全部手写', '手書きを全消去'),
                             onPressed: () async {
-                              setState(() => _memoStrokesByPage.remove(_currentPage));
+                              final bool isSpreadNow = _isSpreadActive(context);
+                              final int firstPage = isSpreadNow ? ((_currentPage ~/ 2) * 2) : _currentPage;
+                              final int secondPage = firstPage + 1;
+                              setState(() {
+                                _memoStrokesByPage.remove(_currentPage);
+                                _memoStrokesByPage.remove(firstPage);
+                                if (isSpreadNow && secondPage < _totalPages) {
+                                  _memoStrokesByPage.remove(secondPage);
+                                }
+                              });
                               await StorageService.savePageMemoStrokes(_bookKey, _currentPage, []);
+                              if (firstPage != _currentPage) {
+                                await StorageService.savePageMemoStrokes(_bookKey, firstPage, []);
+                              }
+                              if (isSpreadNow && secondPage < _totalPages) {
+                                await StorageService.savePageMemoStrokes(_bookKey, secondPage, []);
+                              }
                             },
                           ),
                           TextButton(
@@ -2292,12 +2362,187 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                     child: LayoutBuilder(
                       builder: (context, barConstraints) {
-                        final bool isWide = barConstraints.maxWidth >= 560;
-                        const btnConstraints = BoxConstraints(minWidth: 32, minHeight: 38);
-                        const btnPadding = EdgeInsets.symmetric(horizontal: 4, vertical: 4);
+                        final bool isWide = barConstraints.maxWidth >= 680;
+                        const btnConstraints = BoxConstraints(minWidth: 38, minHeight: 40);
+                        const btnPadding = EdgeInsets.symmetric(horizontal: 6, vertical: 4);
 
-                        final rowWidget = Row(
-                          mainAxisAlignment: isWide ? MainAxisAlignment.start : MainAxisAlignment.spaceBetween,
+                        final actionButtons = <Widget>[
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
+                            icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 22),
+                            tooltip: _tr('이전 파일로 이동', 'Previous File', '上一个文件', '前のファイル'),
+                            onPressed: () => _openAdjacentFileInSameGroup(-1),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
+                            icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
+                            tooltip: _tr('다음 파일로 이동', 'Next File', '下一个文件', '次のファイル'),
+                            onPressed: () => _openAdjacentFileInSameGroup(1),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
+                            icon: const Icon(Icons.lock_outline, color: Colors.white, size: 19),
+                            tooltip: _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
+                            onPressed: () {
+                              setState(() {
+                                _isTouchLocked = true;
+                                _showControls = false;
+                                _isMemoMode = false;
+                                _allowFingerDrawing = false;
+                                _isStylusDown = false;
+                              });
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    _tr(
+                                      '화면이 잠겼습니다. (흔들어서 끄기 또는 음량 버튼 동시에 눌러서 끄기)',
+                                      'Screen locked. (Shake or press Vol Up+Down to unlock)',
+                                      '屏幕已锁定。（摇晃或同时按音量键即可关闭锁定）',
+                                      '画面をロックしました。(振るか音量ボタン同時押しで解除)',
+                                    ),
+                                  ),
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
+                            icon: const Icon(Icons.screen_rotation, color: Colors.white, size: 19),
+                            tooltip: _tr('화면 가로/세로 전환', 'Rotate Screen', '横/竖屏切换', '画面縦横切替'),
+                            onPressed: _toggleScreenOrientation,
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
+                            icon: Icon(
+                              Icons.draw_outlined,
+                              color: _isMemoMode ? Colors.amber : Colors.white,
+                              size: 20,
+                            ),
+                            tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
+                            onPressed: () {
+                              setState(() {
+                                _isMemoMode = !_isMemoMode;
+                                _isEraserMode = false;
+                                if (!_isMemoMode) _allowFingerDrawing = false;
+                              });
+                            },
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
+                            icon: Icon(
+                              _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
+                              color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
+                              size: 20,
+                            ),
+                            tooltip: _tr('가로 모드 2페이지 보기', '2-Page Spread in Landscape', '横屏双页显示', '横画面2ページ表示'),
+                            onPressed: () async {
+                              final nextVal = !_enableTwoPageInLandscape;
+                              await StorageService.setTwoPageLandscape(nextVal);
+                              setState(() => _enableTwoPageInLandscape = nextVal);
+                            },
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
+                            icon: _buildDualDirectionIcon(),
+                            tooltip: _isMangaRtlMode
+                                ? _tr('읽기 방향 전환 (우 → 좌)', 'Reading Direction (R → L)', '切换阅读方向 (右 → 左)', '読書方向切替 (右 → 左)')
+                                : _tr('읽기 방향 전환 (좌 → 우)', 'Reading Direction (L → R)', '切换阅读方向 (左 → 右)', '読書方向切替 (左 → 右)'),
+                            onPressed: () async {
+                              final nextRtl = !_isMangaRtlMode;
+                              await StorageService.setReadingDirectionRtl(nextRtl);
+                              setState(() => _isMangaRtlMode = nextRtl);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).clearSnackBars();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(_tr('읽기 방향 전환 (', 'Reading Direction (', '切换阅读方向 (', '読書方向切替 (')),
+                                        Text(nextRtl ? _tr('우 ', 'R ', '右 ', '右 ') : _tr('좌 ', 'L ', '左 ', '左 ')),
+                                        const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 16),
+                                        Text(nextRtl ? _tr(' 좌)', ' L)', ' 左)', ' 左)') : _tr(' 우)', ' R)', ' 右)', ' 右)')),
+                                      ],
+                                    ),
+                                    duration: const Duration(milliseconds: 900),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                          GestureDetector(
+                            onLongPress: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
+                            child: IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: Icon(
+                                _showTranslatedBubbles ? Icons.chat_bubble : Icons.translate,
+                                color: _showTranslatedBubbles ? Colors.amber : Colors.white,
+                                size: 20,
+                              ),
+                              tooltip: _tr('번역', 'Translate', '翻译', '翻訳'),
+                              onPressed: () {
+                                if (_bubblesByPage.isEmpty) {
+                                  _showLanguageAndTranslateDialog(forceRetranslate: false);
+                                } else {
+                                  setState(() => _showTranslatedBubbles = !_showTranslatedBubbles);
+                                }
+                              },
+                            ),
+                          ),
+                          if (_bubblesByPage.isNotEmpty)
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.refresh, color: Colors.white70, size: 19),
+                              tooltip: _tr('다시 번역', 'Retranslate', '重新翻译', '再翻訳'),
+                              onPressed: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
+                            ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
+                            icon: const Icon(Icons.ios_share, color: Colors.white, size: 19),
+                            tooltip: _tr('파일 내보내기', 'Export File', '导出文件', 'ファイル出力'),
+                            onPressed: _exportDocumentWithAnnotations,
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
+                            icon: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
+                            tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
+                            onPressed: _showBookmarkSheet,
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
+                            icon: const Icon(Icons.tune, color: Colors.white, size: 20),
+                            tooltip: _tr('뷰어 표시 설정', 'Viewer Settings', '阅读器显示设置', 'ビューア表示設定'),
+                            onPressed: _showViewerSettingsSheet,
+                          ),
+                        ];
+
+                        return Row(
                           children: [
                             IconButton(
                               visualDensity: VisualDensity.compact,
@@ -2317,177 +2562,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                                   ),
                                 ),
                               ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 22),
-                              tooltip: _tr('이전 파일로 이동', 'Previous File', '上一个文件', '前のファイル'),
-                              onPressed: () => _openAdjacentFileInSameGroup(-1),
-                            ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
-                              tooltip: _tr('다음 파일로 이동', 'Next File', '下一个文件', '次のファイル'),
-                              onPressed: () => _openAdjacentFileInSameGroup(1),
-                            ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.lock_outline, color: Colors.white, size: 19),
-                              tooltip: _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
-                              onPressed: () {
-                                setState(() {
-                                  _isTouchLocked = true;
-                                  _showControls = false;
-                                  _isMemoMode = false;
-                                  _allowFingerDrawing = false;
-                                  _isStylusDown = false;
-                                });
-                                ScaffoldMessenger.of(context).clearSnackBars();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      _tr(
-                                        '화면이 잠겼습니다. (흔들어서 끄기 또는 음량 버튼 동시에 눌러서 끄기)',
-                                        'Screen locked. (Shake or press Vol Up+Down to unlock)',
-                                        '屏幕已锁定。（摇晃或同时按音量键即可关闭锁定）',
-                                        '画面をロックしました。(振るか音量ボタン同時押しで解除)',
-                                      ),
-                                    ),
-                                    duration: const Duration(seconds: 2),
+                            if (isWide)
+                              ...actionButtons
+                            else
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  physics: const BouncingScrollPhysics(),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: actionButtons,
                                   ),
-                                );
-                              },
-                            ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.screen_rotation, color: Colors.white, size: 19),
-                              tooltip: _tr('화면 가로/세로 전환', 'Rotate Screen', '横/竖屏切换', '画面縦横切替'),
-                              onPressed: _toggleScreenOrientation,
-                            ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: Icon(
-                                Icons.draw_outlined,
-                                color: _isMemoMode ? Colors.amber : Colors.white,
-                                size: 20,
-                              ),
-                              tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
-                              onPressed: () {
-                                setState(() {
-                                  _isMemoMode = !_isMemoMode;
-                                  _isEraserMode = false;
-                                  if (!_isMemoMode) _allowFingerDrawing = false;
-                                });
-                              },
-                            ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: Icon(
-                                _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
-                                color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
-                                size: 20,
-                              ),
-                              tooltip: _tr('가로 모드 2페이지 보기', '2-Page Spread in Landscape', '横屏双页显示', '横画面2ページ表示'),
-                              onPressed: () async {
-                                final nextVal = !_enableTwoPageInLandscape;
-                                await StorageService.setTwoPageLandscape(nextVal);
-                                setState(() => _enableTwoPageInLandscape = nextVal);
-                              },
-                            ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: _buildDualDirectionIcon(),
-                              tooltip: _isMangaRtlMode
-                                  ? _tr('읽기 방향 전환 (우←좌)', 'Reading Direction (R←L)', '切换阅读方向 (右←左)', '読書方向切替 (右←左)')
-                                  : _tr('읽기 방향 전환 (좌→우)', 'Reading Direction (L→R)', '切换阅读方向 (左→右)', '読書方向切替 (左→右)'),
-                              onPressed: () async {
-                                final nextRtl = !_isMangaRtlMode;
-                                await StorageService.setReadingDirectionRtl(nextRtl);
-                                setState(() => _isMangaRtlMode = nextRtl);
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        nextRtl
-                                            ? _tr('읽기 방향 전환 (우←좌)', 'Reading Direction (R←L)', '切换阅读方向 (右←左)', '読書方向切替 (右←左)')
-                                            : _tr('읽기 방향 전환 (좌→우)', 'Reading Direction (L→R)', '切换阅读方向 (左→右)', '読書方向切替 (左→右)'),
-                                      ),
-                                      duration: const Duration(milliseconds: 900),
-                                    ),
-                                  );
-                                }
-                              },
-                            ),
-                            GestureDetector(
-                              onLongPress: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
-                              child: IconButton(
-                                visualDensity: VisualDensity.compact,
-                                padding: btnPadding,
-                                constraints: btnConstraints,
-                                icon: Icon(
-                                  _showTranslatedBubbles ? Icons.chat_bubble : Icons.translate,
-                                  color: _showTranslatedBubbles ? Colors.amber : Colors.white,
-                                  size: 20,
                                 ),
-                                tooltip: _tr('번역', 'Translate', '翻译', '翻訳'),
-                                onPressed: () {
-                                  if (_bubblesByPage.isEmpty) {
-                                    _showLanguageAndTranslateDialog(forceRetranslate: false);
-                                  } else {
-                                    setState(() => _showTranslatedBubbles = !_showTranslatedBubbles);
-                                  }
-                                },
                               ),
-                            ),
-                            if (_bubblesByPage.isNotEmpty)
-                              IconButton(
-                                visualDensity: VisualDensity.compact,
-                                padding: btnPadding,
-                                constraints: btnConstraints,
-                                icon: const Icon(Icons.refresh, color: Colors.white70, size: 19),
-                                tooltip: _tr('다시 번역', 'Retranslate', '重新翻译', '再翻訳'),
-                                onPressed: () => _showLanguageAndTranslateDialog(forceRetranslate: true),
-                              ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
-                              tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
-                              onPressed: _showBookmarkSheet,
-                            ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.tune, color: Colors.white, size: 20),
-                              tooltip: _tr('뷰어 표시 설정', 'Viewer Settings', '阅读器显示设置', 'ビューア表示設定'),
-                              onPressed: _showViewerSettingsSheet,
-                            ),
                           ],
-                        );
-
-                        if (isWide) return rowWidget;
-                        return FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.center,
-                          child: SizedBox(
-                            width: barConstraints.maxWidth,
-                            child: rowWidget,
-                          ),
                         );
                       },
                     ),
@@ -2501,6 +2589,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           if (_useQuickNavTurn && !_isTouchLocked && _totalPages > 1)
             _buildQuickNavButtons(bottomInset),
         ],
+      ),
       ),
       ),
     );
