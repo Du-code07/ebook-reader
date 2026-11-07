@@ -30,54 +30,6 @@ class BookmarkItem {
       );
 }
 
-class BubbleTranslation {
-  final double leftRatio;
-  final double topRatio;
-  final double widthRatio;
-  final double heightRatio;
-  final String originalText;
-  final String translatedText;
-  final bool isSerif;
-  final bool isBold;
-  final bool isDarkBg;
-
-  BubbleTranslation({
-    required this.leftRatio,
-    required this.topRatio,
-    required this.widthRatio,
-    required this.heightRatio,
-    required this.originalText,
-    required this.translatedText,
-    this.isSerif = true,
-    this.isBold = false,
-    this.isDarkBg = false,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'l': leftRatio,
-        't': topRatio,
-        'w': widthRatio,
-        'h': heightRatio,
-        'o': originalText,
-        'tr': translatedText,
-        'sf': isSerif,
-        'bd': isBold,
-        'dk': isDarkBg,
-      };
-
-  factory BubbleTranslation.fromJson(Map<String, dynamic> json) => BubbleTranslation(
-        leftRatio: (json['l'] as num).toDouble(),
-        topRatio: (json['t'] as num).toDouble(),
-        widthRatio: (json['w'] as num).toDouble(),
-        heightRatio: (json['h'] as num).toDouble(),
-        originalText: json['o'] ?? '',
-        translatedText: json['tr'] ?? '',
-        isSerif: json['sf'] ?? true,
-        isBold: json['bd'] ?? false,
-        isDarkBg: json['dk'] ?? false,
-      );
-}
-
 class MemoStroke {
   final List<double> dxList;
   final List<double> dyList;
@@ -545,34 +497,4 @@ class StorageService {
     }
   }
 
-  static Future<void> saveImageBubbleCache(
-      String bookKey, int pageIndex, List<BubbleTranslation> bubbles) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'bubbles_v5_${bookKey}_$pageIndex',
-      jsonEncode(bubbles.map((e) => e.toJson()).toList()),
-    );
-  }
-
-  static Future<List<BubbleTranslation>?> getImageBubbleCache(
-      String bookKey, int pageIndex) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('bubbles_v5_${bookKey}_$pageIndex');
-    if (raw == null) return null;
-    final List decoded = jsonDecode(raw);
-    return decoded.map((e) => BubbleTranslation.fromJson(e)).toList();
-  }
-
-  static Future<void> clearImageBubbleCacheForBook(String bookKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    for (final key in prefs.getKeys().toList()) {
-      if (key.startsWith('bubbles_v5_${bookKey}_') ||
-          key.startsWith('bubbles_v4_${bookKey}_') ||
-          key.startsWith('bubbles_v3_${bookKey}_') ||
-          key.startsWith('bubbles_v2_${bookKey}_') ||
-          key.startsWith('bubbles_${bookKey}_')) {
-        await prefs.remove(key);
-      }
-    }
-  }
 }

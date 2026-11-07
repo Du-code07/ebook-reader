@@ -6,9 +6,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
-import '../services/batch_translation_service.dart';
 import '../services/storage_service.dart';
 import '../services/volume_key_service.dart';
 import '../services/txt_to_epub_converter.dart';
@@ -193,7 +191,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   int _totalPages = 1;
   int? _previousJumpPage;
   bool _showControls = false;
-  bool _showTranslatedBubbles = false;
   bool _isMangaRtlMode = false;
   bool _enableTwoPageInLandscape = false;
   bool _lastIsSpreadMode = false;
@@ -207,7 +204,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _useQuickNavTurn = false;
   bool _useSpenTurn = false;
   bool? _forcedLandscape;
-  int _manualQuarterTurns = 0;
   Offset? _lastEraserPos;
   final Set<int> _activeTouchPointerIds = {};
   final TransformationController _zoomController = TransformationController();
@@ -226,10 +222,87 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   String _footerInfoMode = 'both';
   String _progressBarPos = 'bottom';
+  List<BookmarkItem> _bookmarks = [];
 
-  TextRecognitionScript _selectedScript = TextRecognitionScript.japanese;
-  String _sourceLangCode = 'ja';
-  final Map<int, List<BubbleTranslation>> _bubblesByPage = {};
+  bool get _isCurrentPageBookmarked {
+    if (_bookmarks.isEmpty) return false;
+    final bool isSpreadNow = _isSpreadActive(context);
+    final int firstPage = isSpreadNow ? ((_currentPage ~/ 2) * 2) : _currentPage;
+    final int secondPage = firstPage + 1;
+    return _bookmarks.any((bm) {
+      final p = int.tryParse(bm.position);
+      if (p == null) return false;
+      if (p == _currentPage || p == firstPage) return true;
+      if (isSpreadNow && secondPage < _totalPages && p == secondPage) return true;
+      return false;
+    });
+  }
+
+  String _buildLockScreenMessage() {
+    if (_useShakeLock && _useVolumeComboLock) {
+      return _tr(
+        '화면 잠금 (흔들어서 끄기 또는 음량 버튼 동시에 눌러서 끄기)',
+        'Screen Lock (Shake or press both volume keys to unlock)',
+        '屏幕锁定 (摇晃或同时按音量键关闭)',
+        '画面ロック (振るか音量ボタン同時押しで解除)',
+      );
+    } else if (_useShakeLock) {
+      return _tr(
+        '화면 잠금 (흔들어서 끄기)',
+        'Screen Lock (Shake to unlock)',
+        '屏幕锁定 (摇晃关闭)',
+        '画面ロック (振って解除)',
+      );
+    } else if (_useVolumeComboLock) {
+      return _tr(
+        '화면 잠금 (음량 버튼 동시에 눌러서 끄기)',
+        'Screen Lock (Press both volume keys to unlock)',
+        '屏幕锁定 (同时按音量键关闭)',
+        '画面ロック (音量ボタン同時押しで解除)',
+      );
+    } else {
+      return _tr('화면 잠금', 'Screen Lock', '屏幕锁定', '画面ロック');
+    }
+  }
+
+  Future<void> _showPenWidthInputDialog() async {
+    final ctrl = TextEditingController(text: _penWidth.toStringAsFixed(1));
+    ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
+    final val = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_tr('선 굵기 입력 (0.5 ~ 20.0)', 'Stroke Width (0.5 - 20.0)', '输入线条粗细 (0.5 ~ 20.0)', '선의 太さ入力 (0.5 ~ 20.0)')),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            hintText: '0.5 ~ 20.0',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) {
+            Navigator.pop(ctx, double.tryParse(v.trim()));
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx, double.tryParse(ctrl.text.trim()));
+            },
+            child: Text(_tr('적용', 'Apply', '应用', '適用')),
+          ),
+        ],
+      ),
+    );
+    if (val != null && mounted) {
+      setState(() => _penWidth = val.clamp(0.5, 20.0).toDouble());
+    }
+  }
+
 
   String get _bookKey => widget.customBookKey ?? widget.files.first.path;
 
@@ -240,8 +313,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    BatchTranslationService.translationCompletedEvent.addListener(_onBackgroundTranslationFinished);
     _initMedia();
   }
 
@@ -253,24 +324,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             state == AppLifecycleState.detached ||
             state == AppLifecycleState.hidden)) {
       setState(() => _isTouchLocked = false);
-    }
-  }
-
-  void _onBackgroundTranslationFinished() {
-    _reloadBubbleCachesFromStorage();
-  }
-
-  Future<void> _reloadBubbleCachesFromStorage() async {
-    bool foundAny = false;
-    for (int i = 0; i < _imagePages.length; i++) {
-      final cached = await StorageService.getImageBubbleCache(_bookKey, i);
-      if (cached != null) {
-        _bubblesByPage[i] = cached;
-        if (cached.isNotEmpty) foundAny = true;
-      }
-    }
-    if (mounted && foundAny) {
-      setState(() => _showTranslatedBubbles = true);
     }
   }
 
@@ -287,11 +340,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          byVolume
-              ? _tr('음량 버튼 동시 입력으로 화면 잠금이 해제되었습니다.', 'Screen unlocked via volume buttons.', '已通过同时按音量键解锁屏幕。', '音量ボタン同時押しで画面ロックを解除しました。')
-              : _tr('흔들기 감지로 화면 잠금이 해제되었습니다.', 'Screen unlocked by shake.', '已通过摇晃解锁屏幕。', 'シェイクで画面ロックを解除しました。'),
-        ),
+        content: Text(_tr('화면 잠금 해제', 'Screen Unlocked', '屏幕锁定已解除', '画面ロック解除')),
         duration: const Duration(seconds: 1),
       ),
     );
@@ -304,6 +353,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     _forcedLandscape = nextLandscape;
     StorageService.desiredLandscapeNotifier.value = nextLandscape;
 
+    try {
+      await SystemChrome.setPreferredOrientations(
+        nextLandscape
+            ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+            : [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown],
+      );
+    } catch (_) {}
     try {
       await _pdfChannel.invokeMethod('setScreenOrientation', {
         'mode': nextLandscape ? 'landscape' : 'portrait',
@@ -423,7 +479,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${step < 0 ? "이전" : "다음"} 파일 열기: $nextName'),
+        content: Text(nextName),
         duration: const Duration(milliseconds: 900),
       ),
     );
@@ -505,6 +561,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _useSpenTurn = await StorageService.getUseSpenTurn();
       _footerInfoMode = await StorageService.getFooterInfoMode();
       _progressBarPos = await StorageService.getProgressBarPosition();
+      _bookmarks = await StorageService.getBookmarks(_bookKey);
 
       final tempDir = await getTemporaryDirectory();
       final first = widget.files.first;
@@ -585,14 +642,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       }
     }
 
-    // 캐시 및 필기 데이터 비동기 로드
-    bool anyBubbles = false;
+    // 필기 및 메모 데이터 비동기 로드
     for (int i = 0; i < _imagePages.length; i++) {
-      final cached = await StorageService.getImageBubbleCache(_bookKey, i);
-      if (cached != null) {
-        _bubblesByPage[i] = cached;
-        if (cached.isNotEmpty) anyBubbles = true;
-      }
       final strokes = await StorageService.getPageMemoStrokes(_bookKey, i);
       if (strokes.isNotEmpty) {
         _memoStrokesByPage[i] = strokes;
@@ -602,10 +653,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         _memoNotesByPage[i] = note;
       }
     }
-    if (mounted && (anyBubbles || _memoStrokesByPage.isNotEmpty || _memoNotesByPage.isNotEmpty)) {
-      setState(() {
-        if (anyBubbles) _showTranslatedBubbles = true;
-      });
+    if (mounted && (_memoStrokesByPage.isNotEmpty || _memoNotesByPage.isNotEmpty)) {
+      setState(() {});
     }
   }
 
@@ -706,7 +755,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   void _toggleControls() {
     if (_isTouchLocked) return;
     setState(() => _showControls = !_showControls);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
   Widget _buildDualDirectionIcon() {
@@ -858,163 +906,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       setState(() {
         _memoStrokesByPage[pageIndex] = nextStrokes;
       });
-    }
-  }
-
-  Future<void> _exportDocumentWithAnnotations() async {
-    try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final now = DateTime.now();
-      final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
-      final baseTitle = widget.title.replaceAll(RegExp(r'\.[^.]+$'), '');
-      final exportFileName = '${baseTitle}_메모포함_$dateStr.pdf';
-      final exportFile = File('${appDir.path}/$exportFileName');
-
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => AlertDialog(
-          content: Row(
-            children: [
-              const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  _tr(
-                    '메모와 필기를 포함하여 PDF로 내보내는 중...',
-                    'Exporting PDF with memos and drawings...',
-                    '正在导出包含笔记与手写的 PDF...',
-                    'メモと手書きを含めてPDFを出力中...',
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-
-      final blocks = <Map<String, dynamic>>[];
-      for (int i = 0; i < _imagePages.length; i++) {
-        final imgFile = _imagePages[i];
-        if (!imgFile.existsSync()) continue;
-        final rawBytes = await imgFile.readAsBytes();
-        final strokes = _memoStrokesByPage[i] ?? [];
-        final memoText = _memoNotesByPage[i];
-
-        if (strokes.isEmpty && (memoText == null || memoText.trim().isEmpty)) {
-          blocks.add({
-            'type': 'image',
-            'bytes': rawBytes,
-          });
-          continue;
-        }
-
-        final codec = await ui.instantiateImageCodec(rawBytes);
-        final frame = await codec.getNextFrame();
-        final uiImg = frame.image;
-        final int w = uiImg.width;
-        final int h = uiImg.height;
-
-        final recorder = ui.PictureRecorder();
-        final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
-        canvas.drawImage(uiImg, Offset.zero, Paint());
-
-        for (final s in strokes) {
-          if (s.dxList.isEmpty) continue;
-          final paint = Paint()
-            ..color = Color(s.colorValue)
-            ..strokeWidth = math.max(2.0, s.strokeWidth * (w / 720.0))
-            ..strokeCap = StrokeCap.round
-            ..strokeJoin = StrokeJoin.round
-            ..style = PaintingStyle.stroke;
-          final path = Path();
-          path.moveTo(s.dxList[0] * w, s.dyList[0] * h);
-          for (int k = 1; k < s.dxList.length; k++) {
-            path.lineTo(s.dxList[k] * w, s.dyList[k] * h);
-          }
-          canvas.drawPath(path, paint);
-        }
-
-        if (memoText != null && memoText.trim().isNotEmpty) {
-          final boxPaint = Paint()
-            ..color = const Color(0xEEFFF9C4)
-            ..style = PaintingStyle.fill;
-          final borderPaint = Paint()
-            ..color = const Color(0xFFFBC02D)
-            ..strokeWidth = 3.0
-            ..style = PaintingStyle.stroke;
-          final textPainter = TextPainter(
-            text: TextSpan(
-              text: '📝 ${memoText.trim()}',
-              style: TextStyle(
-                color: const Color(0xFF212121),
-                fontSize: math.max(16.0, w * 0.022),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            textDirection: TextDirection.ltr,
-          )..layout(maxWidth: w * 0.75);
-
-          final boxW = textPainter.width + 24.0;
-          final boxH = textPainter.height + 20.0;
-          final boxRect = RRect.fromRectAndRadius(
-            Rect.fromLTWH(24.0, 24.0, boxW, boxH),
-            const Radius.circular(10.0),
-          );
-          canvas.drawRRect(boxRect, boxPaint);
-          canvas.drawRRect(boxRect, borderPaint);
-          textPainter.paint(canvas, const Offset(36.0, 34.0));
-        }
-
-        final picture = recorder.endRecording();
-        final renderedImg = await picture.toImage(w, h);
-        final byteData = await renderedImg.toByteData(format: ui.ImageByteFormat.png);
-        if (byteData != null) {
-          blocks.add({
-            'type': 'image',
-            'bytes': byteData.buffer.asUint8List(),
-          });
-        }
-      }
-
-      final resPath = await _pdfChannel.invokeMethod<String>('renderStructuredDocToPdf', {
-        'outputPath': exportFile.path,
-        'blocks': blocks,
-      });
-
-      if (resPath != null && File(resPath).existsSync()) {
-        await StorageService.setBookGroup(resPath, 'PDF/문서');
-        try {
-          await _pdfChannel.invokeMethod<String>('saveFileToDownloads', {
-            'sourcePath': resPath,
-            'fileName': exportFileName,
-          });
-        } catch (_) {}
-      }
-
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _tr(
-                '메모 포함 PDF가 서재 및 기기 다운로드(Download) 폴더에 저장되었습니다: $exportFileName',
-                'Saved annotated PDF to Bookshelf & Downloads: $exportFileName',
-                '已将包含笔记的 PDF 保存至书架和下载文件夹：$exportFileName',
-                'メモ付きPDFが書斎とダウンロードフォルダに保存されました: $exportFileName',
-              ),
-            ),
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('내보내기 오류: $e')),
-        );
-      }
     }
   }
 
@@ -1269,214 +1160,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  Future<void> _showLanguageAndTranslateDialog({bool forceRetranslate = false}) async {
-    if (BatchTranslationService.isBookTranslating(_bookKey)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _tr(
-              '현재 백그라운드에서 번역이 진행 중입니다.',
-              'Pre-translation is currently running in the background.',
-              '后台正在进行翻译。',
-              '現在バックグラウンドで翻訳が進行中です。',
-            ),
-          ),
-        ),
-      );
-      return;
-    }
-
-    final targetLang = await StorageService.getAppLanguage();
-
-    if (!mounted) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Text(_tr('번역', 'Translation', '翻译', '翻訳')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _tr(
-                  '원본 언어를 선택하면 현재 앱 설정 언어로 번역합니다:',
-                  'Select source language to translate into App Language:',
-                  '选择原文语言后将翻译为当前应用设置语言：',
-                  '原文言語を選択すると現在のアプリ設定言語に翻訳します：',
-                ),
-                style: const TextStyle(fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              Builder(
-                builder: (context) {
-                  final allOptions = <Map<String, dynamic>>[
-                    {
-                      'code': 'ja',
-                      'label': _tr('일본어 (Japanese)', 'Japanese', '日语 (Japanese)', '日本語 (Japanese)'),
-                      'script': TextRecognitionScript.japanese,
-                    },
-                    {
-                      'code': 'zh',
-                      'label': _tr('중국어 (Chinese)', 'Chinese', '中文 (Chinese)', '中国語 (Chinese)'),
-                      'script': TextRecognitionScript.chinese,
-                    },
-                    {
-                      'code': 'en',
-                      'label': _tr('영어 (English)', 'English', '英语 (English)', '英語 (English)'),
-                      'script': TextRecognitionScript.latin,
-                    },
-                    {
-                      'code': 'ko',
-                      'label': _tr('한국어 (Korean)', 'Korean', '韩语 (Korean)', '韓国語 (Korean)'),
-                      'script': TextRecognitionScript.korean,
-                    },
-                  ];
-                  final availableOptions = allOptions.where((opt) => opt['code'] != targetLang).toList();
-                  if (!availableOptions.any((opt) => opt['code'] == _sourceLangCode) && availableOptions.isNotEmpty) {
-                    _sourceLangCode = availableOptions.first['code'] as String;
-                    _selectedScript = availableOptions.first['script'] as TextRecognitionScript;
-                  }
-                  return Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: availableOptions.map((opt) {
-                      final code = opt['code'] as String;
-                      final label = opt['label'] as String;
-                      final scr = opt['script'] as TextRecognitionScript;
-                      return ChoiceChip(
-                        label: Text(label),
-                        selected: _sourceLangCode == code,
-                        onSelected: (_) {
-                          setModalState(() {
-                            _sourceLangCode = code;
-                            _selectedScript = scr;
-                          });
-                        },
-                      );
-                    }).toList(),
-                  );
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
-            ),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.translate, size: 18),
-              label: Text(_tr('번역 시작', 'Start Translation', '开始翻译', '翻訳開始')),
-              onPressed: () => Navigator.pop(ctx, true),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (confirmed == true) {
-      _startBackgroundBatchTranslation(
-        forceRetranslate: forceRetranslate,
-        targetLang: targetLang,
-      );
-    }
-  }
-
-  /// 1 & 4. 번역(설정 언어 targetLang) 백그라운드 실행
-  void _startBackgroundBatchTranslation({
-    bool forceRetranslate = false,
-    required String targetLang,
-  }) {
-    final String key = _bookKey;
-    final List<File> pages = List<File>.from(_imagePages);
-    final String lang = _sourceLangCode;
-    final TextRecognitionScript scr = _selectedScript;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _tr(
-            '백그라운드 번역이 시작되었습니다. (뒤로가기를 눌러도 유지됩니다)',
-            'Background pre-translation started. (Continues even if you go back)',
-            '后台翻译已开始。（返回书架后仍会继续）',
-            'バックグラウンド翻訳を開始しました。(戻っても継続します)',
-          ),
-        ),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-
-    BatchTranslationService.preTranslateAllImages(
-      bookKey: key,
-      imageFiles: pages,
-      targetLang: targetLang,
-      sourceLang: lang,
-      script: scr,
-      forceRetranslate: forceRetranslate,
-      onProgress: (c, t, s) {
-        StorageService.getImageBubbleCache(key, c - 1).then((cached) {
-          if (cached != null && mounted) {
-            setState(() {
-              _bubblesByPage[c - 1] = cached;
-              _showTranslatedBubbles = true;
-            });
-          }
-        });
-      },
-    ).then((_) async {
-      await _reloadBubbleCachesFromStorage();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _tr('번역이 완료되었습니다.', 'Translation completed.', '翻译已完成。', '翻訳が完了しました。'),
-            ),
-          ),
-        );
-      }
-    });
-  }
-
-  Widget _buildFittedHorizontalKoreanText(BubbleTranslation b, double boxW, double boxH) {
-    final double safeW = math.max<double>(14.0, boxW - 3.0);
-    final double safeH = math.max<double>(12.0, boxH - 2.0);
-    final double area = safeW * safeH;
-    final double estFont = math
-        .sqrt(area / math.max<double>(1.0, b.translatedText.length * 1.55))
-        .clamp(6.5, 22.0)
-        .toDouble();
-
-    final Color textColor = b.isDarkBg ? Colors.white : const Color(0xFF111111);
-
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.center,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: safeW),
-        child: Text(
-          b.translatedText,
-          textAlign: TextAlign.center,
-          softWrap: true,
-          style: TextStyle(
-            color: textColor,
-            fontSize: estFont,
-            fontWeight: b.isBold ? FontWeight.w800 : FontWeight.w600,
-            fontFamily: b.isSerif ? 'serif' : 'sans-serif',
-            height: 1.18,
-            letterSpacing: -0.2,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildSinglePagePanel(int pageIndex, {int spreadSide = 0}) {
     if (pageIndex < 0 || pageIndex >= _imagePages.length) {
       return const SizedBox.expand();
     }
 
-    final bubbles = _bubblesByPage[pageIndex] ?? [];
     final strokes = _memoStrokesByPage[pageIndex] ?? [];
     final memoNote = _memoNotesByPage[pageIndex] ?? '';
     final imgSize = _pageImageSizes[pageIndex];
@@ -1529,41 +1217,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
               ),
             ),
-            if (false && _showTranslatedBubbles && bubbles.isNotEmpty)
-              ...bubbles.map((b) {
-                final double boxW = (b.widthRatio * drawWidth).clamp(12.0, drawWidth).toDouble();
-                final double boxH = (b.heightRatio * drawHeight).clamp(12.0, drawHeight).toDouble();
-                final double boxLeft = (drawLeft + b.leftRatio * drawWidth).clamp(
-                  drawLeft,
-                  math.max<double>(drawLeft, drawLeft + drawWidth - boxW),
-                ).toDouble();
-                final double boxTop = (drawTop + b.topRatio * drawHeight).clamp(
-                  drawTop,
-                  math.max<double>(drawTop, drawTop + drawHeight - boxH),
-                ).toDouble();
-
-                final Color bgColor = b.isDarkBg
-                    ? const Color(0xFF121212).withOpacity(0.95)
-                    : Colors.white.withOpacity(0.96);
-
-                return Positioned(
-                  left: boxLeft,
-                  top: boxTop,
-                  width: boxW,
-                  height: boxH,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 1.0),
-                    decoration: BoxDecoration(
-                      color: bgColor,
-                      borderRadius: BorderRadius.circular(4.0),
-                    ),
-                    alignment: Alignment.center,
-                    clipBehavior: Clip.hardEdge,
-                    child: _buildFittedHorizontalKoreanText(b, boxW, boxH),
-                  ),
-                );
-              }),
-
             // 1. S펜 필기 레이어: EagerStylusPanGestureRecognizer를 통해 S펜이 닿는 즉시 제스처 아레나를 독점하여
             // S펜으로 필기할 때 화면이 같이 움직이거나 페이지가 넘어가는 현상을 100% 차단! (손가락 스와이프로는 페이지 이동 가능)
             if (_isMemoMode)
@@ -1701,6 +1354,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   Future<void> _showBookmarkSheet() async {
     final bookmarks = await StorageService.getBookmarks(_bookKey);
+    if (mounted) {
+      setState(() => _bookmarks = bookmarks);
+    }
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -1770,8 +1426,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   /// 1. 뷰어 표시에서 페이지 번호를 누르고 숫자를 입력하면 해당 페이지로 이동 (설정에서 페이지 번호가 활성화된 경우만 작동)
-  Future<void> _showJumpToPageDialog() async {
-    if (_isTouchLocked || !(_footerInfoMode == 'page' || _footerInfoMode == 'both')) return;
+  Future<void> _showJumpToPageDialog({bool fromProgressBar = false}) async {
+    final bool allowed = fromProgressBar
+        ? (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
+        : (_footerInfoMode == 'page' || _footerInfoMode == 'both');
+    if (_isTouchLocked || !allowed) return;
     final ctrl = TextEditingController(text: '${_currentPage + 1}');
     ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
 
@@ -1903,8 +1562,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both')
-                      ? _showJumpToPageDialog
+                  onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
+                      ? () => _showJumpToPageDialog(fromProgressBar: true)
                       : null,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
@@ -1930,11 +1589,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     final double topInset = MediaQuery.of(context).padding.top;
-    final double safeTopOffset = topInset + (_showControls && _isMemoMode ? 122.0 : (_showControls || _isMemoMode ? 66.0 : 16.0));
+    final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0);
+    final double safeBottomOffset = baseBottom + (_isMemoMode ? 96.0 : (_useQuickNavTurn && _progressBarPos == 'right' ? 48.0 : 8.0));
     return Positioned(
       key: ValueKey('progress_bar_$_progressBarPos'),
       top: safeTopOffset,
-      bottom: _useQuickNavTurn && _progressBarPos == 'right' ? (baseBottom + 48.0) : (baseBottom + 8.0),
+      bottom: safeBottomOffset,
       left: _progressBarPos == 'left' ? 8.0 : null,
       right: _progressBarPos == 'right' ? 8.0 : null,
       width: 40.0,
@@ -1974,8 +1634,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both')
-                    ? _showJumpToPageDialog
+                onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
+                    ? () => _showJumpToPageDialog(fromProgressBar: true)
                     : null,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
@@ -2043,10 +1703,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     // 서재로 완전히 복귀할 때 방향이 초기화됨
     _zoomController.dispose();
     WidgetsBinding.instance.removeObserver(this);
-    BatchTranslationService.translationCompletedEvent.removeListener(_onBackgroundTranslationFinished);
     _volumeKeyService.stopListening();
     _pageController?.dispose();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     super.dispose();
   }
 
@@ -2239,7 +1897,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
           if (_isMemoMode && !_isTouchLocked)
             Positioned(
-              top: (_showControls ? 58.0 : 10.0) + MediaQuery.of(context).padding.top,
+              bottom: math.max<double>(bottomInset + 24.0, 28.0) +
+                  (((_showControls && _progressBarPos == 'bottom') || _useQuickNavTurn) ? 46.0 : 0.0),
               left: 12,
               right: 12,
               child: Center(
@@ -2297,29 +1956,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                                   ),
                                 ),
                               )),
-                          const SizedBox(width: 6),
-                          const Icon(Icons.line_weight, color: Colors.white70, size: 15),
-                          SizedBox(
-                            width: 82,
-                            child: SliderTheme(
-                              data: SliderTheme.of(context).copyWith(
-                                trackHeight: 2.2,
-                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.5),
-                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 10.0),
-                              ),
-                              child: Slider(
-                                value: _penWidth.clamp(1.0, 14.0).toDouble(),
-                                min: 1.0,
-                                max: 14.0,
-                                activeColor: Colors.amber,
-                                onChanged: (v) => setState(() => _penWidth = v),
-                              ),
-                            ),
-                          ),
-                          Text(
-                            '${_penWidth.toStringAsFixed(1)}',
-                            style: const TextStyle(color: Colors.white70, fontSize: 10),
-                          ),
                           const SizedBox(width: 4),
                           IconButton(
                             icon: Icon(
@@ -2330,6 +1966,45 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             tooltip: _tr('지우개', 'Eraser', '橡皮擦', '消しゴム'),
                             onPressed: () => setState(() => _isEraserMode = !_isEraserMode),
                           ),
+                          const SizedBox(width: 2),
+                          const Icon(Icons.line_weight, color: Colors.white70, size: 15),
+                          SizedBox(
+                            width: 82,
+                            child: SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                trackHeight: 2.2,
+                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.5),
+                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 10.0),
+                              ),
+                              child: Slider(
+                                value: _penWidth.clamp(0.5, 20.0).toDouble(),
+                                min: 0.5,
+                                max: 20.0,
+                                activeColor: Colors.amber,
+                                onChanged: (v) => setState(() => _penWidth = v),
+                              ),
+                            ),
+                          ),
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: _showPenWidthInputDialog,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.white38, width: 1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                _penWidth.toStringAsFixed(1),
+                                style: const TextStyle(
+                                  color: Colors.amber,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
                           IconButton(
                             icon: const Icon(Icons.note_alt_outlined, color: Colors.white, size: 18),
                             tooltip: _tr('텍스트 메모 입력', 'Text Memo', '输入文字笔记', 'テキストメモ入力'),
@@ -2425,14 +2100,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               ScaffoldMessenger.of(context).clearSnackBars();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(
-                                    _tr(
-                                      '화면이 잠겼습니다. (흔들어서 끄기 또는 음량 버튼 동시에 눌러서 끄기)',
-                                      'Screen locked. (Shake or press Vol Up+Down to unlock)',
-                                      '屏幕已锁定。（摇晃或同时按音量键即可关闭锁定）',
-                                      '画面をロックしました。(振るか音量ボタン同時押しで解除)',
-                                    ),
-                                  ),
+                                  content: Text(_buildLockScreenMessage()),
                                   duration: const Duration(seconds: 2),
                                 ),
                               );
@@ -2515,7 +2183,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             visualDensity: VisualDensity.compact,
                             padding: btnPadding,
                             constraints: btnConstraints,
-                            icon: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
+                            icon: Icon(
+                              _isCurrentPageBookmarked ? Icons.bookmarks : Icons.bookmarks_outlined,
+                              color: _isCurrentPageBookmarked ? Colors.amber : Colors.white,
+                              size: 20,
+                            ),
                             tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
                             onPressed: _showBookmarkSheet,
                           ),

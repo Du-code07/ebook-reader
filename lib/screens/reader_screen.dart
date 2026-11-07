@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/txt_to_epub_converter.dart';
-import '../services/batch_translation_service.dart';
 import '../services/storage_service.dart';
 import '../services/volume_key_service.dart';
 import 'pdf_and_image_viewer.dart';
@@ -86,7 +85,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
 
   late String _activeFilePath;
-  bool _isTranslatedFileActive = false;
 
   String? _initialCfi;
   String? _currentCfi;
@@ -108,7 +106,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _useQuickNavTurn = false;
   bool _useSpenTurn = false;
   bool? _forcedLandscape;
-  int _manualQuarterTurns = 0;
   Offset? _lastEraserPos;
   final Set<int> _activeTouchPointerIds = {};
   final TransformationController _epubZoomController = TransformationController();
@@ -128,6 +125,80 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   String _footerInfoMode = 'both';
   String _progressBarPos = 'bottom';
+  List<BookmarkItem> _bookmarks = [];
+
+  bool get _isCurrentPageBookmarked {
+    if (_bookmarks.isEmpty) return false;
+    if (_currentCfi != null && _currentCfi!.isNotEmpty) {
+      if (_bookmarks.any((bm) => bm.position == _currentCfi)) return true;
+    }
+    return false;
+  }
+
+  String _buildLockScreenMessage() {
+    if (_useShakeLock && _useVolumeComboLock) {
+      return _tr(
+        '화면 잠금 (흔들어서 끄기 또는 음량 버튼 동시에 눌러서 끄기)',
+        'Screen Lock (Shake or press both volume keys to unlock)',
+        '屏幕锁定 (摇晃或同时按音量键关闭)',
+        '画面ロック (振るか音量ボタン同時押しで解除)',
+      );
+    } else if (_useShakeLock) {
+      return _tr(
+        '화면 잠금 (흔들어서 끄기)',
+        'Screen Lock (Shake to unlock)',
+        '屏幕锁定 (摇晃关闭)',
+        '画面ロック (振って解除)',
+      );
+    } else if (_useVolumeComboLock) {
+      return _tr(
+        '화면 잠금 (음량 버튼 동시에 눌러서 끄기)',
+        'Screen Lock (Press both volume keys to unlock)',
+        '屏幕锁定 (同时按音量键关闭)',
+        '画面ロック (音量ボタン同時押しで解除)',
+      );
+    } else {
+      return _tr('화면 잠금', 'Screen Lock', '屏幕锁定', '画面ロック');
+    }
+  }
+
+  Future<void> _showPenWidthInputDialog() async {
+    final ctrl = TextEditingController(text: _penWidth.toStringAsFixed(1));
+    ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
+    final val = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_tr('선 굵기 입력 (0.5 ~ 20.0)', 'Stroke Width (0.5 - 20.0)', '输入线条粗细 (0.5 ~ 20.0)', '線の太さ入力 (0.5 ~ 20.0)')),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            hintText: '0.5 ~ 20.0',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) {
+            Navigator.pop(ctx, double.tryParse(v.trim()));
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx, double.tryParse(ctrl.text.trim()));
+            },
+            child: Text(_tr('적용', 'Apply', '应用', '適用')),
+          ),
+        ],
+      ),
+    );
+    if (val != null && mounted) {
+      setState(() => _penWidth = val.clamp(0.5, 20.0).toDouble());
+    }
+  }
   double _progress = 0.0;
   bool _hasRestoredInitialPosition = false;
 
@@ -144,23 +215,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     return 'prog_${(prog * 1000).round()}';
   }
 
-  Future<File> _getTranslatedEpubFile({String? sourceLang, String? targetLang}) async {
-    final tgt = targetLang ?? await StorageService.getAppLanguage();
-    final src = sourceLang ?? 'ja';
-    final outPath = widget.filePath.replaceAll(
-      RegExp(r'\.epub$', caseSensitive: false),
-      '_${src}_to_${tgt}_translated.epub',
-    );
-    return File(outPath);
-  }
-
   @override
   void initState() {
     super.initState();
     _activeFilePath = widget.filePath;
     WidgetsBinding.instance.addObserver(this);
-    BatchTranslationService.translationCompletedEvent.addListener(_onBackgroundTranslationFinished);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _initReader();
   }
 
@@ -172,30 +231,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             state == AppLifecycleState.detached ||
             state == AppLifecycleState.hidden)) {
       setState(() => _isTouchLocked = false);
-    }
-  }
-
-  Future<void> _onBackgroundTranslationFinished() async {
-    if (!mounted) return;
-    final translatedFile = await _getTranslatedEpubFile();
-    if (await translatedFile.exists() && !_isTranslatedFileActive) {
-      setState(() {
-        _isLoading = true;
-        _activeFilePath = translatedFile.path;
-        _isTranslatedFileActive = true;
-        _initialCfi = _currentCfi;
-        _hasRestoredInitialPosition = false;
-      });
-      await Future.delayed(const Duration(milliseconds: 100));
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_tr('백그라운드 번역이 완료되어 번역본으로 전환되었습니다.', 'Background translation finished; switched to translated book.', '后台翻译已完成，已切换为译本。', 'バックグラウンド翻訳が完了し、翻訳版に切り替わりました。')),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
     }
   }
 
@@ -211,11 +246,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          byVolume
-              ? _tr('음량 버튼 동시 입력으로 화면 잠금이 해제되었습니다.', 'Screen unlocked via volume buttons.', '已通过同时按音量键解锁屏幕。', '音量ボタン同時押しで画面ロックを解除しました。')
-              : _tr('흔들기 감지로 화면 잠금이 해제되었습니다.', 'Screen unlocked by shake.', '已通过摇晃解锁屏幕。', 'シェイクで画面ロックを解除しました。'),
-        ),
+        content: Text(_tr('화면 잠금 해제', 'Screen Unlocked', '屏幕锁定已解除', '画面ロック解除')),
         duration: const Duration(seconds: 1),
       ),
     );
@@ -228,6 +259,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _forcedLandscape = nextLandscape;
     StorageService.desiredLandscapeNotifier.value = nextLandscape;
 
+    try {
+      await SystemChrome.setPreferredOrientations(
+        nextLandscape
+            ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+            : [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown],
+      );
+    } catch (_) {}
     try {
       await _pdfChannel.invokeMethod('setScreenOrientation', {
         'mode': nextLandscape ? 'landscape' : 'portrait',
@@ -316,7 +354,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${step < 0 ? "이전" : "다음"} 파일 열기: $nextName'),
+        content: Text(nextName),
         duration: const Duration(milliseconds: 900),
       ),
     );
@@ -421,6 +459,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
     final initLocKey = _computeLocationKey(savedCfi, savedProg);
     final strokes = await StorageService.getEpubLocationStrokes(widget.filePath, initLocKey);
+    final loadedBookmarks = await StorageService.getBookmarks(widget.filePath);
 
     _bindHardwareButtons();
 
@@ -444,6 +483,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _useSpenTurn = spenTurn;
       _bookMemoNote = memo;
       _epubStrokes = strokes;
+      _bookmarks = loadedBookmarks;
       _isLoading = false;
     });
   }
@@ -661,79 +701,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
     if (modifiedAny) {
       setState(() => _epubStrokes = nextStrokes);
-    }
-  }
-
-  Future<void> _exportDocumentWithAnnotations() async {
-    try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final now = DateTime.now();
-      final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
-      final baseTitle = widget.bookTitle.replaceAll(RegExp(r'\.[^.]+$'), '');
-      final exportFileName = '${baseTitle}_메모포함_$dateStr.pdf';
-      final exportFile = File('${appDir.path}/$exportFileName');
-
-      final blocks = <Map<String, dynamic>>[
-        {
-          'type': 'paragraph',
-          'text': '📖 ${widget.bookTitle}',
-          'fontSizePt': 16.0,
-          'bold': true,
-        },
-      ];
-      if (_bookMemoNote.trim().isNotEmpty) {
-        blocks.add({
-          'type': 'paragraph',
-          'text': '📝 [메모 내용]\n${_bookMemoNote.trim()}',
-          'fontSizePt': 11.5,
-          'bold': false,
-        });
-      }
-      if (_epubStrokes.isNotEmpty) {
-        blocks.add({
-          'type': 'paragraph',
-          'text': '✏️ [현재 위치 필기 선 ${_epubStrokes.length}개 포함]',
-          'fontSizePt': 10.5,
-          'italic': true,
-        });
-      }
-
-      final resPath = await _pdfChannel.invokeMethod<String>('renderStructuredDocToPdf', {
-        'outputPath': exportFile.path,
-        'blocks': blocks,
-      });
-
-      if (resPath != null && File(resPath).existsSync()) {
-        await StorageService.setBookGroup(resPath, 'PDF/문서');
-        try {
-          await _pdfChannel.invokeMethod<String>('saveFileToDownloads', {
-            'sourcePath': resPath,
-            'fileName': exportFileName,
-          });
-        } catch (_) {}
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _tr(
-                '메모 포함 PDF가 서재 및 기기 다운로드(Download) 폴더에 저장되었습니다: $exportFileName',
-                'Saved annotated PDF to Bookshelf & Downloads: $exportFileName',
-                '已将包含笔记的 PDF 保存至书架和下载文件夹：$exportFileName',
-                'メモ付きPDFが書斎とダウンロードフォルダに保存されました: $exportFileName',
-              ),
-            ),
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('내보내기 오류: $e')),
-        );
-      }
     }
   }
 
@@ -1047,157 +1014,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     );
   }
 
-  /// 1 & 4. Google ML Kit 공식 번역 라이브러리로 설정 언어(targetLang)로 백그라운드 번역
-  Future<void> _handleBatchTranslateBook({bool forceRetranslate = false}) async {
-    if (BatchTranslationService.isBookTranslating(widget.filePath)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _tr(
-              '현재 백그라운드에서 번역이 진행 중입니다. (뒤로가기를 눌러도 계속 번역됩니다)',
-              'Pre-translation is currently running in the background.',
-              '后台正在进行翻译。（返回书架后仍会继续）',
-              '現在バックグラウンドで翻訳が進行中です。(戻っても継続します)',
-            ),
-          ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
-
-    final targetLang = await StorageService.getAppLanguage();
-    final translatedFile = await _getTranslatedEpubFile(targetLang: targetLang);
-
-    if (_isTranslatedFileActive && !forceRetranslate) {
-      setState(() {
-        _isLoading = true;
-        _activeFilePath = widget.filePath;
-        _isTranslatedFileActive = false;
-        _initialCfi = _currentCfi;
-        _hasRestoredInitialPosition = false;
-      });
-      await Future.delayed(const Duration(milliseconds: 100));
-      if (mounted) setState(() => _isLoading = false);
-      return;
-    }
-
-    if (!forceRetranslate && await translatedFile.exists()) {
-      setState(() {
-        _isLoading = true;
-        _activeFilePath = translatedFile.path;
-        _isTranslatedFileActive = true;
-        _initialCfi = _currentCfi;
-        _hasRestoredInitialPosition = false;
-      });
-      await Future.delayed(const Duration(milliseconds: 100));
-      if (mounted) setState(() => _isLoading = false);
-      return;
-    }
-
-    String selectedSource = 'ja';
-
-    if (!mounted) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Text(_tr('번역', 'Translation', '翻译', '翻訳')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _tr(
-                  '원본 언어를 선택하면 현재 앱 설정 언어로 번역합니다:',
-                  'Select source language to translate into App Language:',
-                  '选择原文语言后将翻译为当前应用设置语言：',
-                  '原文言語を選択すると現在のアプリ設定言語に翻訳します：',
-                ),
-                style: const TextStyle(fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              Builder(
-                builder: (context) {
-                  final allOptions = <Map<String, String>>[
-                    {'code': 'ja', 'label': _tr('일본어 (Japanese)', 'Japanese', '日语 (Japanese)', '日本語 (Japanese)')},
-                    {'code': 'zh', 'label': _tr('중국어 (Chinese)', 'Chinese', '中文 (Chinese)', '中国語 (Chinese)')},
-                    {'code': 'en', 'label': _tr('영어 (English)', 'English', '英语 (English)', '英語 (English)')},
-                    {'code': 'ko', 'label': _tr('한국어 (Korean)', 'Korean', '韩语 (Korean)', '韓国語 (Korean)')},
-                  ];
-                  final availableOptions = allOptions.where((opt) => opt['code'] != targetLang).toList();
-                  if (!availableOptions.any((opt) => opt['code'] == selectedSource) && availableOptions.isNotEmpty) {
-                    selectedSource = availableOptions.first['code']!;
-                  }
-                  return Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: availableOptions.map((opt) {
-                      final code = opt['code']!;
-                      final label = opt['label']!;
-                      return ChoiceChip(
-                        label: Text(label),
-                        selected: selectedSource == code,
-                        onSelected: (_) => setModalState(() => selectedSource = code),
-                      );
-                    }).toList(),
-                  );
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
-            ),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.translate, size: 18),
-              label: Text(_tr('번역 시작', 'Start Translation', '开始翻译', '翻訳開始')),
-              onPressed: () => Navigator.pop(ctx, true),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    final targetOutFile = await _getTranslatedEpubFile(
-      sourceLang: selectedSource,
-      targetLang: targetLang,
-    );
-    if (forceRetranslate && await targetOutFile.exists()) {
-      try {
-        await targetOutFile.delete();
-      } catch (_) {}
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _tr(
-            '백그라운드 번역을 시작했습니다. 뒤로가기를 눌러도 유지됩니다.',
-            'Background pre-translation started. Continues even if you go back.',
-            '后台翻译已开始，返回书架后仍会继续。',
-            'バックグラウンド翻訳を開始しました。戻っても継続します。',
-          ),
-        ),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-
-    unawaited(
-      BatchTranslationService.preTranslateWholeEpub(
-        sourceEpub: File(widget.filePath),
-        sourceLang: selectedSource,
-        targetLang: targetLang,
-      ),
-    );
-  }
-
   Future<void> _openBookmarkSheet() async {
     final bookmarks = await StorageService.getBookmarks(widget.filePath);
+    if (mounted) {
+      setState(() => _bookmarks = bookmarks);
+    }
     if (!mounted) return;
 
     showModalBottomSheet(
@@ -1273,7 +1094,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void _toggleControls() {
     if (_isTouchLocked) return;
     setState(() => _showControls = !_showControls);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
   void _handlePointerDown(PointerDownEvent event) {
@@ -1376,8 +1196,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 1. 뷰어 표시에서 페이지 번호를 누르고 숫자를 입력하면 해당 페이지로 이동 (설정에서 페이지 번호가 활성화된 경우만 작동)
-  Future<void> _showJumpToPageDialog() async {
-    if (_isTouchLocked || !(_footerInfoMode == 'page' || _footerInfoMode == 'both')) return;
+  Future<void> _showJumpToPageDialog({bool fromProgressBar = false}) async {
+    final bool allowed = fromProgressBar
+        ? (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
+        : (_footerInfoMode == 'page' || _footerInfoMode == 'both');
+    if (_isTouchLocked || !allowed) return;
     final int totalEstPages = (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
     final int curEstPage = ((_progress * totalEstPages).round()).clamp(1, totalEstPages).toInt();
     final ctrl = TextEditingController(text: '$curEstPage');
@@ -1518,11 +1341,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: Text(
-                    '${(_progress * 100).toStringAsFixed(0)}%',
-                    style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.white),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
+                      ? () => _showJumpToPageDialog(fromProgressBar: true)
+                      : null,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    child: Text(
+                      '${(_progress * 100).toStringAsFixed(0)}%',
+                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
                   ),
                 ),
                 IconButton(
@@ -1541,11 +1370,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
 
     final double topInset = MediaQuery.of(context).padding.top;
-    final double safeTopOffset = topInset + (_showControls && _isMemoMode ? 122.0 : (_showControls || _isMemoMode ? 66.0 : 16.0));
+    final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0);
+    final double safeBottomOffset = baseBottom + (_isMemoMode ? 96.0 : (_useQuickNavTurn && _progressBarPos == 'right' ? 48.0 : 8.0));
     return Positioned(
       key: ValueKey('epub_progress_bar_$_progressBarPos'),
       top: safeTopOffset,
-      bottom: _useQuickNavTurn && _progressBarPos == 'right' ? (baseBottom + 48.0) : (baseBottom + 8.0),
+      bottom: safeBottomOffset,
       left: _progressBarPos == 'left' ? 8.0 : null,
       right: _progressBarPos == 'right' ? 8.0 : null,
       width: 40.0,
@@ -1589,9 +1419,18 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   ),
                 ),
               ),
-              Text(
-                '${(_progress * 100).toStringAsFixed(0)}%',
-                style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.white),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
+                    ? () => _showJumpToPageDialog(fromProgressBar: true)
+                    : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                  child: Text(
+                    '${(_progress * 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.vertical_align_bottom, color: Colors.white, size: 18),
@@ -1648,10 +1487,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
-    BatchTranslationService.translationCompletedEvent.removeListener(_onBackgroundTranslationFinished);
     WidgetsBinding.instance.removeObserver(this);
     _volumeKeyService.stopListening();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     super.dispose();
   }
 
@@ -1967,10 +1804,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 ),
               ),
 
-            // S펜 필기 모드 상단 미니 툴바 (펜 색상 + 지우개 버튼 포함)
+            // S펜 필기 모드 하단 미니 툴바 (진행바 UI 위에 위치 + 색상과 선 굵기 사이에 지우개 배치 + 선 굵기 숫자 터치 입력)
             if (_isMemoMode && !_isTouchLocked)
               Positioned(
-                top: (_showControls ? 58.0 : 10.0) + MediaQuery.of(context).padding.top,
+                bottom: math.max<double>(bottomPadding + 24.0, 28.0) +
+                    (((_showControls && _progressBarPos == 'bottom') || _useQuickNavTurn) ? 46.0 : 0.0),
                 left: 12,
                 right: 12,
                 child: Center(
@@ -2028,29 +1866,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                     ),
                                   ),
                                 )),
-                            const SizedBox(width: 6),
-                            const Icon(Icons.line_weight, color: Colors.white70, size: 15),
-                            SizedBox(
-                              width: 82,
-                              child: SliderTheme(
-                                data: SliderTheme.of(context).copyWith(
-                                  trackHeight: 2.2,
-                                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.5),
-                                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 10.0),
-                                ),
-                                child: Slider(
-                                  value: _penWidth.clamp(1.0, 14.0).toDouble(),
-                                  min: 1.0,
-                                  max: 14.0,
-                                  activeColor: Colors.amber,
-                                  onChanged: (v) => setState(() => _penWidth = v),
-                                ),
-                              ),
-                            ),
-                            Text(
-                              '${_penWidth.toStringAsFixed(1)}',
-                              style: const TextStyle(color: Colors.white70, fontSize: 10),
-                            ),
                             const SizedBox(width: 4),
                             IconButton(
                               icon: Icon(
@@ -2061,6 +1876,45 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                               tooltip: _tr('지우개', 'Eraser', '橡皮擦', '消しゴム'),
                               onPressed: () => setState(() => _isEraserMode = !_isEraserMode),
                             ),
+                            const SizedBox(width: 2),
+                            const Icon(Icons.line_weight, color: Colors.white70, size: 15),
+                            SizedBox(
+                              width: 82,
+                              child: SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  trackHeight: 2.2,
+                                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.5),
+                                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 10.0),
+                                ),
+                                child: Slider(
+                                  value: _penWidth.clamp(0.5, 20.0).toDouble(),
+                                  min: 0.5,
+                                  max: 20.0,
+                                  activeColor: Colors.amber,
+                                  onChanged: (v) => setState(() => _penWidth = v),
+                                ),
+                              ),
+                            ),
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: _showPenWidthInputDialog,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: Colors.white38, width: 1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  _penWidth.toStringAsFixed(1),
+                                  style: const TextStyle(
+                                    color: Colors.amber,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
                             IconButton(
                               icon: const Icon(Icons.note_alt_outlined, color: Colors.white, size: 18),
                               tooltip: '텍스트 메모 입력',
@@ -2150,19 +2004,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                   _isStylusDown = false;
                                 });
                                 ScaffoldMessenger.of(context).clearSnackBars();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      _tr(
-                                        '화면이 잠겼습니다. (흔들어서 끄기 또는 음량 버튼 동시에 눌러서 끄기)',
-                                        'Screen locked. (Shake or press Vol Up+Down to unlock)',
-                                        '屏幕已锁定。（摇晃或同时按音量键即可关闭锁定）',
-                                        '画面をロックしました。(振るか音量ボタン同時押しで解除)',
-                                      ),
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(_buildLockScreenMessage()),
+                                      duration: const Duration(seconds: 2),
                                     ),
-                                    duration: const Duration(seconds: 2),
-                                  ),
-                                );
+                                  );
                               },
                             ),
                             IconButton(
@@ -2246,7 +2093,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                               visualDensity: VisualDensity.compact,
                               padding: btnPadding,
                               constraints: btnConstraints,
-                              icon: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 20),
+                              icon: Icon(
+                                _isCurrentPageBookmarked ? Icons.bookmarks : Icons.bookmarks_outlined,
+                                color: _isCurrentPageBookmarked ? Colors.amber : Colors.white,
+                                size: 20,
+                              ),
                               tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
                               onPressed: _openBookmarkSheet,
                             ),

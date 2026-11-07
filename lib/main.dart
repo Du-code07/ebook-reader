@@ -4,22 +4,14 @@ import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
 import 'screens/pdf_and_image_viewer.dart';
 import 'screens/reader_screen.dart';
 import 'services/storage_service.dart';
-import 'services/batch_translation_service.dart';
 import 'services/txt_to_epub_converter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky, overlays: []);
-  SystemChrome.setSystemUIChangeCallback((systemOverlaysAreVisible) async {
-    if (systemOverlaysAreVisible) {
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky, overlays: []);
-    }
-  });
   final initialDark = await StorageService.getDarkMode();
   final initialLang = await StorageService.getAppLanguage();
   runApp(MyEbookApp(initialDark: initialDark, initialLang: initialLang));
@@ -104,56 +96,13 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         brightness: Brightness.dark,
         colorSchemeSeed: Colors.indigo,
       ),
-      // 8. 태블릿 화면 회전 시 Navigator와 Overlay(툴팁/아이콘 이름, 뷰어 표시 설정 바텀시트, 다이얼로그)까지
-      // 모두 동일한 방향으로 부드럽게 회전되도록 MaterialApp.builder 최상단에서 통합 처리!
       builder: (context, child) {
-        return ValueListenableBuilder<bool?>(
-          valueListenable: StorageService.desiredLandscapeNotifier,
-          builder: (context, desiredLandscape, _) {
-            final mq = MediaQuery.of(context);
-            final bool physicalIsLandscape = mq.size.width > mq.size.height;
-            final bool needsSoftwareRotation =
-                desiredLandscape != null && physicalIsLandscape != desiredLandscape;
-            final int quarterTurns = needsSoftwareRotation ? 1 : 0;
-
-            final MediaQueryData effectiveMq = needsSoftwareRotation
-                ? mq.copyWith(
-                    size: Size(mq.size.height, mq.size.width),
-                    padding: EdgeInsets.only(
-                      top: mq.padding.left,
-                      right: mq.padding.top,
-                      bottom: mq.padding.right,
-                      left: mq.padding.bottom,
-                    ),
-                    viewPadding: EdgeInsets.only(
-                      top: mq.viewPadding.left,
-                      right: mq.viewPadding.top,
-                      bottom: mq.viewPadding.right,
-                      left: mq.viewPadding.bottom,
-                    ),
-                    viewInsets: EdgeInsets.only(
-                      top: mq.viewInsets.left,
-                      right: mq.viewInsets.top,
-                      bottom: mq.viewInsets.right,
-                      left: mq.viewInsets.bottom,
-                    ),
-                  )
-                : mq;
-
-            return FadeTransition(
-              opacity: _rotationFadeAnim,
-              child: ScaleTransition(
-                scale: _rotationScaleAnim,
-                child: RotatedBox(
-                  quarterTurns: quarterTurns,
-                  child: MediaQuery(
-                    data: effectiveMq,
-                    child: child ?? const SizedBox.shrink(),
-                  ),
-                ),
-              ),
-            );
-          },
+        return FadeTransition(
+          opacity: _rotationFadeAnim,
+          child: ScaleTransition(
+            scale: _rotationScaleAnim,
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
       home: BookshelfScreen(
@@ -317,11 +266,6 @@ class UserManualScreen extends StatelessWidget {
               iconWidget: const Icon(Icons.dark_mode, color: Colors.white, size: 22),
               title: _tr('다크 모드 / 라이트 모드 전환', 'Toggle Dark / Light Mode', '切换深色 / 浅色模式', 'ダーク / ライトモード切替'),
               desc: _tr('앱 전체 화면 테마를 라이트 모드와 다크 모드로 전환합니다.', 'Switches the app theme between Light and Dark mode.', '在浅色模式和深色模式之间切换。', 'アプリ全体のテーマをライト/ダークに切り替えます。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.document_scanner_outlined, color: Colors.amber, size: 22),
-              title: _tr('문서 스캔 (하단 [+ 파일 추가] 왼쪽 버튼)', 'Document Scan (Left of [+ Add Files])', '文档扫描（[+ 添加文件] 左侧按钮）', '文書スキャン（[+ ファイル追加] の左）'),
-              desc: _tr('카메라로 책이나 글이 적힌 종이를 촬영하면 그림자를 제거하고 글자를 깔끔하게 정돈합니다. 촬영할 때마다 1, 2, 3... 순서대로 번호가 매겨지며 [PDF 파일로 형성]을 누르면 순서대로 배치된 PDF 파일이 생성됩니다.', 'Captures book pages or paper via camera, cleans background shadows, sharpens text, numbers each shot sequentially (1, 2, 3...), and builds a PDF in order.', '用相机拍摄书页或纸张，自动去除阴影并锐化文字，按拍摄顺序编号并生成 PDF 文件。', 'カメラで本や紙を撮影し、影を除去して文字を鮮明に補正します。撮影順に番号が振られ、順番通りのPDFを作成します。'),
             ),
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 22),
@@ -629,20 +573,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   @override
   void initState() {
     super.initState();
-    BatchTranslationService.translationCompletedEvent.addListener(_onTranslationFinishedInBackground);
     _loadLibrary();
   }
 
   @override
   void dispose() {
-    BatchTranslationService.translationCompletedEvent.removeListener(_onTranslationFinishedInBackground);
     super.dispose();
-  }
-
-  void _onTranslationFinishedInBackground() {
-    if (mounted) {
-      _loadLibrary();
-    }
   }
 
   int _naturalCompare(String a, String b) {
@@ -832,564 +768,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     }
   }
 
-  /// 1. OSS-DocumentScanner & Simple Scan PDF 방식 스캔 엔진:
-  /// - ML Kit 온디바이스 글자 영역 인식 + 적분 영상 기반 Sauvola 적응형 이진화로
-  ///   스캔본의 글자/표만 추출해 순백색(#FFFFFF) 빈 종이에 여백 없이(Zero-Margin) 배치!
-  Future<File> _processRawScanToPureTextPage(File rawFile, String filterMode) async {
-    final List<Map<String, int>> textBoxes = [];
-    if (filterMode != 'magic_color') {
-      final recognizer = TextRecognizer(script: TextRecognitionScript.korean);
-      try {
-        final inputImage = InputImage.fromFilePath(rawFile.path);
-        final recognized = await recognizer.processImage(inputImage);
-        for (final block in recognized.blocks) {
-          final r = block.boundingBox;
-          textBoxes.add({
-            'left': r.left.round(),
-            'top': r.top.round(),
-            'right': r.right.round(),
-            'bottom': r.bottom.round(),
-          });
-          for (final line in block.lines) {
-            final lr = line.boundingBox;
-            textBoxes.add({
-              'left': lr.left.round(),
-              'top': lr.top.round(),
-              'right': lr.right.round(),
-              'bottom': lr.bottom.round(),
-            });
-          }
-        }
-      } catch (_) {
-      } finally {
-        try {
-          await recognizer.close();
-        } catch (_) {}
-      }
-    }
-
-    try {
-      final String? processedPath = await _pdfChannel.invokeMethod<String>(
-        'processScannedPageWithTextIsolation',
-        {
-          'imagePath': rawFile.path,
-          'filterMode': filterMode,
-          'textBoxes': textBoxes,
-        },
-      );
-      if (processedPath != null && File(processedPath).existsSync()) {
-        return File(processedPath);
-      }
-    } catch (_) {}
-    return rawFile;
-  }
-
-  Future<void> _openDocumentScannerDialog() async {
-    final now = DateTime.now();
-    final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
-    final rand4 = (1000 + math.Random().nextInt(9000)).toString();
-    final defaultTitle = '스캔_${dateStr}_$rand4';
-    final titleController = TextEditingController(text: defaultTitle);
-
-    // 원본 촬영 파일과 보정된 결과 파일을 함께 관리하여 필터 변경 시 즉시 재적용 가능
-    final List<File> rawCapturedPages = [];
-    final List<File> scannedPages = [];
-    String selectedFilterMode = 'text_only_zero_margin'; // 기본값: 글자만 인식해 빈 종이에 여백 없이 배치
-    bool isCapturing = false;
-    bool isBuildingPdf = false;
-    bool autoLaunchedFirstCamera = false;
-
-    Future<void> triggerCameraCapture(StateSetter setModalState) async {
-      if (isCapturing || isBuildingPdf) return;
-      setModalState(() => isCapturing = true);
-      try {
-        final String? rawPath = await _pdfChannel.invokeMethod<String>('captureAndScanDocumentPage');
-        if (rawPath != null && File(rawPath).existsSync()) {
-          final rawFile = File(rawPath);
-          final processedFile = await _processRawScanToPureTextPage(rawFile, selectedFilterMode);
-          setModalState(() {
-            rawCapturedPages.add(rawFile);
-            scannedPages.add(processedFile);
-          });
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('${_tr("카메라 스캔 오류", "Camera Scan Error", "扫描错误", "スキャンエラー")}: $e')),
-          );
-        }
-      } finally {
-        setModalState(() => isCapturing = false);
-      }
-    }
-
-    Future<void> importImagesFromGalleryForScan(StateSetter setModalState) async {
-      if (isCapturing || isBuildingPdf) return;
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        allowMultiple: true,
-      );
-      if (picked == null || picked.files.isEmpty) return;
-      setModalState(() => isCapturing = true);
-      try {
-        for (final pf in picked.files) {
-          if (pf.path == null) continue;
-          final rawFile = File(pf.path!);
-          if (!rawFile.existsSync()) continue;
-          final processedFile = await _processRawScanToPureTextPage(rawFile, selectedFilterMode);
-          rawCapturedPages.add(rawFile);
-          scannedPages.add(processedFile);
-        }
-      } finally {
-        setModalState(() => isCapturing = false);
-      }
-    }
-
-    Future<void> reapplyFilterToAllPages(String newMode, StateSetter setModalState) async {
-      if (isCapturing || isBuildingPdf || selectedFilterMode == newMode) return;
-      setModalState(() {
-        selectedFilterMode = newMode;
-        isCapturing = true;
-      });
-      try {
-        final List<File> updated = [];
-        for (int i = 0; i < rawCapturedPages.length; i++) {
-          final res = await _processRawScanToPureTextPage(rawCapturedPages[i], newMode);
-          updated.add(res);
-        }
-        setModalState(() {
-          scannedPages
-            ..clear()
-            ..addAll(updated);
-        });
-      } finally {
-        setModalState(() => isCapturing = false);
-      }
-    }
-
-    if (!mounted) return;
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) {
-          if (!autoLaunchedFirstCamera) {
-            autoLaunchedFirstCamera = true;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              triggerCameraCapture(setModalState);
-            });
-          }
-
-          return AlertDialog(
-            titlePadding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
-            contentPadding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-            title: Row(
-              children: [
-                const Icon(Icons.document_scanner_outlined, color: Colors.indigo, size: 22),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _tr(
-                      '심플 문서 스캔 (${scannedPages.length}장)',
-                      'Simple Document Scan (${scannedPages.length})',
-                      '文档扫描 (${scannedPages.length}页)',
-                      'シンプル文書スキャン (${scannedPages.length}枚)',
-                    ),
-                    style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            content: SizedBox(
-              width: 480,
-              height: 470,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextField(
-                    controller: titleController,
-                    enabled: !isBuildingPdf,
-                    decoration: InputDecoration(
-                      labelText: _tr('생성할 PDF 파일 이름', 'Output PDF Filename', '生成的 PDF 文件名', '作成するPDFファイル名'),
-                      suffixText: '.pdf',
-                      isDense: true,
-                      border: const OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  // OSS-DocumentScanner & Simple Scan 필터 모드 선택 칩
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        ChoiceChip(
-                          visualDensity: VisualDensity.compact,
-                          label: Text(
-                            _tr('글자만 추출 (여백 없음)', 'Text Only (Zero Margin)', '仅提取文字 (无边距)', '文字のみ抽出 (余白なし)'),
-                            style: const TextStyle(fontSize: 11.5),
-                          ),
-                          selected: selectedFilterMode == 'text_only_zero_margin',
-                          onSelected: (_) => reapplyFilterToAllPages('text_only_zero_margin', setModalState),
-                        ),
-                        const SizedBox(width: 6),
-                        ChoiceChip(
-                          visualDensity: VisualDensity.compact,
-                          label: Text(
-                            _tr('백지 흑백 (전체 면)', 'Clean B&W (Full Page)', '净白黑白 (全页)', '白紙モノクロ (全面)'),
-                            style: const TextStyle(fontSize: 11.5),
-                          ),
-                          selected: selectedFilterMode == 'full_bw',
-                          onSelected: (_) => reapplyFilterToAllPages('full_bw', setModalState),
-                        ),
-                        const SizedBox(width: 6),
-                        ChoiceChip(
-                          visualDensity: VisualDensity.compact,
-                          label: Text(
-                            _tr('매직 컬러', 'Magic Color', '增强彩色', 'マジックカラー'),
-                            style: const TextStyle(fontSize: 11.5),
-                          ),
-                          selected: selectedFilterMode == 'magic_color',
-                          onSelected: (_) => reapplyFilterToAllPages('magic_color', setModalState),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: isCapturing
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const CircularProgressIndicator(),
-                                const SizedBox(height: 14),
-                                Text(
-                                  _tr(
-                                    '스캔본의 글자만 인식하여\n빈 종이에 여백 없이 깔끔하게 배치 중입니다...',
-                                    'Isolating text onto a blank white page\nwith zero margins...',
-                                    '正在识别文字并无边距排版至空白页...',
-                                    '文字のみを認識して白紙に余白なしで配置中...',
-                                  ),
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(fontSize: 13),
-                                ),
-                              ],
-                            ),
-                          )
-                        : scannedPages.isEmpty
-                            ? Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.document_scanner_outlined, size: 48, color: Colors.grey),
-                                    const SizedBox(height: 10),
-                                    Text(
-                                      _tr(
-                                        '아래 [카메라 촬영] 버튼을 눌러 종이나 책을 찍으면\n글자만 깔끔하게 인식해 빈 종이에 여백 없이 담아줍니다.',
-                                        'Tap [Camera] below to photograph a page.\nOnly the text will be extracted onto a blank sheet without margins.',
-                                        '点击下方【拍照扫描】拍摄书页或纸张，\n将仅提取文字并无边距排入空白纸张。',
-                                        '下の[カメラ撮影]で本や紙を撮影すると、\n文字だけを認識して白紙に余白なしで配置します。',
-                                      ),
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(fontSize: 12.5, color: Colors.grey),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : GridView.builder(
-                                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 2,
-                                  crossAxisSpacing: 10,
-                                  mainAxisSpacing: 10,
-                                  childAspectRatio: 0.72,
-                                ),
-                                itemCount: scannedPages.length,
-                                itemBuilder: (_, idx) {
-                                  final pageFile = scannedPages[idx];
-                                  final pageNum = idx + 1;
-                                  return Card(
-                                    color: Colors.white,
-                                    clipBehavior: Clip.antiAlias,
-                                    margin: EdgeInsets.zero,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      side: const BorderSide(color: Colors.indigo, width: 1.2),
-                                    ),
-                                    child: Stack(
-                                      fit: StackFit.expand,
-                                      children: [
-                                        Container(
-                                          color: Colors.white,
-                                          child: Image.file(
-                                            pageFile,
-                                            fit: BoxFit.contain,
-                                            gaplessPlayback: true,
-                                            filterQuality: FilterQuality.high,
-                                          ),
-                                        ),
-                                        // 좌측 상단 순서 번호 배지 (#1, #2, #3...)
-                                        Positioned(
-                                          top: 6,
-                                          left: 6,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
-                                            decoration: BoxDecoration(
-                                              color: Colors.indigo.withOpacity(0.92),
-                                              borderRadius: BorderRadius.circular(12),
-                                            ),
-                                            child: Text(
-                                              '#$pageNum',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        // 우측 상단 90도 회전(↻) 및 삭제(✕) 버튼
-                                        Positioned(
-                                          top: 4,
-                                          right: 4,
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Material(
-                                                color: Colors.black54,
-                                                shape: const CircleBorder(),
-                                                child: InkWell(
-                                                  customBorder: const CircleBorder(),
-                                                  onTap: isBuildingPdf
-                                                      ? null
-                                                      : () async {
-                                                          final String? rotPath = await _pdfChannel.invokeMethod<String>(
-                                                            'rotateScannedPageImage',
-                                                            {'imagePath': pageFile.path},
-                                                          );
-                                                          if (rotPath != null && File(rotPath).existsSync()) {
-                                                            setModalState(() {
-                                                              scannedPages[idx] = File(rotPath);
-                                                            });
-                                                          }
-                                                        },
-                                                  child: const Padding(
-                                                    padding: EdgeInsets.all(5.0),
-                                                    child: Icon(Icons.rotate_right, size: 16, color: Colors.white),
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Material(
-                                                color: Colors.black54,
-                                                shape: const CircleBorder(),
-                                                child: InkWell(
-                                                  customBorder: const CircleBorder(),
-                                                  onTap: isBuildingPdf
-                                                      ? null
-                                                      : () {
-                                                          setModalState(() {
-                                                            if (idx < rawCapturedPages.length) {
-                                                              rawCapturedPages.removeAt(idx);
-                                                            }
-                                                            scannedPages.removeAt(idx);
-                                                          });
-                                                        },
-                                                  child: const Padding(
-                                                    padding: EdgeInsets.all(5.0),
-                                                    child: Icon(Icons.close, size: 16, color: Colors.white),
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        // 하단 순서 변경 버튼 (◀ / ▶)
-                                        Positioned(
-                                          left: 0,
-                                          right: 0,
-                                          bottom: 0,
-                                          child: Container(
-                                            color: Colors.black54,
-                                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                            child: Row(
-                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                              children: [
-                                                IconButton(
-                                                  visualDensity: VisualDensity.compact,
-                                                  padding: EdgeInsets.zero,
-                                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 24),
-                                                  icon: const Icon(Icons.arrow_back_ios_new, size: 14, color: Colors.white),
-                                                  onPressed: (idx > 0 && !isBuildingPdf)
-                                                      ? () {
-                                                          setModalState(() {
-                                                            if (idx < rawCapturedPages.length) {
-                                                              final rItem = rawCapturedPages.removeAt(idx);
-                                                              rawCapturedPages.insert(idx - 1, rItem);
-                                                            }
-                                                            final item = scannedPages.removeAt(idx);
-                                                            scannedPages.insert(idx - 1, item);
-                                                          });
-                                                        }
-                                                      : null,
-                                                ),
-                                                Text(
-                                                  '$pageNum / ${scannedPages.length}',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 11,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                                IconButton(
-                                                  visualDensity: VisualDensity.compact,
-                                                  padding: EdgeInsets.zero,
-                                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 24),
-                                                  icon: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white),
-                                                  onPressed: (idx < scannedPages.length - 1 && !isBuildingPdf)
-                                                      ? () {
-                                                          setModalState(() {
-                                                            if (idx < rawCapturedPages.length - 1) {
-                                                              final rItem = rawCapturedPages.removeAt(idx);
-                                                              rawCapturedPages.insert(idx + 1, rItem);
-                                                            }
-                                                            final item = scannedPages.removeAt(idx);
-                                                            scannedPages.insert(idx + 1, item);
-                                                          });
-                                                        }
-                                                      : null,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.camera_alt_outlined, size: 18),
-                          label: Text(
-                            scannedPages.isEmpty
-                                ? _tr('카메라 촬영 (#1)', 'Camera (#1)', '拍照 (#1)', 'カメラ (#1)')
-                                : _tr('추가 촬영 (#${scannedPages.length + 1})', 'Add Shot (#${scannedPages.length + 1})', '继续拍 (#${scannedPages.length + 1})', '追加撮影 (#${scannedPages.length + 1})'),
-                            style: const TextStyle(fontSize: 12.5),
-                          ),
-                          onPressed: (isCapturing || isBuildingPdf)
-                              ? null
-                              : () => triggerCameraCapture(setModalState),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.photo_library_outlined, size: 18),
-                        label: Text(
-                          _tr('사진 선택', 'Gallery', '相册', '写真選択'),
-                          style: const TextStyle(fontSize: 12.5),
-                        ),
-                        onPressed: (isCapturing || isBuildingPdf)
-                            ? null
-                            : () => importImagesFromGalleryForScan(setModalState),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: (isCapturing || isBuildingPdf)
-                    ? null
-                    : () => Navigator.pop(ctx),
-                child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
-              ),
-              ElevatedButton.icon(
-                icon: isBuildingPdf
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.picture_as_pdf, size: 18),
-                label: Text(
-                  _tr(
-                    'PDF 파일로 형성 (${scannedPages.length}장)',
-                    'Build PDF (${scannedPages.length})',
-                    '生成 PDF 文件 (${scannedPages.length}页)',
-                    'PDFファイルを作成 (${scannedPages.length}枚)',
-                  ),
-                ),
-                onPressed: (scannedPages.isEmpty || isCapturing || isBuildingPdf)
-                    ? null
-                    : () async {
-                        setModalState(() => isBuildingPdf = true);
-                        try {
-                          final rawName = titleController.text.trim().isEmpty
-                              ? defaultTitle
-                              : titleController.text.trim();
-                          final cleanName = rawName
-                              .replaceAll(RegExp(r'\.pdf$', caseSensitive: false), '')
-                              .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-                          final appDir = await getApplicationDocumentsDirectory();
-                          final outPath = '${appDir.path}/$cleanName.pdf';
-
-                          final String? createdPath = await _pdfChannel.invokeMethod<String>(
-                            'createScannedPdfFromImages',
-                            {
-                              'imagePaths': scannedPages.map((f) => f.path).toList(),
-                              'outputPath': outPath,
-                            },
-                          );
-
-                          if (createdPath != null && File(createdPath).existsSync()) {
-                            final targetGroup = _selectedGroup == '전체' ? 'PDF/문서' : _selectedGroup;
-                            await StorageService.setBookGroup(createdPath, targetGroup);
-                            for (final tempImg in [...scannedPages, ...rawCapturedPages]) {
-                              try {
-                                if (tempImg.path.contains('camera_scans') && await tempImg.exists()) {
-                                  await tempImg.delete();
-                                }
-                              } catch (_) {}
-                            }
-                            if (ctx.mounted) Navigator.pop(ctx);
-                            await _loadLibrary();
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    _tr(
-                                      '여백 없는 깔끔한 스캔 PDF 파일이 생성되었습니다: $cleanName.pdf',
-                                      'Clean zero-margin scanned PDF created: $cleanName.pdf',
-                                      '已生成无边距清晰扫描 PDF 文件：$cleanName.pdf',
-                                      '余白なしの鮮明なスキャンPDFが作成されました: $cleanName.pdf',
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }
-                          }
-                        } catch (e) {
-                          setModalState(() => isBuildingPdf = false);
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('PDF 생성 오류: $e')),
-                            );
-                          }
-                        }
-                      },
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
   Future<void> _pickAndImportFiles() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
@@ -1470,7 +848,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       final action = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: Text(_tr('이미지 ${imagePicked.length}장 추가 방식 선택', 'Import ${imagePicked.length} Images', '选择导入 ${imagePicked.length} 张图片的方式', '画像 ${imagePicked.length}枚の追加方法を選択')),
+          title: Text(_tr('이미지 추가 방식 선택', 'Image Import Option', '选择图片导入方式', '画像の追加方法を選択')),
           content: Text(
             _tr(
               '선택한 이미지들을 하나로 묶어 통합 파일(.cbz)로 추가할까요?',
@@ -1542,7 +920,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: Text(_tr('JPG 통합 파일 만들기', 'Create Merged Image Book', '创建合并图片文件', 'JPG結合ファイル作成')),
+          title: Text(_tr('cbz 파일 만들기', 'Create cbz File', '创建 cbz 文件', 'cbzファイル作成')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1572,7 +950,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 RadioListTile<bool>(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  title: Text(_tr('파일을 고른(선택한) 순서대로 합치기', 'Keep Selected Order', '按选择顺序合并', '選択した順番通りに結合'), style: const TextStyle(fontSize: 13)),
+                  title: Text(_tr('파일을 선택한 순서대로 합치기', 'Keep Selected Order', '按选择顺序合并', '選択した順番通りに結合'), style: const TextStyle(fontSize: 13)),
                   value: false,
                   groupValue: sortByName,
                   onChanged: (v) => setModalState(() => sortByName = v ?? false),
@@ -1627,7 +1005,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           progressSetState = setDialogState;
           final double ratio = totalSteps > 0 ? (currentStep / totalSteps).clamp(0.0, 1.0).toDouble() : 0.0;
           return AlertDialog(
-            title: Text(_tr('JPG 통합 파일 생성 중', 'Creating Merged Book', '正在生成合并文件', 'JPG結合ファイル作成中')),
+            title: Text(_tr('cbz 파일 생성 중', 'Creating cbz File', '正在生成 cbz 文件', 'cbzファイル作成中')),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1688,14 +1066,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     await _loadLibrary();
     if (mounted) {
+      final grpDisplay = _localizeGroupName(targetGroup);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             _tr(
-              '통합 파일이 서재에 생성되었습니다: $safeTitle.cbz',
-              'Merged file created in bookshelf: $safeTitle.cbz',
-              '合并文件已添加到书架：$safeTitle.cbz',
-              '結合ファイルが書斎に作成されました: $safeTitle.cbz',
+              'cbz 파일이 [$grpDisplay]에 생성되었습니다. ($safeTitle.cbz)',
+              'cbz file created in [$grpDisplay]. ($safeTitle.cbz)',
+              'cbz 文件已创建于 [$grpDisplay]。($safeTitle.cbz)',
+              'cbzファイルが [$grpDisplay] に作成されました。($safeTitle.cbz)',
             ),
           ),
         ),
@@ -1719,7 +1098,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         await _createMangaBookFromImages(files, deleteSourceAfter: false);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_tr('합칠 JPG/PNG 이미지를 2장 이상 선택해 주세요.', 'Select at least 2 images to merge.', '请选择至少 2 张图片进行合并。', '結合する画像を2枚以上選択してください。'))),
+          SnackBar(content: Text(_tr('JPG/PNG 파일을 2개 이상 선택해 주세요.', 'Please select at least 2 JPG/PNG files.', '请选择至少 2 个 JPG/PNG 文件。', 'JPG/PNGファイルを2つ以上選択してください。'))),
         );
       }
       return;
@@ -1731,7 +1110,28 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: Text(_tr('JPG 이미지 합치기', 'Merge JPG Images', '合并 JPG 图片', 'JPG画像結合')),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(_tr('JPG 이미지 합치기', 'Merge JPG Images', '合并 JPG 图片', 'JPG画像結合')),
+              ),
+              TextButton(
+                onPressed: () {
+                  setModalState(() {
+                    if (selectedPaths.length == existingImages.length) {
+                      selectedPaths.clear();
+                    } else {
+                      selectedPaths
+                        ..clear()
+                        ..addAll(existingImages.map((e) => e.path));
+                    }
+                  });
+                },
+                child: Text(_tr('전체선택', 'Select All', '全选', 'すべて選択')),
+              ),
+            ],
+          ),
           content: SizedBox(
             width: 420,
             height: 360,
@@ -1742,39 +1142,20 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('${_tr("선택됨", "Selected", "已选", "選択中")}: ${selectedPaths.length}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () {
-                            setModalState(() {
-                              if (selectedPaths.length == existingImages.length) {
-                                selectedPaths.clear();
-                              } else {
-                                selectedPaths
-                                  ..clear()
-                                  ..addAll(existingImages.map((e) => e.path));
-                              }
-                            });
-                          },
-                          child: Text(_tr('전체선택', 'Select All', '全选', 'すべて選択')),
-                        ),
-                        TextButton.icon(
-                          icon: const Icon(Icons.folder_open, size: 16),
-                          label: Text(_tr('기기에서 선택', 'Browse Device', '从设备选择', '端末から選択')),
-                          onPressed: () async {
-                            Navigator.pop(ctx, false);
-                            final result = await FilePicker.platform.pickFiles(
-                              type: FileType.image,
-                              allowMultiple: true,
-                            );
-                            if (result != null && result.files.length >= 2) {
-                              final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
-                              await _createMangaBookFromImages(files, deleteSourceAfter: false);
-                            }
-                          },
-                        ),
-                      ],
+                    TextButton.icon(
+                      icon: const Icon(Icons.folder_open, size: 16),
+                      label: Text(_tr('기기에서 선택', 'Browse Device', '从设备选择', '端末から選択')),
+                      onPressed: () async {
+                        Navigator.pop(ctx, false);
+                        final result = await FilePicker.platform.pickFiles(
+                          type: FileType.image,
+                          allowMultiple: true,
+                        );
+                        if (result != null && result.files.length >= 2) {
+                          final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
+                          await _createMangaBookFromImages(files, deleteSourceAfter: false);
+                        }
+                      },
                     ),
                   ],
                 ),
@@ -1845,13 +1226,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     final titleController = TextEditingController(text: defaultFileName);
     bool deleteOriginals = deleteSourceAfter;
-    bool sortByName = false;
+    bool sortByName = true;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: Text(_tr('PDF 하나로 합치기', 'Merge into Single PDF', '合并为一个 PDF', '1つのPDFに結合')),
+          title: Text(_tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1860,7 +1241,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 TextField(
                   controller: titleController,
                   decoration: InputDecoration(
-                    labelText: _tr('합쳐진 PDF 파일 이름', 'Merged PDF Filename', '合并后的 PDF 名称', '結合後のPDFファイル名'),
+                    labelText: _tr('PDF 파일 이름', 'PDF Filename', 'PDF 文件名称', 'PDFファイル名'),
                     suffixText: '.pdf',
                     border: const OutlineInputBorder(),
                   ),
@@ -1873,18 +1254,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 RadioListTile<bool>(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  title: Text(_tr('파일을 고른(선택한) 순서대로 합치기', 'Keep Selected Order', '按选择顺序合并', '選択した順番通りに結合'), style: const TextStyle(fontSize: 13)),
-                  value: false,
-                  groupValue: sortByName,
-                  onChanged: (v) => setModalState(() => sortByName = v ?? false),
-                ),
-                RadioListTile<bool>(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
                   title: Text(_tr('파일 이름 순서대로 합치기', 'Sort by Filename', '按文件名顺序合并', 'ファイル名順に結合'), style: const TextStyle(fontSize: 13)),
                   value: true,
                   groupValue: sortByName,
                   onChanged: (v) => setModalState(() => sortByName = v ?? true),
+                ),
+                RadioListTile<bool>(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(_tr('파일을 선택한 순서대로 합치기', 'Keep Selected Order', '按选择顺序合并', '選択した順番通りに結合'), style: const TextStyle(fontSize: 13)),
+                  value: false,
+                  groupValue: sortByName,
+                  onChanged: (v) => setModalState(() => sortByName = v ?? false),
                 ),
                 if (deleteSourceAfter) ...[
                   const Divider(height: 12),
@@ -1892,7 +1273,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                     contentPadding: EdgeInsets.zero,
                     value: deleteOriginals,
                     title: Text(
-                      _tr('합친 후 기존 개별 PDF 파일 휴지통으로 이동', 'Move original PDFs to Trash after merge', '合并后将原 PDF 移至回收站', '結合後に元のPDFをゴミ箱へ移動'),
+                      _tr('기존 PDF 파일 휴지통으로 이동', 'Move original PDFs to Trash', '将原 PDF 移至回收站', '元のPDFをゴミ箱へ移動'),
                       style: const TextStyle(fontSize: 13),
                     ),
                     onChanged: (v) => setModalState(() => deleteOriginals = v ?? false),
@@ -1972,14 +1353,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       await _loadLibrary();
 
       if (mounted) {
+        final grpDisplay = _localizeGroupName(targetGroup);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               _tr(
-                '합쳐진 PDF 파일이 서재에 생성되었습니다: $safeTitle.pdf',
-                'Merged PDF created in bookshelf: $safeTitle.pdf',
-                '合并后的 PDF 已添加到书架：$safeTitle.pdf',
-                '結合されたPDFが書斎に作成されました: $safeTitle.pdf',
+                'PDF 파일이 [$grpDisplay]에 생성되었습니다. ($safeTitle.pdf)',
+                'PDF file created in [$grpDisplay]. ($safeTitle.pdf)',
+                'PDF 文件已创建于 [$grpDisplay]。($safeTitle.pdf)',
+                'PDFファイルが [$grpDisplay] に作成されました。($safeTitle.pdf)',
               ),
             ),
           ),
@@ -2012,7 +1394,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         await _createMergedPdfFromFiles(files, deleteSourceAfter: false);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_tr('합칠 PDF 파일을 2개 이상 선택해 주세요.', 'Select at least 2 PDF files to merge.', '请选择至少 2 个 PDF 文件进行合并。', '結合するPDFを2つ以上選択してください。'))),
+          SnackBar(content: Text(_tr('PDF 파일을 2개 이상 선택해 주세요.', 'Please select at least 2 PDF files.', '请选择至少 2 个 PDF 文件。', 'PDFファイルを2つ以上選択してください。'))),
         );
       }
       return;
@@ -2024,7 +1406,28 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: Text(_tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合')),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(_tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合')),
+              ),
+              TextButton(
+                onPressed: () {
+                  setModalState(() {
+                    if (selectedPaths.length == existingPdfs.length) {
+                      selectedPaths.clear();
+                    } else {
+                      selectedPaths
+                        ..clear()
+                        ..addAll(existingPdfs.map((e) => e.path));
+                    }
+                  });
+                },
+                child: Text(_tr('전체선택', 'Select All', '全选', 'すべて選択')),
+              ),
+            ],
+          ),
           content: SizedBox(
             width: 420,
             height: 360,
@@ -2035,40 +1438,21 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('${_tr("선택됨", "Selected", "已选", "選択中")}: ${selectedPaths.length}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () {
-                            setModalState(() {
-                              if (selectedPaths.length == existingPdfs.length) {
-                                selectedPaths.clear();
-                              } else {
-                                selectedPaths
-                                  ..clear()
-                                  ..addAll(existingPdfs.map((e) => e.path));
-                              }
-                            });
-                          },
-                          child: Text(_tr('전체선택', 'Select All', '全选', 'すべて選択')),
-                        ),
-                        TextButton.icon(
-                          icon: const Icon(Icons.folder_open, size: 16),
-                          label: Text(_tr('기기에서 선택', 'Browse Device', '从设备选择', '端末から選択')),
-                          onPressed: () async {
-                            Navigator.pop(ctx, false);
-                            final result = await FilePicker.platform.pickFiles(
-                              type: FileType.custom,
-                              allowedExtensions: ['pdf'],
-                              allowMultiple: true,
-                            );
-                            if (result != null && result.files.length >= 2) {
-                              final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
-                              await _createMergedPdfFromFiles(files, deleteSourceAfter: false);
-                            }
-                          },
-                        ),
-                      ],
+                    TextButton.icon(
+                      icon: const Icon(Icons.folder_open, size: 16),
+                      label: Text(_tr('기기에서 선택', 'Browse Device', '从设备选择', '端末から選択')),
+                      onPressed: () async {
+                        Navigator.pop(ctx, false);
+                        final result = await FilePicker.platform.pickFiles(
+                          type: FileType.custom,
+                          allowedExtensions: ['pdf'],
+                          allowMultiple: true,
+                        );
+                        if (result != null && result.files.length >= 2) {
+                          final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
+                          await _createMergedPdfFromFiles(files, deleteSourceAfter: false);
+                        }
+                      },
                     ),
                   ],
                 ),
@@ -3064,7 +2448,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         ? _allBooks
         : _allBooks.where((f) => (_bookGroupMap[f.path] ?? '미분류') == _selectedGroup).toList();
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_isSelectionMode,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _isSelectionMode) {
+          setState(() {
+            _isSelectionMode = false;
+            _selectedFilePaths.clear();
+            _isDragSelecting = false;
+          });
+        }
+      },
+      child: Scaffold(
       appBar: _isSelectionMode
           ? AppBar(
               leading: IconButton(
@@ -3296,19 +2691,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         final isFavorite = _favoritePaths.contains(file.path);
                         final lowerExt = rawFileName.split('.').last.toLowerCase();
 
-                        final Color badgeBg = widget.isDarkMode
-                            ? Colors.amber.withOpacity(0.18)
-                            : const Color(0xFF1E293B);
-                        final Color badgeBorder = widget.isDarkMode
-                            ? Colors.amber
-                            : const Color(0xFF0F172A);
-                        final Color badgeFg = widget.isDarkMode
-                            ? Colors.amber
-                            : Colors.white;
-                        final Color progressBarColor = widget.isDarkMode
-                            ? Colors.amber
-                            : const Color(0xFF0F766E);
-
                         return Dismissible(
                           key: ValueKey(file.path),
                           direction: _isSelectionMode ? DismissDirection.none : DismissDirection.endToStart,
@@ -3473,24 +2855,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                 ),
               ],
             )
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FloatingActionButton.extended(
-                  heroTag: 'fab_scan_document',
-                  onPressed: _openDocumentScannerDialog,
-                  icon: const Icon(Icons.document_scanner_outlined),
-                  label: Text(_tr('스캔', 'Scan', '扫描', 'スキャン')),
-                ),
-                const SizedBox(width: 10),
-                FloatingActionButton.extended(
-                  heroTag: 'fab_add_files',
-                  onPressed: _pickAndImportFiles,
-                  icon: const Icon(Icons.add),
-                  label: Text(_tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加')),
-                ),
-              ],
+          : FloatingActionButton.extended(
+              heroTag: 'fab_add_files',
+              onPressed: _pickAndImportFiles,
+              icon: const Icon(Icons.add),
+              label: Text(_tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加')),
             ),
+      ),
     );
   }
 }
