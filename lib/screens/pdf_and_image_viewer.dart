@@ -202,11 +202,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _useShakeLock = true;
   bool _useVolumeComboLock = true;
 
-  bool _useVolumeTurn = true;
   bool _useSwipeTurn = true;
+  bool _useVolumeTurn = true;
   bool _useQuickNavTurn = false;
   bool _useSpenTurn = false;
-  bool _isLandscapeForced = false;
+  bool? _forcedLandscape;
+  final Set<int> _activeTouchPointerIds = {};
+  final TransformationController _zoomController = TransformationController();
+  double _currentZoomScale = 1.0;
 
   bool _isMemoMode = false;
   bool _isEraserMode = false;
@@ -271,28 +274,41 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   void _toggleTouchScreenLock({required bool byVolume}) {
     if (!mounted) return;
+    // 4. 흔들어서 끄기 / 음량 버튼 동시에 눌러서 끄기: 잠금 상태일 때만 잠금을 해제하도록 변경!
+    if (!_isTouchLocked) return;
     if (byVolume && !_useVolumeComboLock) return;
     if (!byVolume && !_useShakeLock) return;
 
-    final nextLocked = !_isTouchLocked;
     setState(() {
-      _isTouchLocked = nextLocked;
-      if (nextLocked) {
-        _showControls = false;
-        _isMemoMode = false;
-        _isStylusDown = false;
-      }
+      _isTouchLocked = false;
     });
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          nextLocked
-              ? (byVolume ? _tr('음량 버튼 동시 입력으로 화면이 잠겼습니다.', 'Screen locked via volume buttons.', '已通过同时按音量键锁定屏幕。', '音量ボタン同時押しで画面をロックしました。') : _tr('흔들기 감지로 화면이 잠겼습니다.', 'Screen locked by shake.', '已通过摇晃锁定屏幕。', 'シェイクロックで画面をロックしました。'))
-              : (byVolume ? _tr('음량 버튼 동시 입력으로 화면 잠금이 해제되었습니다.', 'Screen unlocked via volume buttons.', '已通过同时按音量键解锁屏幕。', '音量ボタン同時押しで画面ロックを解除しました。') : _tr('흔들기 감지로 화면 잠금이 해제되었습니다.', 'Screen unlocked by shake.', '已通过摇晃解锁屏幕。', 'シェイクで画面ロックを解除しました。')),
+          byVolume
+              ? _tr('음량 버튼 동시 입력으로 화면 잠금이 해제되었습니다.', 'Screen unlocked via volume buttons.', '已通过同时按音量键解锁屏幕。', '音量ボタン同時押しで画面ロックを解除しました。')
+              : _tr('흔들기 감지로 화면 잠금이 해제되었습니다.', 'Screen unlocked by shake.', '已通过摇晃解锁屏幕。', 'シェイクで画面ロックを解除しました。'),
         ),
         duration: const Duration(seconds: 1),
       ),
+    );
+  }
+
+  Future<void> _toggleScreenOrientation() async {
+    final bool currentlyLandscape =
+        _forcedLandscape ?? (MediaQuery.of(context).orientation == Orientation.landscape);
+    final bool nextLandscape = !currentlyLandscape;
+    setState(() => _forcedLandscape = nextLandscape);
+    try {
+      await _pdfChannel.invokeMethod('setScreenOrientation', {
+        'mode': nextLandscape ? 'landscape' : 'portrait',
+      });
+    } catch (_) {}
+    await SystemChrome.setPreferredOrientations(
+      nextLandscape
+          ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+          : [DeviceOrientation.portraitUp],
     );
   }
 
@@ -845,11 +861,22 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         ),
       );
 
-      final tempAnnotatedImages = <String>[];
+      final blocks = <Map<String, dynamic>>[];
       for (int i = 0; i < _imagePages.length; i++) {
         final imgFile = _imagePages[i];
         if (!imgFile.existsSync()) continue;
         final rawBytes = await imgFile.readAsBytes();
+        final strokes = _memoStrokesByPage[i] ?? [];
+        final memoText = _memoNotesByPage[i];
+
+        if (strokes.isEmpty && (memoText == null || memoText.trim().isEmpty)) {
+          blocks.add({
+            'type': 'image',
+            'bytes': rawBytes,
+          });
+          continue;
+        }
+
         final codec = await ui.instantiateImageCodec(rawBytes);
         final frame = await codec.getNextFrame();
         final uiImg = frame.image;
@@ -860,7 +887,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
         canvas.drawImage(uiImg, Offset.zero, Paint());
 
-        final strokes = _memoStrokesByPage[i] ?? [];
         for (final s in strokes) {
           if (s.dxList.isEmpty) continue;
           final paint = Paint()
@@ -877,7 +903,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           canvas.drawPath(path, paint);
         }
 
-        final memoText = _memoNotesByPage[i];
         if (memoText != null && memoText.trim().isNotEmpty) {
           final boxPaint = Paint()
             ..color = const Color(0xEEFFF9C4)
@@ -912,19 +937,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         final picture = recorder.endRecording();
         final renderedImg = await picture.toImage(w, h);
         final byteData = await renderedImg.toByteData(format: ui.ImageByteFormat.png);
-        if (byteData == null) continue;
-        final pngPath = '${appDir.path}/temp_annotated_${i}_$now.png';
-        await File(pngPath).writeAsBytes(byteData.buffer.asUint8List());
-        tempAnnotatedImages.add(pngPath);
-      }
-
-      final blocks = tempAnnotatedImages.map((p) => {
-        'type': 'image',
-        'bytes': File(p).readAsBytesSync(),
-      }).toList();
-
-      for (final p in tempAnnotatedImages) {
-        try { File(p).deleteSync(); } catch (_) {}
+        if (byteData != null) {
+          blocks.add({
+            'type': 'image',
+            'bytes': byteData.buffer.asUint8List(),
+          });
+        }
       }
 
       final resPath = await _pdfChannel.invokeMethod<String>('renderStructuredDocToPdf', {
@@ -932,24 +950,31 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         'blocks': blocks,
       });
 
+      if (resPath != null && File(resPath).existsSync()) {
+        await StorageService.setBookGroup(resPath, 'PDF/문서');
+        try {
+          await _pdfChannel.invokeMethod<String>('saveFileToDownloads', {
+            'sourcePath': resPath,
+            'fileName': exportFileName,
+          });
+        } catch (_) {}
+      }
+
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
-        if (resPath != null && File(resPath).existsSync()) {
-          await StorageService.setBookGroup(resPath, 'PDF/문서');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                _tr(
-                  '메모가 포함된 PDF 파일이 서재에 저장되었습니다: $exportFileName',
-                  'Saved annotated PDF to bookshelf: $exportFileName',
-                  '已将包含笔记的 PDF 文件保存至书架：$exportFileName',
-                  'メモ付きPDFが書斎に保存されました: $exportFileName',
-                ),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _tr(
+                '메모 포함 PDF가 서재 및 기기 다운로드(Download) 폴더에 저장되었습니다: $exportFileName',
+                'Saved annotated PDF to Bookshelf & Downloads: $exportFileName',
+                '已将包含笔记的 PDF 保存至书架和下载文件夹：$exportFileName',
+                'メモ付きPDFが書斎とダウンロードフォルダに保存されました: $exportFileName',
               ),
-              duration: const Duration(seconds: 4),
             ),
-          );
-        }
+            duration: const Duration(seconds: 4),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -1048,7 +1073,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     FilterChip(
-                      label: Text(_tr('음량 버튼 동시에 눌러서 끄기', 'Vol Up+Down to Unlock', '同时按音量键关闭锁定', '音量キー同時押しで解除')),
+                      label: Text(_tr('음량 버튼 동시에 눌러서 끄기', 'Press Both Volume Keys to Unlock', '同时按音量键关闭锁定', '音量ボタン同時押しで解除')),
                       selected: _useVolumeComboLock,
                       onSelected: (val) async {
                         await StorageService.setUseVolumeComboLock(val);
@@ -1069,7 +1094,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   runSpacing: 6,
                   children: [
                     FilterChip(
-                      label: Text(_tr('화면 옆으로 밀기 (기본값)', 'Swipe to Turn (Default)', '横向滑动翻页 (默认)', '画面スワイプ (基本)')),
+                      label: Text(_tr('옆으로 밀기', 'Swipe to Turn', '横向滑动翻页', '横にスワイプ')),
                       selected: _useSwipeTurn,
                       onSelected: (val) async {
                         await StorageService.setUseSwipeTurn(val);
@@ -1087,7 +1112,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     FilterChip(
-                      label: Text(_tr('페이지 이동 버튼 (화면 우측 하단 ← / →)', 'On-screen Page Buttons (← / →)', '屏幕翻页按钮 (← / →)', '画面移動ボタン (← / →)')),
+                      label: Text(_tr('페이지 이동 버튼', 'Page Nav Buttons', '翻页按钮', 'ページ移動ボタン')),
                       selected: _useQuickNavTurn,
                       onSelected: (val) async {
                         await StorageService.setUseQuickNavTurn(val);
@@ -1096,7 +1121,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     FilterChip(
-                      label: Text(_tr('S펜 버튼 (한 번: 다음 / 두 번: 이전)', 'S Pen Button', 'S Pen 笔按键', 'Sペンボタン')),
+                      label: Text(_tr('S펜 버튼', 'S Pen Button', 'S Pen 按钮', 'Sペンボタン')),
                       selected: _useSpenTurn,
                       onSelected: (val) async {
                         await StorageService.setUseSpenTurn(val);
@@ -1110,8 +1135,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.picture_as_pdf, color: Colors.indigo),
-                    label: Text(_tr('메모/필기 포함 PDF로 내보내기', 'Export PDF with Annotations', '导出包含笔记的 PDF', 'メモ付きPDFを出力')),
+                    icon: const Icon(Icons.ios_share, size: 18),
+                    label: Text(_tr('메모 포함 파일 내보내기 (PDF)', 'Export File with Memos (PDF)', '导出包含笔记的文件 (PDF)', 'メモ付きファイルを出力 (PDF)')),
                     onPressed: () {
                       Navigator.pop(ctx);
                       _exportDocumentWithAnnotations();
@@ -1229,10 +1254,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         SnackBar(
           content: Text(
             _tr(
-              '현재 백그라운드에서 사전 번역이 진행 중입니다.',
+              '현재 백그라운드에서 번역이 진행 중입니다.',
               'Pre-translation is currently running in the background.',
-              '后台正在进行预先翻译。',
-              '現在バックグラウンドで事前翻訳が進行中です。',
+              '后台正在进行翻译。',
+              '現在バックグラウンドで翻訳が進行中です。',
             ),
           ),
         ),
@@ -1247,7 +1272,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: Text(_tr('사전 번역', 'Pre-Translation', '预先翻译', '事前翻訳')),
+          title: Text(_tr('번역', 'Translation', '翻译', '翻訳')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1291,7 +1316,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     _sourceLangCode = availableOptions.first['code'] as String;
                     _selectedScript = availableOptions.first['script'] as TextRecognitionScript;
                   }
-
                   return Wrap(
                     spacing: 8,
                     runSpacing: 6,
@@ -1338,7 +1362,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
-  /// 1 & 4. 사전 번역(설정 언어 targetLang) 백그라운드 실행
+  /// 1 & 4. 번역(설정 언어 targetLang) 백그라운드 실행
   void _startBackgroundBatchTranslation({
     bool forceRetranslate = false,
     required String targetLang,
@@ -1352,10 +1376,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       SnackBar(
         content: Text(
           _tr(
-            '백그라운드 사전 번역이 시작되었습니다. (뒤로가기를 눌러도 유지됩니다)',
+            '백그라운드 번역이 시작되었습니다. (뒤로가기를 눌러도 유지됩니다)',
             'Background pre-translation started. (Continues even if you go back)',
-            '后台预先翻译已开始。（返回书架后仍会继续）',
-            'バックグラウンド事前翻訳を開始しました。(戻っても継続します)',
+            '后台翻译已开始。（返回书架后仍会继续）',
+            'バックグラウンド翻訳を開始しました。(戻っても継続します)',
           ),
         ),
         duration: const Duration(seconds: 2),
@@ -1894,7 +1918,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   void dispose() {
+    _pdfChannel.invokeMethod('setScreenOrientation', {'mode': 'unspecified'});
     SystemChrome.setPreferredOrientations([]);
+    _zoomController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     BatchTranslationService.translationCompletedEvent.removeListener(_onBackgroundTranslationFinished);
     _volumeKeyService.stopListening();
@@ -1948,6 +1974,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               child: Listener(
                 behavior: HitTestBehavior.translucent,
                 onPointerDown: (event) {
+                  if (event.kind == PointerDeviceKind.touch) {
+                    _activeTouchPointerIds.add(event.pointer);
+                    if (_activeTouchPointerIds.length >= 2) {
+                      setState(() {});
+                    }
+                  }
                   if (_isMemoMode &&
                       (event.kind == PointerDeviceKind.stylus ||
                           event.kind == PointerDeviceKind.invertedStylus)) {
@@ -1957,6 +1989,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   }
                 },
                 onPointerUp: (event) {
+                  if (_activeTouchPointerIds.remove(event.pointer)) {
+                    setState(() {});
+                  }
                   if (_isStylusDown &&
                       (event.kind == PointerDeviceKind.stylus ||
                           event.kind == PointerDeviceKind.invertedStylus)) {
@@ -1964,17 +1999,30 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   }
                 },
                 onPointerCancel: (event) {
+                  if (_activeTouchPointerIds.remove(event.pointer)) {
+                    setState(() {});
+                  }
                   if (_isStylusDown) {
                     setState(() => _isStylusDown = false);
                   }
                 },
                 child: GestureDetector(
                   onTap: _toggleControls,
+                  onDoubleTap: () {
+                    if (_currentZoomScale > 1.03) {
+                      _zoomController.value = Matrix4.identity();
+                      setState(() => _currentZoomScale = 1.0);
+                    }
+                  },
                   child: PageView.builder(
                     key: ValueKey('pageview_spread_$isSpread'),
                     controller: _pageController,
                     reverse: _isMangaRtlMode,
-                    physics: (_isTouchLocked || !_useSwipeTurn || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)))
+                    physics: (_isTouchLocked ||
+                            !_useSwipeTurn ||
+                            _activeTouchPointerIds.length >= 2 ||
+                            _currentZoomScale > 1.03 ||
+                            (_isMemoMode && (_isStylusDown || _allowFingerDrawing)))
                         ? const NeverScrollableScrollPhysics()
                         : const BouncingScrollPhysics(),
                   itemCount: viewItemCount,
@@ -1983,44 +2031,62 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     if (isSpread && viewIdx == viewItemCount - 1) {
                       actualPage = (_totalPages - 1).clamp(0, _totalPages - 1).toInt();
                     }
-                    setState(() => _currentPage = actualPage);
+                    _zoomController.value = Matrix4.identity();
+                    setState(() {
+                      _currentZoomScale = 1.0;
+                      _currentPage = actualPage;
+                    });
                     _ensurePageDimensionLoaded(actualPage);
                     if (actualPage + 1 < _totalPages) _ensurePageDimensionLoaded(actualPage + 1);
                     StorageService.saveLastPosition(_bookKey, actualPage.toString());
                     StorageService.saveProgress(_bookKey, (actualPage + 1) / _totalPages);
                   },
                   itemBuilder: (context, viewIdx) {
+                    final Widget pageChild;
                     if (!isSpread) {
-                      return InteractiveViewer(
-                        panEnabled: !_isMemoMode,
-                        scaleEnabled: !_isMemoMode && !_isTouchLocked,
-                        minScale: 1.0,
-                        maxScale: 4.5,
-                        child: _buildSinglePagePanel(viewIdx),
-                      );
-                    }
-
-                    final int firstPage = viewIdx * 2;
-                    final int secondPage = firstPage + 1;
-                    final Widget leftPanel = _isMangaRtlMode
-                        ? (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand())
-                        : _buildSinglePagePanel(firstPage);
-                    final Widget rightPanel = _isMangaRtlMode
-                        ? _buildSinglePagePanel(firstPage)
-                        : (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand());
-
-                    return InteractiveViewer(
-                      panEnabled: !_isMemoMode,
-                      scaleEnabled: !_isMemoMode,
-                      minScale: 1.0,
-                      maxScale: 3.5,
-                      child: Row(
+                      pageChild = _buildSinglePagePanel(viewIdx);
+                    } else {
+                      final int firstPage = viewIdx * 2;
+                      final int secondPage = firstPage + 1;
+                      final Widget leftPanel = _isMangaRtlMode
+                          ? (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand())
+                          : _buildSinglePagePanel(firstPage);
+                      final Widget rightPanel = _isMangaRtlMode
+                          ? _buildSinglePagePanel(firstPage)
+                          : (secondPage < _totalPages ? _buildSinglePagePanel(secondPage) : const SizedBox.expand());
+                      pageChild = Row(
                         children: [
                           Expanded(child: leftPanel),
                           Container(width: 1, color: Colors.white12),
                           Expanded(child: rightPanel),
                         ],
-                      ),
+                      );
+                    }
+
+                    return InteractiveViewer(
+                      transformationController: _zoomController,
+                      panEnabled: !_isMemoMode && (_currentZoomScale > 1.03 || _activeTouchPointerIds.length >= 2),
+                      scaleEnabled: !_isTouchLocked && (!_isMemoMode || !_allowFingerDrawing),
+                      minScale: 1.0,
+                      maxScale: 5.0,
+                      onInteractionUpdate: (_) {
+                        final s = _zoomController.value.getMaxScaleOnAxis();
+                        if ((s - _currentZoomScale).abs() > 0.02) {
+                          setState(() => _currentZoomScale = s);
+                        }
+                      },
+                      onInteractionEnd: (_) {
+                        final s = _zoomController.value.getMaxScaleOnAxis();
+                        if (s < 1.03) {
+                          _zoomController.value = Matrix4.identity();
+                          if (_currentZoomScale != 1.0) {
+                            setState(() => _currentZoomScale = 1.0);
+                          }
+                        } else if ((s - _currentZoomScale).abs() > 0.01) {
+                          setState(() => _currentZoomScale = s);
+                        }
+                      },
+                      child: pageChild,
                     );
                   },
                   ),
@@ -2073,7 +2139,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          '${_tr("사전 번역", "Trans", "翻译", "翻訳")} ${(task.progress * 100).toStringAsFixed(0)}% (${task.current}/${task.total})',
+                          '${_tr("번역", "Trans", "翻译", "翻訳")} ${(task.progress * 100).toStringAsFixed(0)}% (${task.current}/${task.total})',
                           style: const TextStyle(color: Colors.white, fontSize: 11),
                         ),
                       ],
@@ -2185,6 +2251,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             onPressed: _showMemoTextDialog,
                           ),
                           IconButton(
+                            icon: const Icon(Icons.ios_share, color: Colors.lightBlueAccent, size: 18),
+                            tooltip: _tr('메모 포함 파일 내보내기', 'Export with Memos', '导出含笔记文件', 'メモ付き出力'),
+                            onPressed: _exportDocumentWithAnnotations,
+                          ),
+                          IconButton(
                             icon: const Icon(Icons.delete_sweep_outlined, color: Colors.redAccent, size: 18),
                             tooltip: _tr('현재 페이지 필기 전체 지우기', 'Clear Page Strokes', '清空当前页手写', ' 현재ページの手書きを全消去'),
                             onPressed: () async {
@@ -2235,58 +2306,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
                               onPressed: () => Navigator.pop(context),
                             ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: Icon(
-                                _isTouchLocked ? Icons.lock : Icons.lock_open,
-                                color: _isTouchLocked ? Colors.redAccent : Colors.white,
-                                size: 20,
-                              ),
-                              tooltip: _isTouchLocked
-                                  ? _tr('화면 잠금 끄기', 'Unlock Screen', '关闭锁定', 'ロック解除')
-                                  : _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
-                              onPressed: () {
-                                setState(() => _isTouchLocked = !_isTouchLocked);
-                                if (_isTouchLocked && mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        _tr(
-                                          '화면이 잠겼습니다. (흔들거나 음량 버튼 동시에 누르면 잠금 해제)',
-                                          'Screen locked. (Shake or press Vol Up+Down to unlock)',
-                                          '屏幕已锁定。（摇晃或同时按音量键即可解锁）',
-                                          '画面をロックしました。(振るか音量キー同時押しで解除)',
-                                        ),
-                                      ),
-                                      duration: const Duration(seconds: 2),
-                                    ),
-                                  );
-                                }
-                              },
-                            ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.screen_rotation, color: Colors.white, size: 20),
-                              tooltip: _tr('가로/세로 화면 전환', 'Rotate Screen', '横/竖屏切换', '画面回転切替'),
-                              onPressed: () {
-                                final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-                                if (isLandscape) {
-                                  SystemChrome.setPreferredOrientations([
-                                    DeviceOrientation.portraitUp,
-                                    DeviceOrientation.portraitDown,
-                                  ]);
-                                } else {
-                                  SystemChrome.setPreferredOrientations([
-                                    DeviceOrientation.landscapeLeft,
-                                    DeviceOrientation.landscapeRight,
-                                  ]);
-                                }
-                              },
-                            ),
                             if (isWide)
                               Expanded(
                                 child: Padding(
@@ -2311,8 +2330,46 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               padding: btnPadding,
                               constraints: btnConstraints,
                               icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
-                              tooltip: _tr('다음 파일로 이동 (같은 그룹)', 'Next File in Group', '同组下一个文件', '同グループの次のファイル'),
+                              tooltip: _tr('다음 파일로 이동', 'Next File', '下一个文件', '次のファイル'),
                               onPressed: () => _openAdjacentFileInSameGroup(1),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.lock_outline, color: Colors.white, size: 19),
+                              tooltip: _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
+                              onPressed: () {
+                                setState(() {
+                                  _isTouchLocked = true;
+                                  _showControls = false;
+                                  _isMemoMode = false;
+                                  _allowFingerDrawing = false;
+                                  _isStylusDown = false;
+                                });
+                                ScaffoldMessenger.of(context).clearSnackBars();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      _tr(
+                                        '화면이 잠겼습니다. (흔들어서 끄기 또는 음량 버튼 동시에 눌러서 끄기)',
+                                        'Screen locked. (Shake or press Vol Up+Down to unlock)',
+                                        '屏幕已锁定。（摇晃或同时按音量键即可关闭锁定）',
+                                        '画面をロックしました。(振るか音量ボタン同時押しで解除)',
+                                      ),
+                                    ),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.screen_rotation, color: Colors.white, size: 19),
+                              tooltip: _tr('화면 가로/세로 전환', 'Rotate Screen', '横/竖屏切换', '画面縦横切替'),
+                              onPressed: _toggleScreenOrientation,
                             ),
                             IconButton(
                               visualDensity: VisualDensity.compact,
@@ -2341,7 +2398,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                                 color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
                                 size: 20,
                               ),
-                              tooltip: _tr('가로 모드 2페이지 보기', '2-Page Spread', '双页显示', '2ページ表示'),
+                              tooltip: _tr('가로 모드 2페이지 보기', '2-Page Spread in Landscape', '横屏双页显示', '横画面2ページ表示'),
                               onPressed: () async {
                                 final nextVal = !_enableTwoPageInLandscape;
                                 await StorageService.setTwoPageLandscape(nextVal);
@@ -2354,8 +2411,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               constraints: btnConstraints,
                               icon: _buildDualDirectionIcon(),
                               tooltip: _isMangaRtlMode
-                                  ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
-                                  : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
+                                  ? _tr('읽기 방향 전환 (우←좌)', 'Reading Direction (R←L)', '切换阅读方向 (右←左)', '読書方向切替 (右←左)')
+                                  : _tr('읽기 방향 전환 (좌→우)', 'Reading Direction (L→R)', '切换阅读方向 (左→右)', '読書方向切替 (左→右)'),
                               onPressed: () async {
                                 final nextRtl = !_isMangaRtlMode;
                                 await StorageService.setReadingDirectionRtl(nextRtl);
@@ -2365,8 +2422,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                                     SnackBar(
                                       content: Text(
                                         nextRtl
-                                            ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
-                                            : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
+                                            ? _tr('읽기 방향 전환 (우←좌)', 'Reading Direction (R←L)', '切换阅读方向 (右←左)', '読書方向切替 (右←左)')
+                                            : _tr('읽기 방향 전환 (좌→우)', 'Reading Direction (L→R)', '切换阅读方向 (左→右)', '読書方向切替 (左→右)'),
                                       ),
                                       duration: const Duration(milliseconds: 900),
                                     ),

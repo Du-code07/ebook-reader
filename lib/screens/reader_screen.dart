@@ -103,11 +103,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _isTouchLocked = false;
   bool _useShakeLock = true;
   bool _useVolumeComboLock = true;
-  bool _useVolumeTurn = true;
   bool _useSwipeTurn = true;
+  bool _useVolumeTurn = true;
   bool _useQuickNavTurn = false;
   bool _useSpenTurn = false;
-  bool _isLandscapeForced = false;
+  bool? _forcedLandscape;
+  final Set<int> _activeTouchPointerIds = {};
+  final TransformationController _epubZoomController = TransformationController();
+  double _epubZoomScale = 1.0;
 
   // 1 & 3. S펜 전용 페이지별 필기 및 지우개 상태 (필기 모드에서 S펜이 닿으면 화면 이동 100% 차단 + 해당 페이지에서만 필기 표시)
   bool _isMemoMode = false;
@@ -196,28 +199,40 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   void _toggleTouchScreenLock({required bool byVolume}) {
     if (!mounted) return;
+    if (!_isTouchLocked) return;
     if (byVolume && !_useVolumeComboLock) return;
     if (!byVolume && !_useShakeLock) return;
 
-    final nextLocked = !_isTouchLocked;
     setState(() {
-      _isTouchLocked = nextLocked;
-      if (nextLocked) {
-        _showControls = false;
-        _isMemoMode = false;
-        _isStylusDown = false;
-      }
+      _isTouchLocked = false;
     });
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          nextLocked
-              ? (byVolume ? _tr('음량 버튼 동시 입력으로 화면이 잠겼습니다.', 'Screen locked via volume buttons.', '已通过同时按音量键锁定屏幕。', '音量ボタン同時押しで画面をロックしました。') : _tr('흔들기 감지로 화면이 잠겼습니다.', 'Screen locked by shake.', '已通过摇晃锁定屏幕。', 'シェイクロックで画面をロックしました。'))
-              : (byVolume ? _tr('음량 버튼 동시 입력으로 화면 잠금이 해제되었습니다.', 'Screen unlocked via volume buttons.', '已通过同时按音量键解锁屏幕。', '音量ボタン同時押しで画面ロックを解除しました。') : _tr('흔들기 감지로 화면 잠금이 해제되었습니다.', 'Screen unlocked by shake.', '已通过摇晃解锁屏幕。', 'シェイクで画面ロックを解除しました。')),
+          byVolume
+              ? _tr('음량 버튼 동시 입력으로 화면 잠금이 해제되었습니다.', 'Screen unlocked via volume buttons.', '已通过同时按音量键解锁屏幕。', '音量ボタン同時押しで画面ロックを解除しました。')
+              : _tr('흔들기 감지로 화면 잠금이 해제되었습니다.', 'Screen unlocked by shake.', '已通过摇晃解锁屏幕。', 'シェイクで画面ロックを解除しました。'),
         ),
         duration: const Duration(seconds: 1),
       ),
+    );
+  }
+
+  Future<void> _toggleScreenOrientation() async {
+    final bool currentlyLandscape =
+        _forcedLandscape ?? (MediaQuery.of(context).orientation == Orientation.landscape);
+    final bool nextLandscape = !currentlyLandscape;
+    setState(() => _forcedLandscape = nextLandscape);
+    try {
+      await _pdfChannel.invokeMethod('setScreenOrientation', {
+        'mode': nextLandscape ? 'landscape' : 'portrait',
+      });
+    } catch (_) {}
+    await SystemChrome.setPreferredOrientations(
+      nextLandscape
+          ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+          : [DeviceOrientation.portraitUp],
     );
   }
 
@@ -632,48 +647,55 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       final exportFileName = '${baseTitle}_메모포함_$dateStr.pdf';
       final exportFile = File('${appDir.path}/$exportFileName');
 
-      final blocks = <Map<String, dynamic>>[];
-      blocks.add({
-        'type': 'paragraph',
-        'text': '📖 ${widget.bookTitle}',
-        'fontSizePt': 16.0,
-        'bold': true,
-      });
-
+      final blocks = <Map<String, dynamic>>[
+        {
+          'type': 'paragraph',
+          'text': '📖 ${widget.bookTitle}',
+          'fontSizePt': 16.0,
+          'bold': true,
+        },
+      ];
       if (_bookMemoNote.trim().isNotEmpty) {
         blocks.add({
           'type': 'paragraph',
-          'text': '📝 [전체 메모]\n${_bookMemoNote.trim()}',
+          'text': '📝 [메모 내용]\n${_bookMemoNote.trim()}',
           'fontSizePt': 11.5,
           'bold': false,
         });
       }
-
-      final allSavedStrokes = await StorageService.getEpubLocationStrokes(widget.filePath, _currentPageLocationKey);
-      if (allSavedStrokes.isNotEmpty) {
+      if (_epubStrokes.isNotEmpty) {
         blocks.add({
           'type': 'paragraph',
-          'text': '✏️ [필기 내역: ${allSavedStrokes.length}개의 획 저장됨]',
+          'text': '✏️ [현재 위치 필기 선 ${_epubStrokes.length}개 포함]',
           'fontSizePt': 10.5,
           'italic': true,
         });
       }
 
-      await _pdfChannel.invokeMethod<String>('renderStructuredDocToPdf', {
+      final resPath = await _pdfChannel.invokeMethod<String>('renderStructuredDocToPdf', {
         'outputPath': exportFile.path,
         'blocks': blocks,
       });
 
+      if (resPath != null && File(resPath).existsSync()) {
+        await StorageService.setBookGroup(resPath, 'PDF/문서');
+        try {
+          await _pdfChannel.invokeMethod<String>('saveFileToDownloads', {
+            'sourcePath': resPath,
+            'fileName': exportFileName,
+          });
+        } catch (_) {}
+      }
+
       if (mounted) {
-        await StorageService.setBookGroup(exportFile.path, 'PDF/문서');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               _tr(
-                '메모가 포함된 PDF 파일이 서재에 저장되었습니다: $exportFileName',
-                'Saved annotated PDF to bookshelf: $exportFileName',
-                '已将包含笔记的 PDF 文件保存至书架：$exportFileName',
-                'メモ付きPDFが書斎に保存されました: $exportFileName',
+                '메모 포함 PDF가 서재 및 기기 다운로드(Download) 폴더에 저장되었습니다: $exportFileName',
+                'Saved annotated PDF to Bookshelf & Downloads: $exportFileName',
+                '已将包含笔记的 PDF 保存至书架和下载文件夹：$exportFileName',
+                'メモ付きPDFが書斎とダウンロードフォルダに保存されました: $exportFileName',
               ),
             ),
             duration: const Duration(seconds: 4),
@@ -835,7 +857,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       },
                     ),
                     FilterChip(
-                      label: Text(_tr('음량 버튼 동시에 눌러서 끄기', 'Vol Up+Down to Unlock', '同时按音量键关闭锁定', '音量キー同時押しで解除')),
+                      label: Text(_tr('음량 버튼 동시에 눌러서 끄기', 'Press Both Volume Keys to Unlock', '同时按音量键关闭锁定', '音量ボタン同時押しで解除')),
                       selected: _useVolumeComboLock,
                       onSelected: (val) async {
                         await StorageService.setUseVolumeComboLock(val);
@@ -856,7 +878,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   runSpacing: 6,
                   children: [
                     FilterChip(
-                      label: Text(_tr('화면 옆으로 밀기 (기본값)', 'Swipe to Turn (Default)', '横向滑动翻页 (默认)', '画面スワイプ (基本)')),
+                      label: Text(_tr('옆으로 밀기', 'Swipe to Turn', '横向滑动翻页', '横にスワイプ')),
                       selected: _useSwipeTurn,
                       onSelected: (val) async {
                         await StorageService.setUseSwipeTurn(val);
@@ -897,8 +919,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.picture_as_pdf, color: Colors.indigo),
-                    label: Text(_tr('메모/필기 포함 PDF로 내보내기', 'Export PDF with Annotations', '导出包含笔记的 PDF', 'メモ付きPDFを出力')),
+                    icon: const Icon(Icons.ios_share, size: 18),
+                    label: Text(_tr('메모 포함 파일 내보내기 (PDF)', 'Export File with Memos (PDF)', '导出包含笔记的文件 (PDF)', 'メモ付きファイルを出力 (PDF)')),
                     onPressed: () {
                       Navigator.pop(ctx);
                       _exportDocumentWithAnnotations();
@@ -1017,10 +1039,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         SnackBar(
           content: Text(
             _tr(
-              '현재 백그라운드에서 사전 번역이 진행 중입니다. (뒤로가기를 눌러도 계속 번역됩니다)',
+              '현재 백그라운드에서 번역이 진행 중입니다. (뒤로가기를 눌러도 계속 번역됩니다)',
               'Pre-translation is currently running in the background.',
-              '后台正在进行预先翻译。（返回书架后仍会继续）',
-              '現在バックグラウンドで事前翻訳が進行中です。(戻っても継続します)',
+              '后台正在进行翻译。（返回书架后仍会继续）',
+              '現在バックグラウンドで翻訳が進行中です。(戻っても継続します)',
             ),
           ),
           duration: const Duration(seconds: 2),
@@ -1065,7 +1087,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: Text(_tr('사전 번역', 'Pre-Translation', '预先翻译', '事前翻訳')),
+          title: Text(_tr('번역', 'Translation', '翻译', '翻訳')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1092,7 +1114,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   if (!availableOptions.any((opt) => opt['code'] == selectedSource) && availableOptions.isNotEmpty) {
                     selectedSource = availableOptions.first['code']!;
                   }
-
                   return Wrap(
                     spacing: 8,
                     runSpacing: 6,
@@ -1141,10 +1162,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       SnackBar(
         content: Text(
           _tr(
-            '백그라운드 사전 번역을 시작했습니다. 뒤로가기를 눌러도 유지됩니다.',
+            '백그라운드 번역을 시작했습니다. 뒤로가기를 눌러도 유지됩니다.',
             'Background pre-translation started. Continues even if you go back.',
-            '后台预先翻译已开始，返回书架后仍会继续。',
-            'バックグラウンド事前翻訳を開始しました。戻っても継続します。',
+            '后台翻译已开始，返回书架后仍会继续。',
+            'バックグラウンド翻訳を開始しました。戻っても継続します。',
           ),
         ),
         duration: const Duration(seconds: 2),
@@ -1625,7 +1646,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   bottom: (bottomPadding > 0 ? bottomPadding : 8.0) + 20.0,
                 ),
                 child: IgnorePointer(
-                  ignoring: _isTouchLocked || !_useSwipeTurn || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)),
+                  ignoring: _isTouchLocked || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)),
                   child: Listener(
                     behavior: HitTestBehavior.translucent,
                     onPointerDown: _handlePointerDown,
@@ -1635,9 +1656,35 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         setState(() => _isStylusDown = false);
                       }
                     },
-                    child: EpubViewer(
-                      key: ValueKey('${_activeFilePath}_${spreadSetting}_$_epubBgTheme'),
-                    epubController: _epubController,
+                    child: InteractiveViewer(
+                      transformationController: _epubZoomController,
+                      panEnabled: !_isMemoMode && _epubZoomScale > 1.03,
+                      scaleEnabled: !_isTouchLocked && (!_isMemoMode || !_allowFingerDrawing),
+                      minScale: 1.0,
+                      maxScale: 4.5,
+                      onInteractionUpdate: (_) {
+                        final s = _epubZoomController.value.getMaxScaleOnAxis();
+                        if ((s - _epubZoomScale).abs() > 0.02) {
+                          setState(() => _epubZoomScale = s);
+                        }
+                      },
+                      onInteractionEnd: (_) {
+                        final s = _epubZoomController.value.getMaxScaleOnAxis();
+                        if (s < 1.03) {
+                          _epubZoomController.value = Matrix4.identity();
+                          if (_epubZoomScale != 1.0) {
+                            setState(() => _epubZoomScale = 1.0);
+                          }
+                        } else if ((s - _epubZoomScale).abs() > 0.01) {
+                          setState(() => _epubZoomScale = s);
+                        }
+                      },
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onHorizontalDragUpdate: !_useSwipeTurn ? (_) {} : null,
+                        child: EpubViewer(
+                          key: ValueKey('${_activeFilePath}_${spreadSetting}_$_epubBgTheme'),
+                          epubController: _epubController,
                     epubSource: EpubSource.fromFile(File(_activeFilePath)),
                     initialCfi: _initialCfi,
                     displaySettings: EpubDisplaySettings(
@@ -1711,6 +1758,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         });
                       }
                     },
+                    ),
+                      ),
                     ),
                   ),
                 ),
@@ -1850,7 +1899,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            '${_tr("사전 번역", "Trans", "翻译", "翻訳")} ${(task.progress * 100).toStringAsFixed(0)}% (${task.current}/${task.total})',
+                            '${_tr("번역", "Trans", "翻译", "翻訳")} ${(task.progress * 100).toStringAsFixed(0)}% (${task.current}/${task.total})',
                             style: const TextStyle(color: Colors.white, fontSize: 11),
                           ),
                         ],
@@ -2020,58 +2069,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                 visualDensity: VisualDensity.compact,
                                 padding: btnPadding,
                                 constraints: btnConstraints,
-                                icon: Icon(
-                                  _isTouchLocked ? Icons.lock : Icons.lock_open,
-                                  color: _isTouchLocked ? Colors.redAccent : Colors.white,
-                                  size: 20,
-                                ),
-                                tooltip: _isTouchLocked
-                                    ? _tr('화면 잠금 끄기', 'Unlock Screen', '关闭锁定', 'ロック解除')
-                                    : _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
-                                onPressed: () {
-                                  setState(() => _isTouchLocked = !_isTouchLocked);
-                                  if (_isTouchLocked && mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          _tr(
-                                            '화면이 잠겼습니다. (흔들거나 음량 버튼 동시에 누르면 잠금 해제)',
-                                            'Screen locked. (Shake or press Vol Up+Down to unlock)',
-                                            '屏幕已锁定。（摇晃或同时按音量键即可解锁）',
-                                            '画面をロックしました。(振るか音量キー同時押しで解除)',
-                                          ),
-                                        ),
-                                        duration: const Duration(seconds: 2),
-                                      ),
-                                    );
-                                  }
-                                },
-                              ),
-                              IconButton(
-                                visualDensity: VisualDensity.compact,
-                                padding: btnPadding,
-                                constraints: btnConstraints,
-                                icon: const Icon(Icons.screen_rotation, color: Colors.white, size: 20),
-                                tooltip: _tr('가로/세로 화면 전환', 'Rotate Screen', '横/竖屏切换', '画面回転切替'),
-                                onPressed: () {
-                                  final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-                                  if (isLandscape) {
-                                    SystemChrome.setPreferredOrientations([
-                                      DeviceOrientation.portraitUp,
-                                      DeviceOrientation.portraitDown,
-                                    ]);
-                                  } else {
-                                    SystemChrome.setPreferredOrientations([
-                                      DeviceOrientation.landscapeLeft,
-                                      DeviceOrientation.landscapeRight,
-                                    ]);
-                                  }
-                                },
-                              ),
-                              IconButton(
-                                visualDensity: VisualDensity.compact,
-                                padding: btnPadding,
-                                constraints: btnConstraints,
                                 icon: const Icon(Icons.list, color: Colors.white, size: 20),
                                 tooltip: _tr('목차', 'Contents', '目录', '目次'),
                                 onPressed: () => _scaffoldKey.currentState?.openDrawer(),
@@ -2107,6 +2104,44 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                 visualDensity: VisualDensity.compact,
                                 padding: btnPadding,
                                 constraints: btnConstraints,
+                                icon: const Icon(Icons.lock_outline, color: Colors.white, size: 19),
+                                tooltip: _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
+                                onPressed: () {
+                                  setState(() {
+                                    _isTouchLocked = true;
+                                    _showControls = false;
+                                    _isMemoMode = false;
+                                    _allowFingerDrawing = false;
+                                    _isStylusDown = false;
+                                  });
+                                  ScaffoldMessenger.of(context).clearSnackBars();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        _tr(
+                                          '화면이 잠겼습니다. (흔들어서 끄기 또는 음량 버튼 동시에 눌러서 끄기)',
+                                          'Screen locked. (Shake or press Vol Up+Down to unlock)',
+                                          '屏幕已锁定。（摇晃或同时按音量键即可关闭锁定）',
+                                          '画面をロックしました。(振るか音量ボタン同時押しで解除)',
+                                        ),
+                                      ),
+                                      duration: const Duration(seconds: 2),
+                                    ),
+                                  );
+                                },
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.screen_rotation, color: Colors.white, size: 19),
+                                tooltip: _tr('화면 가로/세로 전환', 'Rotate Screen', '横/竖屏切换', '画面縦横切替'),
+                                onPressed: _toggleScreenOrientation,
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
                                 icon: Icon(
                                   Icons.draw_outlined,
                                   color: _isMemoMode ? Colors.amber : Colors.white,
@@ -2131,7 +2166,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                   color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
                                   size: 20,
                                 ),
-                                tooltip: _tr('가로 모드 2페이지 보기', '2-Page Spread', '双页显示', '2ページ表示'),
+                                tooltip: _tr('가로 모드 2페이지 보기', '2-Page Spread in Landscape', '横屏双页显示', '横画面2ページ表示'),
                                 onPressed: () async {
                                   final nextVal = !_enableTwoPageInLandscape;
                                   await StorageService.setTwoPageLandscape(nextVal);
@@ -2147,8 +2182,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                 constraints: btnConstraints,
                                 icon: _buildDualDirectionIcon(),
                                 tooltip: _isMangaRtlMode
-                                    ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
-                                    : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
+                                    ? _tr('읽기 방향 전환 (우←좌)', 'Reading Direction (R←L)', '切换阅读方向 (右←左)', '読書方向切替 (右←左)')
+                                    : _tr('읽기 방향 전환 (좌→우)', 'Reading Direction (L→R)', '切换阅读方向 (左→右)', '読書方向切替 (左→右)'),
                                 onPressed: () async {
                                   final nextRtl = !_isMangaRtlMode;
                                   await StorageService.setReadingDirectionRtl(nextRtl);
@@ -2158,8 +2193,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                       SnackBar(
                                         content: Text(
                                           nextRtl
-                                              ? _tr('읽기 방향 전환 (우->좌)', 'Reading Direction (R->L)', '切换阅读方向 (右->左)', '読書方向切替 (右->左)')
-                                              : _tr('읽기 방향 전환 (좌->우)', 'Reading Direction (L->R)', '切换阅读方向 (左->右)', '読書方向切替 (左->右)'),
+                                              ? _tr('읽기 방향 전환 (우←좌)', 'Reading Direction (R←L)', '切换阅读方向 (右←左)', '読書方向切替 (右←左)')
+                                              : _tr('읽기 방향 전환 (좌→우)', 'Reading Direction (L→R)', '切换阅读方向 (左→右)', '読書方向切替 (左→右)'),
                                         ),
                                         duration: const Duration(milliseconds: 900),
                                       ),

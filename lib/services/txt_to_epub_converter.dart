@@ -89,6 +89,21 @@ class TxtToEpubConverter {
       });
     }
 
+    // 8. 먼저 HTML5/CSS3 시각적 문서 레이아웃으로 조합하여 Android WebView 스캐너('scanHtmlToPdf')로 원본 양식 그대로 스캔 촬영!
+    try {
+      final htmlDoc = _buildVisualHtmlFromBlocks(title, blocks);
+      final scannedPath = await _pdfChannel.invokeMethod<String>(
+        'scanHtmlToPdf',
+        {
+          'htmlContent': htmlDoc,
+          'outputPath': outFile.path,
+        },
+      );
+      if (scannedPath != null && File(scannedPath).existsSync() && File(scannedPath).lengthSync() > 100) {
+        return File(scannedPath);
+      }
+    } catch (_) {}
+
     final renderedPath = await _pdfChannel.invokeMethod<String>(
       'renderStructuredDocToPdf',
       {
@@ -101,6 +116,168 @@ class TxtToEpubConverter {
       return File(renderedPath);
     }
     return outFile;
+  }
+
+  static String _colorToCssHex(int? argb, {String defaultHex = '#141414'}) {
+    if (argb == null) return defaultHex;
+    final rgb = argb & 0xFFFFFF;
+    return '#${rgb.toRadixString(16).padLeft(6, '0')}';
+  }
+
+  /// 추출된 단락·표(셀 병합/너비/배경/정렬)·이미지를 정밀한 HTML5/CSS3 문서로 구성 (WebView 스캔용)
+  static String _buildVisualHtmlFromBlocks(String title, List<Map<String, dynamic>> blocks) {
+    final buf = StringBuffer();
+    buf.writeln('<!DOCTYPE html><html><head><meta charset="utf-8">');
+    buf.writeln('<style>');
+    buf.writeln("* { box-sizing: border-box; -webkit-print-color-adjust: exact; }");
+    buf.writeln("html, body { margin: 0; padding: 28px 44px; background: #FFFFFF; color: #141414; font-family: sans-serif; font-size: 23px; line-height: 1.55; word-break: keep-all; }");
+    buf.writeln("p { margin: 0 0 10px 0; white-space: pre-wrap; }");
+    buf.writeln("table { width: 100%; border-collapse: collapse; table-layout: fixed; margin: 14px 0 18px 0; }");
+    buf.writeln("td { border: 1.6px solid #334155; padding: 9px 12px; word-break: keep-all; overflow-wrap: break-word; white-space: pre-wrap; }");
+    buf.writeln(".doc-img { display: block; max-width: 100%; height: auto; margin: 12px auto; }");
+    buf.writeln('</style></head><body>');
+
+    for (final b in blocks) {
+      final bType = b['type'] as String? ?? 'paragraph';
+      if (bType == 'paragraph') {
+        final text = (b['text'] as String? ?? '').trimRight();
+        if (text.isEmpty) {
+          buf.writeln('<p>&nbsp;</p>');
+          continue;
+        }
+        final double pt = ((b['fontSizePt'] as num?)?.toDouble() ?? 10.5).clamp(7.5, 36.0);
+        final int px = (pt * 2.25).round();
+        final bool bold = (b['bold'] as bool?) ?? false;
+        final bool italic = (b['italic'] as bool?) ?? false;
+        final bool underline = (b['underline'] as bool?) ?? false;
+        final bool serif = (b['serif'] as bool?) ?? false;
+        final String align = b['align'] as String? ?? 'left';
+        final String fgHex = _colorToCssHex(b['textColor'] as int?);
+        final double indentPx = (((b['leftIndentPt'] as num?)?.toDouble() ?? 0.0) * 2.0).clamp(0.0, 240.0);
+
+        final fontStack = serif
+            ? "'Noto Serif CJK KR', 'Batang', Georgia, serif"
+            : "'Noto Sans CJK KR', 'Malgun Gothic', sans-serif";
+
+        buf.write('<p style="font-family:$fontStack;font-size:${px}px;color:$fgHex;text-align:$align;');
+        if (bold) buf.write('font-weight:700;');
+        if (italic) buf.write('font-style:italic;');
+        if (underline) buf.write('text-decoration:underline;');
+        if (indentPx > 0) buf.write('padding-left:${indentPx.toStringAsFixed(0)}px;');
+        buf.write('">${_escapeXml(text)}</p>
+');
+      } else if (bType == 'table') {
+        final rawCells = b['cells'] as List<dynamic>?;
+        if (rawCells != null && rawCells.isNotEmpty) {
+          final int numRows = ((b['numRows'] as num?)?.toInt() ?? 1).clamp(1, 600);
+          final int numCols = ((b['numCols'] as num?)?.toInt() ?? 1).clamp(1, 60);
+          final rawWidths = b['colWidths'] as List<dynamic>?;
+          final List<double> colW = List<double>.filled(numCols, 1.0);
+          if (rawWidths != null && rawWidths.length == numCols) {
+            double sumW = 0.0;
+            for (int c = 0; c < numCols; c++) {
+              colW[c] = math.max(1.0, (rawWidths[c] as num).toDouble());
+              sumW += colW[c];
+            }
+            if (sumW > 0) {
+              for (int c = 0; c < numCols; c++) {
+                colW[c] = (colW[c] / sumW) * 100.0;
+              }
+            }
+          } else {
+            for (int c = 0; c < numCols; c++) {
+              colW[c] = 100.0 / numCols;
+            }
+          }
+
+          final Map<(int, int), Map<String, dynamic>> cellByCoord = {};
+          final List<List<bool>> covered = List.generate(numRows, (_) => List<bool>.filled(numCols, false));
+
+          for (final rc in rawCells) {
+            final cell = rc as Map<String, dynamic>;
+            final int r = ((cell['row'] as num?)?.toInt() ?? 0).clamp(0, numRows - 1);
+            final int c = ((cell['col'] as num?)?.toInt() ?? 0).clamp(0, numCols - 1);
+            final int rs = ((cell['rowSpan'] as num?)?.toInt() ?? 1).clamp(1, numRows - r);
+            final int cs = ((cell['colSpan'] as num?)?.toInt() ?? 1).clamp(1, numCols - c);
+            cellByCoord[(r, c)] = cell;
+            for (int rr = r; rr < r + rs; rr++) {
+              for (int cc = c; cc < c + cs; cc++) {
+                if (rr == r && cc == c) continue;
+                covered[rr][cc] = true;
+              }
+            }
+          }
+
+          buf.writeln('<table><colgroup>');
+          for (int c = 0; c < numCols; c++) {
+            buf.writeln('<col style="width:${colW[c].toStringAsFixed(2)}%;">');
+          }
+          buf.writeln('</colgroup><tbody>');
+
+          for (int r = 0; r < numRows; r++) {
+            buf.writeln('<tr>');
+            for (int c = 0; c < numCols; c++) {
+              if (covered[r][c]) continue;
+              final cell = cellByCoord[(r, c)];
+              if (cell == null) {
+                buf.writeln('<td>&nbsp;</td>');
+                continue;
+              }
+              final int rs = ((cell['rowSpan'] as num?)?.toInt() ?? 1).clamp(1, numRows - r);
+              final int cs = ((cell['colSpan'] as num?)?.toInt() ?? 1).clamp(1, numCols - c);
+              final String text = (cell['text'] as String? ?? '').trim();
+              final String align = cell['align'] as String? ?? 'left';
+              final String vAlign = cell['vAlign'] as String? ?? 'middle';
+              final bool bold = (cell['bold'] as bool?) ?? false;
+              final bool serif = (cell['serif'] as bool?) ?? false;
+              final double pt = ((cell['fontSizePt'] as num?)?.toDouble() ?? 9.5).clamp(7.5, 24.0);
+              final int px = (pt * 2.15).round();
+              final String fgHex = _colorToCssHex(cell['textColor'] as int?);
+              final int? bgInt = cell['bgColor'] as int?;
+              final double minHPt = ((cell['minHeightPt'] as num?)?.toDouble() ?? 18.0).clamp(16.0, 260.0);
+              final int minHPx = (minHPt * 1.8).round();
+
+              final fontStack = serif
+                  ? "'Noto Serif CJK KR', 'Batang', Georgia, serif"
+                  : "'Noto Sans CJK KR', 'Malgun Gothic', sans-serif";
+
+              buf.write('<td');
+              if (cs > 1) buf.write(' colspan="$cs"');
+              if (rs > 1) buf.write(' rowspan="$rs"');
+              buf.write(' style="font-family:$fontStack;font-size:${px}px;color:$fgHex;text-align:$align;vertical-align:$vAlign;height:${minHPx}px;');
+              if (bold) buf.write('font-weight:700;');
+              if (bgInt != null) {
+                buf.write('background-color:${_colorToCssHex(bgInt, defaultHex: '#FFFFFF')};');
+              }
+              buf.write('">');
+
+              final imgBytes = cell['imageBytes'] as Uint8List?;
+              if (imgBytes != null && imgBytes.isNotEmpty) {
+                final b64 = base64Encode(imgBytes);
+                buf.write('<img class="doc-img" style="max-height:240px;" src="data:image/png;base64,$b64">');
+              }
+              if (text.isNotEmpty) {
+                buf.write(_escapeXml(text));
+              } else if (imgBytes == null) {
+                buf.write('&nbsp;');
+              }
+              buf.writeln('</td>');
+            }
+            buf.writeln('</tr>');
+          }
+          buf.writeln('</tbody></table>');
+        }
+      } else if (bType == 'image') {
+        final imgBytes = b['bytes'] as Uint8List?;
+        if (imgBytes != null && imgBytes.isNotEmpty) {
+          final b64 = base64Encode(imgBytes);
+          buf.writeln('<img class="doc-img" src="data:image/png;base64,$b64">');
+        }
+      }
+    }
+
+    buf.writeln('</body></html>');
+    return buf.toString();
   }
 
   static bool _isSerifFontName(String name) {
@@ -282,7 +459,9 @@ class TxtToEpubConverter {
 
     for (final file in archive) {
       if (file.isFile && file.name == 'word/document.xml') {
-        final xml = utf8.decode(file.content as List<int>, allowMalformed: true);
+        String xml = utf8.decode(file.content as List<int>, allowMalformed: true);
+        // Word <mc:AlternateContent> 내부의 중복 <mc:Fallback> 제거
+        xml = xml.replaceAll(RegExp(r'<mc:Fallback[^>]*>.*?</mc:Fallback>', dotAll: true), '');
         final bodyStart = xml.indexOf('<w:body');
         final bodyXml = bodyStart != -1 ? xml.substring(bodyStart) : xml;
 
@@ -312,9 +491,27 @@ class TxtToEpubConverter {
             final endP = _findBalancedXmlTagEnd(bodyXml, nextP, 'w:p');
             if (endP == -1) break;
             final pXml = bodyXml.substring(nextP, endP);
-            final pBlock = _parseDocxRichParagraph(pXml, defaultStyle, styleMap);
+            // 만약 문단(<w:p>) 내부의 글상자(<w:txbxContent>) 등에 표(<w:tbl>)가 들어 있다면 표를 분리하여 렌더링!
+            final innerTbls = _findDirectXmlTagBlocks(pXml, 'w:tbl');
+            String pWithoutTbls = pXml;
+            for (final itb in innerTbls) {
+              pWithoutTbls = pWithoutTbls.replaceFirst(itb, '');
+            }
+            final pBlock = _parseDocxRichParagraph(pWithoutTbls, defaultStyle, styleMap);
             if (pBlock != null) {
               blocks.add(pBlock);
+            }
+            for (final itb in innerTbls) {
+              final tbBlock = _parseDocxRichTable(
+                itb,
+                defaultStyle,
+                styleMap,
+                rIdToImage,
+                emittedImages,
+              );
+              if (tbBlock != null) {
+                blocks.add(tbBlock);
+              }
             }
             for (final rm in RegExp(r'r:(?:embed|id)="(rId[^"]+)"').allMatches(pXml)) {
               final rid = rm.group(1)!;

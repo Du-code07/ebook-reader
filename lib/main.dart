@@ -263,7 +263,7 @@ class UserManualScreen extends StatelessWidget {
             ),
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.edit_outlined, color: Colors.white, size: 22),
-              title: _tr('파일 이름 변경 (연필 아이콘)', 'Rename File (Pencil Icon)', '重命名文件 (铅笔图标)', 'ファイル名変更 (鉛筆アイコン)'),
+              title: _tr('이름 변경 (연필 아이콘)', 'Rename File (Pencil Icon)', '重命名文件 (铅笔图标)', 'ファイル名変更 (鉛筆アイコン)'),
               desc: _tr('확장자를 유지한 채 파일 이름을 변경합니다.', 'Renames the file while preserving its format extension.', '保持扩展名不变并修改文件名称。', '拡張子を維持したままファイル名を変更します。'),
             ),
             _buildIconGuideRow(
@@ -674,10 +674,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           SnackBar(
             content: Text(
               _tr(
-                '지원되는 파일 형식(EPUB, PDF, JPG, PNG, TXT, YML, CBZ, 워드, 한글)을 선택해 주세요.',
-                'Please select supported files (EPUB, PDF, JPG, PNG, TXT, YML, CBZ, Word, HWP).',
-                '请选择受支持的文件格式 (EPUB, PDF, JPG, PNG, TXT, YML, CBZ, Word, HWP)。',
-                '対応ファイル形式(EPUB, PDF, JPG, PNG, TXT, YML, CBZ, Word, HWP)を選択してください。',
+                '지원되는 파일 형식(EPUB, PDF, JPG, PNG, TXT, CBZ, 워드, 한글)을 선택해 주세요.',
+                'Please select supported files (EPUB, PDF, JPG, PNG, TXT, CBZ, Word, HWP).',
+                '请选择受支持的文件格式 (EPUB, PDF, JPG, PNG, TXT, CBZ, Word, HWP)。',
+                '対応ファイル形式(EPUB, PDF, JPG, PNG, TXT, CBZ, Word, HWP)を選択してください。',
               ),
             ),
           ),
@@ -1440,7 +1440,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(_tr('파일 이름 변경', 'Rename File', '重命名文件', 'ファイル名変更')),
+        title: Text(_tr('이름 변경', 'Rename File', '重命名文件', 'ファイル名変更')),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -2390,7 +2390,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                   children: [
                                     Text(
                                       task != null
-                                          ? '[$grpDisplay]  •  $progLabel ${prog.toStringAsFixed(1)}%  •  ${task.status}'
+                                          ? '[$grpDisplay]  •  $progLabel ${prog.toStringAsFixed(1)}%  •  ${_tr("번역 중", "Translating", "正在翻译", "翻訳中")} (${task.current}/${task.total})'
                                           : '[$grpDisplay]  •  $progLabel ${prog.toStringAsFixed(1)}%',
                                       style: const TextStyle(fontSize: 12),
                                       maxLines: 1,

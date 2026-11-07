@@ -1,6 +1,14 @@
 package com.example.my_ebook_reader
 
 import android.content.Context
+import android.content.ContentValues
+import android.content.pm.ActivityInfo
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.view.View
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.graphics.Bitmap
 import android.graphics.Typeface
 import android.graphics.BitmapFactory
@@ -80,6 +88,13 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        try {
+            WebView.enableSlowWholeDocumentDraw()
+        } catch (_: Exception) {}
+        super.onCreate(savedInstanceState)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         setupSpenMediaSession()
@@ -92,6 +107,16 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     isVolumeInterceptEnabled = enabled
                     updateMediaSessionState(enabled)
                     result.success(null)
+                } else if (call.method == "setScreenOrientation") {
+                    val mode = call.argument<String>("mode") ?: "unspecified"
+                    runOnUiThread {
+                        requestedOrientation = when (mode) {
+                            "landscape" -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                            "portrait" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        }
+                        result.success(true)
+                    }
                 } else {
                     result.notImplemented()
                 }
@@ -727,6 +752,206 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             runOnUiThread { result.error("DOC_PDF_ERR", e.message, null) }
                         }
                     }.start()
+                } else if (call.method == "setScreenOrientation") {
+                    val mode = call.argument<String>("mode") ?: "unspecified"
+                    runOnUiThread {
+                        requestedOrientation = when (mode) {
+                            "landscape" -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                            "portrait" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        }
+                        result.success(true)
+                    }
+                } else if (call.method == "saveFileToDownloads") {
+                    val sourcePath = call.argument<String>("sourcePath")
+                    val fileName = call.argument<String>("fileName") ?: "FReader_Export.pdf"
+                    if (sourcePath == null || !File(sourcePath).exists()) {
+                        result.error("INVALID_SOURCE", "Source file does not exist", null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        try {
+                            val srcFile = File(sourcePath)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                val values = ContentValues().apply {
+                                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                                    put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+                                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                                    put(MediaStore.Downloads.IS_PENDING, 1)
+                                }
+                                val resolver = applicationContext.contentResolver
+                                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                                if (uri != null) {
+                                    resolver.openOutputStream(uri)?.use { outStream ->
+                                        srcFile.inputStream().use { inStream ->
+                                            inStream.copyTo(outStream)
+                                        }
+                                    }
+                                    values.clear()
+                                    values.put(MediaStore.Downloads.IS_PENDING, 0)
+                                    resolver.update(uri, values, null, null)
+                                }
+                            } else {
+                                @Suppress("DEPRECATION")
+                                val dlDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                                if (!dlDir.exists()) dlDir.mkdirs()
+                                val dstFile = File(dlDir, fileName)
+                                srcFile.copyTo(dstFile, overwrite = true)
+                            }
+                            runOnUiThread { result.success(fileName) }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.error("DOWNLOAD_SAVE_ERR", e.message, null) }
+                        }
+                    }.start()
+                } else if (call.method == "scanHtmlToPdf") {
+                    val htmlContent = call.argument<String>("htmlContent")
+                    val outputPath = call.argument<String>("outputPath")
+                    if (htmlContent == null || outputPath == null) {
+                        result.error("INVALID_ARGS", "Missing htmlContent or outputPath", null)
+                        return@setMethodCallHandler
+                    }
+                    runOnUiThread {
+                        try {
+                            val pageWidth = 1240
+                            val pageHeight = 1754
+                            val marginY = 64
+                            val printableHeight = pageHeight - marginY * 2
+
+                            val webView = WebView(this@MainActivity)
+                            webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                            webView.setBackgroundColor(Color.WHITE)
+                            webView.settings.apply {
+                                javaScriptEnabled = false
+                                loadsImagesAutomatically = true
+                                useWideViewPort = false
+                                loadWithOverviewMode = false
+                                defaultTextEncodingName = "utf-8"
+                                builtInZoomControls = false
+                                displayZoomControls = false
+                            }
+
+                            val widthSpec = View.MeasureSpec.makeMeasureSpec(pageWidth, View.MeasureSpec.EXACTLY)
+                            val heightSpec = View.MeasureSpec.makeMeasureSpec(pageHeight, View.MeasureSpec.EXACTLY)
+                            webView.measure(widthSpec, heightSpec)
+                            webView.layout(0, 0, pageWidth, pageHeight)
+
+                            var finished = false
+                            webView.webViewClient = object : WebViewClient() {
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    if (finished) return
+                                    finished = true
+                                    mainHandler.postDelayed({
+                                        try {
+                                            val wSpec = View.MeasureSpec.makeMeasureSpec(pageWidth, View.MeasureSpec.EXACTLY)
+                                            val hSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                                            webView.measure(wSpec, hSpec)
+                                            val rawH = maxOf(
+                                                webView.measuredHeight,
+                                                (webView.contentHeight * webView.scale).toInt()
+                                            ).coerceAtLeast(printableHeight)
+                                            val totalH = rawH.coerceAtMost(printableHeight * 120)
+                                            webView.layout(0, 0, pageWidth, totalH)
+
+                                            mainHandler.postDelayed({
+                                                Thread {
+                                                    val pdfDoc = PdfDocument()
+                                                    try {
+                                                        // WebView 전체 또는 슬라이스를 고해상도 비트맵으로 스캔하여 줄 잘림 없이 페이지 분할
+                                                        var curY = 0
+                                                        var pageNum = 1
+                                                        val sliceBmp = Bitmap.createBitmap(pageWidth, printableHeight, Bitmap.Config.ARGB_8888)
+                                                        val sliceCanvas = android.graphics.Canvas(sliceBmp)
+                                                        val rowPixels = IntArray(pageWidth)
+
+                                                        while (curY < totalH) {
+                                                            val remaining = totalH - curY
+                                                            var cutH = minOf(printableHeight, remaining)
+
+                                                            runOnUiThread {
+                                                                sliceBmp.eraseColor(Color.WHITE)
+                                                                sliceCanvas.save()
+                                                                sliceCanvas.translate(0f, -curY.toFloat())
+                                                                webView.draw(sliceCanvas)
+                                                                sliceCanvas.restore()
+                                                            }
+                                                            // UI 스레드 드로잉 완료 대기
+                                                            val latch = java.util.concurrent.CountDownLatch(1)
+                                                            runOnUiThread { latch.countDown() }
+                                                            latch.await()
+
+                                                            // 페이지 하단에서 글자나 표 테두리가 반으로 잘리지 않도록 하단 여백 행 탐색
+                                                            if (remaining > printableHeight) {
+                                                                val searchStart = printableHeight - 10
+                                                                val searchEnd = (printableHeight - 150).coerceAtLeast(200)
+                                                                for (y in searchStart downTo searchEnd) {
+                                                                    sliceBmp.getPixels(rowPixels, 0, pageWidth, 0, y, pageWidth, 1)
+                                                                    var allWhite = true
+                                                                    for (x in 40 until (pageWidth - 40) step 4) {
+                                                                        val px = rowPixels[x]
+                                                                        val r = (px shr 16) and 0xFF
+                                                                        val g = (px shr 8) and 0xFF
+                                                                        val b = px and 0xFF
+                                                                        if (r < 245 || g < 245 || b < 245) {
+                                                                            allWhite = false
+                                                                            break
+                                                                        }
+                                                                    }
+                                                                    if (allWhite) {
+                                                                        cutH = y
+                                                                        break
+                                                                    }
+                                                                }
+                                                            }
+
+                                                            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNum++).create()
+                                                            val page = pdfDoc.startPage(pageInfo)
+                                                            page.canvas.drawColor(Color.WHITE)
+                                                            val srcRect = Rect(0, 0, pageWidth, cutH)
+                                                            val dstRect = Rect(0, marginY, pageWidth, marginY + cutH)
+                                                            page.canvas.drawBitmap(sliceBmp, srcRect, dstRect, null)
+                                                            pdfDoc.finishPage(page)
+
+                                                            curY += cutH.coerceAtLeast(100)
+                                                        }
+
+                                                        sliceBmp.recycle()
+                                                        val outFile = File(outputPath)
+                                                        outFile.parentFile?.mkdirs()
+                                                        FileOutputStream(outFile).use { outStream ->
+                                                            pdfDoc.writeTo(outStream)
+                                                        }
+                                                        pdfDoc.close()
+                                                        runOnUiThread {
+                                                            try { webView.destroy() } catch (_: Exception) {}
+                                                            result.success(outFile.absolutePath)
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        try { pdfDoc.close() } catch (_: Exception) {}
+                                                        runOnUiThread {
+                                                            try { webView.destroy() } catch (_: Exception) {}
+                                                            result.error("SCAN_PDF_ERR", e.message, null)
+                                                        }
+                                                    }
+                                                }.start()
+                                            }, 180L)
+                                        } catch (e: Exception) {
+                                            result.error("WEBVIEW_MEASURE_ERR", e.message, null)
+                                        }
+                                    }, 320L)
+                                }
+                            }
+
+                            webView.loadDataWithBaseURL(
+                                "https://local.freader.doc/",
+                                htmlContent,
+                                "text/html",
+                                "utf-8",
+                                null
+                            )
+                        } catch (e: Exception) {
+                            result.error("WEBVIEW_INIT_ERR", e.message, null)
+                        }
+                    }
                 } else {
                     result.notImplemented()
                 }
