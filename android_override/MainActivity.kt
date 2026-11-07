@@ -242,8 +242,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method == "renderPdfFirstPageThumbnail") {
-                    val pdfPath = call.argument<String>("pdfPath")
-                    val thumbPath = call.argument<String>("thumbPath")
+                    val pdfPath = call.argument<String>("pdfPath") ?: call.argument<String>("filePath")
+                    val thumbPath = call.argument<String>("thumbPath") ?: call.argument<String>("outPath")
                     if (pdfPath == null || thumbPath == null) {
                         result.error("INVALID_ARGS", "Missing paths", null)
                         return@setMethodCallHandler
@@ -1343,7 +1343,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         pendingVolUpRunnable = r
                         mainHandler.postDelayed(r, 70L)
                     }
-                } else if (action == KeyEvent.ACTION_UP || action == KeyEvent.ACTION_CANCEL) {
+                } else if (action == KeyEvent.ACTION_UP) {
                     isVolUpPressed = false
                     if (!isVolDownPressed) comboTriggered = false
                 }
@@ -1370,7 +1370,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         pendingVolDownRunnable = r
                         mainHandler.postDelayed(r, 70L)
                     }
-                } else if (action == KeyEvent.ACTION_UP || action == KeyEvent.ACTION_CANCEL) {
+                } else if (action == KeyEvent.ACTION_UP) {
                     isVolDownPressed = false
                     if (!isVolUpPressed) comboTriggered = false
                 }
