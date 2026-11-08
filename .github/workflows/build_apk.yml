@@ -183,9 +183,8 @@ jobs:
             if ! grep -q "com.samsung.android.support.REMOTE_ACTION" "$MANIFEST"; then
               sed -i 's/<\/activity>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true"\/><property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
             fi
-            # 태블릿에서도 화면 회전 시 OS 창과 상태표시줄이 함께 회전해 항상 화면 위쪽에 오도록 application과 activity 모두에 resizeableActivity="false" 지정
-            sed -i 's/android:label="[^"]*"/android:label="FReader" android:resizeableActivity="false"/g' "$MANIFEST"
-            sed -i 's/android:name="\.MainActivity"/android:name=".MainActivity" android:resizeableActivity="false"/g' "$MANIFEST"
+            # 태블릿에서 상단 상태표시줄(시계, 날짜, 배터리)이 정상적으로 숨겨지도록 resizeableActivity="false"를 제거하고 targetSdk 34 + 호환 속성으로 회전 지원
+            sed -i 's/android:label="[^"]*"/android:label="FReader"/g' "$MANIFEST"
           fi
 
           for STYLE_FILE in android/app/src/main/res/values/styles.xml android/app/src/main/res/values-night/styles.xml; do
