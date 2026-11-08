@@ -23,6 +23,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.35.7'
 
       - name: 4. Generate Android Platform Files & Configure FReader Store Release (com.freader.my_ebook_reader)
         run: |
@@ -168,6 +169,11 @@ jobs:
 
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
+            # Flutter's template grants INTERNET to debug/profile only. WebView
+            # book requests need it in the RELEASE manifest too (no runtime dialog).
+            if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+              sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET"/>' "$MANIFEST"
+            fi
             if ! grep -q "com.samsung.android.support.REMOTE_ACTION" "$MANIFEST"; then
               sed -i 's/<\/activity>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true"\/><property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
               sed -i 's/<\/application>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true"\/><property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><\/application>/' "$MANIFEST"
@@ -185,7 +191,7 @@ jobs:
 
       - name: 5. Build Release APK (Direct Install/Update) & AAB (Google Play Store)
         run: |
-          BUILD_NUM=$((120 + ${{ github.run_number }}))
+          BUILD_NUM=$((121 + ${{ github.run_number }}))
           flutter pub get
           flutter build apk --release --no-tree-shake-icons --build-number=$BUILD_NUM
           flutter build appbundle --release --no-tree-shake-icons --build-number=$BUILD_NUM
