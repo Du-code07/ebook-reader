@@ -39,10 +39,6 @@ import java.io.FileOutputStream
 import java.util.concurrent.Executors
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
-import java.nio.ByteBuffer
-import java.nio.charset.CharacterCodingException
-import java.nio.charset.Charset
-import java.nio.charset.CodingErrorAction
 import kotlin.math.sqrt
 
 class MainActivity : FlutterActivity(), SensorEventListener {
@@ -146,6 +142,17 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         } catch (_: Exception) {}
                     }
                 }
+                // 일부 One UI 버전은 새 방식(insetsController)만으로는 상태표시줄을 안 내리는 경우가 있어
+                // 예전 방식 플래그도 함께 걸어 둔다 (두 경로 모두 '숨김'으로 일치)
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    )
             } else {
                 @Suppress("DEPRECATION")
                 window.decorView.systemUiVisibility = (
@@ -208,6 +215,11 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 if (isStatusBarCurrentlyVisible() && window.decorView.hasWindowFocus() && !isImeCurrentlyVisible()) {
                     // 2단계: 그래도 남아 있으면 시스템 바 전체(상태표시줄+내비게이션/태스크바)를 한 번에 숨김
                     controller.hide(WindowInsets.Type.systemBars())
+                    // 3단계: 그래도 남으면 알림창을 내렸다 올린 것처럼 창 포커스를 잠깐 옮겼다 돌려받아
+                    // 시스템이 상태표시줄 상태를 다시 계산하게 만든다
+                    mainHandler.postDelayed({
+                        if (isActivityResumed && isStatusBarCurrentlyVisible()) focusBlipToResetBars()
+                    }, 380L)
                     @Suppress("DEPRECATION")
                     window.decorView.systemUiVisibility = (
                         View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -220,6 +232,44 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
             } catch (_: Exception) {}
         }, 520L)
+    }
+
+    private var lastFocusBlipAt = 0L
+
+    // 보이지 않는 1x1 창을 아주 잠깐 띄웠다 닫아 포커스를 앱 창으로 되돌린다.
+    // (One UI에서 상태표시줄이 고착됐을 때 사용자가 알림창을 내렸다 올리면 사라지는 것과 같은 원리)
+    private fun focusBlipToResetBars() {
+        if (isFinishing || isDestroyed) return
+        if (!window.decorView.hasWindowFocus() || isImeCurrentlyVisible()) return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastFocusBlipAt < 4000L) return
+        lastFocusBlipAt = now
+        try {
+            val blip = android.app.Dialog(this)
+            blip.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+            blip.setContentView(View(this))
+            blip.setCancelable(false)
+            blip.window?.let { w ->
+                w.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+                w.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                w.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+                w.setLayout(1, 1)
+                w.setGravity(android.view.Gravity.TOP or android.view.Gravity.START)
+                w.setWindowAnimations(0)
+            }
+            blip.show()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    blip.window?.insetsController?.hide(WindowInsets.Type.statusBars())
+                } catch (_: Exception) {}
+            }
+            mainHandler.postDelayed({
+                try {
+                    if (blip.isShowing) blip.dismiss()
+                } catch (_: Exception) {}
+                mainHandler.postDelayed({ hideSystemStatusBar() }, 60L)
+            }, 90L)
+        } catch (_: Exception) {}
     }
 
     private fun applyRequestedScreenOrientation(mode: String) {
@@ -430,18 +480,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     } catch (e: Exception) {
                         runOnUiThread { result.success(null) }
                     }
-                }
-            } else if (call.method == "decodeTextBytes") {
-                val rawBytes = call.argument<ByteArray>("bytes")
-                if (rawBytes == null || rawBytes.isEmpty()) {
-                    result.success("")
-                    return@setMethodCallHandler
-                }
-                try {
-                    val decoded = decodeKoreanTextBytesSmart(rawBytes)
-                    result.success(decoded)
-                } catch (e: Exception) {
-                    result.success(String(rawBytes, Charsets.UTF_8))
                 }
             } else if (call.method == "renderPdfToImages") {
                 val pdfPath = call.argument<String>("pdfPath")
@@ -845,45 +883,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             checkStylusButtonEvent(ev)
         }
         return super.dispatchTouchEvent(ev)
-    }
-
-    private fun decodeKoreanTextBytesSmart(bytes: ByteArray): String {
-        if (bytes.size >= 3 &&
-            (bytes[0].toInt() and 0xFF) == 0xEF &&
-            (bytes[1].toInt() and 0xFF) == 0xBB &&
-            (bytes[2].toInt() and 0xFF) == 0xBF
-        ) {
-            return String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
-        }
-        if (bytes.size >= 2 &&
-            (bytes[0].toInt() and 0xFF) == 0xFF &&
-            (bytes[1].toInt() and 0xFF) == 0xFE
-        ) {
-            return String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
-        }
-        if (bytes.size >= 2 &&
-            (bytes[0].toInt() and 0xFF) == 0xFE &&
-            (bytes[1].toInt() and 0xFF) == 0xFF
-        ) {
-            return String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
-        }
-
-        try {
-            val utf8Decoder = Charsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-            return utf8Decoder.decode(ByteBuffer.wrap(bytes)).toString()
-        } catch (_: CharacterCodingException) {}
-
-        for (csName in listOf("MS949", "CP949", "EUC-KR", "x-windows-949")) {
-            try {
-                if (Charset.isSupported(csName)) {
-                    return String(bytes, Charset.forName(csName))
-                }
-            } catch (_: Exception) {}
-        }
-
-        return String(bytes, Charsets.UTF_8)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {

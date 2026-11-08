@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
 import 'package:path_provider/path_provider.dart';
-import '../services/txt_to_epub_converter.dart';
 import '../services/storage_service.dart';
 import '../services/volume_key_service.dart';
 import 'pdf_and_image_viewer.dart';
@@ -385,11 +384,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final favs = await StorageService.getFavoriteBooks();
     final dir = await getApplicationDocumentsDirectory();
     const supportedExts = [
-      'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
-      'docx', 'doc', 'hwpx', 'hwp'
+      'epub', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
     ];
     const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
-    const docConvertExts = ['txt', 'docx', 'doc', 'hwpx', 'hwp'];
 
     final allFiles = <File>[];
     for (final e in dir.listSync()) {
@@ -451,25 +448,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         ),
       );
 
-    } else if (docConvertExts.contains(nextExt)) {
-      final File epubFile;
-      try {
-        epubFile = await TxtToEpubConverter.convertDocumentToEpub(nextFile);
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('${_tr('문서를 변환하지 못했습니다', 'Could not convert the document', '无法转换文档', '文書を変換できませんでした')}: $e')),
-          );
-        }
-        return;
-      }
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ReaderScreen(filePath: epubFile.path, bookTitle: nextName),
-        ),
-      );
     } else if (nextExt == 'pdf') {
       Navigator.pushReplacement(
         context,
@@ -1178,6 +1156,116 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     setState(() => _showControls = !_showControls);
   }
 
+  // ── 스와이프 페이지 넘김 보강 ──
+  // WebView(epub.js)의 스와이프 인식은 (1) 빠른 튕김은 위쪽 확대 제스처에 빼앗기고,
+  // (2) 손가락이 세로로 50px 이상 흔들리면 무시된다. 이 두 경우만 Flutter가 직접 넘겨
+  // 한 번의 스와이프에 한 페이지만 넘어가도록 한다.
+  int _swipeActivePointers = 0;
+  bool _swipeMultiTouch = false;
+  bool _swipeHandledByDrag = false;
+  bool _swipeScaleStarted = false;
+  Offset? _swipeStartPos;
+  DateTime? _swipeStartTime;
+  DateTime? _swipeFirstMoveTime;
+  double _flickDx = 0.0;
+  bool _hasTextSelection = false;
+
+  bool get _swipeFlutterOwned =>
+      _useSwipeTurn && !_isTouchLocked && _epubZoomScale <= 1.03;
+
+  bool _isStylusEvent(PointerEvent e) =>
+      e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus;
+
+  void _swipeTrackDown(PointerDownEvent e) {
+    if (_isMemoMode && _isStylusEvent(e)) return;
+    _swipeActivePointers++;
+    if (_swipeActivePointers == 1) {
+      _swipeMultiTouch = false;
+      _swipeHandledByDrag = false;
+      _swipeScaleStarted = false;
+      _swipeStartPos = e.position;
+      _swipeStartTime = DateTime.now();
+      _swipeFirstMoveTime = null;
+    } else {
+      _swipeMultiTouch = true;
+    }
+  }
+
+  void _swipeTrackMove(PointerMoveEvent e) {
+    final start = _swipeStartPos;
+    if (start == null || _swipeFirstMoveTime != null) return;
+    if ((e.position - start).distance > 12.0) {
+      _swipeFirstMoveTime = DateTime.now();
+    }
+  }
+
+  void _swipeTrackUp(PointerEvent e, {bool cancelled = false}) {
+    if (_isMemoMode && _isStylusEvent(e)) return;
+    if (_swipeActivePointers > 0) _swipeActivePointers--;
+    if (_swipeActivePointers > 0) return;
+
+    final start = _swipeStartPos;
+    final startTime = _swipeStartTime;
+    _swipeStartPos = null;
+    _swipeStartTime = null;
+    if (cancelled || start == null || startTime == null) return;
+    if (_swipeMultiTouch || _swipeHandledByDrag) return;
+    if (!_useSwipeTurn || _isTouchLocked || _epubZoomScale > 1.03 || _hasTextSelection) return;
+
+    // 길게 누른 뒤 끄는 동작(문장 선택 등)은 스와이프로 보지 않음
+    final int holdMs = (_swipeFirstMoveTime ?? DateTime.now()).difference(startTime).inMilliseconds;
+    if (holdMs > 400) return;
+
+    final Offset d = e.position - start;
+    final double adx = d.dx.abs();
+    final double ady = d.dy.abs();
+    final bool isSwipe = adx >= 40.0 && adx > ady * 1.2;
+    if (!isSwipe) return;
+
+    if (_swipeScaleStarted) {
+      // 확대 제스처가 터치를 가져가 WebView가 못 받은 스와이프
+      _turnBySwipeDirection(d.dx);
+      return;
+    }
+    // WebView가 받은 스와이프: epub.js 기준(가로 50px 초과 & 세로 흔들림 50px 미만)을 통과하면
+    // epub.js가 넘기므로 건드리지 않고, 기준에 걸려 무시되는 경우만 대신 넘긴다. 경계값 근처는 중복 방지를 위해 보류.
+    final bool jsWouldTurn = adx > 55.0 && ady < 45.0;
+    final bool nearJsBoundary = (adx > 45.0 && adx <= 55.0) || (ady >= 45.0 && ady < 55.0 && adx > 55.0);
+    if (!jsWouldTurn && !nearJsBoundary) {
+      _turnBySwipeDirection(d.dx);
+    }
+  }
+
+  // epub.js와 같은 방향 규칙: 왼쪽으로 밀면 다음, 오른쪽으로 밀면 이전
+  void _turnBySwipeDirection(double dx) {
+    _hasTextSelection = false;
+    setState(() => _activeStrokePoints.clear());
+    if (dx < 0) {
+      _epubController.next();
+    } else {
+      _epubController.prev();
+    }
+  }
+
+  void _onFlickStart(DragStartDetails details) {
+    _swipeHandledByDrag = true;
+    _flickDx = 0.0;
+  }
+
+  void _onFlickUpdate(DragUpdateDetails details) {
+    _flickDx += details.primaryDelta ?? details.delta.dx;
+  }
+
+  void _onFlickEnd(DragEndDetails details) {
+    if (_swipeMultiTouch || _hasTextSelection) return;
+    final double vx = details.velocity.pixelsPerSecond.dx;
+    if (vx.abs() >= 300.0) {
+      _turnBySwipeDirection(vx);
+    } else if (_flickDx.abs() >= 30.0) {
+      _turnBySwipeDirection(_flickDx);
+    }
+  }
+
   void _handlePointerDown(PointerDownEvent event) {
     if (_isTouchLocked) return;
     if (_isMemoMode &&
@@ -1654,9 +1742,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   ignoring: _isTouchLocked || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)),
                   child: Listener(
                     behavior: HitTestBehavior.translucent,
-                    onPointerDown: _handlePointerDown,
-                    onPointerUp: (event) => _handlePointerUp(event, screenSize),
+                    onPointerDown: (event) {
+                      _swipeTrackDown(event);
+                      _handlePointerDown(event);
+                    },
+                    onPointerMove: _swipeTrackMove,
+                    onPointerUp: (event) {
+                      _swipeTrackUp(event);
+                      _handlePointerUp(event, screenSize);
+                    },
                     onPointerCancel: (event) {
+                      _swipeTrackUp(event, cancelled: true);
                       if (_isStylusDown) {
                         setState(() => _isStylusDown = false);
                       }
@@ -1667,6 +1763,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       scaleEnabled: !_isTouchLocked && (!_isMemoMode || !_allowFingerDrawing),
                       minScale: 1.0,
                       maxScale: 4.5,
+                      onInteractionStart: (_) {
+                        // 확대/이동 제스처가 터치를 가져가면 WebView는 스와이프를 받지 못함
+                        _swipeScaleStarted = true;
+                      },
                       onInteractionUpdate: (_) {
                         final s = _epubZoomController.value.getMaxScaleOnAxis();
                         if ((s - _epubZoomScale).abs() > 0.02) {
@@ -1686,7 +1786,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       },
                       child: GestureDetector(
                         behavior: HitTestBehavior.translucent,
-                        onHorizontalDragUpdate: !_useSwipeTurn ? (_) {} : null,
+                        // 빠르게 튕기는 스와이프는 WebView보다 먼저 Flutter가 받아 직접 페이지를 넘긴다
+                        onHorizontalDragStart: _swipeFlutterOwned ? _onFlickStart : null,
+                        onHorizontalDragUpdate: !_useSwipeTurn
+                            ? (_) {}
+                            : (_swipeFlutterOwned ? _onFlickUpdate : null),
+                        onHorizontalDragEnd: _swipeFlutterOwned ? _onFlickEnd : null,
                         child: EpubViewer(
                           key: ValueKey(epubViewerKey),
                           epubController: _epubController,
@@ -1741,8 +1846,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     },
                     onTextSelected: (epubTextSelection) {
                       _selectedCfiRange = epubTextSelection.selectionCfi;
+                      _hasTextSelection = true;
+                    },
+                    onDeselection: () {
+                      _hasTextSelection = false;
                     },
                     onRelocated: (value) async {
+                      _hasTextSelection = false;
                       if (!_hasRestoredInitialPosition &&
                           _initialCfi != null &&
                           value.progress < 0.01 &&

@@ -9,7 +9,6 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
 import '../services/volume_key_service.dart';
-import '../services/txt_to_epub_converter.dart';
 import 'reader_screen.dart';
 
 /// 1. S펜 전용 즉시 승리 제스처 인식기 (Eager Stylus Gesture Recognizer):
@@ -410,11 +409,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final favs = await StorageService.getFavoriteBooks();
     final dir = await getApplicationDocumentsDirectory();
     const supportedExts = [
-      'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
-      'docx', 'doc', 'hwpx', 'hwp'
+      'epub', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
     ];
     const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
-    const docConvertExts = ['txt', 'docx', 'doc', 'hwpx', 'hwp'];
 
     final allFiles = <File>[];
     for (final e in dir.listSync()) {
@@ -486,15 +483,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         ),
       );
 
-    } else if (docConvertExts.contains(nextExt)) {
-      final epubFile = await TxtToEpubConverter.convertDocumentToEpub(targetFile);
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ReaderScreen(filePath: epubFile.path, bookTitle: nextName),
-        ),
-      );
     } else if (nextExt == 'pdf') {
       Navigator.pushReplacement(
         context,
