@@ -80,16 +80,40 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var firstShakeTime = 0L
     private val thumbExecutor = Executors.newFixedThreadPool(4)
 
-    // 1. 태블릿(resizeableActivity="false" 포함)에서 상태표시줄 및 네비게이션 바가 항상 자동으로 숨겨지도록 주기적으로 강제 적용하는 워치독
+    // 1. 태블릿에서 상단 상태표시줄(시계, 날짜, 배터리) 및 네비게이션 바를 숨기고 내렸을 때 자동으로 다시 올라가게 하는 워치독
     private var isActivityResumed = false
     private var statusBarVisibleTicks = 0
     private val statusBarWatchdogRunnable = object : Runnable {
         override fun run() {
             if (!isActivityResumed) return
             try {
-                hideSystemStatusBar()
+                if (isStatusBarCurrentlyVisible()) {
+                    statusBarVisibleTicks++
+                    if (statusBarVisibleTicks >= 2) {
+                        hideSystemStatusBar()
+                    }
+                } else {
+                    statusBarVisibleTicks = 0
+                }
             } catch (_: Exception) {}
-            mainHandler.postDelayed(this, 1000L)
+            mainHandler.postDelayed(this, 750L)
+        }
+    }
+
+    private fun isStatusBarCurrentlyVisible(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val rootInsets = window?.decorView?.rootWindowInsets
+                (rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true) ||
+                    (rootInsets?.isVisible(WindowInsets.Type.navigationBars()) == true)
+            } else {
+                @Suppress("DEPRECATION")
+                val vis = window.decorView.systemUiVisibility
+                (vis and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0 ||
+                    (vis and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) == 0
+            }
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -111,16 +135,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
             }
 
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            )
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
                 window.insetsController?.let { controller ->
@@ -131,6 +145,16 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             or WindowInsets.Type.navigationBars()
                     )
                 }
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                )
             }
         } catch (_: Exception) {}
     }
@@ -741,7 +765,9 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         if (ev != null && (ev.actionMasked == MotionEvent.ACTION_DOWN || ev.actionMasked == MotionEvent.ACTION_UP)) {
-            hideSystemStatusBar()
+            if (isStatusBarCurrentlyVisible()) {
+                hideSystemStatusBar()
+            }
         }
         if (isVolumeInterceptEnabled) {
             checkStylusButtonEvent(ev)

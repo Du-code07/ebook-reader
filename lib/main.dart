@@ -2572,11 +2572,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   }
 
   Widget _buildPcStyleScrollbar(int itemCount) {
+    // 선택 모드일 때만 표시
+    if (!_isSelectionMode) {
+      return const SizedBox.shrink();
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final double totalBarHeight = constraints.maxHeight;
-        const double arrowBtnHeight = 28.0;
-        final double trackHeight = (totalBarHeight - (arrowBtnHeight * 2) - 8.0).clamp(48.0, 4000.0);
+        final double trackHeight = (totalBarHeight - 12.0).clamp(48.0, 4000.0);
 
         return AnimatedBuilder(
           animation: _bookshelfScrollController,
@@ -2620,7 +2623,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
             final double totalContent = viewport + maxExtent;
             final double thumbHeight = ((viewport / totalContent) * trackHeight)
-                .clamp(44.0, math.max<double>(44.0, trackHeight * 0.70));
+                .clamp(40.0, math.max<double>(40.0, trackHeight * 0.65));
             final double movableTrack = math.max<double>(1.0, trackHeight - thumbHeight);
             final double scrollRatio = (currentPixels / maxExtent).clamp(0.0, 1.0);
             final double thumbTop = scrollRatio * movableTrack;
@@ -2634,121 +2637,63 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
               _bookshelfScrollController.jumpTo(targetOffset.clamp(0.0, limit));
             }
 
-            return Container(
-              width: 26,
-              margin: const EdgeInsets.fromLTRB(0, 4, 3, 4),
-              decoration: BoxDecoration(
-                color: widget.isDarkMode
-                    ? const Color(0xFF1E293B)
-                    : const Color(0xFFE2E8F0),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: widget.isDarkMode ? Colors.white24 : Colors.black26,
-                  width: 1,
+            final Color thumbColor = _isDraggingScrollbar
+                ? (widget.isDarkMode ? Colors.white.withOpacity(0.88) : Colors.black.withOpacity(0.75))
+                : (widget.isDarkMode ? Colors.white.withOpacity(0.55) : Colors.black.withOpacity(0.45));
+
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (details) {
+                final double localY = (details.localPosition.dy - 6.0).clamp(0.0, trackHeight);
+                if (localY < thumbTop || localY > thumbTop + thumbHeight) {
+                  final double targetRatio =
+                      ((localY - thumbHeight / 2.0) / movableTrack).clamp(0.0, 1.0);
+                  jumpToClamped(targetRatio * maxExtent);
+                }
+              },
+              onVerticalDragStart: (details) {
+                setState(() => _isDraggingScrollbar = true);
+                final double localY = (details.localPosition.dy - 6.0).clamp(0.0, trackHeight);
+                if (localY < thumbTop - 8.0 || localY > thumbTop + thumbHeight + 8.0) {
+                  final double targetRatio =
+                      ((localY - thumbHeight / 2.0) / movableTrack).clamp(0.0, 1.0);
+                  jumpToClamped(targetRatio * maxExtent);
+                }
+                _scrollDragStartDy = details.globalPosition.dy;
+                _scrollDragStartOffset = _bookshelfScrollController.hasClients
+                    ? _bookshelfScrollController.position.pixels
+                    : 0.0;
+              },
+              onVerticalDragUpdate: (details) {
+                final double deltaY = details.globalPosition.dy - _scrollDragStartDy;
+                final double scrollDelta = (deltaY / movableTrack) * maxExtent;
+                jumpToClamped(_scrollDragStartOffset + scrollDelta);
+              },
+              onVerticalDragEnd: (_) {
+                if (mounted) setState(() => _isDraggingScrollbar = false);
+              },
+              onVerticalDragCancel: () {
+                if (mounted) setState(() => _isDraggingScrollbar = false);
+              },
+              child: SizedBox(
+                width: 16,
+                height: totalBarHeight,
+                child: Stack(
+                  children: [
+                    Positioned(
+                      top: 6.0 + thumbTop,
+                      right: 3.0,
+                      width: 5.5,
+                      height: thumbHeight,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: thumbColor,
+                          borderRadius: BorderRadius.circular(3.0),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              child: Column(
-                children: [
-                  // 상단 ▲ 스크롤 버튼 (PC 브라우저 스크롤바 스타일)
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => jumpToClamped(currentPixels - 220.0),
-                    child: SizedBox(
-                      height: arrowBtnHeight,
-                      width: double.infinity,
-                      child: Icon(
-                        Icons.arrow_drop_up,
-                        size: 22,
-                        color: widget.isDarkMode ? Colors.white70 : Colors.black87,
-                      ),
-                    ),
-                  ),
-                  // 중앙 드래그 트랙 및 손잡이(Thumb)
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTapDown: (details) {
-                        final double localY = details.localPosition.dy.clamp(0.0, trackHeight);
-                        if (localY < thumbTop || localY > thumbTop + thumbHeight) {
-                          final double targetRatio =
-                              ((localY - thumbHeight / 2.0) / movableTrack).clamp(0.0, 1.0);
-                          jumpToClamped(targetRatio * maxExtent);
-                        }
-                      },
-                      onVerticalDragStart: (details) {
-                        setState(() => _isDraggingScrollbar = true);
-                        final double localY = details.localPosition.dy.clamp(0.0, trackHeight);
-                        if (localY < thumbTop - 6.0 || localY > thumbTop + thumbHeight + 6.0) {
-                          final double targetRatio =
-                              ((localY - thumbHeight / 2.0) / movableTrack).clamp(0.0, 1.0);
-                          jumpToClamped(targetRatio * maxExtent);
-                        }
-                        _scrollDragStartDy = details.globalPosition.dy;
-                        _scrollDragStartOffset = _bookshelfScrollController.hasClients
-                            ? _bookshelfScrollController.position.pixels
-                            : 0.0;
-                      },
-                      onVerticalDragUpdate: (details) {
-                        final double deltaY = details.globalPosition.dy - _scrollDragStartDy;
-                        final double scrollDelta = (deltaY / movableTrack) * maxExtent;
-                        jumpToClamped(_scrollDragStartOffset + scrollDelta);
-                      },
-                      onVerticalDragEnd: (_) {
-                        if (mounted) setState(() => _isDraggingScrollbar = false);
-                      },
-                      onVerticalDragCancel: () {
-                        if (mounted) setState(() => _isDraggingScrollbar = false);
-                      },
-                      child: Stack(
-                        children: [
-                          Positioned(
-                            top: thumbTop,
-                            left: 2,
-                            right: 2,
-                            height: thumbHeight,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: _isDraggingScrollbar
-                                    ? Colors.amber
-                                    : (widget.isDarkMode ? Colors.indigoAccent : Colors.indigo),
-                                borderRadius: BorderRadius.circular(6),
-                                boxShadow: const [
-                                  BoxShadow(color: Colors.black26, blurRadius: 2),
-                                ],
-                              ),
-                              child: Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Container(width: 11, height: 1.5, color: Colors.white),
-                                    const SizedBox(height: 3),
-                                    Container(width: 11, height: 1.5, color: Colors.white),
-                                    const SizedBox(height: 3),
-                                    Container(width: 11, height: 1.5, color: Colors.white),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  // 하단 ▼ 스크롤 버튼
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => jumpToClamped(currentPixels + 220.0),
-                    child: SizedBox(
-                      height: arrowBtnHeight,
-                      width: double.infinity,
-                      child: Icon(
-                        Icons.arrow_drop_down,
-                        size: 22,
-                        color: widget.isDarkMode ? Colors.white70 : Colors.black87,
-                      ),
-                    ),
-                  ),
-                ],
               ),
             );
           },
