@@ -90,11 +90,18 @@ jobs:
           if [ -f android/app/build.gradle ]; then
             sed -i 's/compileSdk .*/compileSdk 36/g' android/app/build.gradle
             sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' android/app/build.gradle
+            sed -i 's/targetSdkVersion .*/targetSdkVersion 34/g' android/app/build.gradle
+            sed -i 's/targetSdk = .*/targetSdk = 34/g' android/app/build.gradle
+            sed -i 's/targetSdk .*/targetSdk 34/g' android/app/build.gradle
             sed -i 's/minSdkVersion .*/minSdkVersion 24/g' android/app/build.gradle
             sed -i 's/minSdk = .*/minSdk = 24/g' android/app/build.gradle
             sed -i 's/minSdk .*/minSdk 24/g' android/app/build.gradle
             echo "" >> android/app/build.gradle
             echo "android {" >> android/app/build.gradle
+            echo "    defaultConfig {" >> android/app/build.gradle
+            echo "        minSdkVersion 24" >> android/app/build.gradle
+            echo "        targetSdkVersion 34" >> android/app/build.gradle
+            echo "    }" >> android/app/build.gradle
             echo "    signingConfigs {" >> android/app/build.gradle
             echo "        release {" >> android/app/build.gradle
             echo "            storeFile file('freader_release.keystore')" >> android/app/build.gradle
@@ -116,9 +123,14 @@ jobs:
 
           if [ -f android/app/build.gradle.kts ]; then
             sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts
+            sed -i 's/targetSdk = .*/targetSdk = 34/g' android/app/build.gradle.kts
             sed -i 's/minSdk = .*/minSdk = 24/g' android/app/build.gradle.kts
             echo "" >> android/app/build.gradle.kts
             echo 'android {' >> android/app/build.gradle.kts
+            echo '    defaultConfig {' >> android/app/build.gradle.kts
+            echo '        minSdk = 24' >> android/app/build.gradle.kts
+            echo '        targetSdk = 34' >> android/app/build.gradle.kts
+            echo '    }' >> android/app/build.gradle.kts
             echo '    signingConfigs {' >> android/app/build.gradle.kts
             echo '        create("release") {' >> android/app/build.gradle.kts
             echo '            storeFile = file("freader_release.keystore")' >> android/app/build.gradle.kts
@@ -169,10 +181,11 @@ jobs:
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
             if ! grep -q "com.samsung.android.support.REMOTE_ACTION" "$MANIFEST"; then
-              sed -i 's/<\/activity>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
+              sed -i 's/<\/activity>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true"\/><property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
             fi
-            # 태블릿에서도 화면 회전 시 OS 창과 상태표시줄 자체가 회전되어 항상 화면 위쪽에 오도록 resizeableActivity="false" 적용
+            # 태블릿에서도 화면 회전 시 OS 창과 상태표시줄이 함께 회전해 항상 화면 위쪽에 오도록 application과 activity 모두에 resizeableActivity="false" 지정
             sed -i 's/android:label="[^"]*"/android:label="FReader" android:resizeableActivity="false"/g' "$MANIFEST"
+            sed -i 's/android:name="\.MainActivity"/android:name=".MainActivity" android:resizeableActivity="false"/g' "$MANIFEST"
           fi
 
           for STYLE_FILE in android/app/src/main/res/values/styles.xml android/app/src/main/res/values-night/styles.xml; do
