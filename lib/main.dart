@@ -13,6 +13,8 @@ import 'services/txt_to_epub_converter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  PaintingBinding.instance.imageCache.maximumSize = 3000;
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 300 << 20;
   final initialDark = await StorageService.getDarkMode();
   final initialLang = await StorageService.getAppLanguage();
   runApp(MyEbookApp(initialDark: initialDark, initialLang: initialLang));
@@ -37,9 +39,6 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   late final AnimationController _rotationAnimController;
   late final Animation<double> _rotationFadeAnim;
   late final Animation<double> _rotationScaleAnim;
-  Timer? _fallbackRotateTimer;
-  bool _allowCanvasFallbackRotation = false;
-
   @override
   void initState() {
     super.initState();
@@ -60,29 +59,13 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   }
 
   void _onDesiredOrientationChanged() {
-    _fallbackRotateTimer?.cancel();
-    final desired = StorageService.desiredLandscapeNotifier.value;
-    if (desired == null) {
-      if (mounted) {
-        setState(() => _allowCanvasFallbackRotation = false);
-      }
-      return;
-    }
     if (mounted) {
-      setState(() => _allowCanvasFallbackRotation = false);
       _rotationAnimController.forward(from: 0.0);
     }
-    // OS 창 회전이 220ms 내에 작동하지 않는 태블릿 환경에서는 자동으로 캔버스 회전(RotatedBox + MediaQuery 스왑) 적용
-    _fallbackRotateTimer = Timer(const Duration(milliseconds: 220), () {
-      if (mounted) {
-        setState(() => _allowCanvasFallbackRotation = true);
-      }
-    });
   }
 
   @override
   void dispose() {
-    _fallbackRotateTimer?.cancel();
     StorageService.desiredLandscapeNotifier.removeListener(_onDesiredOrientationChanged);
     _rotationAnimController.dispose();
     super.dispose();
@@ -116,54 +99,12 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         colorSchemeSeed: Colors.indigo,
       ),
       builder: (context, child) {
-        return ValueListenableBuilder<bool?>(
-          valueListenable: StorageService.desiredLandscapeNotifier,
-          builder: (context, desiredLandscape, _) {
-            final mq = MediaQuery.of(context);
-            final bool actualLandscape = mq.size.width > mq.size.height;
-            final bool needFallbackTurn = desiredLandscape != null &&
-                desiredLandscape != actualLandscape &&
-                _allowCanvasFallbackRotation;
-            final int quarterTurns = needFallbackTurn ? 1 : 0;
-
-            final MediaQueryData effectiveMq = needFallbackTurn
-                ? mq.copyWith(
-                    size: Size(mq.size.height, mq.size.width),
-                    padding: EdgeInsets.only(
-                      top: mq.padding.left,
-                      right: mq.padding.top,
-                      bottom: mq.padding.right,
-                      left: mq.padding.bottom,
-                    ),
-                    viewPadding: EdgeInsets.only(
-                      top: mq.viewPadding.left,
-                      right: mq.viewPadding.top,
-                      bottom: mq.viewPadding.right,
-                      left: mq.viewPadding.bottom,
-                    ),
-                    viewInsets: EdgeInsets.only(
-                      top: mq.viewInsets.left,
-                      right: mq.viewInsets.top,
-                      bottom: mq.viewInsets.right,
-                      left: mq.viewInsets.bottom,
-                    ),
-                  )
-                : mq;
-
-            return RotatedBox(
-              quarterTurns: quarterTurns,
-              child: MediaQuery(
-                data: effectiveMq,
-                child: FadeTransition(
-                  opacity: _rotationFadeAnim,
-                  child: ScaleTransition(
-                    scale: _rotationScaleAnim,
-                    child: child ?? const SizedBox.shrink(),
-                  ),
-                ),
-              ),
-            );
-          },
+        return FadeTransition(
+          opacity: _rotationFadeAnim,
+          child: ScaleTransition(
+            scale: _rotationScaleAnim,
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
       home: BookshelfScreen(
@@ -519,6 +460,27 @@ class UserManualScreen extends StatelessWidget {
   }
 }
 
+/// 그리드/리스트 스크롤 시 화면 밖으로 나간 카드 위젯과 디코딩된 썸네일 GPU 텍스처가 절대 파괴되지 않도록 유지하는 KeepAlive 래퍼
+class _KeepAliveBookItem extends StatefulWidget {
+  final Widget child;
+  const _KeepAliveBookItem({super.key, required this.child});
+
+  @override
+  State<_KeepAliveBookItem> createState() => _KeepAliveBookItemState();
+}
+
+class _KeepAliveBookItemState extends State<_KeepAliveBookItem>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
 class BookshelfScreen extends StatefulWidget {
   final bool isDarkMode;
   final String appLang;
@@ -549,12 +511,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   Set<String> _favoritePaths = {};
   bool _hideFileExtension = false;
   String _bookshelfViewMode = 'list'; // 기본값: 'list' (목록형)
-  final Map<String, String?> _thumbnailPathCache = {};
+  static final Map<String, ImageProvider> _globalThumbMemoryCache = {};
+  final Map<String, ValueNotifier<ImageProvider?>> _thumbNotifiers = {};
   final Set<String> _thumbnailGeneratingPaths = {};
 
   bool _isSelectionMode = false;
   final Set<String> _selectedFilePaths = {};
   final ScrollController _bookshelfScrollController = ScrollController();
+  bool _isDraggingScrollbar = false;
+  double _scrollDragStartDy = 0.0;
+  double _scrollDragStartOffset = 0.0;
   final Map<String, GlobalKey> _fileRowKeys = {};
   bool _isDragSelecting = false;
   bool _dragTargetSelectState = true;
@@ -637,8 +603,43 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     _loadLibrary();
   }
 
+  ValueNotifier<ImageProvider?> _getThumbNotifier(String bookPath) {
+    return _thumbNotifiers.putIfAbsent(
+      bookPath,
+      () => ValueNotifier<ImageProvider?>(_globalThumbMemoryCache[bookPath]),
+    );
+  }
+
+  void _cacheThumbnailFromFileSync(String bookPath, String thumbPath, {bool isRawOriginalImage = false}) {
+    if (_globalThumbMemoryCache.containsKey(bookPath)) {
+      _getThumbNotifier(bookPath).value = _globalThumbMemoryCache[bookPath];
+      return;
+    }
+    try {
+      final f = File(thumbPath);
+      if (!f.existsSync()) return;
+      final ImageProvider provider;
+      if (isRawOriginalImage) {
+        provider = ResizeImage(FileImage(f), width: 360, allowUpscaling: false);
+      } else {
+        final bytes = f.readAsBytesSync();
+        if (bytes.length < 64) return;
+        provider = MemoryImage(bytes);
+      }
+      _globalThumbMemoryCache[bookPath] = provider;
+      _getThumbNotifier(bookPath).value = provider;
+      if (mounted) {
+        precacheImage(provider, context).catchError((_) {});
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    for (final notifier in _thumbNotifiers.values) {
+      notifier.dispose();
+    }
+    _bookshelfScrollController.dispose();
     super.dispose();
   }
 
@@ -728,6 +729,45 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       progMap[f.path] = await StorageService.getProgress(f.path);
     }
 
+    // 디스크에 이미 생성되어 있는 썸네일 바이트(MemoryImage)를 setState 전에 동기식으로 즉시 메모리에 고정하여 스크롤 시 재로딩 원천 차단
+    final thumbDir = Directory('${dir.path}/.thumbnails');
+    if (!thumbDir.existsSync()) {
+      thumbDir.createSync(recursive: true);
+    }
+    final Map<String, String> existingThumbBySafeKey = {};
+    for (final entity in thumbDir.listSync()) {
+      if (entity is File) {
+        final name = entity.path.split(Platform.pathSeparator).last;
+        if (name.startsWith('thumb_v36_') && name.endsWith('.jpg')) {
+          final k = name.substring('thumb_v36_'.length, name.length - 4);
+          existingThumbBySafeKey[k] = entity.path;
+        } else if (name.startsWith('thumb_hq26_') && name.endsWith('.jpg')) {
+          final parts = name.split('_');
+          if (parts.length >= 3) {
+            existingThumbBySafeKey.putIfAbsent(parts[2], () => entity.path);
+          }
+        }
+      }
+    }
+
+    for (final f in files) {
+      final path = f.path;
+      if (_globalThumbMemoryCache.containsKey(path)) {
+        _getThumbNotifier(path).value = _globalThumbMemoryCache[path];
+        continue;
+      }
+      final ext = path.split('.').last.toLowerCase();
+      if (_imageExts.contains(ext)) {
+        _cacheThumbnailFromFileSync(path, path, isRawOriginalImage: true);
+        continue;
+      }
+      final safeKey = path.hashCode.toUnsigned(32).toString();
+      final existingThumbPath = existingThumbBySafeKey[safeKey];
+      if (existingThumbPath != null) {
+        _cacheThumbnailFromFileSync(path, existingThumbPath);
+      }
+    }
+
     if (mounted) {
       setState(() {
         _allBooks = files;
@@ -747,43 +787,35 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         }
       });
       for (final f in files) {
-        _ensureBookThumbnail(f);
+        if (!_globalThumbMemoryCache.containsKey(f.path)) {
+          _ensureBookThumbnail(f, thumbDir.path);
+        }
       }
     }
   }
 
-  /// 13. 각 파일의 가장 첫 페이지를 썸네일 이미지로 생성 및 캐싱
-  Future<void> _ensureBookThumbnail(File file) async {
+  /// 13. 각 파일의 가장 첫 페이지를 초고속 네이티브 스레드 풀에서 썸네일 이미지로 생성 및 MemoryImage로 영구 고정
+  Future<void> _ensureBookThumbnail(File file, [String? cachedThumbDirPath]) async {
     final path = file.path;
-    if (_thumbnailPathCache.containsKey(path) && _thumbnailPathCache[path] != null) {
-      if (File(_thumbnailPathCache[path]!).existsSync()) return;
-    }
+    if (_globalThumbMemoryCache.containsKey(path)) return;
     if (_thumbnailGeneratingPaths.contains(path)) return;
     _thumbnailGeneratingPaths.add(path);
 
     try {
       final ext = path.split('.').last.toLowerCase();
       if (_imageExts.contains(ext)) {
-        if (mounted) {
-          setState(() => _thumbnailPathCache[path] = path);
-        }
+        _cacheThumbnailFromFileSync(path, path, isRawOriginalImage: true);
         return;
       }
 
-      final appDir = await getApplicationDocumentsDirectory();
-      final thumbDir = Directory('${appDir.path}/.thumbnails');
-      if (!await thumbDir.exists()) {
-        await thumbDir.create(recursive: true);
-      }
+      final String thumbDirPath = cachedThumbDirPath ??
+          '${(await getApplicationDocumentsDirectory()).path}/.thumbnails';
       final safeKey = path.hashCode.toUnsigned(32).toString();
-      final stat = await file.stat();
-      final thumbPath = '${thumbDir.path}/thumb_hq26_${safeKey}_${stat.size}.jpg';
+      final thumbPath = '$thumbDirPath/thumb_v36_$safeKey.jpg';
       final thumbFile = File(thumbPath);
 
-      if (await thumbFile.exists() && await thumbFile.length() > 64) {
-        if (mounted) {
-          setState(() => _thumbnailPathCache[path] = thumbPath);
-        }
+      if (thumbFile.existsSync() && thumbFile.lengthSync() > 64) {
+        _cacheThumbnailFromFileSync(path, thumbPath);
         return;
       }
 
@@ -793,37 +825,28 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           {
             'filePath': path,
             'outPath': thumbPath,
-            'maxWidth': 1080,
+            'maxWidth': 420,
           },
         );
-        if (rendered != null && File(rendered).existsSync()) {
-          if (mounted) {
-            setState(() => _thumbnailPathCache[path] = rendered);
-          }
+        if (rendered != null) {
+          _cacheThumbnailFromFileSync(path, rendered);
           return;
         }
       } else if (ext == 'cbz' || ext == 'epub') {
-        final bytes = await file.readAsBytes();
-        final archive = ZipDecoder().decodeBytes(bytes);
-        final imgEntries = archive.files.where((af) {
-          if (!af.isFile) return false;
-          final n = af.name.toLowerCase();
-          return n.endsWith('.jpg') || n.endsWith('.jpeg') || n.endsWith('.png') || n.endsWith('.webp');
-        }).toList();
-        if (imgEntries.isNotEmpty) {
-          imgEntries.sort((a, b) => _naturalCompare(a.name, b.name));
-          final firstImg = imgEntries.first;
-          final content = firstImg.content as List<int>;
-          await thumbFile.writeAsBytes(content, flush: true);
-          if (mounted) {
-            setState(() => _thumbnailPathCache[path] = thumbPath);
-          }
+        final rendered = await _pdfChannel.invokeMethod<String>(
+          'extractArchiveFirstImageThumbnail',
+          {
+            'filePath': path,
+            'outPath': thumbPath,
+            'maxWidth': 420,
+          },
+        );
+        if (rendered != null) {
+          _cacheThumbnailFromFileSync(path, rendered);
           return;
         }
       }
-      _thumbnailPathCache[path] = null;
     } catch (_) {
-      _thumbnailPathCache[path] = null;
     } finally {
       _thumbnailGeneratingPaths.remove(path);
     }
@@ -2276,7 +2299,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     final isSelected = _selectedFilePaths.contains(file.path);
     final isFavorite = _favoritePaths.contains(file.path);
     final lowerExt = rawFileName.split('.').last.toLowerCase();
-    final thumbPath = _thumbnailPathCache[file.path];
+    final thumbNotifier = _getThumbNotifier(file.path);
 
     final IconData fallbackIcon = lowerExt == 'pdf'
         ? Icons.picture_as_pdf
@@ -2345,41 +2368,47 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                     children: [
                       Container(
                         color: widget.isDarkMode ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                        child: (thumbPath != null && File(thumbPath).existsSync())
-                            ? Image.file(
-                                File(thumbPath),
+                        child: ValueListenableBuilder<ImageProvider?>(
+                          valueListenable: thumbNotifier,
+                          builder: (context, thumbProvider, _) {
+                            if (thumbProvider != null) {
+                              return Image(
+                                image: thumbProvider,
                                 fit: BoxFit.cover,
                                 alignment: Alignment.topCenter,
                                 gaplessPlayback: true,
-                                filterQuality: FilterQuality.high,
+                                filterQuality: FilterQuality.low,
                                 errorBuilder: (_, __, ___) => Center(
                                   child: Icon(fallbackIcon, size: 34, color: Colors.indigo),
                                 ),
-                              )
-                            : Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(fallbackIcon, size: 32, color: Colors.indigo),
-                                    const SizedBox(height: 4),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.indigo.withOpacity(0.12),
-                                        borderRadius: BorderRadius.circular(5),
-                                      ),
-                                      child: Text(
-                                        lowerExt.toUpperCase(),
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.indigo,
-                                        ),
+                              );
+                            }
+                            return Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(fallbackIcon, size: 32, color: Colors.indigo),
+                                  const SizedBox(height: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.indigo.withOpacity(0.12),
+                                      borderRadius: BorderRadius.circular(5),
+                                    ),
+                                    child: Text(
+                                      lowerExt.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.indigo,
                                       ),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
+                            );
+                          },
+                        ),
                       ),
                       if (_isSelectionMode)
                         Positioned(
@@ -2542,6 +2571,192 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     );
   }
 
+  Widget _buildPcStyleScrollbar(int itemCount) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double totalBarHeight = constraints.maxHeight;
+        const double arrowBtnHeight = 28.0;
+        final double trackHeight = (totalBarHeight - (arrowBtnHeight * 2) - 8.0).clamp(48.0, 4000.0);
+
+        return AnimatedBuilder(
+          animation: _bookshelfScrollController,
+          builder: (context, _) {
+            double realMaxExtent = 0.0;
+            double viewport = totalBarHeight;
+            double currentPixels = 0.0;
+            bool hasDimensions = false;
+
+            if (_bookshelfScrollController.hasClients &&
+                _bookshelfScrollController.position.hasContentDimensions) {
+              hasDimensions = true;
+              realMaxExtent = _bookshelfScrollController.position.maxScrollExtent;
+              viewport = _bookshelfScrollController.position.viewportDimension;
+              currentPixels = _bookshelfScrollController.position.pixels.clamp(
+                0.0,
+                math.max<double>(0.0, realMaxExtent),
+              );
+            }
+
+            final int estVisibleCount = _bookshelfViewMode == 'grid'
+                ? 9
+                : math.max<int>(4, (totalBarHeight / 68.0).floor());
+            final bool overflowsByCount = itemCount > estVisibleCount;
+            final bool overflowsByExtent = realMaxExtent > 2.0;
+
+            if (!overflowsByCount && !overflowsByExtent) {
+              return const SizedBox.shrink();
+            }
+
+            if (!hasDimensions && overflowsByCount) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() {});
+              });
+            }
+
+            final double estMaxExtent = _bookshelfViewMode == 'grid'
+                ? math.max<double>(100.0, (((itemCount + 2) ~/ 3) * (totalBarHeight / 3.0)) - totalBarHeight + 88.0)
+                : math.max<double>(100.0, (itemCount * 68.0) - totalBarHeight + 88.0);
+            final double maxExtent = realMaxExtent > 2.0 ? realMaxExtent : estMaxExtent;
+
+            final double totalContent = viewport + maxExtent;
+            final double thumbHeight = ((viewport / totalContent) * trackHeight)
+                .clamp(44.0, math.max<double>(44.0, trackHeight * 0.70));
+            final double movableTrack = math.max<double>(1.0, trackHeight - thumbHeight);
+            final double scrollRatio = (currentPixels / maxExtent).clamp(0.0, 1.0);
+            final double thumbTop = scrollRatio * movableTrack;
+
+            void jumpToClamped(double targetOffset) {
+              if (!_bookshelfScrollController.hasClients) return;
+              final pos = _bookshelfScrollController.position;
+              final limit = pos.hasContentDimensions && pos.maxScrollExtent > 0
+                  ? pos.maxScrollExtent
+                  : maxExtent;
+              _bookshelfScrollController.jumpTo(targetOffset.clamp(0.0, limit));
+            }
+
+            return Container(
+              width: 26,
+              margin: const EdgeInsets.fromLTRB(0, 4, 3, 4),
+              decoration: BoxDecoration(
+                color: widget.isDarkMode
+                    ? const Color(0xFF1E293B)
+                    : const Color(0xFFE2E8F0),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: widget.isDarkMode ? Colors.white24 : Colors.black26,
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                children: [
+                  // 상단 ▲ 스크롤 버튼 (PC 브라우저 스크롤바 스타일)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => jumpToClamped(currentPixels - 220.0),
+                    child: SizedBox(
+                      height: arrowBtnHeight,
+                      width: double.infinity,
+                      child: Icon(
+                        Icons.arrow_drop_up,
+                        size: 22,
+                        color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                  ),
+                  // 중앙 드래그 트랙 및 손잡이(Thumb)
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapDown: (details) {
+                        final double localY = details.localPosition.dy.clamp(0.0, trackHeight);
+                        if (localY < thumbTop || localY > thumbTop + thumbHeight) {
+                          final double targetRatio =
+                              ((localY - thumbHeight / 2.0) / movableTrack).clamp(0.0, 1.0);
+                          jumpToClamped(targetRatio * maxExtent);
+                        }
+                      },
+                      onVerticalDragStart: (details) {
+                        setState(() => _isDraggingScrollbar = true);
+                        final double localY = details.localPosition.dy.clamp(0.0, trackHeight);
+                        if (localY < thumbTop - 6.0 || localY > thumbTop + thumbHeight + 6.0) {
+                          final double targetRatio =
+                              ((localY - thumbHeight / 2.0) / movableTrack).clamp(0.0, 1.0);
+                          jumpToClamped(targetRatio * maxExtent);
+                        }
+                        _scrollDragStartDy = details.globalPosition.dy;
+                        _scrollDragStartOffset = _bookshelfScrollController.hasClients
+                            ? _bookshelfScrollController.position.pixels
+                            : 0.0;
+                      },
+                      onVerticalDragUpdate: (details) {
+                        final double deltaY = details.globalPosition.dy - _scrollDragStartDy;
+                        final double scrollDelta = (deltaY / movableTrack) * maxExtent;
+                        jumpToClamped(_scrollDragStartOffset + scrollDelta);
+                      },
+                      onVerticalDragEnd: (_) {
+                        if (mounted) setState(() => _isDraggingScrollbar = false);
+                      },
+                      onVerticalDragCancel: () {
+                        if (mounted) setState(() => _isDraggingScrollbar = false);
+                      },
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            top: thumbTop,
+                            left: 2,
+                            right: 2,
+                            height: thumbHeight,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: _isDraggingScrollbar
+                                    ? Colors.amber
+                                    : (widget.isDarkMode ? Colors.indigoAccent : Colors.indigo),
+                                borderRadius: BorderRadius.circular(6),
+                                boxShadow: const [
+                                  BoxShadow(color: Colors.black26, blurRadius: 2),
+                                ],
+                              ),
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(width: 11, height: 1.5, color: Colors.white),
+                                    const SizedBox(height: 3),
+                                    Container(width: 11, height: 1.5, color: Colors.white),
+                                    const SizedBox(height: 3),
+                                    Container(width: 11, height: 1.5, color: Colors.white),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // 하단 ▼ 스크롤 버튼
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => jumpToClamped(currentPixels + 220.0),
+                    child: SizedBox(
+                      height: arrowBtnHeight,
+                      width: double.infinity,
+                      child: Icon(
+                        Icons.arrow_drop_down,
+                        size: 22,
+                        color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final filteredBooks = _selectedGroup == '전체'
@@ -2690,8 +2905,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         ),
                       ),
                     )
-                  : Listener(
-                      behavior: HitTestBehavior.translucent,
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: Listener(
+                              behavior: HitTestBehavior.translucent,
                       onPointerDown: (event) {
                         if (_isSelectionMode) {
                           _pointerDownGlobalPos = event.position;
@@ -2755,6 +2973,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
                                 return GridView.builder(
                                   controller: _bookshelfScrollController,
+                                  cacheExtent: 3000.0,
                                   physics: _isSelectionMode
                                       ? const NeverScrollableScrollPhysics()
                                       : const AlwaysScrollableScrollPhysics(),
@@ -2767,13 +2986,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                   ),
                                   itemCount: filteredBooks.length,
                                   itemBuilder: (context, index) {
-                                    return _buildGridBookCard(filteredBooks[index]);
+                                    final bookFile = filteredBooks[index];
+                                    return _KeepAliveBookItem(
+                                      key: ValueKey(bookFile.path),
+                                      child: _buildGridBookCard(bookFile),
+                                    );
                                   },
                                 );
                               },
                             )
                           : ListView.separated(
                         controller: _bookshelfScrollController,
+                        cacheExtent: 3000.0,
                         physics: _isSelectionMode
                             ? const NeverScrollableScrollPhysics()
                             : const AlwaysScrollableScrollPhysics(),
@@ -2927,7 +3151,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         );
                       },
                     ),
-                      ),
+                          ),
+                        ),
+                        _buildPcStyleScrollbar(filteredBooks.length),
+                      ],
+                    ),
             ),
           ],
         ),

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
@@ -35,6 +36,9 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.Executors
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
@@ -71,44 +75,21 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var accelLast = SensorManager.GRAVITY_EARTH
     private var shakeAccel = 0.0f
     private var lastShakeTimestamp = 0L
+    private var lastShakePeakTime = 0L
     private var shakeCount = 0
     private var firstShakeTime = 0L
+    private val thumbExecutor = Executors.newFixedThreadPool(4)
 
-    // 1. 태블릿에서 상단 상태표시줄을 한번 내렸을 때 자동으로 다시 올라가게 하는 감시 워치독
+    // 1. 태블릿(resizeableActivity="false" 포함)에서 상태표시줄 및 네비게이션 바가 항상 자동으로 숨겨지도록 주기적으로 강제 적용하는 워치독
     private var isActivityResumed = false
     private var statusBarVisibleTicks = 0
     private val statusBarWatchdogRunnable = object : Runnable {
         override fun run() {
             if (!isActivityResumed) return
             try {
-                val visible = isStatusBarCurrentlyVisible()
-                if (visible) {
-                    statusBarVisibleTicks++
-                    if (statusBarVisibleTicks >= 2) {
-                        hideSystemStatusBar()
-                    }
-                } else {
-                    statusBarVisibleTicks = 0
-                }
+                hideSystemStatusBar()
             } catch (_: Exception) {}
-            mainHandler.postDelayed(this, 750L)
-        }
-    }
-
-    private fun isStatusBarCurrentlyVisible(): Boolean {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val rootInsets = window?.decorView?.rootWindowInsets
-                (rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true) ||
-                    (rootInsets?.isVisible(WindowInsets.Type.navigationBars()) == true)
-            } else {
-                @Suppress("DEPRECATION")
-                val vis = window.decorView.systemUiVisibility
-                (vis and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0 ||
-                    (vis and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) == 0
-            }
-        } catch (_: Exception) {
-            false
+            mainHandler.postDelayed(this, 1000L)
         }
     }
 
@@ -130,35 +111,39 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
             }
 
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
                 window.insetsController?.let { controller ->
                     controller.systemBarsBehavior =
                         WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                    controller.hide(
+                        WindowInsets.Type.statusBars()
+                            or WindowInsets.Type.navigationBars()
+                    )
                 }
-            } else {
-                @Suppress("DEPRECATION")
-                window.decorView.systemUiVisibility = (
-                    View.SYSTEM_UI_FLAG_FULLSCREEN
-                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                        or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                )
             }
         } catch (_: Exception) {}
     }
 
     private fun applyRequestedScreenOrientation(mode: String) {
         requestedOrientation = when (mode) {
-            "landscape" -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            "portrait" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            "landscape" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            "portrait" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         hideSystemStatusBar()
         mainHandler.postDelayed({ hideSystemStatusBar() }, 180L)
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 450L)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -247,38 +232,38 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             if (call.method == "renderPdfFirstPageThumbnail") {
                 val pdfPath = call.argument<String>("pdfPath") ?: call.argument<String>("filePath")
                 val thumbPath = call.argument<String>("thumbPath") ?: call.argument<String>("outPath")
+                val requestedW = call.argument<Int>("maxWidth") ?: 420
                 if (pdfPath == null || thumbPath == null) {
                     result.error("INVALID_ARGS", "Missing paths", null)
                     return@setMethodCallHandler
                 }
-                Thread {
+                thumbExecutor.execute {
                     try {
                         val thumbFile = File(thumbPath)
                         if (thumbFile.exists() && thumbFile.length() > 100L) {
                             runOnUiThread { result.success(thumbFile.absolutePath) }
-                            return@Thread
+                            return@execute
                         }
                         thumbFile.parentFile?.mkdirs()
                         val pdfFile = File(pdfPath)
                         if (!pdfFile.exists()) {
                             runOnUiThread { result.success(null) }
-                            return@Thread
+                            return@execute
                         }
                         val pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
                         val renderer = PdfRenderer(pfd)
                         if (renderer.pageCount > 0) {
                             val page = renderer.openPage(0)
-                            val requestedW = call.argument<Int>("maxWidth") ?: 1080
-                            val targetW = requestedW.coerceIn(720, 1440)
+                            val targetW = requestedW.coerceIn(320, 640)
                             val scale = targetW.toFloat() / page.width.toFloat().coerceAtLeast(1f)
                             val w = targetW
-                            val h = (page.height * scale).toInt().coerceIn(640, 2048)
+                            val h = (page.height * scale).toInt().coerceIn(320, 960)
                             val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                             bitmap.eraseColor(Color.WHITE)
                             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                             page.close()
                             FileOutputStream(thumbFile).use { out ->
-                                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
                             }
                             bitmap.recycle()
                         }
@@ -290,7 +275,70 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     } catch (e: Exception) {
                         runOnUiThread { result.success(null) }
                     }
-                }.start()
+                }
+            } else if (call.method == "extractArchiveFirstImageThumbnail") {
+                val archivePath = call.argument<String>("filePath")
+                val thumbPath = call.argument<String>("outPath")
+                val requestedW = call.argument<Int>("maxWidth") ?: 420
+                if (archivePath == null || thumbPath == null) {
+                    result.error("INVALID_ARGS", "Missing paths", null)
+                    return@setMethodCallHandler
+                }
+                thumbExecutor.execute {
+                    try {
+                        val thumbFile = File(thumbPath)
+                        if (thumbFile.exists() && thumbFile.length() > 100L) {
+                            runOnUiThread { result.success(thumbFile.absolutePath) }
+                            return@execute
+                        }
+                        val srcFile = File(archivePath)
+                        if (!srcFile.exists()) {
+                            runOnUiThread { result.success(null) }
+                            return@execute
+                        }
+                        thumbFile.parentFile?.mkdirs()
+                        ZipFile(srcFile).use { zip ->
+                            val entries = zip.entries()
+                            var bestEntry: ZipEntry? = null
+                            var bestName = ""
+                            while (entries.hasMoreElements()) {
+                                val entry = entries.nextElement()
+                                if (entry.isDirectory) continue
+                                val lower = entry.name.lowercase()
+                                if (lower.contains("__macosx") || lower.substringAfterLast('/').startsWith("._")) continue
+                                if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp")) {
+                                    if (bestEntry == null || compareNaturalStrings(lower, bestName) < 0) {
+                                        bestEntry = entry
+                                        bestName = lower
+                                    }
+                                }
+                            }
+                            if (bestEntry != null) {
+                                val rawBytes = zip.getInputStream(bestEntry).use { it.readBytes() }
+                                val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, boundsOpts)
+                                var sampleSize = 1
+                                val targetW = requestedW.coerceIn(320, 640)
+                                while (boundsOpts.outWidth / (sampleSize * 2) >= targetW) {
+                                    sampleSize *= 2
+                                }
+                                val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                                val decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, decodeOpts)
+                                if (decoded != null) {
+                                    FileOutputStream(thumbFile).use { out ->
+                                        decoded.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                                    }
+                                    decoded.recycle()
+                                }
+                            }
+                        }
+                        runOnUiThread {
+                            result.success(if (thumbFile.exists() && thumbFile.length() > 64L) thumbFile.absolutePath else null)
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { result.success(null) }
+                    }
+                }
             } else if (call.method == "decodeTextBytes") {
                 val rawBytes = call.argument<ByteArray>("bytes")
                 if (rawBytes == null || rawBytes.isEmpty()) {
@@ -439,6 +487,22 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         } catch (_: Exception) {}
     }
 
+    private fun compareNaturalStrings(a: String, b: String): Int {
+        val reg = Regex("(\\d+)|(\\D+)")
+        val ma = reg.findAll(a).map { it.value }.toList()
+        val mb = reg.findAll(b).map { it.value }.toList()
+        val len = minOf(ma.size, mb.size)
+        for (i in 0 until len) {
+            val pa = ma[i]
+            val pb = mb[i]
+            val na = pa.toBigIntegerOrNull()
+            val nb = pb.toBigIntegerOrNull()
+            val cmp = if (na != null && nb != null) na.compareTo(nb) else pa.compareTo(pb)
+            if (cmp != 0) return cmp
+        }
+        return ma.size.compareTo(mb.size)
+    }
+
     override fun onSensorChanged(event: SensorEvent?) {
         if (!isVolumeInterceptEnabled || event == null) return
         if (event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
@@ -450,21 +514,25 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         accelLast = accelCurrent
         accelCurrent = magnitude
         val delta = kotlin.math.abs(accelCurrent - accelLast)
-        shakeAccel = shakeAccel * 0.82f + delta
+        shakeAccel = shakeAccel * 0.80f + delta
         val gForce = magnitude / SensorManager.GRAVITY_EARTH
 
-        if (shakeAccel > 4.8f || gForce > 1.58f) {
+        // 일상적인 흔들림이나 손 움직임에서는 반응하지 않도록 임계값을 높이고, 명확하게 2번 흔들었을 때만 해제되도록 설정
+        if (gForce > 2.42f && shakeAccel > 11.8f) {
             val now = SystemClock.uptimeMillis()
-            if (now - lastShakeTimestamp < 750L) return
+            if (now - lastShakeTimestamp < 1100L) return
+            // 한 번 흔드는 동작의 시작·멈춤이 2번으로 중복 인식되지 않도록 최소 220ms 간격 보장
+            if (now - lastShakePeakTime < 220L) return
+            lastShakePeakTime = now
 
-            if (now - firstShakeTime > 850L) {
+            if (now - firstShakeTime > 800L) {
                 shakeCount = 1
                 firstShakeTime = now
             } else {
                 shakeCount++
             }
 
-            if (shakeCount >= 2 || shakeAccel > 8.0f || gForce > 2.00f) {
+            if (shakeCount >= 2) {
                 shakeCount = 0
                 shakeAccel = 0.0f
                 lastShakeTimestamp = now
@@ -673,9 +741,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         if (ev != null && (ev.actionMasked == MotionEvent.ACTION_DOWN || ev.actionMasked == MotionEvent.ACTION_UP)) {
-            if (isStatusBarCurrentlyVisible()) {
-                hideSystemStatusBar()
-            }
+            hideSystemStatusBar()
         }
         if (isVolumeInterceptEnabled) {
             checkStylusButtonEvent(ev)
