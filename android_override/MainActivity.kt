@@ -80,79 +80,146 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var firstShakeTime = 0L
     private val thumbExecutor = Executors.newFixedThreadPool(4)
 
-    // Keep one owner of immersive state. One UI can report hidden insets while
-    // still drawing a transient status bar, so recovery must not depend on that
-    // visibility report. Never consume touch events or IME insets.
+    // 1. 태블릿에서 상단 상태표시줄을 한번 내렸을 때 약 1.3초 후 자동으로 다시 올라가게 하는 감시 워치독 (v33/v34 동일 로직)
     private var isActivityResumed = false
-    private var lastImmersiveRequest = 0L
-    private val immersiveRetry = Runnable {
-        if (isActivityResumed && window.decorView.hasWindowFocus()) {
-            hideSystemStatusBar(alsoHideNavBar = true)
-        }
-    }
-    private var controllableInsetsListener:
-        WindowInsetsController.OnControllableInsetsChangedListener? = null
+    private var statusBarVisibleTicks = 0
     private val statusBarWatchdogRunnable = object : Runnable {
         override fun run() {
             if (!isActivityResumed) return
-            if (window.decorView.hasWindowFocus()) {
-                hideSystemStatusBar(alsoHideNavBar = true)
-            }
-            mainHandler.postDelayed(this, 2000L)
+            try {
+                val visible = isStatusBarCurrentlyVisible()
+                if (visible) {
+                    statusBarVisibleTicks++
+                    if (statusBarVisibleTicks >= 2) {
+                        forceHideStatusBar()
+                    }
+                } else {
+                    statusBarVisibleTicks = 0
+                }
+            } catch (_: Exception) {}
+            mainHandler.postDelayed(this, 750L)
         }
     }
 
-    private fun requestImmersiveRecovery() {
-        if (!isActivityResumed || !window.decorView.hasWindowFocus()) return
-        hideSystemStatusBar(alsoHideNavBar = true)
-        mainHandler.removeCallbacks(immersiveRetry)
-        // Android can ignore hide requests for 1s after closing the keyboard.
-        mainHandler.postDelayed(immersiveRetry, 1200L)
+    private fun isStatusBarCurrentlyVisible(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val rootInsets = window?.decorView?.rootWindowInsets
+                rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true
+            } else {
+                @Suppress("DEPRECATION")
+                (window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
-    @Suppress("DEPRECATION")
     private fun hideSystemStatusBar(alsoHideNavBar: Boolean = false) {
-        if (isFinishing || isDestroyed) return
-        val decor = window.decorView
-        // Let search/rename/memo dialogs keep normal keyboard interaction.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-            decor.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true) return
-
-        window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+        try {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
             window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val lp = window.attributes
-            val cutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-            else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            if (lp.layoutInDisplayCutoutMode != cutout) {
-                lp.layoutInDisplayCutoutMode = cutout
-                window.attributes = lp
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val lp = window.attributes
+                val desiredCutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                } else {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+                if (lp.layoutInDisplayCutoutMode != desiredCutout) {
+                    lp.layoutInDisplayCutoutMode = desiredCutout
+                    window.attributes = lp
+                }
             }
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Use Android's controller directly: Flutter SystemUiMode is ignored
-            // for targetSdk 36. Edge-to-edge alone does not hide the status bar.
-            window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let { controller ->
-                controller.systemBarsBehavior =
-                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                if (alsoHideNavBar) controller.hide(WindowInsets.Type.navigationBars())
-                controller.hide(WindowInsets.Type.statusBars())
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.setDecorFitsSystemWindows(false)
+                window.insetsController?.let { controller ->
+                    controller.systemBarsBehavior =
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    // 중요: 태블릿 OneUI에서 navigationBars()와 statusBars()를 묶어서 호출하면 태스크바 때문에 상태표시줄 숨김 애니메이션이 취소되므로 반드시 분리!
+                    controller.hide(WindowInsets.Type.statusBars())
+                    if (alsoHideNavBar) {
+                        try {
+                            controller.hide(WindowInsets.Type.navigationBars())
+                        } catch (_: Exception) {}
+                    }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                )
             }
-        } else {
-            decor.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            )
+        } catch (_: Exception) {}
+    }
+
+    // One UI(갤럭시 탭) 상태표시줄 고착 버그 대응.
+    // 앱은 이미 '숨김'을 요청한 상태인데 시스템이 상태표시줄을 계속 그리는 경우, hide()를 다시 불러도
+    // 요청 상태가 바뀌지 않아 시스템에 전달조차 되지 않는다. 그래서 잠깐 '표시' 요청으로 바꿨다가
+    // 다음 프레임에 '숨김'을 다시 요청해 시스템이 상태표시줄 상태를 새로 계산하도록 만든다.
+    // (사용자가 알림창을 한 번 내렸다 올리면 사라지는 것과 같은 효과)
+    private var lastForceHideAt = 0L
+
+    private fun isImeCurrentlyVisible(): Boolean {
+        return try {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                window?.decorView?.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true
+        } catch (_: Exception) {
+            false
         }
-        lastImmersiveRequest = SystemClock.uptimeMillis()
+    }
+
+    private fun forceHideStatusBar() {
+        if (isFinishing || isDestroyed) return
+        if (!window.decorView.hasWindowFocus()) return // 알림창/다른 창이 위에 있으면 건드리지 않음
+        if (isImeCurrentlyVisible()) return // 키보드 입력 중(검색·이름변경 등)에는 건드리지 않음
+        val now = SystemClock.uptimeMillis()
+        if (now - lastForceHideAt < 700L) return
+        lastForceHideAt = now
+
+        hideSystemStatusBar()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+
+        val controller = window.insetsController ?: return
+        mainHandler.postDelayed({
+            try {
+                if (isStatusBarCurrentlyVisible()) {
+                    // 1단계: 표시 → (다음 프레임) 숨김 으로 요청 상태를 실제로 바꿔 시스템에 다시 전달
+                    controller.show(WindowInsets.Type.statusBars())
+                    mainHandler.postDelayed({
+                        try {
+                            controller.systemBarsBehavior =
+                                WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                            controller.hide(WindowInsets.Type.statusBars())
+                        } catch (_: Exception) {}
+                    }, 48L)
+                }
+            } catch (_: Exception) {}
+        }, 32L)
+        mainHandler.postDelayed({
+            try {
+                if (isStatusBarCurrentlyVisible() && window.decorView.hasWindowFocus() && !isImeCurrentlyVisible()) {
+                    // 2단계: 그래도 남아 있으면 시스템 바 전체(상태표시줄+내비게이션/태스크바)를 한 번에 숨김
+                    controller.hide(WindowInsets.Type.systemBars())
+                    @Suppress("DEPRECATION")
+                    window.decorView.systemUiVisibility = (
+                        View.SYSTEM_UI_FLAG_FULLSCREEN
+                            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        )
+                }
+            } catch (_: Exception) {}
+        }, 520L)
     }
 
     private fun applyRequestedScreenOrientation(mode: String) {
@@ -172,35 +239,21 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 250L)
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 600L)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val listener = WindowInsetsController.OnControllableInsetsChangedListener { _, types ->
-                if ((types and WindowInsets.Type.statusBars()) != 0) {
-                    window.decorView.post { requestImmersiveRecovery() }
-                }
-            }
-            controllableInsetsListener = listener
-            window.insetsController?.addOnControllableInsetsChangedListener(listener)
-        }
         window.decorView.setOnApplyWindowInsetsListener { v, insets ->
-            val visible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val statusBarVisible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 insets.isVisible(WindowInsets.Type.statusBars())
             } else {
                 @Suppress("DEPRECATION")
                 insets.systemWindowInsetTop > 0
             }
-            if (visible && isActivityResumed &&
-                SystemClock.uptimeMillis() - lastImmersiveRequest > 100L) {
-                // Coalesce callbacks; do not schedule one task per animation frame.
-                mainHandler.removeCallbacks(immersiveRetry)
-                mainHandler.postDelayed(immersiveRetry, 1200L)
+            if (statusBarVisible) {
+                mainHandler.postDelayed({ hideSystemStatusBar() }, 1500L)
+                mainHandler.postDelayed({
+                    if (isActivityResumed && isStatusBarCurrentlyVisible()) forceHideStatusBar()
+                }, 2300L)
             }
             v.onApplyWindowInsets(insets)
         }
-    }
-
-    override fun onFlutterUiDisplayed() {
-        super.onFlutterUiDisplayed()
-        window.decorView.post { requestImmersiveRecovery() }
     }
 
     override fun onPostResume() {
@@ -219,6 +272,10 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         if (hasFocus) {
             hideSystemStatusBar()
             mainHandler.postDelayed({ hideSystemStatusBar() }, 120L)
+            // 앱 실행 직후/알림창을 닫은 직후 상태표시줄이 남아 있으면 자동으로 강제 숨김
+            mainHandler.postDelayed({
+                if (isActivityResumed && isStatusBarCurrentlyVisible()) forceHideStatusBar()
+            }, 600L)
         }
     }
 
@@ -712,6 +769,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     override fun onResume() {
         super.onResume()
         isActivityResumed = true
+        statusBarVisibleTicks = 0
         hideSystemStatusBar(alsoHideNavBar = true)
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 250L)
         mainHandler.removeCallbacks(statusBarWatchdogRunnable)
@@ -725,7 +783,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     override fun onPause() {
         isActivityResumed = false
         mainHandler.removeCallbacks(statusBarWatchdogRunnable)
-        mainHandler.removeCallbacks(immersiveRetry)
         try {
             sensorManager?.unregisterListener(this)
         } catch (_: Exception) {}
@@ -733,15 +790,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     }
 
     override fun onDestroy() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            controllableInsetsListener?.let {
-                window.insetsController?.removeOnControllableInsetsChangedListener(it)
-            }
-        }
-        controllableInsetsListener = null
         isActivityResumed = false
         mainHandler.removeCallbacks(statusBarWatchdogRunnable)
-        mainHandler.removeCallbacks(immersiveRetry)
         try {
             sensorManager?.unregisterListener(this)
             mediaSession?.isActive = false
@@ -781,14 +831,20 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-        if (isVolumeInterceptEnabled) checkStylusButtonEvent(ev)
-        val handled = super.dispatchTouchEvent(ev)
-        if (ev != null && ev.actionMasked == MotionEvent.ACTION_UP) {
-            // Apply AFTER Flutter/WebView processes the tap; keep its normal action.
-            // Do this even if One UI claims the status bar is already hidden.
-            window.decorView.post { requestImmersiveRecovery() }
+        if (ev != null && (ev.actionMasked == MotionEvent.ACTION_DOWN || ev.actionMasked == MotionEvent.ACTION_UP)) {
+            if (isStatusBarCurrentlyVisible()) {
+                if (ev.actionMasked == MotionEvent.ACTION_UP) {
+                    // 화면을 터치했다 떼면 남아 있는 상태표시줄을 강제로 숨김
+                    forceHideStatusBar()
+                } else {
+                    hideSystemStatusBar()
+                }
+            }
         }
-        return handled
+        if (isVolumeInterceptEnabled) {
+            checkStylusButtonEvent(ev)
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     private fun decodeKoreanTextBytesSmart(bytes: ByteArray): String {

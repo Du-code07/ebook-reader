@@ -1718,10 +1718,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       final File epubFile;
       try {
         epubFile = await TxtToEpubConverter.convertDocumentToEpub(file);
-      } catch (error) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('문서를 열지 못했습니다: $error'), duration: const Duration(seconds: 8)),
-        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${_tr('문서를 변환하지 못했습니다', 'Could not convert the document', '无法转换文档', '文書を変換できませんでした')}: $e')),
+          );
+        }
         return;
       }
       if (!mounted) return;
