@@ -48,11 +48,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     private var isVolumeInterceptEnabled = false
     private var eventSink: EventChannel.EventSink? = null
+    private var pdfMethodChannel: MethodChannel? = null
 
     private var isVolUpPressed = false
     private var isVolDownPressed = false
     private var comboTriggered = false
-    private var lastVolKeyDownTime = 0L
+    private var lastVolUpDownTime = 0L
+    private var lastVolDownDownTime = 0L
+    private var lastVolUpEventTime = 0L
+    private var lastVolDownEventTime = 0L
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingVolUpRunnable: Runnable? = null
     private var pendingVolDownRunnable: Runnable? = null
@@ -63,6 +67,9 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     private var sensorManager: SensorManager? = null
     private var accelerometer: Sensor? = null
+    private var accelCurrent = SensorManager.GRAVITY_EARTH
+    private var accelLast = SensorManager.GRAVITY_EARTH
+    private var shakeAccel = 0.0f
     private var lastShakeTimestamp = 0L
     private var shakeCount = 0
     private var firstShakeTime = 0L
@@ -77,7 +84,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 val visible = isStatusBarCurrentlyVisible()
                 if (visible) {
                     statusBarVisibleTicks++
-                    // 상태표시줄이 내려온 뒤 약 1.3초가 경과하면 자동으로 다시 숨김 (안 올라갔을 경우 매 750ms마다 재시도)
                     if (statusBarVisibleTicks >= 2) {
                         hideSystemStatusBar()
                     }
@@ -93,21 +99,19 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val rootInsets = window?.decorView?.rootWindowInsets
-                rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true
+                (rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true) ||
+                    (rootInsets?.isVisible(WindowInsets.Type.navigationBars()) == true)
             } else {
                 @Suppress("DEPRECATION")
-                (window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0
+                val vis = window.decorView.systemUiVisibility
+                (vis and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0 ||
+                    (vis and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) == 0
             }
         } catch (_: Exception) {
             false
         }
     }
 
-    /**
-     * 1 & 2. Android 11~16 태블릿(OneUI)에서 legacy systemUiVisibility 호출로 인해
-     * BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE 설정이 풀리는 현상을 방지하기 위해
-     * API 30 이상에서는 순수 WindowInsetsController만 사용하여 상태표시줄을 숨김!
-     */
     private fun hideSystemStatusBar() {
         try {
             window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
@@ -131,13 +135,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 window.insetsController?.let { controller ->
                     controller.systemBarsBehavior =
                         WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    controller.hide(WindowInsets.Type.statusBars())
+                    controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
                 }
             } else {
                 @Suppress("DEPRECATION")
                 window.decorView.systemUiVisibility = (
                     View.SYSTEM_UI_FLAG_FULLSCREEN
                         or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                         or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                         or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 )
@@ -158,15 +164,19 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         hideSystemStatusBar()
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 150L)
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 400L)
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 800L)
 
         window.decorView.setOnApplyWindowInsetsListener { v, insets ->
-            val statusBarVisible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                insets.isVisible(WindowInsets.Type.statusBars())
+            val sysBarVisible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.isVisible(WindowInsets.Type.statusBars()) ||
+                    insets.isVisible(WindowInsets.Type.navigationBars())
             } else {
                 @Suppress("DEPRECATION")
-                insets.systemWindowInsetTop > 0
+                insets.systemWindowInsetTop > 0 || insets.systemWindowInsetBottom > 0
             }
-            if (statusBarVisible) {
+            if (sysBarVisible) {
                 mainHandler.postDelayed({ hideSystemStatusBar() }, 1500L)
             }
             v.onApplyWindowInsets(insets)
@@ -194,6 +204,9 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        hideSystemStatusBar()
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 200L)
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 600L)
         setupSpenMediaSession()
         setupShakeSensor()
 
@@ -202,6 +215,9 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 if (call.method == "setIntercept") {
                     val enabled = call.argument<Boolean>("enabled") ?: false
                     isVolumeInterceptEnabled = enabled
+                    if (enabled) {
+                        registerShakeSensorListener()
+                    }
                     updateMediaSessionState(enabled)
                     result.success(null)
                 } else if (call.method == "setScreenOrientation") {
@@ -225,170 +241,201 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
             })
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
-            .setMethodCallHandler { call, result ->
-                if (call.method == "renderPdfFirstPageThumbnail") {
-                    val pdfPath = call.argument<String>("pdfPath") ?: call.argument<String>("filePath")
-                    val thumbPath = call.argument<String>("thumbPath") ?: call.argument<String>("outPath")
-                    if (pdfPath == null || thumbPath == null) {
-                        result.error("INVALID_ARGS", "Missing paths", null)
-                        return@setMethodCallHandler
+        val pChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
+        pdfMethodChannel = pChannel
+        pChannel.setMethodCallHandler { call, result ->
+            if (call.method == "renderPdfFirstPageThumbnail") {
+                val pdfPath = call.argument<String>("pdfPath") ?: call.argument<String>("filePath")
+                val thumbPath = call.argument<String>("thumbPath") ?: call.argument<String>("outPath")
+                if (pdfPath == null || thumbPath == null) {
+                    result.error("INVALID_ARGS", "Missing paths", null)
+                    return@setMethodCallHandler
+                }
+                Thread {
+                    try {
+                        val thumbFile = File(thumbPath)
+                        if (thumbFile.exists() && thumbFile.length() > 100L) {
+                            runOnUiThread { result.success(thumbFile.absolutePath) }
+                            return@Thread
+                        }
+                        thumbFile.parentFile?.mkdirs()
+                        val pdfFile = File(pdfPath)
+                        if (!pdfFile.exists()) {
+                            runOnUiThread { result.success(null) }
+                            return@Thread
+                        }
+                        val pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
+                        val renderer = PdfRenderer(pfd)
+                        if (renderer.pageCount > 0) {
+                            val page = renderer.openPage(0)
+                            val requestedW = call.argument<Int>("maxWidth") ?: 1080
+                            val targetW = requestedW.coerceIn(720, 1440)
+                            val scale = targetW.toFloat() / page.width.toFloat().coerceAtLeast(1f)
+                            val w = targetW
+                            val h = (page.height * scale).toInt().coerceIn(640, 2048)
+                            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                            bitmap.eraseColor(Color.WHITE)
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            page.close()
+                            FileOutputStream(thumbFile).use { out ->
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                            }
+                            bitmap.recycle()
+                        }
+                        renderer.close()
+                        pfd.close()
+                        runOnUiThread {
+                            result.success(if (thumbFile.exists()) thumbFile.absolutePath else null)
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { result.success(null) }
                     }
-                    Thread {
-                        try {
-                            val thumbFile = File(thumbPath)
-                            if (thumbFile.exists() && thumbFile.length() > 100L) {
-                                runOnUiThread { result.success(thumbFile.absolutePath) }
-                                return@Thread
-                            }
-                            thumbFile.parentFile?.mkdirs()
-                            val pdfFile = File(pdfPath)
-                            if (!pdfFile.exists()) {
-                                runOnUiThread { result.success(null) }
-                                return@Thread
-                            }
-                            val pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
-                            val renderer = PdfRenderer(pfd)
-                            if (renderer.pageCount > 0) {
-                                val page = renderer.openPage(0)
-                                val requestedW = call.argument<Int>("maxWidth") ?: 1080
-                                val targetW = requestedW.coerceIn(720, 1440)
-                                val scale = targetW.toFloat() / page.width.toFloat().coerceAtLeast(1f)
-                                val w = targetW
-                                val h = (page.height * scale).toInt().coerceIn(640, 2048)
-                                val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                }.start()
+            } else if (call.method == "decodeTextBytes") {
+                val rawBytes = call.argument<ByteArray>("bytes")
+                if (rawBytes == null || rawBytes.isEmpty()) {
+                    result.success("")
+                    return@setMethodCallHandler
+                }
+                try {
+                    val decoded = decodeKoreanTextBytesSmart(rawBytes)
+                    result.success(decoded)
+                } catch (e: Exception) {
+                    result.success(String(rawBytes, Charsets.UTF_8))
+                }
+            } else if (call.method == "renderPdfToImages") {
+                val pdfPath = call.argument<String>("pdfPath")
+                val outDirPath = call.argument<String>("outDirPath")
+                if (pdfPath == null || outDirPath == null) {
+                    result.error("INVALID_ARGS", "Missing paths", null)
+                    return@setMethodCallHandler
+                }
+                Thread {
+                    try {
+                        val outDir = File(outDirPath)
+                        if (!outDir.exists()) outDir.mkdirs()
+                        val pfd = ParcelFileDescriptor.open(File(pdfPath), ParcelFileDescriptor.MODE_READ_ONLY)
+                        val renderer = PdfRenderer(pfd)
+                        val pagePaths = ArrayList<String>()
+
+                        for (i in 0 until renderer.pageCount) {
+                            val pageFile = File(outDir, "page_${String.format("%04d", i)}.jpg")
+                            if (!pageFile.exists() || pageFile.length() == 0L) {
+                                val page = renderer.openPage(i)
+                                val scale = (1440f / page.width.toFloat().coerceAtLeast(1f)).coerceIn(1.5f, 2.5f)
+                                val width = (page.width * scale).toInt().coerceAtLeast(720)
+                                val height = (page.height * scale).toInt().coerceAtLeast(960)
+                                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                                 bitmap.eraseColor(Color.WHITE)
                                 page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                                 page.close()
-                                FileOutputStream(thumbFile).use { out ->
-                                    bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                                FileOutputStream(pageFile).use { out ->
+                                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
                                 }
                                 bitmap.recycle()
                             }
-                            renderer.close()
-                            pfd.close()
-                            runOnUiThread {
-                                result.success(if (thumbFile.exists()) thumbFile.absolutePath else null)
-                            }
-                        } catch (e: Exception) {
-                            runOnUiThread { result.success(null) }
+                            pagePaths.add(pageFile.absolutePath)
                         }
-                    }.start()
-                } else if (call.method == "decodeTextBytes") {
-                    val rawBytes = call.argument<ByteArray>("bytes")
-                    if (rawBytes == null || rawBytes.isEmpty()) {
-                        result.success("")
-                        return@setMethodCallHandler
-                    }
-                    try {
-                        val decoded = decodeKoreanTextBytesSmart(rawBytes)
-                        result.success(decoded)
+                        renderer.close()
+                        pfd.close()
+                        runOnUiThread { result.success(pagePaths) }
                     } catch (e: Exception) {
-                        result.success(String(rawBytes, Charsets.UTF_8))
+                        runOnUiThread { result.error("PDF_ERR", e.message, null) }
                     }
-                } else if (call.method == "renderPdfToImages") {
-                    val pdfPath = call.argument<String>("pdfPath")
-                    val outDirPath = call.argument<String>("outDirPath")
-                    if (pdfPath == null || outDirPath == null) {
-                        result.error("INVALID_ARGS", "Missing paths", null)
-                        return@setMethodCallHandler
-                    }
-                    Thread {
-                        try {
-                            val outDir = File(outDirPath)
-                            if (!outDir.exists()) outDir.mkdirs()
-                            val pfd = ParcelFileDescriptor.open(File(pdfPath), ParcelFileDescriptor.MODE_READ_ONLY)
+                }.start()
+            } else if (call.method == "mergePdfs") {
+                val inputPaths = call.argument<List<String>>("inputPaths")
+                val outputPath = call.argument<String>("outputPath")
+                if (inputPaths == null || outputPath == null || inputPaths.isEmpty()) {
+                    result.error("INVALID_ARGS", "Missing inputPaths or outputPath", null)
+                    return@setMethodCallHandler
+                }
+                Thread {
+                    val outPdf = PdfDocument()
+                    try {
+                        var globalPageNum = 1
+                        val totalFiles = inputPaths.size
+                        for ((fileIdx, path) in inputPaths.withIndex()) {
+                            val f = File(path)
+                            if (!f.exists()) continue
+                            val currentIdx = fileIdx + 1
+                            val currentName = f.name
+                            mainHandler.post {
+                                try {
+                                    pdfMethodChannel?.invokeMethod(
+                                        "onPdfMergeProgress",
+                                        mapOf(
+                                            "current" to currentIdx,
+                                            "total" to totalFiles,
+                                            "fileName" to currentName
+                                        )
+                                    )
+                                } catch (_: Exception) {}
+                            }
+                            val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
                             val renderer = PdfRenderer(pfd)
-                            val pagePaths = ArrayList<String>()
-
                             for (i in 0 until renderer.pageCount) {
-                                val pageFile = File(outDir, "page_${String.format("%04d", i)}.jpg")
-                                if (!pageFile.exists() || pageFile.length() == 0L) {
-                                    val page = renderer.openPage(i)
-                                    val scale = (1440f / page.width.toFloat().coerceAtLeast(1f)).coerceIn(1.5f, 2.5f)
-                                    val width = (page.width * scale).toInt().coerceAtLeast(720)
-                                    val height = (page.height * scale).toInt().coerceAtLeast(960)
-                                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                                    bitmap.eraseColor(Color.WHITE)
-                                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                    page.close()
-                                    FileOutputStream(pageFile).use { out ->
-                                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                                    }
-                                    bitmap.recycle()
-                                }
-                                pagePaths.add(pageFile.absolutePath)
+                                val srcPage = renderer.openPage(i)
+                                val scale = (1440f / srcPage.width.toFloat().coerceAtLeast(1f)).coerceIn(1.5f, 2.2f)
+                                val w = (srcPage.width * scale).toInt().coerceAtLeast(720)
+                                val h = (srcPage.height * scale).toInt().coerceAtLeast(960)
+                                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                                bmp.eraseColor(Color.WHITE)
+                                srcPage.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                srcPage.close()
+
+                                val pageInfo = PdfDocument.PageInfo.Builder(w, h, globalPageNum++).create()
+                                val dstPage = outPdf.startPage(pageInfo)
+                                dstPage.canvas.drawBitmap(bmp, 0f, 0f, null)
+                                outPdf.finishPage(dstPage)
+                                bmp.recycle()
                             }
                             renderer.close()
                             pfd.close()
-                            runOnUiThread { result.success(pagePaths) }
-                        } catch (e: Exception) {
-                            runOnUiThread { result.error("PDF_ERR", e.message, null) }
                         }
-                    }.start()
-                } else if (call.method == "mergePdfs") {
-                    val inputPaths = call.argument<List<String>>("inputPaths")
-                    val outputPath = call.argument<String>("outputPath")
-                    if (inputPaths == null || outputPath == null || inputPaths.isEmpty()) {
-                        result.error("INVALID_ARGS", "Missing inputPaths or outputPath", null)
-                        return@setMethodCallHandler
-                    }
-                    Thread {
-                        val outPdf = PdfDocument()
-                        try {
-                            var globalPageNum = 1
-                            for (path in inputPaths) {
-                                val f = File(path)
-                                if (!f.exists()) continue
-                                val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
-                                val renderer = PdfRenderer(pfd)
-                                for (i in 0 until renderer.pageCount) {
-                                    val srcPage = renderer.openPage(i)
-                                    val scale = (1440f / srcPage.width.toFloat().coerceAtLeast(1f)).coerceIn(1.5f, 2.2f)
-                                    val w = (srcPage.width * scale).toInt().coerceAtLeast(720)
-                                    val h = (srcPage.height * scale).toInt().coerceAtLeast(960)
-                                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                                    bmp.eraseColor(Color.WHITE)
-                                    srcPage.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                    srcPage.close()
-
-                                    val pageInfo = PdfDocument.PageInfo.Builder(w, h, globalPageNum++).create()
-                                    val dstPage = outPdf.startPage(pageInfo)
-                                    dstPage.canvas.drawBitmap(bmp, 0f, 0f, null)
-                                    outPdf.finishPage(dstPage)
-                                    bmp.recycle()
-                                }
-                                renderer.close()
-                                pfd.close()
-                            }
-                            val outFile = File(outputPath)
-                            outFile.parentFile?.mkdirs()
-                            FileOutputStream(outFile).use { outStream ->
-                                outPdf.writeTo(outStream)
-                            }
-                            outPdf.close()
-                            runOnUiThread { result.success(outFile.absolutePath) }
-                        } catch (e: Exception) {
-                            try { outPdf.close() } catch (_: Exception) {}
-                            runOnUiThread { result.error("MERGE_PDF_ERR", e.message, null) }
+                        val outFile = File(outputPath)
+                        outFile.parentFile?.mkdirs()
+                        FileOutputStream(outFile).use { outStream ->
+                            outPdf.writeTo(outStream)
                         }
-                    }.start()
-                } else if (call.method == "setScreenOrientation") {
-                    val mode = call.argument<String>("mode") ?: "unspecified"
-                    runOnUiThread {
-                        applyRequestedScreenOrientation(mode)
-                        result.success(true)
+                        outPdf.close()
+                        runOnUiThread { result.success(outFile.absolutePath) }
+                    } catch (e: Exception) {
+                        try { outPdf.close() } catch (_: Exception) {}
+                        runOnUiThread { result.error("MERGE_PDF_ERR", e.message, null) }
                     }
-                } else {
-                    result.notImplemented()
+                }.start()
+            } else if (call.method == "setScreenOrientation") {
+                val mode = call.argument<String>("mode") ?: "unspecified"
+                runOnUiThread {
+                    applyRequestedScreenOrientation(mode)
+                    result.success(true)
                 }
+            } else {
+                result.notImplemented()
             }
+        }
     }
 
     private fun setupShakeSensor() {
         try {
             sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
             accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            accelCurrent = SensorManager.GRAVITY_EARTH
+            accelLast = SensorManager.GRAVITY_EARTH
+            shakeAccel = 0.0f
+        } catch (_: Exception) {}
+    }
+
+    private fun registerShakeSensorListener() {
+        try {
+            if (sensorManager == null || accelerometer == null) {
+                setupShakeSensor()
+            }
+            accelerometer?.let {
+                sensorManager?.unregisterListener(this, it)
+                sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+            }
         } catch (_: Exception) {}
     }
 
@@ -399,23 +446,31 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         val x = event.values[0]
         val y = event.values[1]
         val z = event.values[2]
-        val gForce = sqrt((x * x + y * y + z * z).toDouble()) / SensorManager.GRAVITY_EARTH
+        val magnitude = sqrt((x * x + y * y + z * z).toDouble()).toFloat()
+        accelLast = accelCurrent
+        accelCurrent = magnitude
+        val delta = kotlin.math.abs(accelCurrent - accelLast)
+        shakeAccel = shakeAccel * 0.82f + delta
+        val gForce = magnitude / SensorManager.GRAVITY_EARTH
 
-        if (gForce > 2.35) {
+        if (shakeAccel > 4.8f || gForce > 1.58f) {
             val now = SystemClock.uptimeMillis()
-            if (now - lastShakeTimestamp < 900L) return
+            if (now - lastShakeTimestamp < 750L) return
 
-            if (now - firstShakeTime > 650L) {
+            if (now - firstShakeTime > 850L) {
                 shakeCount = 1
                 firstShakeTime = now
             } else {
                 shakeCount++
             }
 
-            if (shakeCount >= 2) {
+            if (shakeCount >= 2 || shakeAccel > 8.0f || gForce > 2.00f) {
                 shakeCount = 0
+                shakeAccel = 0.0f
                 lastShakeTimestamp = now
-                eventSink?.success("SHAKE_LOCK_TOGGLE")
+                mainHandler.post {
+                    eventSink?.success("SHAKE_TOGGLE")
+                }
             }
         }
     }
@@ -556,13 +611,11 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         isActivityResumed = true
         statusBarVisibleTicks = 0
         hideSystemStatusBar()
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 180L)
+        mainHandler.postDelayed({ hideSystemStatusBar() }, 450L)
         mainHandler.removeCallbacks(statusBarWatchdogRunnable)
         mainHandler.postDelayed(statusBarWatchdogRunnable, 750L)
-        try {
-            accelerometer?.let {
-                sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-            }
-        } catch (_: Exception) {}
+        registerShakeSensorListener()
         if (isVolumeInterceptEnabled) {
             updateMediaSessionState(true)
         }
@@ -693,18 +746,23 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
         if (isVolumeInterceptEnabled) {
             val now = SystemClock.uptimeMillis()
-            if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && (now - lastVolKeyDownTime > 450L)) {
+            if (isVolUpPressed && (now - lastVolUpEventTime > 1800L)) {
                 isVolUpPressed = false
+            }
+            if (isVolDownPressed && (now - lastVolDownEventTime > 1800L)) {
                 isVolDownPressed = false
+            }
+            if (!isVolUpPressed && !isVolDownPressed && (now - lastVolUpDownTime > 500L) && (now - lastVolDownDownTime > 500L)) {
                 comboTriggered = false
             }
 
             if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
                 if (action == KeyEvent.ACTION_DOWN) {
-                    lastVolKeyDownTime = now
+                    lastVolUpEventTime = now
                     if (event.repeatCount == 0) {
+                        lastVolUpDownTime = now
                         isVolUpPressed = true
-                        if (isVolDownPressed) {
+                        if (isVolDownPressed || (now - lastVolDownDownTime in 0L..420L)) {
                             comboTriggered = true
                             pendingVolDownRunnable?.let { mainHandler.removeCallbacks(it) }
                             pendingVolUpRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -717,7 +775,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             }
                         }
                         pendingVolUpRunnable = r
-                        mainHandler.postDelayed(r, 70L)
+                        mainHandler.postDelayed(r, 130L)
                     }
                 } else if (action == KeyEvent.ACTION_UP) {
                     isVolUpPressed = false
@@ -728,10 +786,11 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
             if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
                 if (action == KeyEvent.ACTION_DOWN) {
-                    lastVolKeyDownTime = now
+                    lastVolDownEventTime = now
                     if (event.repeatCount == 0) {
+                        lastVolDownDownTime = now
                         isVolDownPressed = true
-                        if (isVolUpPressed) {
+                        if (isVolUpPressed || (now - lastVolUpDownTime in 0L..420L)) {
                             comboTriggered = true
                             pendingVolUpRunnable?.let { mainHandler.removeCallbacks(it) }
                             pendingVolDownRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -744,7 +803,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             }
                         }
                         pendingVolDownRunnable = r
-                        mainHandler.postDelayed(r, 70L)
+                        mainHandler.postDelayed(r, 130L)
                     }
                 } else if (action == KeyEvent.ACTION_UP) {
                     isVolDownPressed = false

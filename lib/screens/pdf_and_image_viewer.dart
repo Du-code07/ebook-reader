@@ -331,8 +331,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     if (!mounted) return;
     // 4. 흔들어서 끄기 / 음량 버튼 동시에 눌러서 끄기: 잠금 상태일 때만 잠금을 해제하도록 변경!
     if (!_isTouchLocked) return;
-    if (byVolume && !_useVolumeComboLock) return;
-    if (!byVolume && !_useShakeLock) return;
+    final bool neitherEnabled = !_useShakeLock && !_useVolumeComboLock;
+    if (byVolume && !_useVolumeComboLock && !neitherEnabled) return;
+    if (!byVolume && !_useShakeLock && !neitherEnabled) return;
 
     setState(() {
       _isTouchLocked = false;
@@ -353,13 +354,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     _forcedLandscape = nextLandscape;
     StorageService.desiredLandscapeNotifier.value = nextLandscape;
 
-    try {
-      await SystemChrome.setPreferredOrientations(
-        nextLandscape
-            ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
-            : [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown],
-      );
-    } catch (_) {}
     try {
       await _pdfChannel.invokeMethod('setScreenOrientation', {
         'mode': nextLandscape ? 'landscape' : 'portrait',
@@ -2093,6 +2087,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               setState(() {
                                 _isTouchLocked = true;
                                 _showControls = false;
+                                _volumeKeyService.ensureInterceptActive();
                                 _isMemoMode = false;
                                 _allowFingerDrawing = false;
                                 _isStylusDown = false;

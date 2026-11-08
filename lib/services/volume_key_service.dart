@@ -34,7 +34,7 @@ class VolumeKeyService {
         onVolumeDown();
       } else if (event == 'VOL_BOTH_UNLOCK') {
         onVolumeBothUnlock?.call();
-      } else if (event == 'SHAKE_TOGGLE') {
+      } else if (event == 'SHAKE_TOGGLE' || event == 'SHAKE_LOCK_TOGGLE') {
         onShakeToggle?.call();
       } else if (event == 'SPEN_SINGLE') {
         onSpenSinglePress?.call();
@@ -50,7 +50,7 @@ class VolumeKeyService {
     });
   }
 
-  /// 뷰어 내에서 다이얼로그/시트 닫힘 후 가로채기 상태를 재확인할 때 호출
+  /// 뷰어 내에서 화면 잠금 활성화 또는 다이얼로그/시트 닫힘 후 가로채기 상태를 재확인할 때 호출
   Future<void> ensureInterceptActive() async {
     if (_isRegistered) {
       try {

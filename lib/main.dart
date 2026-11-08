@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:archive/archive.dart';
@@ -36,6 +37,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   late final AnimationController _rotationAnimController;
   late final Animation<double> _rotationFadeAnim;
   late final Animation<double> _rotationScaleAnim;
+  Timer? _fallbackRotateTimer;
+  bool _allowCanvasFallbackRotation = false;
 
   @override
   void initState() {
@@ -57,13 +60,29 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   }
 
   void _onDesiredOrientationChanged() {
+    _fallbackRotateTimer?.cancel();
+    final desired = StorageService.desiredLandscapeNotifier.value;
+    if (desired == null) {
+      if (mounted) {
+        setState(() => _allowCanvasFallbackRotation = false);
+      }
+      return;
+    }
     if (mounted) {
+      setState(() => _allowCanvasFallbackRotation = false);
       _rotationAnimController.forward(from: 0.0);
     }
+    // OS 창 회전이 220ms 내에 작동하지 않는 태블릿 환경에서는 자동으로 캔버스 회전(RotatedBox + MediaQuery 스왑) 적용
+    _fallbackRotateTimer = Timer(const Duration(milliseconds: 220), () {
+      if (mounted) {
+        setState(() => _allowCanvasFallbackRotation = true);
+      }
+    });
   }
 
   @override
   void dispose() {
+    _fallbackRotateTimer?.cancel();
     StorageService.desiredLandscapeNotifier.removeListener(_onDesiredOrientationChanged);
     _rotationAnimController.dispose();
     super.dispose();
@@ -97,12 +116,54 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         colorSchemeSeed: Colors.indigo,
       ),
       builder: (context, child) {
-        return FadeTransition(
-          opacity: _rotationFadeAnim,
-          child: ScaleTransition(
-            scale: _rotationScaleAnim,
-            child: child ?? const SizedBox.shrink(),
-          ),
+        return ValueListenableBuilder<bool?>(
+          valueListenable: StorageService.desiredLandscapeNotifier,
+          builder: (context, desiredLandscape, _) {
+            final mq = MediaQuery.of(context);
+            final bool actualLandscape = mq.size.width > mq.size.height;
+            final bool needFallbackTurn = desiredLandscape != null &&
+                desiredLandscape != actualLandscape &&
+                _allowCanvasFallbackRotation;
+            final int quarterTurns = needFallbackTurn ? 1 : 0;
+
+            final MediaQueryData effectiveMq = needFallbackTurn
+                ? mq.copyWith(
+                    size: Size(mq.size.height, mq.size.width),
+                    padding: EdgeInsets.only(
+                      top: mq.padding.left,
+                      right: mq.padding.top,
+                      bottom: mq.padding.right,
+                      left: mq.padding.bottom,
+                    ),
+                    viewPadding: EdgeInsets.only(
+                      top: mq.viewPadding.left,
+                      right: mq.viewPadding.top,
+                      bottom: mq.viewPadding.right,
+                      left: mq.viewPadding.bottom,
+                    ),
+                    viewInsets: EdgeInsets.only(
+                      top: mq.viewInsets.left,
+                      right: mq.viewInsets.top,
+                      bottom: mq.viewInsets.right,
+                      left: mq.viewInsets.bottom,
+                    ),
+                  )
+                : mq;
+
+            return RotatedBox(
+              quarterTurns: quarterTurns,
+              child: MediaQuery(
+                data: effectiveMq,
+                child: FadeTransition(
+                  opacity: _rotationFadeAnim,
+                  child: ScaleTransition(
+                    scale: _rotationScaleAnim,
+                    child: child ?? const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
       home: BookshelfScreen(
@@ -1034,7 +1095,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
       progressSetState?.call(() {
         currentStep = i + 1;
-        progressStatus = '(${i + 1}/${orderedImages.length}): $fileName';
+        progressStatus = '$fileName (${i + 1}/${orderedImages.length})';
       });
       await Future.delayed(const Duration(milliseconds: 15));
 
@@ -1154,6 +1215,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         if (result != null && result.files.length >= 2) {
                           final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
                           await _createMangaBookFromImages(files, deleteSourceAfter: false);
+                        } else if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(_tr('JPG/PNG 파일을 2개 이상 선택해 주세요.', 'Please select at least 2 JPG/PNG files.', '请选择至少 2 个 JPG/PNG 文件。', 'JPG/PNGファイルを2つ以上選択してください。'))),
+                          );
                         }
                       },
                     ),
@@ -1308,23 +1373,52 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           ));
     }
 
+    int currentStep = 0;
+    final int totalSteps = orderedPdfs.length;
+    final String firstFileName = orderedPdfs.first.path.split(Platform.pathSeparator).last;
+    String progressStatus = '$firstFileName (1/${orderedPdfs.length})';
+    StateSetter? progressSetState;
+
+    _pdfChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onPdfMergeProgress') {
+        final args = call.arguments as Map?;
+        if (args != null) {
+          final int cur = (args['current'] as num?)?.toInt() ?? 1;
+          final int tot = (args['total'] as num?)?.toInt() ?? orderedPdfs.length;
+          final String fName = (args['fileName'] ?? '').toString();
+          progressSetState?.call(() {
+            currentStep = cur;
+            progressStatus = '$fName ($cur/$tot)';
+          });
+        }
+      }
+      return null;
+    });
+
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: Text(_tr('PDF 병합 중', 'Merging PDFs', '正在合并 PDF', 'PDF結合中')),
-        content: Row(
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                _tr('PDF 페이지들을 하나로 합치는 중입니다...', 'Merging PDF pages into a single document...', '正在将 PDF 页面合并为一个文件...', 'PDFページを1つに結合しています...'),
-                style: const TextStyle(fontSize: 13),
-              ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          progressSetState = setDialogState;
+          final double ratio = totalSteps > 0 ? (currentStep / totalSteps).clamp(0.0, 1.0).toDouble() : 0.0;
+          return AlertDialog(
+            title: Text(_tr('PDF 병합 중', 'Merging PDFs', '正在合并 PDF', 'PDF結合中')),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(value: currentStep > 0 ? ratio : null),
+                const SizedBox(height: 12),
+                Text(
+                  '${(ratio * 100).toStringAsFixed(0)}% ($currentStep / ${orderedPdfs.length})',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 6),
+                Text(progressStatus, style: const TextStyle(fontSize: 12)),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
 
@@ -1374,6 +1468,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           SnackBar(content: Text('PDF Merge Error: $e')),
         );
       }
+    } finally {
+      _pdfChannel.setMethodCallHandler(null);
     }
   }
 
@@ -1383,7 +1479,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       return ext == 'pdf';
     }).toList();
 
-    if (existingPdfs.length < 2) {
+    if (existingPdfs.isEmpty) {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
@@ -1451,6 +1547,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         if (result != null && result.files.length >= 2) {
                           final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
                           await _createMergedPdfFromFiles(files, deleteSourceAfter: false);
+                        } else if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(_tr('PDF 파일을 2개 이상 선택해 주세요.', 'Please select at least 2 PDF files.', '请选择至少 2 个 PDF 文件。', 'PDFファイルを2つ以上選択してください。'))),
+                          );
                         }
                       },
                     ),
@@ -2496,7 +2596,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
               ],
             )
           : AppBar(
-              title: const Text('FReader'),
+              title: const Text('MY'),
               actions: [
                 IconButton(
                   icon: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode),
