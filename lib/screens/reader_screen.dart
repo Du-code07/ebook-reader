@@ -85,6 +85,78 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
 
   late String _activeFilePath;
+  late EpubSource _epubSource;
+  Timer? _loadWatchdog;
+  String? _watchdogKey;
+  int _readerAttempt = 0;
+  bool _readerReady = false;
+  bool _closingAfterError = false;
+  bool _bridgeProbeRunning = false;
+
+  void _watchReaderLoad(String key) {
+    if (_watchdogKey == key) return;
+    _watchdogKey = key;
+    _readerReady = false;
+    _loadWatchdog?.cancel();
+    final started = DateTime.now();
+    _loadWatchdog = Timer.periodic(const Duration(seconds: 2), (timer) async {
+      if (!mounted || _readerReady || _watchdogKey != key) { timer.cancel(); return; }
+      if (DateTime.now().difference(started).inSeconds >= 90) {
+        timer.cancel();
+        _handleReaderLoadError('본문 표시 시간이 초과되었습니다. 파일 손상 여부와 Android System WebView를 확인해 주세요.');
+        return;
+      }
+      if (_bridgeProbeRunning) return;
+      _bridgeProbeRunning = true;
+      try {
+        // Some WebViews emit PlatformReady before epubView.js attaches its
+        // listener. Recover that missed event once, only before loadBook starts.
+        await _epubController.webViewController?.callMethod('eval', [r"""
+          (function () {
+            if (typeof loadBook !== 'function' ||
+                typeof currentLoadToken === 'undefined' || currentLoadToken !== 0 ||
+                !window.flutter_inappwebview ||
+                typeof window.flutter_inappwebview.callHandler !== 'function' ||
+                window.__freaderReadyRecovered) return;
+            window.__freaderReadyRecovered = true;
+            window.flutter_inappwebview.callHandler('readyToLoad');
+          })()
+        """]).timeout(const Duration(seconds: 3));
+      } catch (_) {
+        // The platform view may still be attaching. The bounded timer retries.
+      } finally {
+        _bridgeProbeRunning = false;
+      }
+    });
+  }
+
+  void _handleReaderLoadError(Object error) {
+    if (!mounted || _closingAfterError) return;
+    _loadWatchdog?.cancel();
+    // A saved CFI from an older conversion can point at a removed chapter.
+    // Retry once from the beginning without deleting bookmarks or memos.
+    if (_readerAttempt == 0 && ((_currentCfi ?? _initialCfi)?.isNotEmpty ?? false)) {
+      setState(() {
+        _readerAttempt++;
+        _initialCfi = null;
+        _currentCfi = null;
+        _hasRestoredInitialPosition = true;
+        _restoreProgressPending = false;
+      });
+      return;
+    }
+    _closingAfterError = true;
+    Future<void>.delayed(Duration.zero, () {
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.of(context).pop();
+      messenger.showSnackBar(SnackBar(
+        content: Text('문서를 열지 못했습니다: $error'),
+        duration: const Duration(seconds: 8),
+      ));
+    });
+  }
+
 
   String? _initialCfi;
   String? _currentCfi;
@@ -200,6 +272,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
   }
   double _progress = 0.0;
+  double _initialProgress = 0.0;
+  bool _restoreProgressPending = false;
   bool _hasRestoredInitialPosition = false;
 
   Offset? _pointerDownPosition;
@@ -219,8 +293,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void initState() {
     super.initState();
     _activeFilePath = widget.filePath;
+    _epubSource = EpubSource.fromFile(File(_activeFilePath));
     WidgetsBinding.instance.addObserver(this);
-    _initReader();
+    _initReader().catchError((Object error) { _handleReaderLoadError(error); });
   }
 
   @override
@@ -362,7 +437,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       );
 
     } else if (docConvertExts.contains(nextExt)) {
-      final epubFile = await TxtToEpubConverter.convertDocumentToEpub(nextFile);
+      final File epubFile;
+      try {
+        epubFile = await TxtToEpubConverter.convertDocumentToEpub(nextFile);
+      } catch (error) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('문서를 열지 못했습니다: $error')),
+        );
+        return;
+      }
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
@@ -422,6 +505,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<void> _initReader() async {
+    await TxtToEpubConverter.validateEpub(File(_activeFilePath));
     final savedCfi = await StorageService.getLastPosition(widget.filePath);
     final prevCfi = await StorageService.getPreviousPosition(widget.filePath);
     final savedProg = await StorageService.getProgress(widget.filePath);
@@ -451,6 +535,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _currentCfi = savedCfi;
       _previousJumpCfi = prevCfi;
       _progress = savedProg.clamp(0.0, 1.0).toDouble();
+      _initialProgress = _progress;
+      _restoreProgressPending = (savedCfi == null || savedCfi.isEmpty) && _progress > 0.01;
       _currentPageLocationKey = initLocKey;
       _enableTwoPageInLandscape = twoPage;
       _isMangaRtlMode = isRtl;
@@ -1471,6 +1557,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _volumeKeyService.stopListening();
+    _loadWatchdog?.cancel();
+    _epubZoomController.dispose();
     super.dispose();
   }
 
@@ -1487,6 +1575,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final EpubSpread spreadSetting =
         (isLandscape && _enableTwoPageInLandscape) ? EpubSpread.always : EpubSpread.none;
 
+    final viewerKey = '${_activeFilePath}_${spreadSetting}_${_epubBgTheme}_$_readerAttempt';
+    _watchReaderLoad(viewerKey);
     final bgColor = _getBgColor();
     final footerTextColor = _epubBgTheme == 'dark' ? Colors.white54 : Colors.black54;
     final footerText = _formatEpubFooterText();
@@ -1581,10 +1671,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         behavior: HitTestBehavior.translucent,
                         onHorizontalDragUpdate: !_useSwipeTurn ? (_) {} : null,
                         child: EpubViewer(
-                          key: ValueKey('${_activeFilePath}_${spreadSetting}_$_epubBgTheme'),
+                          key: ValueKey(viewerKey),
                           epubController: _epubController,
-                    epubSource: EpubSource.fromFile(File(_activeFilePath)),
-                    initialCfi: _initialCfi,
+                    epubSource: _epubSource,
+                    // Avoid file:// -> intercepted HTTPS/XHR restrictions in
+                    // vendor WebViews. All content comes from the local EPUB.
+                    useLocalServer: !Platform.isAndroid,
+                    initialCfi: _currentCfi ?? _initialCfi,
+                    onEpubLoaded: () {
+                      if (!mounted || _watchdogKey != viewerKey) return;
+                      _readerReady = true;
+                      _loadWatchdog?.cancel();
+                    },
+                    onLoadError: (error) {
+                      if (_watchdogKey == viewerKey) _handleReaderLoadError(error);
+                    },
                     displaySettings: EpubDisplaySettings(
                       flow: EpubFlow.paginated,
                       snap: true,
@@ -1610,24 +1711,27 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       ],
                     ),
                     onChaptersLoaded: (chapters) {
+                      if (!mounted || _watchdogKey != viewerKey) return;
                       setState(() => _chapters = chapters);
-                      if (!_hasRestoredInitialPosition) {
+                    },
+                    onInitialPositionLoaded: () {
+                      if (mounted && _watchdogKey == viewerKey) {
                         _hasRestoredInitialPosition = true;
-                        if (_initialCfi != null && _initialCfi!.isNotEmpty) {
-                          Future.delayed(const Duration(milliseconds: 150), () {
-                            _epubController.display(cfi: _initialCfi!);
-                          });
-                        } else if (_progress > 0.01) {
-                          Future.delayed(const Duration(milliseconds: 150), () {
-                            _epubController.toProgressPercentage(_progress);
-                          });
-                        }
                       }
+                    },
+                    onLocationLoaded: () {
+                      if (!mounted || _watchdogKey != viewerKey || !_restoreProgressPending) return;
+                      // Percent navigation needs the generated locations. A fixed
+                      // 150ms delay can run before these exist on a large book.
+                      _restoreProgressPending = false;
+                      _hasRestoredInitialPosition = true;
+                      _epubController.toProgressPercentage(_initialProgress);
                     },
                     onTextSelected: (epubTextSelection) {
                       _selectedCfiRange = epubTextSelection.selectionCfi;
                     },
                     onRelocated: (value) async {
+                      if (!mounted || _watchdogKey != viewerKey || _restoreProgressPending) return;
                       if (!_hasRestoredInitialPosition &&
                           _initialCfi != null &&
                           value.progress < 0.01 &&

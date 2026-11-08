@@ -1715,7 +1715,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         ),
       );
     } else if (_docConvertExts.contains(ext)) {
-      final epubFile = await TxtToEpubConverter.convertDocumentToEpub(file);
+      final File epubFile;
+      try {
+        epubFile = await TxtToEpubConverter.convertDocumentToEpub(file);
+      } catch (error) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('문서를 열지 못했습니다: $error'), duration: const Duration(seconds: 8)),
+        );
+        return;
+      }
       if (!mounted) return;
       await Navigator.push(
         context,

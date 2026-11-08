@@ -487,7 +487,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       );
 
     } else if (docConvertExts.contains(nextExt)) {
-      final epubFile = await TxtToEpubConverter.convertDocumentToEpub(targetFile);
+      final File epubFile;
+      try {
+        epubFile = await TxtToEpubConverter.convertDocumentToEpub(targetFile);
+      } catch (error) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('문서를 열지 못했습니다: $error')),
+        );
+        return;
+      }
       if (!mounted) return;
       Navigator.pushReplacement(
         context,

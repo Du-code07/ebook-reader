@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter/services.dart';
+import 'package:xml/xml.dart';
 
 class _DocStyleInfo {
   double fontSizePt;
@@ -226,7 +227,7 @@ class TxtToEpubConverter {
       if (file.isFile && file.name == 'word/document.xml') {
         String xml = utf8.decode(file.content as List<int>, allowMalformed: true);
         // Word <mc:AlternateContent> 내부의 중복 <mc:Fallback> 제거
-        xml = xml.replaceAll(RegExp(r'<mc:Fallback[^>]*>.*?</mc:Fallback>', dotAll: true), '');
+        xml = xml.replaceAll(RegExp(r'<mc:Fallback\b[^>]*>.*?</mc:Fallback>', dotAll: true), '');
         final bodyStart = xml.indexOf('<w:body');
         final bodyXml = bodyStart != -1 ? xml.substring(bodyStart) : xml;
 
@@ -522,13 +523,13 @@ class TxtToEpubConverter {
         _applyDocxPropsToStyle(tcXml, cellStyle);
 
         final cellText = _extractDocxCellText(tcXml);
-        Uint8List? cellImageBytes;
+        final cellImages = <Uint8List>[];
         for (final rm in RegExp(r'r:(?:embed|id)="(rId[^"]+)"').allMatches(tcXml)) {
           final rid = rm.group(1)!;
           final img = rIdToImage[rid];
           if (img != null) {
             emittedImages.add(img);
-            cellImageBytes ??= img;
+            cellImages.add(img);
           }
         }
 
@@ -546,7 +547,7 @@ class TxtToEpubConverter {
           'textColor': cellStyle.textColor,
           'bgColor': bgColor,
           'minHeightPt': rowMinHeightPt,
-          if (cellImageBytes != null) 'imageBytes': cellImageBytes,
+          if (cellImages.isNotEmpty) 'images': cellImages,
         };
 
         cells.add(cellMap);
@@ -581,12 +582,22 @@ class TxtToEpubConverter {
   }
 
   static String _extractDocxParagraphText(String pXml) {
-    final String withBreaks = pXml
-        .replaceAll(RegExp(r'<w:tab\s*/>'), '    ')
-        .replaceAll(RegExp(r'<w:(?:br|cr)\b[^>]*/>'), '\n');
+    // Tabs and breaks are siblings of w:t, not inside it. Preserve their order.
     final buf = StringBuffer();
-    for (final tm in RegExp(r'<w:t(?:\s[^>]*)?>(.*?)</w:t>', dotAll: true).allMatches(withBreaks)) {
-      buf.write(_unescapeXml(tm.group(1) ?? ''));
+    final xml = XmlDocument.parse(pXml);
+    for (final node in xml.descendants.whereType<XmlElement>()) {
+      switch (node.name.qualified) {
+        case 'w:t':
+          buf.write(node.innerText);
+          break;
+        case 'w:tab':
+          buf.write('\t');
+          break;
+        case 'w:br':
+        case 'w:cr':
+          buf.write('\n');
+          break;
+      }
     }
     return buf.toString().trimRight();
   }
@@ -602,7 +613,7 @@ class TxtToEpubConverter {
     final List<Uint8List> allImagesInOrder = [];
 
     final sortedFiles = archive.files.where((f) => f.isFile).toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+      ..sort((a, b) => _compareSectionNames(a.name, b.name));
 
     for (final file in sortedFiles) {
       final lower = file.name.toLowerCase();
@@ -718,7 +729,7 @@ class TxtToEpubConverter {
 
     final Set<Uint8List> emittedImages = {};
     final sectionFiles = sortedFiles
-        .where((f) => f.name.startsWith('Contents/section') && f.name.endsWith('.xml'))
+        .where((f) => RegExp(r'^Contents/section\d+\.xml$', caseSensitive: false).hasMatch(f.name))
         .toList();
 
     for (final secFile in sectionFiles) {
@@ -731,11 +742,7 @@ class TxtToEpubConverter {
         }
 
         final pStyle = _resolveHwpxStyle(pWithoutTables, charPrMap, paraAlignMap);
-        final pTextBuf = StringBuffer();
-        for (final tm in RegExp(r'<hp:t(?:\s[^>]*)?>(.*?)</hp:t>', dotAll: true).allMatches(pWithoutTables)) {
-          pTextBuf.write(_unescapeXml(tm.group(1) ?? ''));
-        }
-        final pText = pTextBuf.toString().trimRight();
+        final pText = _extractHwpxText(pWithoutTables);
         if (pText.isNotEmpty) {
           blocks.add({
             'type': 'paragraph',
@@ -885,21 +892,17 @@ class TxtToEpubConverter {
       final cellParas = _findDirectXmlTagBlocks(tcXml, 'hp:p');
       final cellLines = <String>[];
       for (final cp in cellParas) {
-        final cBuf = StringBuffer();
-        for (final tm in RegExp(r'<hp:t(?:\s[^>]*)?>(.*?)</hp:t>', dotAll: true).allMatches(cp)) {
-          cBuf.write(_unescapeXml(tm.group(1) ?? ''));
-        }
-        final ct = cBuf.toString().trimRight();
+        final ct = _extractHwpxText(cp);
         if (ct.isNotEmpty) cellLines.add(ct);
       }
 
-      Uint8List? cellImage;
+      final cellImages = <Uint8List>[];
       for (final imgM in RegExp(r'(?:binaryItemIDRef|binItemIDRef|binData)="([^"]+)"').allMatches(tcXml)) {
         final refId = imgM.group(1)!;
         final img = binDataMap[refId] ?? binDataMap[refId.toLowerCase()];
         if (img != null) {
           emittedImages.add(img);
-          cellImage ??= img;
+          cellImages.add(img);
         }
       }
 
@@ -917,7 +920,7 @@ class TxtToEpubConverter {
         'textColor': cellStyle.textColor,
         'bgColor': bgColor,
         'minHeightPt': minHeightPt,
-        if (cellImage != null) 'imageBytes': cellImage,
+        if (cellImages.isNotEmpty) 'images': cellImages,
       });
 
       fallbackCol = col + colSpan;
@@ -948,21 +951,21 @@ class TxtToEpubConverter {
   // =========================================================================
   static List<Map<String, dynamic>> _extractHwp5StructuredBlocks(Uint8List bytes) {
     final List<Map<String, dynamic>> blocks = [];
-    if (bytes.length < 512) return blocks;
-
-    if (bytes[0] != 0xD0 ||
-        bytes[1] != 0xCF ||
-        bytes[2] != 0x11 ||
-        bytes[3] != 0xE0) {
-      if (bytes[0] == 0x50 && bytes[1] == 0x4B) {
-        return _extractHwpxStructuredBlocks(bytes);
-      }
-      return blocks;
+    if (bytes.length >= 2 && bytes[0] == 0x50 && bytes[1] == 0x4B) {
+      return _extractHwpxStructuredBlocks(bytes);
+    }
+    const signature = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+    if (bytes.length < 512 ||
+        List.generate(8, (i) => bytes[i] == signature[i]).contains(false)) {
+      throw const FormatException('HWP 5 문서가 아니거나 파일이 손상되었습니다.');
     }
 
     final bd = ByteData.sublistView(bytes);
     final sectorShift = bd.getUint16(30, Endian.little);
     final miniSectorShift = bd.getUint16(32, Endian.little);
+    if ((sectorShift != 9 && sectorShift != 12) || miniSectorShift != 6) {
+      throw const FormatException('HWP 저장 구조가 올바르지 않습니다.');
+    }
     final sectorSize = 1 << sectorShift;
     final miniSectorSize = 1 << miniSectorShift;
 
@@ -1004,8 +1007,9 @@ class TxtToEpubConverter {
     Uint8List readChain(int startSector, [int? exactSize]) {
       final builder = BytesBuilder(copy: false);
       int cur = startSector;
-      int guard = 0;
-      while (cur < 0xFFFFFFFE && cur < fat.length && guard < 200000) {
+      final visited = <int>{};
+      while (cur < 0xFFFFFFFA && cur < fat.length) {
+        if (!visited.add(cur)) throw const FormatException('HWP FAT 순환 오류');
         final pos = (cur + 1) * sectorSize;
         if (pos + sectorSize <= bytes.length) {
           builder.add(Uint8List.sublistView(bytes, pos, pos + sectorSize));
@@ -1013,7 +1017,6 @@ class TxtToEpubConverter {
           break;
         }
         cur = fat[cur];
-        guard++;
       }
       final raw = builder.takeBytes();
       if (exactSize != null && exactSize < raw.length) {
@@ -1081,8 +1084,9 @@ class TxtToEpubConverter {
       }
       final builder = BytesBuilder(copy: false);
       int cur = startSec;
-      int guard = 0;
-      while (cur < 0xFFFFFFFE && cur < miniFat.length && guard < 150000) {
+      final visited = <int>{};
+      while (cur < 0xFFFFFFFA && cur < miniFat.length) {
+        if (!visited.add(cur)) throw const FormatException('HWP MiniFAT 순환 오류');
         final pos = cur * miniSectorSize;
         if (pos + miniSectorSize <= miniStream.length) {
           builder.add(Uint8List.sublistView(miniStream, pos, pos + miniSectorSize));
@@ -1090,7 +1094,6 @@ class TxtToEpubConverter {
           break;
         }
         cur = miniFat[cur];
-        guard++;
       }
       final raw = builder.takeBytes();
       if (size < raw.length) {
@@ -1100,11 +1103,24 @@ class TxtToEpubConverter {
     }
 
     bool isCompressed = true;
+    if (!sectionStreams.containsKey('__FileHeader__')) {
+      throw const FormatException('HWP FileHeader를 찾지 못했습니다.');
+    }
     if (sectionStreams.containsKey('__FileHeader__')) {
       final (fhSec, fhSize) = sectionStreams['__FileHeader__']!;
       final fileHeaderData = readEntryStream(fhSec, fhSize);
+      if (fileHeaderData.length < 40 ||
+          ascii.decode(fileHeaderData.take(17).toList(), allowInvalid: true) != 'HWP Document File') {
+        throw const FormatException('유효한 HWP 5 FileHeader가 아닙니다.');
+      }
       if (fileHeaderData.length >= 40) {
         final flags = ByteData.sublistView(fileHeaderData).getUint32(36, Endian.little);
+        if ((flags & 0x02) != 0) {
+          throw const FormatException('암호로 보호된 HWP입니다. 암호를 해제한 문서를 열어 주세요.');
+        }
+        if ((flags & 0x04) != 0) {
+          throw const FormatException('배포용 HWP는 현재 지원하지 않습니다. 일반 HWP 또는 PDF로 저장해 주세요.');
+        }
         isCompressed = (flags & 0x01) != 0;
       }
     }
@@ -1168,7 +1184,7 @@ class TxtToEpubConverter {
     }
 
     final Set<int> usedBinImageIndices = {};
-    final sortedSectionNames = sectionStreams.keys.where((k) => k.startsWith('Section')).toList()..sort();
+    final sortedSectionNames = sectionStreams.keys.where((k) => RegExp(r'^Section\d+$').hasMatch(k)).toList()..sort(_compareSectionNames);
 
     for (final secName in sortedSectionNames) {
       final (startSec, size) = sectionStreams[secName]!;
@@ -1179,9 +1195,7 @@ class TxtToEpubConverter {
         try {
           secBytes = Uint8List.fromList(ZLibCodec(raw: true).decoder.convert(secBytes));
         } catch (_) {
-          try {
-            secBytes = Uint8List.fromList(ZLibCodec(raw: false).decoder.convert(secBytes));
-          } catch (_) {}
+          throw FormatException('HWP 본문 $secName 압축을 해제하지 못했습니다.');
         }
       }
 
@@ -1204,23 +1218,8 @@ class TxtToEpubConverter {
       }
     }
 
-    if (blocks.isEmpty && sectionStreams.containsKey('__PrvText__')) {
-      final (startSec, size) = sectionStreams['__PrvText__']!;
-      final rawPrv = readEntryStream(startSec, size);
-      if (rawPrv.length >= 2) {
-        final pBd = ByteData.sublistView(rawPrv);
-        final units = <int>[];
-        for (int i = 0; i + 1 < rawPrv.length; i += 2) {
-          units.add(pBd.getUint16(i, Endian.little));
-        }
-        final prvStr = String.fromCharCodes(units);
-        for (final line in prvStr.split(RegExp(r'\r?\n'))) {
-          final t = line.trimRight();
-          if (t.isNotEmpty) {
-            blocks.add({'type': 'paragraph', 'text': t});
-          }
-        }
-      }
+    if (sortedSectionNames.isEmpty) {
+      throw const FormatException('HWP 본문 스트림이 없습니다. 미리보기만으로는 전체 문서를 열 수 없습니다.');
     }
 
     return blocks;
@@ -1542,7 +1541,7 @@ class TxtToEpubConverter {
         if (matchedIdx != null) {
           usedBinImageIndices.add(matchedIdx);
           if (activeTableCtrlLevel != null && currentCellMap != null) {
-            currentCellMap!['imageBytes'] ??= binImages[matchedIdx];
+            (currentCellMap!.putIfAbsent('images', () => <Uint8List>[]) as List<Uint8List>).add(binImages[matchedIdx]);
           } else {
             blocks.add({'type': 'image', 'bytes': binImages[matchedIdx]});
           }
@@ -1656,199 +1655,272 @@ class TxtToEpubConverter {
     return lines;
   }
 
-  /// 10 & 11. TXT/YML 메모장(UTF-8, UTF-16, CP949/EUC-KR 자동 감지) 및 워드(.docx)/한글(.hwp, .hwpx) 문서를 EPUB 2.0으로 변환 (이전 버전 방식 복구)
+  static int _compareSectionNames(String a, String b) {
+    final pattern = RegExp(r'section(\d+)', caseSensitive: false);
+    final an = int.tryParse(pattern.firstMatch(a)?.group(1) ?? '');
+    final bn = int.tryParse(pattern.firstMatch(b)?.group(1) ?? '');
+    return an != null && bn != null ? an.compareTo(bn) : a.compareTo(b);
+  }
+
+  /// Read the package/spine before mounting a WebView. Do not treat ZIP files,
+  /// damaged exports or missing chapters as successfully loaded blank books.
+  static Future<void> validateEpub(File file) async {
+    final archive = ZipDecoder().decodeBytes(await file.readAsBytes());
+    String xmlText(String name) {
+      final entry = archive.findFile(name);
+      if (entry == null || !entry.isFile) {
+        throw FormatException('EPUB 내부 파일이 없습니다: $name');
+      }
+      return utf8.decode(entry.content as List<int>);
+    }
+    final container = XmlDocument.parse(xmlText('META-INF/container.xml'));
+    final roots = container.descendants.whereType<XmlElement>()
+        .where((e) => e.name.local == 'rootfile');
+    if (roots.isEmpty) throw const FormatException('EPUB rootfile이 없습니다.');
+    final opfPath = roots.first.getAttribute('full-path');
+    if (opfPath == null || opfPath.isEmpty) {
+      throw const FormatException('EPUB 패키지 경로가 없습니다.');
+    }
+    final opf = XmlDocument.parse(xmlText(opfPath));
+    final items = <String, String>{};
+    for (final item in opf.descendants.whereType<XmlElement>()
+        .where((e) => e.name.local == 'item')) {
+      final id = item.getAttribute('id');
+      final href = item.getAttribute('href');
+      if (id != null && href != null) items[id] = href;
+    }
+    final spine = opf.descendants.whereType<XmlElement>()
+        .where((e) => e.name.local == 'itemref').toList();
+    if (spine.isEmpty) throw const FormatException('EPUB 본문 목록이 비어 있습니다.');
+    final base = Uri(path: '/$opfPath');
+    for (final ref in spine) {
+      final href = items[ref.getAttribute('idref')];
+      if (href == null) throw const FormatException('EPUB 본문 참조가 올바르지 않습니다.');
+      final uri = base.resolve(href);
+      final path = Uri.decodeComponent(uri.path).replaceFirst(RegExp(r'^/'), '');
+      if (uri.hasScheme || archive.findFile(path) == null) {
+        throw FormatException('EPUB 본문을 찾을 수 없습니다: $href');
+      }
+    }
+  }
+
   static Future<File> convertDocumentToEpub(File inputFile) async {
-    final epubPath = inputFile.path.replaceAll(
+    final ext = inputFile.path.split('.').last.toLowerCase();
+    if (!['txt', 'docx', 'hwpx', 'hwp', 'doc'].contains(ext)) {
+      throw const FormatException('지원하지 않는 문서 형식입니다.');
+    }
+    final bytes = await inputFile.readAsBytes();
+    if (bytes.isEmpty) throw const FormatException('파일이 비어 있습니다.');
+    final title = inputFile.uri.pathSegments.last.replaceAll(RegExp(r'\.[^.]+$'), '');
+    List<Map<String, dynamic>> blocks;
+    switch (ext) {
+      case 'txt':
+        String? content;
+        try {
+          content = await _pdfChannel.invokeMethod<String>(
+            'decodeTextBytes', {'bytes': bytes},
+          );
+        } on MissingPluginException {
+          // Pure Dart/desktop validation still supports Unicode encodings.
+        }
+        content ??= _decodeUnicodeText(bytes);
+        blocks = content.replaceFirst(RegExp(r'^\uFEFF'), '')
+            .split(RegExp(r'\r\n|\r|\n'))
+            .map((line) => <String, dynamic>{'type': 'paragraph', 'text': line})
+            .toList();
+        break;
+      case 'docx':
+        blocks = _extractDocxStructuredBlocks(bytes);
+        break;
+      case 'hwpx':
+        blocks = _extractHwpxStructuredBlocks(bytes);
+        break;
+      case 'hwp':
+        blocks = _extractHwp5StructuredBlocks(bytes);
+        break;
+      default:
+        throw const FormatException('구형 DOC는 DOCX 또는 PDF로 저장한 뒤 열어 주세요.');
+    }
+    if (blocks.isEmpty || !blocks.any((b) =>
+        b['type'] == 'image' || b['type'] == 'table' ||
+        (b['text'] as String? ?? '').trim().isNotEmpty)) {
+      throw const FormatException('문서에서 읽을 수 있는 본문이나 그림을 찾지 못했습니다.');
+    }
+    // Keep the existing cache name so bookmarks and memo keys remain compatible.
+    final outFile = File(inputFile.path.replaceFirst(
       RegExp(r'\.(txt|docx|doc|hwpx|hwp)$', caseSensitive: false),
       '_v25_converted.epub',
-    );
-    final outFile = File(epubPath);
-
-    final ext = inputFile.path.split('.').last.toLowerCase();
-    final bytes = await inputFile.readAsBytes();
-    final String title = inputFile.path
-        .split(Platform.pathSeparator)
-        .last
-        .replaceAll(RegExp(r'\.[^.]+$'), '');
-
-    List<String> lines = [];
-    if (ext == 'txt') {
-      String? content;
-      try {
-        content = await _pdfChannel.invokeMethod<String>(
-          'decodeTextBytes',
-          {'bytes': Uint8List.fromList(bytes)},
-        );
-      } catch (_) {}
-      if (content == null || content.isEmpty) {
-        try {
-          content = utf8.decode(bytes);
-        } catch (_) {
-          content = utf8.decode(bytes, allowMalformed: true);
-        }
-      }
-      lines = content.split(RegExp(r'\r?\n'));
-    } else if (ext == 'docx') {
-      final blocks = _extractDocxStructuredBlocks(bytes);
-      lines = _blocksToReadableLines(blocks);
-    } else if (ext == 'hwpx') {
-      final blocks = _extractHwpxStructuredBlocks(bytes);
-      lines = _blocksToReadableLines(blocks);
-    } else if (ext == 'hwp') {
-      final blocks = _extractHwp5StructuredBlocks(Uint8List.fromList(bytes));
-      lines = _blocksToReadableLines(blocks);
-    } else {
-      lines = _extractReadableStringsFromBinary(bytes);
-    }
-
-    if (lines.isEmpty) {
-      lines = _extractReadableStringsFromBinary(bytes);
-    }
-    if (lines.isEmpty) {
-      lines = ['[$title] 문서에서 표시할 수 있는 텍스트를 찾지 못했습니다.'];
-    }
-
-    return _buildEpubArchive(outFile, title, lines);
+    ));
+    return _buildEpubArchive(outFile, title, blocks);
   }
 
-  static List<String> _blocksToReadableLines(List<Map<String, dynamic>> blocks) {
-    final List<String> lines = [];
-    for (final b in blocks) {
-      final bType = b['type'] as String? ?? 'paragraph';
-      if (bType == 'paragraph') {
-        final t = (b['text'] as String? ?? '').trimRight();
-        if (t.isNotEmpty) lines.add(t);
-      } else if (bType == 'table') {
-        final rawCells = b['cells'] as List<dynamic>?;
-        if (rawCells != null && rawCells.isNotEmpty) {
-          final int numRows = ((b['numRows'] as num?)?.toInt() ?? 1).clamp(1, 500);
-          final Map<int, List<String>> rowMap = {};
-          for (final rc in rawCells) {
-            final cell = rc as Map<String, dynamic>;
-            final int r = ((cell['row'] as num?)?.toInt() ?? 0).clamp(0, numRows - 1);
-            final String ct = (cell['text'] as String? ?? '').trim().replaceAll('\n', ' ');
-            if (ct.isNotEmpty) {
-              rowMap.putIfAbsent(r, () => []).add(ct);
-            }
-          }
-          for (final r in rowMap.keys.toList()..sort()) {
-            lines.add('│ ${rowMap[r]!.join("  │  ")} │');
-          }
-        }
-      }
+  static String _decodeUnicodeText(Uint8List bytes) {
+    if (bytes.length >= 2 &&
+        ((bytes[0] == 0xFF && bytes[1] == 0xFE) ||
+         (bytes[0] == 0xFE && bytes[1] == 0xFF))) {
+      if (bytes.length.isOdd) throw const FormatException('UTF-16 파일 길이가 올바르지 않습니다.');
+      final bd = ByteData.sublistView(bytes);
+      final endian = bytes[0] == 0xFF ? Endian.little : Endian.big;
+      return String.fromCharCodes([
+        for (var i = 2; i + 1 < bytes.length; i += 2) bd.getUint16(i, endian),
+      ]);
     }
-    return lines;
+    return utf8.decode(bytes);
   }
 
-  static List<String> _extractReadableStringsFromBinary(List<int> bytes) {
-    final List<String> result = [];
-    try {
-      final decoded = utf8.decode(bytes, allowMalformed: true);
-      final matches = RegExp(r'[가-힣a-zA-Z0-9\s.,?!:;\-\(\)\[\]\"\x27]{8,}').allMatches(decoded);
-      for (final m in matches) {
-        final s = (m.group(0) ?? '').trim();
-        if (s.length >= 8 && RegExp(r'[가-힣a-zA-Z]').hasMatch(s)) {
-          result.add(s);
-        }
-      }
-    } catch (_) {}
-    return result;
+  static String _blockStyle(Map<String, dynamic> block) {
+    final styles = <String>['white-space:pre-wrap', 'overflow-wrap:anywhere'];
+    final align = block['align'];
+    if (['left', 'center', 'right', 'justify'].contains(align)) {
+      styles.add('text-align:$align');
+    }
+    if (block['bold'] == true) styles.add('font-weight:bold');
+    if (block['italic'] == true) styles.add('font-style:italic');
+    if (block['underline'] == true) styles.add('text-decoration:underline');
+    if (block['serif'] == true) styles.add('font-family:serif');
+    final size = (block['fontSizePt'] as num?)?.toDouble();
+    if (size != null) styles.add('font-size:${(size / 10.5).clamp(0.7, 3.5)}em');
+    final indent = (block['leftIndentPt'] as num?)?.toDouble() ?? 0;
+    if (indent > 0) styles.add('margin-left:${indent.clamp(0, 120)}pt');
+    return styles.join(';');
   }
 
-  static Future<File> _buildEpubArchive(File outFile, String title, List<String> lines) async {
+  static Future<File> _buildEpubArchive(
+    File outFile, String title, List<Map<String, dynamic>> blocks,
+  ) async {
     final archive = Archive();
+    void addText(String path, String text) {
+      final data = utf8.encode(text);
+      archive.addFile(ArchiveFile(path, data.length, data));
+    }
+    final mimetype = utf8.encode('application/epub+zip');
+    archive.addFile(ArchiveFile('mimetype', mimetype.length, mimetype)..compress = false);
+    addText('META-INF/container.xml', '''<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>''');
 
-    final mimetypeBytes = utf8.encode('application/epub+zip');
-    final mimetypeFile = ArchiveFile('mimetype', mimetypeBytes.length, mimetypeBytes);
-    mimetypeFile.compress = false;
-    archive.addFile(mimetypeFile);
-
-    const containerXml = '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n'
-        '  <rootfiles>\n'
-        '    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>\n'
-        '  </rootfiles>\n'
-        '</container>';
-    archive.addFile(ArchiveFile('META-INF/container.xml', utf8.encode(containerXml).length, utf8.encode(containerXml)));
-
-    final bodyBuf = StringBuffer();
-    for (final line in lines) {
-      final trimmed = line.trim();
-      if (trimmed.isEmpty) {
-        bodyBuf.writeln('<p>&#160;</p>');
-      } else {
-        bodyBuf.writeln('<p>${_escapeXml(trimmed)}</p>');
+    final mediaManifest = StringBuffer();
+    final imagePaths = <String, String>{};
+    String imageHtml(dynamic raw) {
+      if (raw is! List<int> || raw.isEmpty) return '';
+      final key = base64Encode(raw);
+      var path = imagePaths[key];
+      if (path == null) {
+        final (String ext, String mime) = raw.length >= 4 && raw[0] == 0x89 && raw[1] == 0x50
+            ? ('png', 'image/png')
+            : raw.length >= 3 && raw[0] == 0xFF && raw[1] == 0xD8
+                ? ('jpg', 'image/jpeg')
+                : raw.length >= 3 && raw[0] == 0x47 && raw[1] == 0x49
+                    ? ('gif', 'image/gif')
+                    : raw.length >= 12 && raw[0] == 0x52 && raw[8] == 0x57
+                        ? ('webp', 'image/webp') : ('bmp', 'image/bmp');
+        final id = 'image${imagePaths.length + 1}';
+        path = 'images/$id.$ext';
+        imagePaths[key] = path;
+        archive.addFile(ArchiveFile('OEBPS/$path', raw.length, raw));
+        mediaManifest.writeln('<item id="$id" href="$path" media-type="$mime"/>');
       }
+      return '<img src="$path" alt="" style="max-width:100%;height:auto;object-fit:contain;"/>';
+    }
+    String blockHtml(Map<String, dynamic> block) {
+      if (block['type'] == 'image') return '<div>${imageHtml(block['bytes'])}</div>';
+      if (block['type'] != 'table') {
+        final text = block['text'] as String? ?? '';
+        return '<p style="${_blockStyle(block)}">${text.isEmpty ? '&#160;' : _escapeXml(text)}</p>';
+      }
+      final rows = ((block['numRows'] as num?)?.toInt() ?? 1).clamp(1, 500);
+      final cols = ((block['numCols'] as num?)?.toInt() ?? 1).clamp(1, 100);
+      final cells = (block['cells'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+      final occupied = <String>{};
+      final byPosition = {for (final c in cells) '${c['row']}:${c['col']}': c};
+      final html = StringBuffer('<table style="border-collapse:collapse;width:100%;table-layout:fixed;"><tbody>');
+      for (var r = 0; r < rows; r++) {
+        html.write('<tr>');
+        for (var c = 0; c < cols; c++) {
+          if (occupied.contains('$r:$c')) continue;
+          final cell = byPosition['$r:$c'];
+          if (cell == null) { html.write('<td></td>'); continue; }
+          final rs = ((cell['rowSpan'] as num?)?.toInt() ?? 1).clamp(1, rows - r);
+          final cs = ((cell['colSpan'] as num?)?.toInt() ?? 1).clamp(1, cols - c);
+          for (var rr = r; rr < r + rs; rr++) {
+            for (var cc = c; cc < c + cs; cc++) { occupied.add('$rr:$cc'); }
+          }
+          final valign = ['top', 'middle', 'bottom'].contains(cell['vAlign']) ? cell['vAlign'] : 'middle';
+          html.write('<td rowspan="$rs" colspan="$cs" style="border:1px solid currentColor;padding:0.4em;vertical-align:$valign;${_blockStyle(cell)}">');
+          html.write(_escapeXml(cell['text'] as String? ?? ''));
+          for (final image in (cell['images'] as List<dynamic>? ?? [])) {
+            html.write(imageHtml(image));
+          }
+          html.write('</td>');
+        }
+        html.write('</tr>');
+      }
+      html.write('</tbody></table>');
+      return html.toString();
     }
 
-    final chapterXhtml = '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n'
-        '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ko">\n'
-        '<head>\n'
-        '  <title>${_escapeXml(title)}</title>\n'
-        '  <style type="text/css">\n'
-        '    html, body { font-family: sans-serif; line-height: 1.75; padding: 4%; word-break: keep-all; }\n'
-        '    p { margin: 0.45em 0; text-align: justify; }\n'
-        '  </style>\n'
-        '</head>\n'
-        '<body>\n'
-        '  <h2>${_escapeXml(title)}</h2>\n'
-        '  ${bodyBuf.toString()}\n'
-        '</body>\n'
-        '</html>';
-    final chapterBytes = utf8.encode(chapterXhtml);
-    archive.addFile(ArchiveFile('OEBPS/chapter1.xhtml', chapterBytes.length, chapterBytes));
-
-    final opfXml = '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">\n'
-        '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
-        '    <dc:title>${_escapeXml(title)}</dc:title>\n'
-        '    <dc:language>ko</dc:language>\n'
-        '    <dc:identifier id="BookId">urn:uuid:${DateTime.now().millisecondsSinceEpoch}</dc:identifier>\n'
-        '  </metadata>\n'
-        '  <manifest>\n'
-        '    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>\n'
-        '    <item id="chap1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>\n'
-        '  </manifest>\n'
-        '  <spine toc="ncx">\n'
-        '    <itemref idref="chap1"/>\n'
-        '  </spine>\n'
-        '</package>';
-    archive.addFile(ArchiveFile('OEBPS/content.opf', utf8.encode(opfXml).length, utf8.encode(opfXml)));
-
-    final ncxXml = '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2.0">\n'
-        '  <head><meta name="dtb:uid" content="1"/></head>\n'
-        '  <docTitle><text>${_escapeXml(title)}</text></docTitle>\n'
-        '  <navMap>\n'
-        '    <navPoint id="navPoint-1" playOrder="1">\n'
-        '      <navLabel><text>${_escapeXml(title)}</text></navLabel>\n'
-        '      <content src="chapter1.xhtml"/>\n'
-        '    </navPoint>\n'
-        '  </navMap>\n'
-        '</ncx>';
-    archive.addFile(ArchiveFile('OEBPS/toc.ncx', utf8.encode(ncxXml).length, utf8.encode(ncxXml)));
-
-    final zipBytes = ZipEncoder().encode(archive);
-    await outFile.writeAsBytes(zipBytes!);
+    // Bound chapter size so large TXT files do not become one enormous WebView
+    // layout. Do not split tables or images between chapters.
+    final chapters = <String>[];
+    var body = StringBuffer();
+    for (final block in blocks) {
+      body.writeln(blockHtml(block));
+      if (body.length >= 48000) { chapters.add(body.toString()); body = StringBuffer(); }
+    }
+    if (body.isNotEmpty) chapters.add(body.toString());
+    final manifest = StringBuffer();
+    final spine = StringBuffer();
+    final nav = StringBuffer();
+    final uid = 'urn:freader:${DateTime.now().microsecondsSinceEpoch}';
+    for (var i = 0; i < chapters.length; i++) {
+      final id = 'chap${i + 1}';
+      final name = 'chapter${i + 1}.xhtml';
+      addText('OEBPS/$name', '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ko"><head><title>${_escapeXml(title)}</title>
+<style type="text/css">html,body{font-family:sans-serif;line-height:1.75;word-break:keep-all;}body{padding:4%;}p{margin:0.45em 0;}img{max-width:100%;max-height:90vh;}td{overflow-wrap:anywhere;}</style>
+</head><body>${i == 0 ? '<h2>${_escapeXml(title)}</h2>' : ''}${chapters[i]}</body></html>''');
+      manifest.writeln('<item id="$id" href="$name" media-type="application/xhtml+xml"/>');
+      spine.writeln('<itemref idref="$id"/>');
+      nav.writeln('<navPoint id="$id" playOrder="${i + 1}"><navLabel><text>${_escapeXml(title)}${chapters.length > 1 ? ' (${i + 1})' : ''}</text></navLabel><content src="$name"/></navPoint>');
+    }
+    addText('OEBPS/content.opf', '''<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${_escapeXml(title)}</dc:title><dc:language>ko</dc:language><dc:identifier id="BookId">$uid</dc:identifier></metadata>
+<manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>$manifest$mediaManifest</manifest><spine toc="ncx">$spine</spine></package>''');
+    addText('OEBPS/toc.ncx', '''<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="$uid"/></head><docTitle><text>${_escapeXml(title)}</text></docTitle><navMap>$nav</navMap></ncx>''');
+    final zipBytes = ZipEncoder().encode(archive)!;
+    final temp = File('${outFile.path}.tmp');
+    try {
+      await temp.writeAsBytes(zipBytes, flush: true);
+      await temp.rename(outFile.path);
+    } finally {
+      if (await temp.exists()) await temp.delete();
+    }
     return outFile;
   }
 
   static String _escapeXml(String s) {
-    return s
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&apos;');
+    // XML 1.0 forbids NUL/control characters; one such character used to make
+    // the whole XHTML chapter fail to parse and appear blank.
+    final clean = String.fromCharCodes(s.runes.where((r) =>
+        r == 9 || r == 10 || r == 13 ||
+        (r >= 0x20 && r <= 0xD7FF) || (r >= 0xE000 && r <= 0xFFFD) ||
+        (r >= 0x10000 && r <= 0x10FFFF)));
+    return const HtmlEscape(HtmlEscapeMode.element).convert(clean)
+        .replaceAll('"', '&quot;').replaceAll("'", '&apos;');
   }
 
-  static String _unescapeXml(String s) {
-    return s
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'")
-        .replaceAll('&amp;', '&');
+  static String _extractHwpxText(String fragment) {
+    final doc = XmlDocument.parse(fragment);
+    String textOf(XmlNode node) {
+      if (node is XmlText || node is XmlCDATA) return node.value ?? '';
+      if (node is XmlElement) {
+        if (node.name.local == 'tab') return '\t';
+        if (node.name.local == 'lineBreak') return '\n';
+      }
+      return node.children.map(textOf).join();
+    }
+    return doc.descendants.whereType<XmlElement>()
+        .where((e) => e.name.qualified == 'hp:t').map(textOf).join().trimRight();
   }
 }
