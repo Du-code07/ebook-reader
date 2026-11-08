@@ -3,8 +3,6 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -527,19 +525,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   bool _isSelectionMode = false;
   final Set<String> _selectedFilePaths = {};
   final ScrollController _bookshelfScrollController = ScrollController();
-  bool _isDraggingScrollbar = false;
-  double _scrollDragStartDy = 0.0;
-  double _scrollDragStartOffset = 0.0;
   final Map<String, GlobalKey> _fileRowKeys = {};
   bool _isDragSelecting = false;
   bool _dragTargetSelectState = true;
   String? _lastDragTouchedPath;
-  String? _pointerDownRowPath;
-  Offset? _pointerDownGlobalPos;
   final Map<int, Offset> _activeBookshelfPointers = {};
-  bool _isMultiTouchScrolling = false;
-  double _lastTwoFingerAvgDy = 0.0;
-  VelocityTracker? _twoFingerVelocity;
   Timer? _dragEdgeScrollTimer;
   Offset? _lastDragGlobalPos;
 
@@ -1224,11 +1214,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
     final result = await showDialog<Object?>(
       context: context,
-      builder: (ctx) => _ImageMergeSelectDialog(
-        images: existingImages,
-        isDarkMode: widget.isDarkMode,
+      builder: (ctx) => _FileMergeSelectDialog(
+        files: existingImages,
         tr: _tr,
         displayName: (f) => _formatDisplayFileName(f.path.split(Platform.pathSeparator).last),
+        title: _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'),
+        mergeLabel: _tr('선택한 이미지 합치기', 'Merge Selected', '合并所选图片', '選択した画像を結合'),
       ),
     );
 
@@ -1468,121 +1459,38 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       return;
     }
 
-    final List<String> selectedPaths = [];
-
-    final proceed = await showDialog<bool>(
+    final result = await showDialog<Object?>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(_tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合')),
-              ),
-              TextButton(
-                onPressed: () {
-                  setModalState(() {
-                    if (selectedPaths.length == existingPdfs.length) {
-                      selectedPaths.clear();
-                    } else {
-                      selectedPaths
-                        ..clear()
-                        ..addAll(existingPdfs.map((e) => e.path));
-                    }
-                  });
-                },
-                child: Text(_tr('전체선택', 'Select All', '全选', 'すべて選択')),
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: 420,
-            height: 360,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('${_tr("선택됨", "Selected", "已选", "選択中")}: ${selectedPaths.length}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    TextButton.icon(
-                      icon: const Icon(Icons.folder_open, size: 16),
-                      label: Text(_tr('기기에서 선택', 'Browse Device', '从设备选择', '端末から選択')),
-                      onPressed: () async {
-                        Navigator.pop(ctx, false);
-                        final result = await FilePicker.platform.pickFiles(
-                          type: FileType.custom,
-                          allowedExtensions: ['pdf'],
-                          allowMultiple: true,
-                        );
-                        if (result != null && result.files.length >= 2) {
-                          final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
-                          await _createMergedPdfFromFiles(files, deleteSourceAfter: false);
-                        } else if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(_tr('PDF 파일을 2개 이상 선택해 주세요.', 'Please select at least 2 PDF files.', '请选择至少 2 个 PDF 文件。', 'PDFファイルを2つ以上選択してください。'))),
-                          );
-                        }
-                      },
-                    ),
-                  ],
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: existingPdfs.length,
-                    itemBuilder: (_, idx) {
-                      final f = existingPdfs[idx];
-                      final name = _formatDisplayFileName(f.path.split(Platform.pathSeparator).last);
-                      final selIndex = selectedPaths.indexOf(f.path);
-                      final checked = selIndex != -1;
-                      return CheckboxListTile(
-                        dense: true,
-                        value: checked,
-                        secondary: checked
-                            ? CircleAvatar(
-                                radius: 11,
-                                backgroundColor: Colors.indigo,
-                                child: Text(
-                                  '${selIndex + 1}',
-                                  style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
-                                ),
-                              )
-                            : null,
-                        title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        onChanged: (v) {
-                          setModalState(() {
-                            if (v == true) {
-                              if (!selectedPaths.contains(f.path)) {
-                                selectedPaths.add(f.path);
-                              }
-                            } else {
-                              selectedPaths.remove(f.path);
-                            }
-                          });
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
-            ElevatedButton(
-              onPressed: selectedPaths.length >= 2 ? () => Navigator.pop(ctx, true) : null,
-              child: Text(_tr('선택한 PDF 합치기', 'Merge Selected PDFs', '合并所选 PDF', '選択したPDFを結合')),
-            ),
-          ],
-        ),
+      builder: (ctx) => _FileMergeSelectDialog(
+        files: existingPdfs,
+        tr: _tr,
+        displayName: (f) => _formatDisplayFileName(f.path.split(Platform.pathSeparator).last),
+        title: _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'),
+        mergeLabel: _tr('선택한 PDF 합치기', 'Merge Selected PDFs', '合并所选 PDF', '選択したPDFを結合'),
+        checkboxLeading: false,
       ),
     );
 
-    if (proceed == true && selectedPaths.length >= 2) {
+    if (result == 'browse') {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+        allowMultiple: true,
+      );
+      if (picked != null && picked.files.length >= 2) {
+        final files = picked.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
+        await _createMergedPdfFromFiles(files, deleteSourceAfter: false);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_tr('PDF 파일을 2개 이상 선택해 주세요.', 'Please select at least 2 PDF files.', '请选择至少 2 个 PDF 文件。', 'PDFファイルを2つ以上選択してください。'))),
+        );
+      }
+      return;
+    }
+
+    if (result is List<String> && result.length >= 2) {
       final fileByPath = {for (final f in existingPdfs) f.path: f};
-      final chosen = selectedPaths.map((p) => fileByPath[p]!).toList();
+      final chosen = result.map((p) => fileByPath[p]!).toList();
       await _createMergedPdfFromFiles(chosen, deleteSourceAfter: true);
     }
   }
@@ -2237,7 +2145,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         key: rowKey,
         child: GestureDetector(
           onLongPress: () {
-            if (_isMultiTouchScrolling || _activeBookshelfPointers.length >= 2) return;
+            if (_activeBookshelfPointers.length >= 2) return;
             setState(() {
               final bool targetSelect = !_isSelectionMode ? true : !isSelected;
               _isSelectionMode = true;
@@ -2252,7 +2160,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             });
           },
           onTap: () {
-            if (_isMultiTouchScrolling || _activeBookshelfPointers.length >= 2) return;
+            if (_activeBookshelfPointers.length >= 2) return;
             if (_isSelectionMode) {
               setState(() {
                 if (isSelected) {
@@ -2494,137 +2402,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     );
   }
 
-  Widget _buildPcStyleScrollbar(int itemCount) {
-    // 선택 모드일 때만 표시
-    if (!_isSelectionMode) {
-      return const SizedBox.shrink();
-    }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double totalBarHeight = constraints.maxHeight;
-        final double trackHeight = (totalBarHeight - 12.0).clamp(48.0, 4000.0);
-
-        return AnimatedBuilder(
-          animation: _bookshelfScrollController,
-          builder: (context, _) {
-            double realMaxExtent = 0.0;
-            double viewport = totalBarHeight;
-            double currentPixels = 0.0;
-            bool hasDimensions = false;
-
-            if (_bookshelfScrollController.hasClients &&
-                _bookshelfScrollController.position.hasContentDimensions) {
-              hasDimensions = true;
-              realMaxExtent = _bookshelfScrollController.position.maxScrollExtent;
-              viewport = _bookshelfScrollController.position.viewportDimension;
-              currentPixels = _bookshelfScrollController.position.pixels.clamp(
-                0.0,
-                math.max<double>(0.0, realMaxExtent),
-              );
-            }
-
-            final int estVisibleCount = _bookshelfViewMode == 'grid'
-                ? 9
-                : math.max<int>(4, (totalBarHeight / 68.0).floor());
-            final bool overflowsByCount = itemCount > estVisibleCount;
-            final bool overflowsByExtent = realMaxExtent > 2.0;
-
-            if (!overflowsByCount && !overflowsByExtent) {
-              return const SizedBox.shrink();
-            }
-
-            if (!hasDimensions && overflowsByCount) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) setState(() {});
-              });
-            }
-
-            final double estMaxExtent = _bookshelfViewMode == 'grid'
-                ? math.max<double>(100.0, (((itemCount + 2) ~/ 3) * (totalBarHeight / 3.0)) - totalBarHeight + 88.0)
-                : math.max<double>(100.0, (itemCount * 68.0) - totalBarHeight + 88.0);
-            final double maxExtent = realMaxExtent > 2.0 ? realMaxExtent : estMaxExtent;
-
-            final double totalContent = viewport + maxExtent;
-            final double thumbHeight = ((viewport / totalContent) * trackHeight)
-                .clamp(40.0, math.max<double>(40.0, trackHeight * 0.65));
-            final double movableTrack = math.max<double>(1.0, trackHeight - thumbHeight);
-            final double scrollRatio = (currentPixels / maxExtent).clamp(0.0, 1.0);
-            final double thumbTop = scrollRatio * movableTrack;
-
-            void jumpToClamped(double targetOffset) {
-              if (!_bookshelfScrollController.hasClients) return;
-              final pos = _bookshelfScrollController.position;
-              final limit = pos.hasContentDimensions && pos.maxScrollExtent > 0
-                  ? pos.maxScrollExtent
-                  : maxExtent;
-              _bookshelfScrollController.jumpTo(targetOffset.clamp(0.0, limit));
-            }
-
-            final Color thumbColor = _isDraggingScrollbar
-                ? (widget.isDarkMode ? Colors.white.withOpacity(0.88) : Colors.black.withOpacity(0.75))
-                : (widget.isDarkMode ? Colors.white.withOpacity(0.55) : Colors.black.withOpacity(0.45));
-
-            return GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTapDown: (details) {
-                final double localY = (details.localPosition.dy - 6.0).clamp(0.0, trackHeight);
-                if (localY < thumbTop || localY > thumbTop + thumbHeight) {
-                  final double targetRatio =
-                      ((localY - thumbHeight / 2.0) / movableTrack).clamp(0.0, 1.0);
-                  jumpToClamped(targetRatio * maxExtent);
-                }
-              },
-              onVerticalDragStart: (details) {
-                setState(() => _isDraggingScrollbar = true);
-                final double localY = (details.localPosition.dy - 6.0).clamp(0.0, trackHeight);
-                if (localY < thumbTop - 8.0 || localY > thumbTop + thumbHeight + 8.0) {
-                  final double targetRatio =
-                      ((localY - thumbHeight / 2.0) / movableTrack).clamp(0.0, 1.0);
-                  jumpToClamped(targetRatio * maxExtent);
-                }
-                _scrollDragStartDy = details.globalPosition.dy;
-                _scrollDragStartOffset = _bookshelfScrollController.hasClients
-                    ? _bookshelfScrollController.position.pixels
-                    : 0.0;
-              },
-              onVerticalDragUpdate: (details) {
-                final double deltaY = details.globalPosition.dy - _scrollDragStartDy;
-                final double scrollDelta = (deltaY / movableTrack) * maxExtent;
-                jumpToClamped(_scrollDragStartOffset + scrollDelta);
-              },
-              onVerticalDragEnd: (_) {
-                if (mounted) setState(() => _isDraggingScrollbar = false);
-              },
-              onVerticalDragCancel: () {
-                if (mounted) setState(() => _isDraggingScrollbar = false);
-              },
-              child: SizedBox(
-                width: 16,
-                height: totalBarHeight,
-                child: Stack(
-                  children: [
-                    Positioned(
-                      top: 6.0 + thumbTop,
-                      right: 3.0,
-                      width: 5.5,
-                      height: thumbHeight,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: thumbColor,
-                          borderRadius: BorderRadius.circular(3.0),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final filteredBooks = _selectedGroup == '전체'
@@ -2778,119 +2555,35 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                         Expanded(
                           child: Listener(
                               behavior: HitTestBehavior.translucent,
+                      // 선택: 파일을 꾹 누른 채 드래그 / 그냥 드래그: 목록 스크롤
+                      // (꾹 누름이 인식되면 목록 스크롤은 자동으로 멈추고 선택만 진행됨)
                       onPointerDown: (event) {
-                        if (_isSelectionMode &&
-                            _activeBookshelfPointers.isEmpty &&
-                            _bookshelfScrollController.hasClients) {
-                          // 진행 중인 관성 스크롤 멈춤
-                          _bookshelfScrollController.jumpTo(_bookshelfScrollController.position.pixels);
-                        }
                         _activeBookshelfPointers[event.pointer] = event.position;
-                        if (_activeBookshelfPointers.length >= 2) {
-                          _isMultiTouchScrolling = true;
-                          if (_isDragSelecting) {
-                            setState(() => _isDragSelecting = false);
-                          }
-                          _pointerDownGlobalPos = null;
-                          _pointerDownRowPath = null;
-                          _lastDragTouchedPath = null;
-                          _lastTwoFingerAvgDy = _activeBookshelfPointers.values
-                                  .map((p) => p.dy)
-                                  .reduce((a, b) => a + b) /
-                              _activeBookshelfPointers.length;
-                          _twoFingerVelocity = VelocityTracker.withKind(event.kind)
-                            ..addPosition(event.timeStamp, Offset(0, _lastTwoFingerAvgDy));
-                          return;
-                        }
-                        if (_isSelectionMode && !_isMultiTouchScrolling) {
-                          _pointerDownGlobalPos = event.position;
-                          _pointerDownRowPath = _findFileRowPathAtGlobalPos(event.position);
-                          _lastDragTouchedPath = null;
+                        if (_activeBookshelfPointers.length >= 2 && _isDragSelecting) {
+                          setState(() => _isDragSelecting = false);
                         }
                       },
                       onPointerMove: (event) {
                         _activeBookshelfPointers[event.pointer] = event.position;
-                        if (!_isSelectionMode) return;
-
-                        // 1. 선택 모드에서 두 손가락 이상으로 드래그 시 파일 선택을 즉시 차단하고 화면 스크롤만 수행
-                        if (_activeBookshelfPointers.length >= 2 || _isMultiTouchScrolling) {
-                          if (_isDragSelecting) {
-                            setState(() => _isDragSelecting = false);
-                          }
-                          if (_activeBookshelfPointers.length >= 2 &&
-                              _bookshelfScrollController.hasClients &&
-                              _bookshelfScrollController.position.hasContentDimensions) {
-                            final double curAvgDy = _activeBookshelfPointers.values
-                                    .map((p) => p.dy)
-                                    .reduce((a, b) => a + b) /
-                                _activeBookshelfPointers.length;
-                            final double dyDelta = _lastTwoFingerAvgDy - curAvgDy;
-                            _lastTwoFingerAvgDy = curAvgDy;
-                            _twoFingerVelocity?.addPosition(event.timeStamp, Offset(0, curAvgDy));
-                            final pos = _bookshelfScrollController.position;
-                            final double targetOffset = (pos.pixels + dyDelta)
-                                .clamp(pos.minScrollExtent, pos.maxScrollExtent);
-                            _bookshelfScrollController.jumpTo(targetOffset);
-                          }
-                          return;
-                        }
-
-                        if (!_isDragSelecting && _pointerDownGlobalPos != null) {
-                          if ((event.position - _pointerDownGlobalPos!).distance > 10.0) {
-                            setState(() {
-                              _isDragSelecting = true;
-                              if (_pointerDownRowPath != null) {
-                                final alreadySelected = _selectedFilePaths.contains(_pointerDownRowPath!);
-                                _dragTargetSelectState = !alreadySelected;
-                                if (_dragTargetSelectState) {
-                                  _selectedFilePaths.add(_pointerDownRowPath!);
-                                } else {
-                                  _selectedFilePaths.remove(_pointerDownRowPath!);
-                                }
-                                _lastDragTouchedPath = _pointerDownRowPath;
-                              } else {
-                                _dragTargetSelectState = true;
-                              }
-                            });
-                          }
-                        }
-                        if (_isDragSelecting) {
+                        if (_isSelectionMode && _isDragSelecting && _activeBookshelfPointers.length < 2) {
                           _applyDragSelectionAtGlobalPos(event.position);
                         }
                       },
                       onPointerUp: (event) {
                         _activeBookshelfPointers.remove(event.pointer);
-                        if (_activeBookshelfPointers.length < 2 && _twoFingerVelocity != null) {
-                          // 두 손가락을 떼면 손을 뗀 속도대로 관성 스크롤(스무스 스크롤)
-                          final double vy = _twoFingerVelocity!.getVelocity().pixelsPerSecond.dy;
-                          _twoFingerVelocity = null;
-                          if (_isSelectionMode) _flingScrollController(_bookshelfScrollController, -vy);
-                        }
-                        if (_activeBookshelfPointers.length >= 2) {
-                          _lastTwoFingerAvgDy = _activeBookshelfPointers.values
-                                  .map((p) => p.dy)
-                                  .reduce((a, b) => a + b) /
-                              _activeBookshelfPointers.length;
-                        } else if (_activeBookshelfPointers.isEmpty) {
-                          _isMultiTouchScrolling = false;
+                        if (_activeBookshelfPointers.isEmpty) {
                           if (_isDragSelecting) {
                             setState(() => _isDragSelecting = false);
                           }
-                          _pointerDownGlobalPos = null;
-                          _pointerDownRowPath = null;
                           _lastDragTouchedPath = null;
                         }
                       },
                       onPointerCancel: (event) {
                         _activeBookshelfPointers.remove(event.pointer);
-                        if (_activeBookshelfPointers.length < 2) _twoFingerVelocity = null;
                         if (_activeBookshelfPointers.isEmpty) {
-                          _isMultiTouchScrolling = false;
                           if (_isDragSelecting) {
                             setState(() => _isDragSelecting = false);
                           }
-                          _pointerDownGlobalPos = null;
-                          _pointerDownRowPath = null;
                           _lastDragTouchedPath = null;
                         }
                       },
@@ -2910,9 +2603,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                 return GridView.builder(
                                   controller: _bookshelfScrollController,
                                   cacheExtent: 3000.0,
-                                  physics: _isSelectionMode
-                                      ? const NeverScrollableScrollPhysics()
-                                      : const AlwaysScrollableScrollPhysics(),
+                                  physics: const AlwaysScrollableScrollPhysics(),
                                   padding: const EdgeInsets.fromLTRB(hPad, vPad, hPad, 88),
                                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                                     crossAxisCount: crossCount,
@@ -2934,9 +2625,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                           : ListView.separated(
                         controller: _bookshelfScrollController,
                         cacheExtent: 3000.0,
-                        physics: _isSelectionMode
-                            ? const NeverScrollableScrollPhysics()
-                            : const AlwaysScrollableScrollPhysics(),
+                        physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.only(bottom: 88),
                         itemCount: filteredBooks.length,
                         separatorBuilder: (_, __) => const Divider(height: 1),
@@ -3051,7 +2740,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                     ],
                                   ),
                             onLongPress: () {
-                              if (_isMultiTouchScrolling || _activeBookshelfPointers.length >= 2) return;
+                              if (_activeBookshelfPointers.length >= 2) return;
                               setState(() {
                                 final bool targetSelect = !_isSelectionMode ? true : !isSelected;
                                 _isSelectionMode = true;
@@ -3066,7 +2755,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                               });
                             },
                             onTap: () {
-                              if (_isMultiTouchScrolling || _activeBookshelfPointers.length >= 2) return;
+                              if (_activeBookshelfPointers.length >= 2) return;
                               if (_isSelectionMode) {
                                 setState(() {
                                   if (isSelected) {
@@ -3089,7 +2778,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                     ),
                           ),
                         ),
-                        _buildPcStyleScrollbar(filteredBooks.length),
                       ],
                     ),
             ),
@@ -3147,20 +2835,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 선택 목록 공용: 두 손가락 스크롤 후 관성(스무스) 이동
-void _flingScrollController(ScrollController controller, double velocityPxPerSec) {
-  if (!controller.hasClients) return;
-  final pos = controller.position;
-  if (!pos.hasContentDimensions || velocityPxPerSec.abs() < 150.0) return;
-  const double drag = 0.135;
-  final sim = FrictionSimulation(drag, pos.pixels, velocityPxPerSec);
-  final double target = sim.finalX.clamp(pos.minScrollExtent, pos.maxScrollExtent).toDouble();
-  if ((target - pos.pixels).abs() < 1.0) return;
-  final double seconds = math.log(30.0 / velocityPxPerSec.abs()) / math.log(drag);
-  final int ms = (seconds * 1000).clamp(220, 1100).round();
-  controller.animateTo(target, duration: Duration(milliseconds: ms), curve: Curves.decelerate);
-}
-
 // 드래그 선택 중 손가락이 목록 위/아래 가장자리에 머무는 동안 계속 부드럽게 자동 스크롤할 속도(16ms당 px)
 double _edgeAutoScrollStep(double localDy, double viewportHeight, double zone) {
   if (localDy < zone) {
@@ -3174,170 +2848,43 @@ double _edgeAutoScrollStep(double localDy, double viewportHeight, double zone) {
   return 0.0;
 }
 
-/// 선택 모드 스크롤바와 같은 모양/동작의 목록용 스크롤바
-class _PcListScrollbar extends StatefulWidget {
-  const _PcListScrollbar({
-    required this.controller,
-    required this.isDarkMode,
-    required this.itemCount,
-    required this.itemExtent,
-  });
-
-  final ScrollController controller;
-  final bool isDarkMode;
-  final int itemCount;
-  final double itemExtent;
-
-  @override
-  State<_PcListScrollbar> createState() => _PcListScrollbarState();
-}
-
-class _PcListScrollbarState extends State<_PcListScrollbar> {
-  bool _dragging = false;
-  double _dragStartDy = 0.0;
-  double _dragStartOffset = 0.0;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double totalBarHeight = constraints.maxHeight;
-        final double trackHeight = (totalBarHeight - 12.0).clamp(48.0, 4000.0).toDouble();
-        return AnimatedBuilder(
-          animation: widget.controller,
-          builder: (context, _) {
-            final c = widget.controller;
-            double realMaxExtent = 0.0;
-            double viewport = totalBarHeight;
-            double currentPixels = 0.0;
-            if (c.hasClients && c.position.hasContentDimensions) {
-              realMaxExtent = c.position.maxScrollExtent;
-              viewport = c.position.viewportDimension;
-              currentPixels = c.position.pixels.clamp(0.0, math.max<double>(0.0, realMaxExtent)).toDouble();
-            } else {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) setState(() {});
-              });
-            }
-            final double estMaxExtent =
-                math.max<double>(0.0, widget.itemCount * widget.itemExtent - totalBarHeight);
-            final double maxExtent = realMaxExtent > 2.0 ? realMaxExtent : estMaxExtent;
-            if (maxExtent <= 2.0) {
-              return const SizedBox(width: 16);
-            }
-
-            final double totalContent = viewport + maxExtent;
-            final double thumbHeight = ((viewport / totalContent) * trackHeight)
-                .clamp(40.0, math.max<double>(40.0, trackHeight * 0.65))
-                .toDouble();
-            final double movableTrack = math.max<double>(1.0, trackHeight - thumbHeight);
-            final double scrollRatio = (currentPixels / maxExtent).clamp(0.0, 1.0).toDouble();
-            final double thumbTop = scrollRatio * movableTrack;
-
-            void jumpToClamped(double target) {
-              if (!c.hasClients) return;
-              final pos = c.position;
-              final limit = pos.hasContentDimensions && pos.maxScrollExtent > 0 ? pos.maxScrollExtent : maxExtent;
-              c.jumpTo(target.clamp(0.0, limit).toDouble());
-            }
-
-            final Color thumbColor = _dragging
-                ? (widget.isDarkMode ? Colors.white.withOpacity(0.88) : Colors.black.withOpacity(0.75))
-                : (widget.isDarkMode ? Colors.white.withOpacity(0.55) : Colors.black.withOpacity(0.45));
-
-            return GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTapDown: (d) {
-                final double localY = (d.localPosition.dy - 6.0).clamp(0.0, trackHeight).toDouble();
-                if (localY < thumbTop || localY > thumbTop + thumbHeight) {
-                  jumpToClamped(((localY - thumbHeight / 2.0) / movableTrack).clamp(0.0, 1.0) * maxExtent);
-                }
-              },
-              onVerticalDragStart: (d) {
-                setState(() => _dragging = true);
-                final double localY = (d.localPosition.dy - 6.0).clamp(0.0, trackHeight).toDouble();
-                if (localY < thumbTop - 8.0 || localY > thumbTop + thumbHeight + 8.0) {
-                  jumpToClamped(((localY - thumbHeight / 2.0) / movableTrack).clamp(0.0, 1.0) * maxExtent);
-                }
-                _dragStartDy = d.globalPosition.dy;
-                _dragStartOffset = c.hasClients ? c.position.pixels : 0.0;
-              },
-              onVerticalDragUpdate: (d) {
-                final double deltaY = d.globalPosition.dy - _dragStartDy;
-                jumpToClamped(_dragStartOffset + (deltaY / movableTrack) * maxExtent);
-              },
-              onVerticalDragEnd: (_) {
-                if (mounted) setState(() => _dragging = false);
-              },
-              onVerticalDragCancel: () {
-                if (mounted) setState(() => _dragging = false);
-              },
-              child: SizedBox(
-                width: 16,
-                height: totalBarHeight,
-                child: Stack(
-                  children: [
-                    Positioned(
-                      top: 6.0 + thumbTop,
-                      right: 3.0,
-                      width: 5.5,
-                      height: thumbHeight,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: thumbColor,
-                          borderRadius: BorderRadius.circular(3.0),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-/// 이미지 합치기 선택 창: 한 손가락 드래그 = 연속 선택, 두 손가락 드래그 = 목록 스크롤
+/// 합치기용 파일 선택 창 (이미지·PDF 공용)
+/// - 그냥 드래그: 목록 스크롤
+/// - 파일을 꾹 누른 채 드래그: 지나가는 파일 연속 선택(가장자리에서 자동 스크롤)
 /// 반환값: 선택한 경로 목록(List<String>) 또는 'browse'(기기에서 선택)
-class _ImageMergeSelectDialog extends StatefulWidget {
-  const _ImageMergeSelectDialog({
-    required this.images,
-    required this.isDarkMode,
+class _FileMergeSelectDialog extends StatefulWidget {
+  const _FileMergeSelectDialog({
+    required this.files,
     required this.tr,
     required this.displayName,
+    required this.title,
+    required this.mergeLabel,
+    this.checkboxLeading = true,
   });
 
-  final List<File> images;
-  final bool isDarkMode;
+  final List<File> files;
   final String Function(String ko, String en, String zh, String ja) tr;
   final String Function(File f) displayName;
+  final String title;
+  final String mergeLabel;
+  /// true: [체크칸][파일이름][순서번호]  /  false: [순서번호][파일이름][체크칸]
+  final bool checkboxLeading;
 
   @override
-  State<_ImageMergeSelectDialog> createState() => _ImageMergeSelectDialogState();
+  State<_FileMergeSelectDialog> createState() => _FileMergeSelectDialogState();
 }
 
-class _ImageMergeSelectDialogState extends State<_ImageMergeSelectDialog> {
+class _FileMergeSelectDialogState extends State<_FileMergeSelectDialog> {
   static const double _rowH = 48.0;
   final ScrollController _sc = ScrollController();
   final GlobalKey _listKey = GlobalKey();
   final List<String> _selected = [];
 
-  final Map<int, Offset> _pointers = {};
-  bool _multi = false;
-  double _lastAvgDy = 0.0;
-  VelocityTracker? _velocity;
-
-  Offset? _downPos;
   bool _dragSelecting = false;
   bool _dragTarget = true;
   int? _lastIndex;
   Offset? _lastDragGlobal;
   Timer? _edgeTimer;
-
-  String get _title => widget.tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合');
 
   @override
   void dispose() {
@@ -3353,7 +2900,7 @@ class _ImageMergeSelectDialogState extends State<_ImageMergeSelectDialog> {
 
   int? _indexAt(Offset global, {bool clampToList = false}) {
     final box = _listBox;
-    if (box == null || widget.images.isEmpty) return null;
+    if (box == null || widget.files.isEmpty) return null;
     double y = box.globalToLocal(global).dy;
     if (y < 0 || y >= box.size.height) {
       if (!clampToList) return null;
@@ -3361,12 +2908,12 @@ class _ImageMergeSelectDialogState extends State<_ImageMergeSelectDialog> {
     }
     final double off = _sc.hasClients ? _sc.position.pixels : 0.0;
     final int idx = ((y + off) / _rowH).floor();
-    if (idx < 0 || idx >= widget.images.length) return null;
+    if (idx < 0 || idx >= widget.files.length) return null;
     return idx;
   }
 
   void _setSelected(int idx, bool select) {
-    final path = widget.images[idx].path;
+    final path = widget.files[idx].path;
     if (select) {
       if (!_selected.contains(path)) _selected.add(path);
     } else {
@@ -3410,89 +2957,45 @@ class _ImageMergeSelectDialogState extends State<_ImageMergeSelectDialog> {
     });
   }
 
-  double _avgDy() => _pointers.values.map((p) => p.dy).reduce((a, b) => a + b) / _pointers.length;
-
-  void _onDown(PointerDownEvent e) {
-    if (_pointers.isEmpty && _sc.hasClients) {
-      _sc.jumpTo(_sc.position.pixels); // 진행 중인 관성 스크롤 멈춤
-    }
-    _pointers[e.pointer] = e.position;
-    if (_pointers.length >= 2) {
-      _multi = true;
-      _dragSelecting = false;
-      _downPos = null;
-      _lastIndex = null;
-      _lastAvgDy = _avgDy();
-      _velocity = VelocityTracker.withKind(e.kind)..addPosition(e.timeStamp, Offset(0, _lastAvgDy));
-      return;
-    }
-    if (!_multi) {
-      _downPos = e.position;
-      _lastIndex = null;
-    }
-  }
-
-  void _onMove(PointerMoveEvent e) {
-    _pointers[e.pointer] = e.position;
-    if (_multi) {
-      if (_pointers.length >= 2 && _sc.hasClients && _sc.position.hasContentDimensions) {
-        final double cur = _avgDy();
-        final double delta = _lastAvgDy - cur;
-        _lastAvgDy = cur;
-        _velocity?.addPosition(e.timeStamp, Offset(0, cur));
-        final pos = _sc.position;
-        _sc.jumpTo((pos.pixels + delta).clamp(pos.minScrollExtent, pos.maxScrollExtent).toDouble());
-      }
-      return;
-    }
-    final down = _downPos;
-    if (down == null) return;
-    if (!_dragSelecting && (e.position - down).distance > 10.0) {
-      final startIdx = _indexAt(down);
+  void _onLongPressStart(LongPressStartDetails d) {
+    final idx = _indexAt(d.globalPosition);
+    if (idx == null) return;
+    HapticFeedback.selectionClick();
+    setState(() {
       _dragSelecting = true;
-      _dragTarget = startIdx == null ? true : !_selected.contains(widget.images[startIdx].path);
-      if (startIdx != null) {
-        setState(() => _setSelected(startIdx, _dragTarget));
-        _lastIndex = startIdx;
-      }
-    }
-    if (_dragSelecting) {
-      _lastDragGlobal = e.position;
-      _applyDragAt(e.position);
-      _ensureEdgeTimer();
-    }
+      _dragTarget = !_selected.contains(widget.files[idx].path);
+      _setSelected(idx, _dragTarget);
+    });
+    _lastIndex = idx;
+    _lastDragGlobal = d.globalPosition;
   }
 
-  void _onUp(PointerEvent e, {bool cancelled = false}) {
-    _pointers.remove(e.pointer);
-    if (_multi) {
-      if (_pointers.length < 2 && _velocity != null) {
-        final double vy = _velocity!.getVelocity().pixelsPerSecond.dy;
-        _velocity = null;
-        if (!cancelled) _flingScrollController(_sc, -vy);
-      } else if (_pointers.length >= 2) {
-        _lastAvgDy = _avgDy();
-      }
-      if (_pointers.isEmpty) _multi = false;
-      return;
-    }
-    final down = _downPos;
-    if (!cancelled && !_dragSelecting && down != null && (e.position - down).distance <= 10.0) {
-      final idx = _indexAt(down);
-      if (idx != null) {
-        setState(() => _setSelected(idx, !_selected.contains(widget.images[idx].path)));
-      }
-    }
+  void _onLongPressMove(LongPressMoveUpdateDetails d) {
+    if (!_dragSelecting) return;
+    _lastDragGlobal = d.globalPosition;
+    _applyDragAt(d.globalPosition);
+    _ensureEdgeTimer();
+  }
+
+  void _onLongPressEnd() {
     _dragSelecting = false;
-    _downPos = null;
     _lastIndex = null;
     _lastDragGlobal = null;
   }
 
+  Widget _orderBadge(int selIndex) => CircleAvatar(
+        radius: 11,
+        backgroundColor: Colors.indigo,
+        child: Text(
+          '${selIndex + 1}',
+          style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final tr = widget.tr;
-    final images = widget.images;
+    final files = widget.files;
     return AlertDialog(
       title: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -3501,18 +3004,18 @@ class _ImageMergeSelectDialogState extends State<_ImageMergeSelectDialog> {
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
-              child: Text(_title, maxLines: 1, softWrap: false),
+              child: Text(widget.title, maxLines: 1, softWrap: false),
             ),
           ),
           TextButton(
             onPressed: () {
               setState(() {
-                if (_selected.length == images.length) {
+                if (_selected.length == files.length) {
                   _selected.clear();
                 } else {
                   _selected
                     ..clear()
-                    ..addAll(images.map((e) => e.path));
+                    ..addAll(files.map((e) => e.path));
                 }
               });
             },
@@ -3540,63 +3043,49 @@ class _ImageMergeSelectDialogState extends State<_ImageMergeSelectDialog> {
             ),
             const Divider(height: 1),
             Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: Listener(
-                      behavior: HitTestBehavior.translucent,
-                      onPointerDown: _onDown,
-                      onPointerMove: _onMove,
-                      onPointerUp: (e) => _onUp(e),
-                      onPointerCancel: (e) => _onUp(e, cancelled: true),
-                      child: ListView.builder(
-                        key: _listKey,
-                        controller: _sc,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemExtent: _rowH,
-                        itemCount: images.length,
-                        itemBuilder: (_, idx) {
-                          final f = images[idx];
-                          final selIndex = _selected.indexOf(f.path);
-                          final checked = selIndex != -1;
-                          return Row(
-                            children: [
-                              IgnorePointer(
-                                child: Checkbox(value: checked, onChanged: (_) {}),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  widget.displayName(f),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (checked)
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 6, right: 2),
-                                  child: CircleAvatar(
-                                    radius: 11,
-                                    backgroundColor: Colors.indigo,
-                                    child: Text(
-                                      '${selIndex + 1}',
-                                      style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
-                                    ),
+              child: GestureDetector(
+                onLongPressStart: _onLongPressStart,
+                onLongPressMoveUpdate: _onLongPressMove,
+                onLongPressEnd: (_) => _onLongPressEnd(),
+                onLongPressCancel: _onLongPressEnd,
+                child: ListView.builder(
+                  key: _listKey,
+                  controller: _sc,
+                  itemExtent: _rowH,
+                  itemCount: files.length,
+                  itemBuilder: (_, idx) {
+                    final f = files[idx];
+                    final selIndex = _selected.indexOf(f.path);
+                    final checked = selIndex != -1;
+                    final checkbox = IgnorePointer(child: Checkbox(value: checked, onChanged: (_) {}));
+                    final name = Expanded(
+                      child: Text(widget.displayName(f), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    );
+                    return InkWell(
+                      onTap: () => setState(() => _setSelected(idx, !checked)),
+                      child: Row(
+                        children: widget.checkboxLeading
+                            ? [
+                                checkbox,
+                                name,
+                                if (checked)
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 6, right: 6),
+                                    child: _orderBadge(selIndex),
                                   ),
+                              ]
+                            : [
+                                SizedBox(
+                                  width: 40,
+                                  child: checked ? Center(child: _orderBadge(selIndex)) : null,
                                 ),
-                            ],
-                          );
-                        },
+                                name,
+                                checkbox,
+                              ],
                       ),
-                    ),
-                  ),
-                  _PcListScrollbar(
-                    controller: _sc,
-                    isDarkMode: widget.isDarkMode,
-                    itemCount: images.length,
-                    itemExtent: _rowH,
-                  ),
-                ],
+                    );
+                  },
+                ),
               ),
             ),
           ],
@@ -3606,7 +3095,7 @@ class _ImageMergeSelectDialogState extends State<_ImageMergeSelectDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('취소', 'Cancel', '取消', 'キャンセル'))),
         ElevatedButton(
           onPressed: _selected.length >= 2 ? () => Navigator.pop(context, List<String>.of(_selected)) : null,
-          child: Text(tr('선택한 이미지 합치기', 'Merge Selected', '合并所选图片', '選択した画像を結合')),
+          child: Text(widget.mergeLabel),
         ),
       ],
     );
