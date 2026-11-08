@@ -507,25 +507,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         ),
       );
     } else if (imageExts.contains(nextExt)) {
-      final siblingImages = allFiles.where((f) {
-        final fExt = f.path.split('.').last.toLowerCase();
-        return imageExts.contains(fExt);
-      }).toList();
-      final targetList = siblingImages.length > 1 ? siblingImages : [targetFile];
-      final bookKey = targetList.first.path;
-      final clickedIdx = targetList.indexWhere((f) => f.path == targetFile!.path);
-      if (clickedIdx >= 0) {
-        await StorageService.saveLastPosition(bookKey, clickedIdx.toString());
-      }
-      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => UniversalMediaReaderScreen(
-            files: targetList,
-            title: targetList.length > 1 ? '$nextName 외 ${targetList.length - 1}장' : nextName,
+            files: [targetFile!],
+            title: nextName,
             isPdf: false,
-            customBookKey: bookKey,
           ),
         ),
       );

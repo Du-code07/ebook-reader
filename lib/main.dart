@@ -527,6 +527,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   String? _lastDragTouchedPath;
   String? _pointerDownRowPath;
   Offset? _pointerDownGlobalPos;
+  final Map<int, Offset> _activeBookshelfPointers = {};
+  bool _isMultiTouchScrolling = false;
+  double _lastTwoFingerAvgDy = 0.0;
 
   // 10, 11 & 13. 워드(.docx, .doc), 한글(.hwpx, .hwp), 메모장(.txt) 뷰어 열람 지원 (YML 제외)
   static const _supportedExts = [
@@ -1118,7 +1121,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
 
       progressSetState?.call(() {
         currentStep = i + 1;
-        progressStatus = '$fileName (${i + 1}/${orderedImages.length})';
+        progressStatus = fileName;
       });
       await Future.delayed(const Duration(milliseconds: 15));
 
@@ -1399,7 +1402,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     int currentStep = 0;
     final int totalSteps = orderedPdfs.length;
     final String firstFileName = orderedPdfs.first.path.split(Platform.pathSeparator).last;
-    String progressStatus = '$firstFileName (1/${orderedPdfs.length})';
+    String progressStatus = firstFileName;
     StateSetter? progressSetState;
 
     _pdfChannel.setMethodCallHandler((call) async {
@@ -1411,7 +1414,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           final String fName = (args['fileName'] ?? '').toString();
           progressSetState?.call(() {
             currentStep = cur;
-            progressStatus = '$fName ($cur/$tot)';
+            progressStatus = fName;
           });
         }
       }
@@ -1732,30 +1735,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         ),
       );
     } else if (_imageExts.contains(ext)) {
-      final currentGroup = _bookGroupMap[file.path];
-      final siblingImages = _allBooks.where((f) {
-        final fExt = f.path.split('.').last.toLowerCase();
-        return _imageExts.contains(fExt) && _bookGroupMap[f.path] == currentGroup;
-      }).toList();
-
-      final targetList = siblingImages.length > 1 ? siblingImages : [file];
-      final String bookKey = targetList.first.path;
-      final savedPos = await StorageService.getLastPosition(bookKey);
-      final clickedIdx = targetList.indexWhere((f) => f.path == file.path);
-
-      if (clickedIdx > 0 || savedPos == null) {
-        await StorageService.saveLastPosition(bookKey, clickedIdx.clamp(0, targetList.length - 1).toString());
-      }
-
-      if (!mounted) return;
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => UniversalMediaReaderScreen(
-            files: targetList,
-            title: targetList.length > 1 ? '$displayName (+${targetList.length - 1})' : displayName,
+            files: [file],
+            title: displayName,
             isPdf: false,
-            customBookKey: bookKey,
           ),
         ),
       );
@@ -2316,6 +2302,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
         key: rowKey,
         child: GestureDetector(
           onLongPress: () {
+            if (_isMultiTouchScrolling || _activeBookshelfPointers.length >= 2) return;
             setState(() {
               final bool targetSelect = !_isSelectionMode ? true : !isSelected;
               _isSelectionMode = true;
@@ -2330,6 +2317,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
             });
           },
           onTap: () {
+            if (_isMultiTouchScrolling || _activeBookshelfPointers.length >= 2) return;
             if (_isSelectionMode) {
               setState(() {
                 if (isSelected) {
@@ -2856,16 +2844,55 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                           child: Listener(
                               behavior: HitTestBehavior.translucent,
                       onPointerDown: (event) {
-                        if (_isSelectionMode) {
+                        _activeBookshelfPointers[event.pointer] = event.position;
+                        if (_activeBookshelfPointers.length >= 2) {
+                          _isMultiTouchScrolling = true;
+                          if (_isDragSelecting) {
+                            setState(() => _isDragSelecting = false);
+                          }
+                          _pointerDownGlobalPos = null;
+                          _pointerDownRowPath = null;
+                          _lastDragTouchedPath = null;
+                          _lastTwoFingerAvgDy = _activeBookshelfPointers.values
+                                  .map((p) => p.dy)
+                                  .reduce((a, b) => a + b) /
+                              _activeBookshelfPointers.length;
+                          return;
+                        }
+                        if (_isSelectionMode && !_isMultiTouchScrolling) {
                           _pointerDownGlobalPos = event.position;
                           _pointerDownRowPath = _findFileRowPathAtGlobalPos(event.position);
                           _lastDragTouchedPath = null;
                         }
                       },
                       onPointerMove: (event) {
+                        _activeBookshelfPointers[event.pointer] = event.position;
                         if (!_isSelectionMode) return;
+
+                        // 1. 선택 모드에서 두 손가락 이상으로 드래그 시 파일 선택을 즉시 차단하고 화면 스크롤만 수행
+                        if (_activeBookshelfPointers.length >= 2 || _isMultiTouchScrolling) {
+                          if (_isDragSelecting) {
+                            setState(() => _isDragSelecting = false);
+                          }
+                          if (_activeBookshelfPointers.length >= 2 &&
+                              _bookshelfScrollController.hasClients &&
+                              _bookshelfScrollController.position.hasContentDimensions) {
+                            final double curAvgDy = _activeBookshelfPointers.values
+                                    .map((p) => p.dy)
+                                    .reduce((a, b) => a + b) /
+                                _activeBookshelfPointers.length;
+                            final double dyDelta = _lastTwoFingerAvgDy - curAvgDy;
+                            _lastTwoFingerAvgDy = curAvgDy;
+                            final pos = _bookshelfScrollController.position;
+                            final double targetOffset = (pos.pixels + dyDelta)
+                                .clamp(pos.minScrollExtent, pos.maxScrollExtent);
+                            _bookshelfScrollController.jumpTo(targetOffset);
+                          }
+                          return;
+                        }
+
                         if (!_isDragSelecting && _pointerDownGlobalPos != null) {
-                          if ((event.position - _pointerDownGlobalPos!).distance > 8.0) {
+                          if ((event.position - _pointerDownGlobalPos!).distance > 10.0) {
                             setState(() {
                               _isDragSelecting = true;
                               if (_pointerDownRowPath != null) {
@@ -2887,21 +2914,34 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                           _applyDragSelectionAtGlobalPos(event.position);
                         }
                       },
-                      onPointerUp: (_) {
-                        if (_isDragSelecting) {
-                          setState(() => _isDragSelecting = false);
+                      onPointerUp: (event) {
+                        _activeBookshelfPointers.remove(event.pointer);
+                        if (_activeBookshelfPointers.length >= 2) {
+                          _lastTwoFingerAvgDy = _activeBookshelfPointers.values
+                                  .map((p) => p.dy)
+                                  .reduce((a, b) => a + b) /
+                              _activeBookshelfPointers.length;
+                        } else if (_activeBookshelfPointers.isEmpty) {
+                          _isMultiTouchScrolling = false;
+                          if (_isDragSelecting) {
+                            setState(() => _isDragSelecting = false);
+                          }
+                          _pointerDownGlobalPos = null;
+                          _pointerDownRowPath = null;
+                          _lastDragTouchedPath = null;
                         }
-                        _pointerDownGlobalPos = null;
-                        _pointerDownRowPath = null;
-                        _lastDragTouchedPath = null;
                       },
-                      onPointerCancel: (_) {
-                        if (_isDragSelecting) {
-                          setState(() => _isDragSelecting = false);
+                      onPointerCancel: (event) {
+                        _activeBookshelfPointers.remove(event.pointer);
+                        if (_activeBookshelfPointers.isEmpty) {
+                          _isMultiTouchScrolling = false;
+                          if (_isDragSelecting) {
+                            setState(() => _isDragSelecting = false);
+                          }
+                          _pointerDownGlobalPos = null;
+                          _pointerDownRowPath = null;
+                          _lastDragTouchedPath = null;
                         }
-                        _pointerDownGlobalPos = null;
-                        _pointerDownRowPath = null;
-                        _lastDragTouchedPath = null;
                       },
                       child: _bookshelfViewMode == 'grid'
                           ? LayoutBuilder(
@@ -3062,6 +3102,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                                     ],
                                   ),
                             onLongPress: () {
+                              if (_isMultiTouchScrolling || _activeBookshelfPointers.length >= 2) return;
                               setState(() {
                                 final bool targetSelect = !_isSelectionMode ? true : !isSelected;
                                 _isSelectionMode = true;
@@ -3076,6 +3117,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                               });
                             },
                             onTap: () {
+                              if (_isMultiTouchScrolling || _activeBookshelfPointers.length >= 2) return;
                               if (_isSelectionMode) {
                                 setState(() {
                                   if (isSelected) {
@@ -3109,22 +3151,38 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           ? Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                FloatingActionButton.extended(
-                  heroTag: 'fab_batch_move_group',
-                  backgroundColor: Colors.indigo,
-                  foregroundColor: Colors.white,
-                  onPressed: _selectedFilePaths.isNotEmpty ? _moveSelectedFilesBatch : null,
-                  icon: const Icon(Icons.drive_file_move_outline),
-                  label: Text('${_tr("그룹 이동", "Move Group", "移动分组", "グループ移動")} (${_selectedFilePaths.length})'),
+                SizedBox(
+                  height: 42,
+                  child: FloatingActionButton.extended(
+                    heroTag: 'fab_batch_move_group',
+                    backgroundColor: Colors.indigo,
+                    foregroundColor: Colors.white,
+                    extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
+                    extendedIconLabelSpacing: 6,
+                    onPressed: _selectedFilePaths.isNotEmpty ? _moveSelectedFilesBatch : null,
+                    icon: const Icon(Icons.drive_file_move_outline, size: 18),
+                    label: Text(
+                      '${_tr("그룹", "Group", "分组", "グループ")} (${_selectedFilePaths.length})',
+                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 10),
-                FloatingActionButton.extended(
-                  heroTag: 'fab_batch_delete',
-                  backgroundColor: Colors.redAccent,
-                  foregroundColor: Colors.white,
-                  onPressed: _selectedFilePaths.isNotEmpty ? _deleteSelectedFilesBatch : null,
-                  icon: const Icon(Icons.delete_outline),
-                  label: Text('${_tr("선택 삭제", "Delete", "删除", "削除")} (${_selectedFilePaths.length})'),
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 42,
+                  child: FloatingActionButton.extended(
+                    heroTag: 'fab_batch_delete',
+                    backgroundColor: Colors.redAccent,
+                    foregroundColor: Colors.white,
+                    extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
+                    extendedIconLabelSpacing: 6,
+                    onPressed: _selectedFilePaths.isNotEmpty ? _deleteSelectedFilesBatch : null,
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: Text(
+                      '${_tr("삭제", "Delete", "删除", "削除")} (${_selectedFilePaths.length})',
+                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                    ),
+                  ),
                 ),
               ],
             )

@@ -80,14 +80,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var firstShakeTime = 0L
     private val thumbExecutor = Executors.newFixedThreadPool(4)
 
-    // 1. 태블릿에서 상단 상태표시줄(시계, 날짜, 배터리) 및 네비게이션 바를 숨기고 내렸을 때 자동으로 다시 올라가게 하는 워치독
+    // 1. 태블릿에서 상단 상태표시줄을 한번 내렸을 때 약 1.3초 후 자동으로 다시 올라가게 하는 감시 워치독 (v33/v34 동일 로직)
     private var isActivityResumed = false
     private var statusBarVisibleTicks = 0
     private val statusBarWatchdogRunnable = object : Runnable {
         override fun run() {
             if (!isActivityResumed) return
             try {
-                if (isStatusBarCurrentlyVisible()) {
+                val visible = isStatusBarCurrentlyVisible()
+                if (visible) {
                     statusBarVisibleTicks++
                     if (statusBarVisibleTicks >= 2) {
                         hideSystemStatusBar()
@@ -104,20 +105,17 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val rootInsets = window?.decorView?.rootWindowInsets
-                (rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true) ||
-                    (rootInsets?.isVisible(WindowInsets.Type.navigationBars()) == true)
+                rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true
             } else {
                 @Suppress("DEPRECATION")
-                val vis = window.decorView.systemUiVisibility
-                (vis and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0 ||
-                    (vis and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) == 0
+                (window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0
             }
         } catch (_: Exception) {
             false
         }
     }
 
-    private fun hideSystemStatusBar() {
+    private fun hideSystemStatusBar(alsoHideNavBar: Boolean = false) {
         try {
             window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
             window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
@@ -140,10 +138,13 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 window.insetsController?.let { controller ->
                     controller.systemBarsBehavior =
                         WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    controller.hide(
-                        WindowInsets.Type.statusBars()
-                            or WindowInsets.Type.navigationBars()
-                    )
+                    // 중요: 태블릿 OneUI에서 navigationBars()와 statusBars()를 묶어서 호출하면 태스크바 때문에 상태표시줄 숨김 애니메이션이 취소되므로 반드시 분리!
+                    controller.hide(WindowInsets.Type.statusBars())
+                    if (alsoHideNavBar) {
+                        try {
+                            controller.hide(WindowInsets.Type.navigationBars())
+                        } catch (_: Exception) {}
+                    }
                 }
             } else {
                 @Suppress("DEPRECATION")
@@ -172,20 +173,18 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        hideSystemStatusBar()
-        mainHandler.postDelayed({ hideSystemStatusBar() }, 150L)
-        mainHandler.postDelayed({ hideSystemStatusBar() }, 400L)
-        mainHandler.postDelayed({ hideSystemStatusBar() }, 800L)
+        hideSystemStatusBar(alsoHideNavBar = true)
+        mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 250L)
+        mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 600L)
 
         window.decorView.setOnApplyWindowInsetsListener { v, insets ->
-            val sysBarVisible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                insets.isVisible(WindowInsets.Type.statusBars()) ||
-                    insets.isVisible(WindowInsets.Type.navigationBars())
+            val statusBarVisible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.isVisible(WindowInsets.Type.statusBars())
             } else {
                 @Suppress("DEPRECATION")
-                insets.systemWindowInsetTop > 0 || insets.systemWindowInsetBottom > 0
+                insets.systemWindowInsetTop > 0
             }
-            if (sysBarVisible) {
+            if (statusBarVisible) {
                 mainHandler.postDelayed({ hideSystemStatusBar() }, 1500L)
             }
             v.onApplyWindowInsets(insets)
@@ -702,9 +701,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         super.onResume()
         isActivityResumed = true
         statusBarVisibleTicks = 0
-        hideSystemStatusBar()
-        mainHandler.postDelayed({ hideSystemStatusBar() }, 180L)
-        mainHandler.postDelayed({ hideSystemStatusBar() }, 450L)
+        hideSystemStatusBar(alsoHideNavBar = true)
+        mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 250L)
         mainHandler.removeCallbacks(statusBarWatchdogRunnable)
         mainHandler.postDelayed(statusBarWatchdogRunnable, 750L)
         registerShakeSensorListener()
