@@ -271,6 +271,44 @@ jobs:
           path: ${{ runner.temp }}/freader-gradle-distributions
           key: freader-gradle-bin-v1-${{ runner.os }}-${{ env.FREADER_GRADLE_VERSION }}-${{ env.FREADER_GRADLE_SHA256 }}
 
+      - name: 4d. Route Kotlin dependencies through Maven Central
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_INIT_DIR="${GRADLE_USER_HOME:-$HOME/.gradle}/init.d"
+          mkdir -p "$GRADLE_INIT_DIR"
+          cat > "$GRADLE_INIT_DIR/freader-repositories.gradle" <<'GRADLE'
+          import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+
+          // Flutter's included Gradle build has its own plugin repositories; the app's
+          // settings.gradle.kts does NOT configure that build. Apply this in init.d so
+          // it reaches the app, Flutter's included build, buildSrc, and plugin projects.
+          def configurePluginRepositories = { repositories ->
+              repositories.mavenCentral()
+              repositories.google()
+              repositories.gradlePluginPortal()
+
+              // Plugin Portal may redirect JetBrains jars to GitHub Releases (HTTP 504).
+              // These groups are published directly to Maven Central. Keep Plugin Portal
+              // for Gradle-only plugin markers, but never use its JetBrains redirects.
+              repositories.withType(MavenArtifactRepository).configureEach { repository ->
+                  if (repository.url.host in ['plugins.gradle.org', 'plugins-artifacts.gradle.org']) {
+                      repository.content {
+                          excludeGroupByRegex('org[.]jetbrains([.].*)?')
+                      }
+                  }
+              }
+          }
+
+          gradle.beforeSettings { settings ->
+              configurePluginRepositories(settings.pluginManagement.repositories)
+          }
+
+          gradle.beforeProject { project ->
+              configurePluginRepositories(project.buildscript.repositories)
+          }
+          GRADLE
+
       - name: 5. Build Release APK (Direct Install/Update) & AAB (Google Play Store)
         run: |
           BUILD_NUM=$((121 + ${{ github.run_number }}))
