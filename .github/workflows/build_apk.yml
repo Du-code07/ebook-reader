@@ -271,43 +271,246 @@ jobs:
           path: ${{ runner.temp }}/freader-gradle-distributions
           key: freader-gradle-bin-v1-${{ runner.os }}-${{ env.FREADER_GRADLE_VERSION }}-${{ env.FREADER_GRADLE_SHA256 }}
 
-      - name: 4d. Route Kotlin dependencies through Maven Central
+      - name: 4d. Reuse verified Kotlin compiler from Gradle distribution
         shell: bash
         run: |
           set -euo pipefail
+          export FREADER_KOTLIN_REPOSITORY="$RUNNER_TEMP/freader-kotlin-repository"
+
+          # Gradle 8.12 already bundles the EXACT Maven compiler jar that failed with 504.
+          # Reuse it; do not download it again from Central/Plugin Portal/GitHub.
+          python3 - <<'PY'
+          import hashlib
+          import os
+          import zipfile
+          from pathlib import Path
+
+          version = os.environ['FREADER_GRADLE_VERSION']
+          archive = Path(os.environ['RUNNER_TEMP']) / 'freader-gradle-distributions' / f'gradle-{version}-bin.zip'
+          with archive.open('rb') as stream:
+              digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+          if digest != os.environ['FREADER_GRADLE_SHA256']:
+              raise SystemExit('Gradle distribution checksum mismatch; refusing to extract Kotlin.')
+
+          artifact = 'kotlin-compiler-embeddable-2.0.21'
+          with zipfile.ZipFile(archive) as dist:
+              compiler = dist.read(f'gradle-{version}/lib/{artifact}.jar')
+          expected = '9fa8cdd1de0dccffe154c997d423ec6b5f53cd6d9177e3a77a9b0de03fb1bc81'
+          if hashlib.sha256(compiler).hexdigest() != expected:
+              raise SystemExit('Bundled Kotlin compiler checksum mismatch.')
+
+          target = Path(os.environ['FREADER_KOTLIN_REPOSITORY']) / 'org/jetbrains/kotlin/kotlin-compiler-embeddable/2.0.21'
+          target.mkdir(parents=True, exist_ok=True)
+          (target / f'{artifact}.jar').write_bytes(compiler)
+          # Published Maven POM, including ALL original runtime dependencies/exclusions.
+          # Keeping it here avoids a network request even for this artifact's metadata.
+          (target / f'{artifact}.pom').write_text("""<?xml version="1.0" encoding="UTF-8"?>
+          <project xmlns="http://maven.apache.org/POM/4.0.0" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <modelVersion>4.0.0</modelVersion>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-compiler-embeddable</artifactId>
+            <version>2.0.21</version>
+            <name>Kotlin Compiler Embeddable</name>
+            <description>Kotlin Compiler (embeddable)</description>
+            <url>https://kotlinlang.org/</url>
+            <licenses>
+              <license>
+                <name>The Apache License, Version 2.0</name>
+                <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+              </license>
+            </licenses>
+            <developers>
+              <developer>
+                <name>Kotlin Team</name>
+                <organization>JetBrains</organization>
+                <organizationUrl>https://www.jetbrains.com</organizationUrl>
+              </developer>
+            </developers>
+            <scm>
+              <connection>scm:git:https://github.com/JetBrains/kotlin.git</connection>
+              <developerConnection>scm:git:https://github.com/JetBrains/kotlin.git</developerConnection>
+              <url>https://github.com/JetBrains/kotlin</url>
+            </scm>
+            <dependencies>
+              <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-stdlib</artifactId>
+                <version>2.0.21</version>
+                <scope>runtime</scope>
+              </dependency>
+              <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-script-runtime</artifactId>
+                <version>2.0.21</version>
+                <scope>runtime</scope>
+              </dependency>
+              <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-reflect</artifactId>
+                <version>1.6.10</version>
+                <scope>runtime</scope>
+                <exclusions>
+                  <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                  </exclusion>
+                </exclusions>
+              </dependency>
+              <dependency>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-daemon-embeddable</artifactId>
+                <version>2.0.21</version>
+                <scope>runtime</scope>
+              </dependency>
+              <dependency>
+                <groupId>org.jetbrains.intellij.deps</groupId>
+                <artifactId>trove4j</artifactId>
+                <version>1.0.20200330</version>
+                <scope>runtime</scope>
+              </dependency>
+              <dependency>
+                <groupId>org.jetbrains.kotlinx</groupId>
+                <artifactId>kotlinx-coroutines-core-jvm</artifactId>
+                <version>1.6.4</version>
+                <scope>runtime</scope>
+                <exclusions>
+                  <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                  </exclusion>
+                </exclusions>
+              </dependency>
+            </dependencies>
+          </project>
+          """, encoding='utf-8')
+          print(f'Prepared verified local Kotlin compiler 2.0.21 ({len(compiler)} bytes).')
+          PY
+
+          printf 'FREADER_KOTLIN_REPOSITORY=%s\n' "$FREADER_KOTLIN_REPOSITORY" >> "$GITHUB_ENV"
           GRADLE_INIT_DIR="${GRADLE_USER_HOME:-$HOME/.gradle}/init.d"
           mkdir -p "$GRADLE_INIT_DIR"
           cat > "$GRADLE_INIT_DIR/freader-repositories.gradle" <<'GRADLE'
           import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+          import org.gradle.api.initialization.resolve.RepositoriesMode
 
-          // Flutter's included Gradle build has its own plugin repositories; the app's
-          // settings.gradle.kts does NOT configure that build. Apply this in init.d so
-          // it reaches the app, Flutter's included build, buildSrc, and plugin projects.
-          def configurePluginRepositories = { repositories ->
-              repositories.mavenCentral()
-              repositories.google()
-              repositories.gradlePluginPortal()
+          def localPath = System.getenv('FREADER_KOTLIN_REPOSITORY')
+          if (!localPath || !new File(localPath,
+                  'org/jetbrains/kotlin/kotlin-compiler-embeddable/2.0.21/kotlin-compiler-embeddable-2.0.21.jar').isFile()) {
+              throw new GradleException('The verified FReader Kotlin repository is missing. Run workflow step 4d first.')
+          }
 
-              // Plugin Portal may redirect JetBrains jars to GitHub Releases (HTTP 504).
-              // These groups are published directly to Maven Central. Keep Plugin Portal
-              // for Gradle-only plugin markers, but never use its JetBrains redirects.
+          def configureBundledCompiler = { repositories ->
+              repositories.maven {
+                  name = 'FReaderBundledKotlin'
+                  url = new File(localPath).toURI()
+                  content {
+                      includeVersion('org.jetbrains.kotlin', 'kotlin-compiler-embeddable', '2.0.21')
+                  }
+                  metadataSources { mavenPom() }
+              }
               repositories.withType(MavenArtifactRepository).configureEach { repository ->
-                  if (repository.url.host in ['plugins.gradle.org', 'plugins-artifacts.gradle.org']) {
+                  if (repository.name != 'FReaderBundledKotlin') {
+                      // Exclusion, not just ordering: even cached remote metadata must not
+                      // send this version back through the failing HTTP redirect chain.
                       repository.content {
-                          excludeGroupByRegex('org[.]jetbrains([.].*)?')
+                          excludeVersion('org.jetbrains.kotlin', 'kotlin-compiler-embeddable', '2.0.21')
                       }
                   }
               }
           }
 
-          gradle.beforeSettings { settings ->
-              configurePluginRepositories(settings.pluginManagement.repositories)
+          def configurePluginRepositories = { repositories ->
+              configureBundledCompiler(repositories)
+              repositories.mavenCentral()
+              repositories.google()
+              repositories.gradlePluginPortal()
+              repositories.withType(MavenArtifactRepository).configureEach { repository ->
+                  if (repository.url.host in ['plugins.gradle.org', 'plugins-artifacts.gradle.org']) {
+                      repository.content { excludeGroupByRegex('org[.]jetbrains([.].*)?') }
+                  }
+              }
           }
 
+          // init.d applies to Flutter's INCLUDED Gradle build too. Editing only the app's
+          // settings.gradle.kts leaves the failing Flutter plugin classpath untouched.
+          gradle.beforeSettings { settings ->
+              configurePluginRepositories(settings.pluginManagement.repositories)
+              configureBundledCompiler(settings.dependencyResolutionManagement.repositories)
+          }
+
+          def projectRepositoriesAllowed = true
+          gradle.settingsEvaluated { settings ->
+              projectRepositoriesAllowed = settings.dependencyResolutionManagement.repositoriesMode.get() == RepositoriesMode.PREFER_PROJECT
+          }
           gradle.beforeProject { project ->
               configurePluginRepositories(project.buildscript.repositories)
+              // Flutter uses FAIL_ON_PROJECT_REPOS; its settings repository above handles
+              // compiler configurations. Normal Android projects use project repositories.
+              if (projectRepositoriesAllowed) {
+                  configureBundledCompiler(project.repositories)
+              }
           }
           GRADLE
+
+      - name: 4e. Verify local Kotlin resolution without network
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHECK_DIR="$RUNNER_TEMP/freader-kotlin-check"
+          mkdir -p "$CHECK_DIR/included"
+          cat > "$CHECK_DIR/settings.gradle" <<'GRADLE'
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { mavenCentral() }
+          }
+          rootProject.name = 'freader-kotlin-check'
+          includeBuild('included') { name = 'freader-kotlin-included' }
+          GRADLE
+          cat > "$CHECK_DIR/included/settings.gradle" <<'GRADLE'
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { mavenCentral() }
+          }
+          rootProject.name = 'freader-kotlin-included'
+          GRADLE
+          cat > "$CHECK_DIR/included/build.gradle" <<'GRADLE'
+          buildscript {
+              dependencies {
+                  // This preflight checks the previously failing jar itself. Production
+                  // resolution still uses the full published POM with its dependencies.
+                  classpath('org.jetbrains.kotlin:kotlin-compiler-embeddable:2.0.21') { transitive = false }
+              }
+          }
+          configurations { bundledCompiler }
+          dependencies {
+              bundledCompiler('org.jetbrains.kotlin:kotlin-compiler-embeddable:2.0.21') { transitive = false }
+          }
+          tasks.register('verifyBundledKotlin') {
+              doLast {
+                  def expected = new File(System.getenv('FREADER_KOTLIN_REPOSITORY'),
+                          'org/jetbrains/kotlin/kotlin-compiler-embeddable/2.0.21/kotlin-compiler-embeddable-2.0.21.jar').canonicalFile
+                  [buildscript.configurations.classpath, configurations.bundledCompiler].each { configuration ->
+                      def resolved = configuration.singleFile.canonicalFile
+                      if (resolved != expected) throw new GradleException('Kotlin did not resolve from the verified local repository: ' + resolved)
+                      def digest = java.security.MessageDigest.getInstance('SHA-256').digest(resolved.bytes).encodeHex().toString()
+                      if (digest != '9fa8cdd1de0dccffe154c997d423ec6b5f53cd6d9177e3a77a9b0de03fb1bc81') {
+                          throw new GradleException('Resolved Kotlin compiler checksum mismatch.')
+                      }
+                  }
+                  println('FREADER_LOCAL_KOTLIN_OK: ' + project.name)
+              }
+          }
+          GRADLE
+          cp "$CHECK_DIR/included/build.gradle" "$CHECK_DIR/build.gradle"
+          cat >> "$CHECK_DIR/build.gradle" <<'GRADLE'
+          tasks.named('verifyBundledKotlin') {
+              dependsOn gradle.includedBuild('freader-kotlin-included').task(':verifyBundledKotlin')
+          }
+          GRADLE
+          # Fail HERE with a clear message if the wiring ever regresses. No external
+          # repositories may be contacted by this check, including the included build.
+          "$GITHUB_WORKSPACE/android/gradlew" -p "$CHECK_DIR" --offline --no-daemon --console=plain verifyBundledKotlin
 
       - name: 5. Build Release APK (Direct Install/Update) & AAB (Google Play Store)
         run: |
