@@ -9,6 +9,9 @@ permissions:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    env:
+      FREADER_GRADLE_VERSION: '8.12'
+      FREADER_GRADLE_SHA256: '7a00d51fb93147819aab76024feece20b6b84e420694101f276be952e08bef03'
     steps:
       - name: 1. Checkout Source
         uses: actions/checkout@v4
@@ -189,12 +192,91 @@ jobs:
             fi
           done
 
+      - name: 4a. Restore verified Gradle distribution cache
+        id: gradle-dist-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/freader-gradle-distributions
+          key: freader-gradle-bin-v1-${{ runner.os }}-${{ env.FREADER_GRADLE_VERSION }}-${{ env.FREADER_GRADLE_SHA256 }}
+
+      - name: 4b. Prepare Gradle with retries and checksum verification
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Pin the same Gradle version as Flutter 3.35.7. Only the distribution type
+          # changes: -bin contains everything needed to build, without sources/docs.
+          DIST_DIR="$RUNNER_TEMP/freader-gradle-distributions"
+          DIST_ZIP="$DIST_DIR/gradle-${FREADER_GRADLE_VERSION}-bin.zip"
+          export FREADER_GRADLE_ZIP="$DIST_ZIP"
+          mkdir -p "$DIST_DIR"
+
+          verify_gradle() {
+            [ -s "$1" ] && printf '%s  %s\n' "$FREADER_GRADLE_SHA256" "$1" | sha256sum --check --status
+          }
+
+          if ! verify_gradle "$DIST_ZIP"; then
+            rm -f "$DIST_ZIP" "$DIST_ZIP.part"
+            # Both official hosts can redirect to the same GitHub endpoint.
+            # The mirror is accepted ONLY when the pinned official SHA-256 matches.
+            for BASE_URL in https://downloads.gradle.org/distributions https://services.gradle.org/distributions https://mirrors.cloud.tencent.com/gradle; do
+              echo "Downloading Gradle ${FREADER_GRADLE_VERSION} from $BASE_URL"
+              if curl --fail --location --show-error --silent \
+                --retry 2 --retry-delay 5 --retry-all-errors --retry-max-time 180 \
+                --connect-timeout 20 --max-time 180 \
+                "$BASE_URL/gradle-${FREADER_GRADLE_VERSION}-bin.zip" \
+                --output "$DIST_ZIP.part"; then
+                if verify_gradle "$DIST_ZIP.part"; then
+                  mv "$DIST_ZIP.part" "$DIST_ZIP"
+                  break
+                fi
+                echo "::warning::Gradle download failed SHA-256 verification; trying the next endpoint."
+              fi
+              rm -f "$DIST_ZIP.part"
+            done
+          fi
+
+          if ! verify_gradle "$DIST_ZIP"; then
+            echo "::error::Gradle download failed after retries. No unverified archive will be used."
+            exit 1
+          fi
+
+          # Flutter recreates android/ earlier in this job, so patch the newly generated
+          # wrapper HERE. The wrapper now installs from a verified local file and cannot
+          # hit the GitHub redirect/504 during assembleRelease or bundleRelease.
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          wrapper = Path('android/gradle/wrapper/gradle-wrapper.properties')
+          updates = {
+              'distributionUrl': Path(os.environ['FREADER_GRADLE_ZIP']).resolve().as_uri(),
+              'distributionSha256Sum': os.environ['FREADER_GRADLE_SHA256'],
+              'networkTimeout': '60000',
+          }
+          lines = [line for line in wrapper.read_text().splitlines()
+                   if line.split('=', 1)[0].strip() not in updates]
+          lines.extend(f'{key}={value}' for key, value in updates.items())
+          wrapper.write_text('\n'.join(lines) + '\n')
+          PY
+
+          # Detect installation problems before starting the much longer Flutter build.
+          (cd android && ./gradlew --version)
+
+      - name: 4c. Save verified Gradle distribution cache
+        if: steps.gradle-dist-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/freader-gradle-distributions
+          key: freader-gradle-bin-v1-${{ runner.os }}-${{ env.FREADER_GRADLE_VERSION }}-${{ env.FREADER_GRADLE_SHA256 }}
+
       - name: 5. Build Release APK (Direct Install/Update) & AAB (Google Play Store)
         run: |
           BUILD_NUM=$((121 + ${{ github.run_number }}))
           flutter pub get
-          flutter build apk --release --no-tree-shake-icons --build-number=$BUILD_NUM
-          flutter build appbundle --release --no-tree-shake-icons --build-number=$BUILD_NUM
+          flutter build apk --release --no-pub --no-tree-shake-icons --build-number=$BUILD_NUM
+          flutter build appbundle --release --no-pub --no-tree-shake-icons --build-number=$BUILD_NUM
 
       - name: 6. Upload Release APK Artifact
         uses: actions/upload-artifact@v4
