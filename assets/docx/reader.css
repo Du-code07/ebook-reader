@@ -46,3 +46,11 @@ body[data-theme="dark"] .page img { filter: invert(1) hue-rotate(180deg); }
 .docx-tab[data-leader]::after { content: ''; position: absolute; left: 0; right: 0; bottom: .15em; border-bottom: 1px dotted currentColor; }
 .docx-tab[data-leader="hyphen"]::after { border-bottom-style: dashed; }
 .docx-tab[data-leader="underscore"]::after { border-bottom-style: solid; }
+/* FReader: 그림을 불러오는 동안 자리만 옅게 표시 */
+img[data-resource]:not([src]) { background: rgba(128, 128, 128, 0.12); }
+/* FReader: 각주·미주 */
+sup.docx-note-ref::after { content: attr(data-note); font-size: 0.68em; vertical-align: super; line-height: 0; }
+sup.docx-note-ref { font-size: 1em; vertical-align: baseline; line-height: 0; }
+.docx-note-area { position: absolute; z-index: 1; font: 8pt/1.35 FReaderSans, sans-serif; color: #000; white-space: pre-wrap; }
+.docx-note-area::before { content: ''; display: block; width: 33%; border-top: 0.75pt solid #000; margin-bottom: 3px; }
+.docx-note-area .docx-note sup { font-size: 0.75em; line-height: 0; }

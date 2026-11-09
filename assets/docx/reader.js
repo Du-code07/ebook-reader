@@ -202,6 +202,9 @@ async function preparePages(html, current) {
   // OOXML specifies the display extents. Reserve them without decoding every
   // photograph. Only unusual images without extents need an intrinsic-size probe.
   for (const img of measure.querySelectorAll('img')) {
+    // FReader: 변환 엔진이 모든 그림에 붙이는 'Error: image not found' 대체 글자가
+    // 그림을 불러오는 동안 보이지 않게 한다 (실제로 못 읽은 그림은 아래 missingImage가 따로 표시)
+    if (/image not found/i.test(img.alt || '')) img.alt = '';
     if (!img.dataset.resource && !img.getAttribute('src')) { missingImage(img); continue; }
     if (!(parseFloat(img.style.width || img.getAttribute('width')) > 0) ||
         !(parseFloat(img.style.height || img.getAttribute('height')) > 0)) {
@@ -341,22 +344,69 @@ async function render() {
     frame.appendChild(source); fragment.appendChild(frame);
   }
   host.replaceChildren(fragment); fitPages();
+  renderNoteAreas();
   const visible = [...host.querySelectorAll('img[data-resource]')].filter(img => {
     const clip = (img.closest('.freader-content') || img.closest('.page')).getBoundingClientRect();
     return [...img.getClientRects()].some(r => r.width > 0 && r.height > 0 && r.right > clip.left + .1 && r.left < clip.right - .1 && r.bottom > clip.top + .1 && r.top < clip.bottom - .1);
   });
   activeImagePaths = new Set(visible.map(img => img.dataset.resource));
   trimImages();
-  // Sequential decoding bounds the temporary pixel buffers for photo-heavy files.
-  for (const img of visible) {
-    if (disposed || serial !== renderSerial) return;
-    try {
-      const item = await imageFor(img.dataset.resource);
+  // Bounded decoding keeps temporary pixel buffers small for photo-heavy files.
+  // FReader: 두 장씩 함께 불러와 사진이 많은 쪽도 빨리 채운다.
+  const queue = [...visible];
+  const worker = async () => {
+    while (queue.length) {
+      const img = queue.shift();
       if (disposed || serial !== renderSerial) return;
-      img.loading = 'eager'; img.src = item.url; await img.decode();
-    } catch (error) { if (!disposed && serial === renderSerial) missingImage(img, error); }
-  }
+      try {
+        const item = await imageFor(img.dataset.resource);
+        if (disposed || serial !== renderSerial) return;
+        img.loading = 'eager'; img.src = item.url; await img.decode();
+      } catch (error) { if (!disposed && serial === renderSerial) missingImage(img, error); }
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  if (disposed || serial !== renderSerial) return;
   if (serial === renderSerial) trimImages();
+}
+// FReader: 이 쪽에 보이는 각주 번호의 본문을 쪽 아래에 표시 (Word처럼 본문 아래, 자리가 없으면 아래 여백)
+function renderNoteAreas() {
+  const notes = options.docxLayout?.notes;
+  for (const frame of host.children) {
+    const source = frame.firstElementChild; if (!source) continue;
+    for (const old of source.querySelectorAll(':scope > .docx-note-area')) old.remove();
+    if (!notes) continue;
+    const clipEl = source.querySelector(':scope > .freader-content'); if (!clipEl) continue;
+    const clip = clipEl.getBoundingClientRect();
+    const inside = r => r.width > 0 && r.height > 0 && r.right > clip.left + .1 && r.left < clip.right - .1 && r.bottom > clip.top + .1 && r.top < clip.bottom - .1;
+    const seen = new Set(), items = [];
+    for (const ref of clipEl.querySelectorAll('sup.docx-note-ref')) {
+      if (![...ref.getClientRects()].some(inside)) continue;
+      const key = ref.dataset.noteKey; if (seen.has(key) || notes[key] == null) continue;
+      seen.add(key); items.push([ref.dataset.note, notes[key]]);
+    }
+    if (!items.length) continue;
+    const scale = frame.getBoundingClientRect().width / Number(frame.dataset.width) || 1;
+    let contentBottom = clip.top;
+    for (const el of clipEl.querySelectorAll('x-p, table, img')) {
+      for (const r of el.getClientRects()) if (inside(r)) contentBottom = Math.max(contentBottom, Math.min(r.bottom, clip.bottom));
+    }
+    const area = document.createElement('div'); area.className = 'docx-note-area';
+    const left = parseFloat(clipEl.style.left) || 0, top0 = parseFloat(clipEl.style.top) || 0;
+    const bodyHeight = parseFloat(clipEl.style.height) || 0, pageHeight = Number(frame.dataset.height);
+    Object.assign(area.style, { left: `${left}px`, width: clipEl.style.width });
+    for (const [label, text] of items) {
+      const row = document.createElement('div'); row.className = 'docx-note';
+      const mark = document.createElement('sup'); mark.textContent = label;
+      row.append(mark, document.createTextNode(' ' + text)); area.appendChild(row);
+    }
+    source.appendChild(area);
+    const h = area.getBoundingClientRect().height / scale;
+    const usedBottom = top0 + (contentBottom - clip.top) / scale, bodyBottom = top0 + bodyHeight;
+    let top = bodyBottom - h;
+    if (top < usedBottom + 6) top = Math.min(bodyBottom + 4, pageHeight - h - 2);
+    area.style.top = `${Math.max(0, top)}px`;
+  }
 }
 function fitPages() {
   const frames = [...host.children]; if (!frames.length) return;

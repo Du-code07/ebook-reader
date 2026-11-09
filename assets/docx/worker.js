@@ -26,8 +26,10 @@ async function perform({ action, bytes, password, path, session: requestedSessio
     const result = picture ? { bytes: picture.bytes.slice(), mimeType: picture.mimeType } : document.read(path);
     if (/image\/(?:x-)?(?:emf|wmf)/i.test(result.mimeType)) {
       const { convertMetafileToSvg } = await import('./metafile/converter.js');
-      const svg = await convertMetafileToSvg(result.bytes.buffer.slice(result.bytes.byteOffset, result.bytes.byteOffset + result.bytes.byteLength));
+      let svg = await convertMetafileToSvg(result.bytes.buffer.slice(result.bytes.byteOffset, result.bytes.byteOffset + result.bytes.byteLength));
       if (!svg) throw new Error('이 벡터 그림을 변환하지 못했습니다.');
+      // FReader: 표 칸마다 넣은 사진이 앞 칸의 잘라내기 영역과 잘못 겹쳐 사라지는 문제 보정
+      try { const { fixDisjointClipChains } = await import('./emf_fix.js'); svg = fixDisjointClipChains(svg); } catch (_) {}
       return { type: 'resource', bytes: new TextEncoder().encode(svg), mimeType: 'image/svg+xml', session };
     }
     // This owned buffer can cross the worker boundary without another clone.

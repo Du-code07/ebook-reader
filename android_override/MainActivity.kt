@@ -425,6 +425,34 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
                 wake(window.decorView)
                 result.success(count)
+            } else if (call.method == "snapshotWebView") {
+                // 위로 밀어 넘길 때 지금 페이지를 잠깐 붙잡아 두는 그림 (JPEG 바이트, 빈 곳은 배경색)
+                val webView = findLargestWebView(window.decorView)
+                if (webView == null || webView.width <= 0 || webView.height <= 0) {
+                    result.error("NO_WEBVIEW", "WebView not found", null)
+                    return@setMethodCallHandler
+                }
+                try {
+                    val bg = (call.argument<Number>("background") ?: 0xFF000000L).toLong().toInt()
+                    val bmp = Bitmap.createBitmap(webView.width, webView.height, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    canvas.drawColor(bg)
+                    canvas.translate(-webView.scrollX.toFloat(), -webView.scrollY.toFloat())
+                    webView.draw(canvas)
+                    Thread {
+                        try {
+                            val out = java.io.ByteArrayOutputStream()
+                            bmp.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                            bmp.recycle()
+                            val bytes = out.toByteArray()
+                            runOnUiThread { result.success(bytes) }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.error("CAPTURE_ERR", e.message, null) }
+                        }
+                    }.start()
+                } catch (e: Exception) {
+                    result.error("CAPTURE_ERR", e.message, null)
+                }
             } else if (call.method == "captureWebView") {
                 // EPUB 본문(WebView) 화면을 그림 파일로 저장 (PDF 내보내기용)
                 val outPath = call.argument<String>("path")

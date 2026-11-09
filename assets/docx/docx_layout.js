@@ -240,6 +240,45 @@ function sections(root, hints, matches) {
   }
   if (previous && cursor === blocks.length) source.remove();
 }
+// FReader: 각주·미주 번호 표시. 글자 노드를 만들지 않아(::after) 문단 글자 위치 계산에 영향이 없다.
+function insertNoteRefs(p, notes) {
+  for (const note of notes) {
+    const sup = p.ownerDocument.createElement('sup');
+    sup.className = 'docx-note-ref'; sup.dataset.note = note.label; sup.dataset.noteKey = note.key;
+    let remaining = note.offset, placed = false;
+    for (const node of contentNodes(p)) {
+      const data = node.data;
+      let count = 0, i = 0;
+      for (; i < data.length; i++) {
+        if (count === remaining) break;
+        if (!/[\t\r\n\u200b]/.test(data[i])) count++;
+      }
+      if (count === remaining && (i < data.length || remaining === 0 || count > 0)) {
+        if (i >= data.length) node.after(sup);
+        else if (i === 0) node.before(sup);
+        else node.splitText(i).before(sup);
+        placed = true; break;
+      }
+      remaining -= count;
+    }
+    if (!placed) p.appendChild(sup);
+  }
+}
+// FReader: 사진 상자(크기가 정해진 div) 안에서 원본을 키우고 옮겨, Word에서 자른 부분만 보이게 한다.
+function cropDocxImage(img, crop) {
+  const l = (+crop.l || 0) / 1e5, t = (+crop.t || 0) / 1e5, r = (+crop.r || 0) / 1e5, b = (+crop.b || 0) / 1e5;
+  const w = 1 - l - r, h = 1 - t - b;
+  if (!(w > 0.001 && h > 0.001)) return;
+  const frame = img.parentElement;
+  if (!frame || frame.localName !== 'div' || !frame.style.width || !frame.style.height) return;
+  frame.style.overflow = 'hidden';
+  if (!frame.style.position || frame.style.position === 'static') frame.style.position = 'relative';
+  img.style.position = 'absolute';
+  img.style.maxWidth = 'none'; img.style.maxHeight = 'none';
+  img.style.width = `${100 / w}%`; img.style.height = `${100 / h}%`;
+  img.style.left = `${(-l / w) * 100}%`; img.style.top = `${(-t / h) * 100}%`;
+  img.dataset.docxCrop = 'true';
+}
 export function applyDocxLayout(root, layout) {
   if (layout?.version !== 1) return false;
   const paragraphs = [...root.querySelectorAll('.odr-page-inner x-p')], matches = new Map();
@@ -257,6 +296,12 @@ export function applyDocxLayout(root, layout) {
     const p = paragraphs[found]; cursor = found + 1; matches.set(hint.index, p);
     paragraphStyle(p, hint, layout.theme || {}, layout.defaultTab || 720);
     const images = [...p.querySelectorAll('img')];
+    // FReader: Word에서 잘라 낸 사진은 잘린 모양 그대로 보이게 (a:srcRect)
+    const pictures = (hint.drawings || []).filter(d => d.picture);
+    const cropPairs = images.length === pictures.length ? pictures.map((d, i) => [images[i], d])
+      : images.length === hint.drawingCount ? (hint.drawings || []).map(d => [images[d.index], d]) : [];
+    for (const [img, d] of cropPairs) if (img && d.crop) cropDocxImage(img, d.crop);
+    if (hint.notes) insertNoteRefs(p, hint.notes);
     if (images.length === hint.drawingCount) for (const drawing of hint.drawings || []) {
       const img = images[drawing.index], frame = img?.parentElement;
       if (drawing.chartXml && img) replaceDocxChart(img, drawing, layout.themeColors || {});
