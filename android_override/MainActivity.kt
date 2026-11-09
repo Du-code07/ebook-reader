@@ -408,6 +408,23 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         runOnUiThread { result.error("PDF_ERR", e.message, null) }
                     }
                 }.start()
+            } else if (call.method == "wakeHiddenWebViews") {
+                // 서재 표지(첫 페이지) 만들기용 화면 밖 WebView: 숨김 상태면 그리기를 멈추므로
+                // 완전히 투명하게 + 화면 밖으로 옮긴 뒤 '보이는' 상태로 둔다 (사용자에게는 안 보임)
+                var count = 0
+                fun wake(v: View) {
+                    if (v is WebView && v.visibility == View.INVISIBLE) {
+                        v.alpha = 0f
+                        v.translationX = -100000f
+                        v.visibility = View.VISIBLE
+                        count++
+                    }
+                    if (v is ViewGroup) {
+                        for (i in 0 until v.childCount) wake(v.getChildAt(i))
+                    }
+                }
+                wake(window.decorView)
+                result.success(count)
             } else if (call.method == "captureWebView") {
                 // EPUB 본문(WebView) 화면을 그림 파일로 저장 (PDF 내보내기용)
                 val outPath = call.argument<String>("path")
@@ -951,7 +968,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private fun findLargestWebView(root: View): WebView? {
         var best: WebView? = null
         fun walk(v: View) {
-            if (v is WebView && v.isShown) {
+            // 표지 만들기용 투명 WebView(alpha 0)는 제외
+            if (v is WebView && v.isShown && v.alpha > 0f) {
                 val b = best
                 if (b == null || v.width * v.height > b.width * b.height) best = v
             }
