@@ -11,6 +11,7 @@ import 'screens/reader_screen.dart';
 import 'screens/language_select_screen.dart';
 import 'screens/app_settings_screen.dart';
 import 'widgets/sheet_pull_to_close.dart';
+import 'widgets/file_type_icon.dart';
 import 'services/storage_service.dart';
 import 'services/doc_thumbnail_service.dart';
 
@@ -568,34 +569,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Timer? _dragEdgeScrollTimer;
   Offset? _lastDragGlobalPos;
 
-  // 메모장(.txt), 워드(.docx, .doc), 한글(.hwpx, .hwp)도 열람 (모두 기기 안에서 처리)
+  // 메모장(.txt), 워드(.docx, .doc), 한글(.hwpx, .hwp), 파워포인트(.pptx, .ppt)도 열람 (모두 기기 안에서 처리)
   static const _supportedExts = [
     'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
-    'docx', 'doc', 'hwpx', 'hwp',
+    'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt',
   ];
   static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
 
   /// 글 문서(리더 화면에서 여는 형식)
-  static const _readerExts = ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp'];
-
-  /// 파일 형식별 기본 아이콘 (표지 그림이 없을 때)
-  static IconData _fileTypeIcon(String ext) {
-    switch (ext) {
-      case 'pdf':
-        return Icons.picture_as_pdf;
-      case 'docx':
-      case 'doc':
-      case 'hwpx':
-      case 'hwp':
-        return Icons.description_outlined;
-      case 'epub':
-      case 'txt':
-        return Icons.menu_book;
-      case 'cbz':
-        return Icons.auto_stories;
-    }
-    return Icons.image;
-  }
+  static const _readerExts = ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt'];
 
   String? _findFileRowPathAtGlobalPos(Offset globalPos) {
     for (final entry in _fileRowKeys.entries) {
@@ -700,14 +682,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     try {
       final f = File(thumbPath);
       if (!f.existsSync()) return;
-      final ImageProvider provider;
-      if (isRawOriginalImage) {
-        provider = ResizeImage(FileImage(f), width: 360, allowUpscaling: false);
-      } else {
-        final bytes = f.readAsBytesSync();
-        if (bytes.length < 64) return;
-        provider = MemoryImage(bytes);
-      }
+      // 표지는 화면에 작게 보이므로 작은 크기로 풀어 둔다 (큰 그림을 통째로 풀면 목록·화면 전환이 버벅임).
+      // 파일은 백그라운드에서 읽는다. 표지를 새로 만든 경우를 위해 예전 그림 캐시는 비운다.
+      if (!isRawOriginalImage && f.lengthSync() < 64) return;
+      final ImageProvider provider = ResizeImage(FileImage(f), width: isRawOriginalImage ? 360 : 420, allowUpscaling: false);
+      provider.evict().catchError((_) => false);
       _globalThumbMemoryCache[bookPath] = provider;
       _getThumbNotifier(bookPath).value = provider;
       if (mounted) {
@@ -2132,7 +2111,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final lowerExt = rawFileName.split('.').last.toLowerCase();
     final thumbNotifier = _getThumbNotifier(file.path);
 
-    final IconData fallbackIcon = _fileTypeIcon(lowerExt);
 
     return RepaintBoundary(
       child: Container(
@@ -2197,14 +2175,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           valueListenable: thumbNotifier,
                           builder: (context, thumbProvider, _) {
                             if (thumbProvider != null) {
+                              final bool slides = lowerExt == 'pptx' || lowerExt == 'ppt';
                               return Image(
                                 image: thumbProvider,
-                                fit: BoxFit.cover,
-                                alignment: Alignment.topCenter,
+                                // 슬라이드(가로)는 잘리지 않게 전체를 보여 준다
+                                fit: slides ? BoxFit.contain : BoxFit.cover,
+                                alignment: slides ? Alignment.center : Alignment.topCenter,
                                 gaplessPlayback: true,
                                 filterQuality: FilterQuality.low,
                                 errorBuilder: (_, __, ___) => Center(
-                                  child: Icon(fallbackIcon, size: 34, color: Colors.indigo),
+                                  child: FileTypeIcon(ext: lowerExt, size: 34),
                                 ),
                               );
                             }
@@ -2212,12 +2192,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(fallbackIcon, size: 32, color: Colors.indigo),
+                                  FileTypeIcon(ext: lowerExt, size: 32),
                                   const SizedBox(height: 4),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: Colors.indigo.withOpacity(0.12),
+                                      color: Colors.indigo.withValues(alpha: 0.12),
                                       borderRadius: BorderRadius.circular(5),
                                     ),
                                     child: Text(
@@ -2304,6 +2284,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     children: [
                       Row(
                         children: [
+                          // 파일 이름 앞 형식 아이콘
+                          FileTypeIcon(ext: lowerExt, size: 15),
+                          const SizedBox(width: 3),
                           Expanded(
                             child: Text(
                               displayFileName,
@@ -2666,10 +2649,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                       });
                                     },
                                   )
-                                : Icon(
-                                    _fileTypeIcon(lowerExt),
-                                    color: Colors.indigo,
-                                  ),
+                                : FileTypeIcon(ext: lowerExt),
                             title: Text(
                               displayFileName,
                               maxLines: 1,

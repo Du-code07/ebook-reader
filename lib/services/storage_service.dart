@@ -127,10 +127,6 @@ class StorageService {
   static bool isDarkFor(String mode) => mode == 'dark' ||
       (mode == 'system' && WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark);
 
-  static Future<void> setDarkMode(bool isDark) => setAppThemeMode(isDark ? 'dark' : 'light');
-
-  /// 지금 실제로 어두운 화면인지 (기본 시스템이면 휴대폰 설정에 따름)
-  static Future<bool> getDarkMode() async => isDarkFor(await getAppThemeMode());
 
   // 6. 앱 언어 설정 ('system': 기본 시스템, 'ko': 한국어, 'en': 영어, 'zh': 중국어, 'ja': 일본어)
   // 저장값은 'system'일 수 있고, 실제 화면 문구에 쓰는 언어(appLangNotifier)는 항상 ko/en/zh/ja 중 하나다.

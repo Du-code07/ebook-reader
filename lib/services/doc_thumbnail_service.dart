@@ -16,7 +16,7 @@ import 'docx_layout_hints.dart';
 ///    - HWPX: Preview/PrvImage.png   - HWP: 'PrvImage' 스트림   - DOCX: docProps/thumbnail.*
 /// 2) 없으면 문서 뷰어와 같은 엔진을 화면 밖 WebView에서 열어 첫 페이지를 찍는다.
 class DocThumbnailService {
-  static const List<String> supportedExts = ['hwp', 'hwpx', 'docx', 'doc'];
+  static const List<String> supportedExts = ['hwp', 'hwpx', 'docx', 'doc', 'pptx', 'ppt'];
   static const MethodChannel _native = MethodChannel('ebook_reader/pdf_renderer');
 
   /// 표지 그림을 [outPath]에 저장. 성공하면 true.
@@ -89,7 +89,7 @@ class DocThumbnailService {
     final lower = path.toLowerCase();
     final file = File(path);
     if (!file.existsSync()) return null;
-    if (lower.endsWith('.hwpx') || lower.endsWith('.docx')) {
+    if (lower.endsWith('.hwpx') || lower.endsWith('.docx') || lower.endsWith('.pptx')) {
       final bytes = file.readAsBytesSync();
       final archive = ZipDecoder().decodeBytes(bytes);
       for (final f in archive.files) {
@@ -147,8 +147,9 @@ class DocThumbnailService {
     final bool isDocx = lower.endsWith('.docx');
     final bool isDoc = lower.endsWith('.doc');
     final bool isWord = isDocx || isDoc;
-    final String entry = '$_origin/assets/flutter_assets/assets/${isWord ? 'docx' : 'hwp'}/index.html';
-    final String jsObject = isWord ? 'freaderDocx' : 'freaderHwp';
+    final bool isSlides = lower.endsWith('.pptx') || lower.endsWith('.ppt');
+    final String entry = '$_origin/assets/flutter_assets/assets/${isSlides ? 'ppt' : isWord ? 'docx' : 'hwp'}/index.html';
+    final String jsObject = isSlides ? 'freaderPpt' : isWord ? 'freaderDocx' : 'freaderHwp';
 
     final source = File(path);
     final int length = await source.length();
@@ -166,6 +167,7 @@ class DocThumbnailService {
       'position': null,
       'progress': 0.0,
       if (isWord) 'format': isDoc ? 'doc' : 'docx',
+      if (isSlides) 'format': lower.endsWith('.pptx') ? 'pptx' : 'ppt',
       if (isDocx) 'docxLayout': docxLayout,
     };
 
@@ -206,7 +208,7 @@ class DocThumbnailService {
 
     Future<void> capture() async {
       // 글꼴·그림이 다 그려질 시간을 조금 준다
-      await Future<void>.delayed(const Duration(milliseconds: 700));
+      await Future<void>.delayed(Duration(milliseconds: isSlides ? 1400 : 700));
       try {
         final shot = await web?.takeScreenshot(
           screenshotConfiguration: ScreenshotConfiguration(compressFormat: CompressFormat.JPEG, quality: 85),
@@ -222,7 +224,7 @@ class DocThumbnailService {
 
     final headless = HeadlessInAppWebView(
       initialUrlRequest: URLRequest(url: WebUri(entry)),
-      initialSize: const Size(600, 848), // A4 비율
+      initialSize: isSlides ? const Size(800, 450) : const Size(600, 848), // 슬라이드는 16:9, 문서는 A4 비율
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
         transparentBackground: false,

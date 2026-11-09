@@ -404,7 +404,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final dir = await getApplicationDocumentsDirectory();
     const supportedExts = [
       'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
-      'docx', 'doc', 'hwpx', 'hwp',
+      'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt',
     ];
     const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
 
@@ -470,7 +470,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ),
     );
 
-    if (const ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp'].contains(nextExt)) {
+    if (const ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt'].contains(nextExt)) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -1650,7 +1650,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         dyList: _activeStrokePoints
                             .map((p) => (p.dy / drawHeight).clamp(0.0, 1.0).toDouble())
                             .toList(),
-                        colorValue: _penColor.value,
+                        colorValue: _penColor.toARGB32(),
                         strokeWidth: _penWidth,
                       );
                       final before = _memoStrokesByPage[pageIndex] ?? const <MemoStroke>[];
@@ -1693,7 +1693,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     constraints: const BoxConstraints(maxWidth: 220),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                      color: Colors.amber.shade200.withOpacity(0.95),
+                      color: Colors.amber.shade200.withValues(alpha: 0.95),
                       borderRadius: BorderRadius.circular(8),
                       boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
                     ),

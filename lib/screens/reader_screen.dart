@@ -18,6 +18,7 @@ import '../widgets/sheet_pull_to_close.dart';
 import '../services/pdf_export_service.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/vertical_page_swipe.dart';
+import '../widgets/after_route_transition.dart';
 import 'pdf_and_image_viewer.dart';
 
 class _EpubMemoPainter extends CustomPainter {
@@ -99,10 +100,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool get _isTxt => widget.filePath.toLowerCase().endsWith('.txt');
   bool get _isEpub => !_isOfflineDocument;
   bool get _isPaperTheme => _isEpub && _epubBgTheme == 'sepia';
-  bool get _isOfflineDocument => RegExp(r'\.(hwp|hwpx|docx|doc|txt)$', caseSensitive: false).hasMatch(widget.filePath);
+  bool get _isOfflineDocument => RegExp(r'\.(hwp|hwpx|docx|doc|txt|pptx|ppt)$', caseSensitive: false).hasMatch(widget.filePath);
+  bool get _isPresentation => RegExp(r'\.pptx?$', caseSensitive: false).hasMatch(widget.filePath);
   String get _documentPositionPrefix {
     final lower = widget.filePath.toLowerCase();
     if (_isTxt) return 'txt';
+    if (lower.endsWith('.pptx')) return 'pptx';
+    if (lower.endsWith('.ppt')) return 'ppt';
     if (lower.endsWith('.docx')) return 'docx';
     if (lower.endsWith('.doc')) return 'doc';
     return 'hwp';
@@ -143,37 +147,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       "typeof window.flutter_inappwebview.callHandler==='function'){"
       "window.flutter_inappwebview.callHandler('readyToLoad');}}catch(e){}})()";
 
-  // 배터리 절약: epub 뷰어 JS가 페이지(챕터)를 그릴 때마다 2초 간격 타이머를 새로 만들어
-  // 문장 선택 감시(0.2초 간격)를 끝없이 다시 시작시킨다. 안드로이드는 선택 이벤트가 정상 동작하므로
-  // 이 '재시작용 2초 타이머'만 생성되지 않게 막는다. (선택 감시 자체와 선택 이벤트는 그대로 동작)
-  Timer? _epubBatteryPatchTimer;
-  static const String _epubBatteryPatchJs =
-      "(function(){try{if(window.__frPollPatched)return true;if(typeof loadBook!=='function')return false;"
-      "var o=window.setInterval;window.setInterval=function(fn,ms){try{if(ms===2000&&typeof fn==='function'&&"
-      "String(fn).indexOf('lastPolledSelections')!==-1)return 0;}catch(e){}return o.apply(window,arguments);};"
-      "window.__frPollPatched=true;return true;}catch(e){return false;}})()";
-
-  void _startEpubBatteryPatch() {
-    _epubBatteryPatchTimer?.cancel();
-    int tries = 0;
-    _epubBatteryPatchTimer = Timer.periodic(const Duration(milliseconds: 150), (t) {
-      tries++;
-      if (!mounted || tries > 60) {
-        t.cancel();
-        return;
-      }
-      final wv = _epubController.webViewController;
-      if (wv == null) return;
-      wv.callMethod('eval', [_epubBatteryPatchJs]).then((v) {
-        if (v == true) t.cancel();
-      }).catchError((_) => null);
-    });
-  }
-
   void _startEpubLoadWatchdog(String key) {
     if (_epubWatchKey == key) return;
     _epubWatchKey = key;
-    _startEpubBatteryPatch();
     _epubDisplayed = false;
     _epubReadySignalResent = false;
     _epubLoadWatchdog?.cancel();
@@ -411,7 +387,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final dir = await getApplicationDocumentsDirectory();
     const supportedExts = [
       'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
-      'docx', 'doc', 'hwpx', 'hwp',
+      'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt',
     ];
     const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
 
@@ -467,7 +443,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       ),
     );
 
-    if (const ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp'].contains(nextExt)) {
+    if (const ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt'].contains(nextExt)) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -1054,7 +1030,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 각 페이지에 직접 쓴 필기를 겹쳐서 PDF 한 파일로 저장 (다운로드/FReader 폴더).
   /// 끝나면 원래 읽던 위치로 돌아간다.
   /// 파일 내보내기는 워드·한글 문서만 (EPUB·TXT는 제외)
-  bool get _canExport => _isOfflineDocument && !_isTxt;
+  bool get _canExport => _isOfflineDocument && !_isTxt && !_isPresentation; // 워드·한글만 (PPT는 내보내기 대상 아님)
 
   Future<void> _exportToPdf() async {
     if (!_canExport) return;
@@ -1746,6 +1722,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _canTurnSwipe(int dir) {
     if (_isOfflineDocument && _docPageCount > 0) {
       final int page = _vPeekActive ? _vBasePage : _docPage;
+      // 파워포인트는 마지막 슬라이드에도 애니메이션 단계가 남아 있을 수 있다
+      if (_isPresentation) return dir > 0 || page > 0 || _posOrder(_vPeekActive ? _vBasePos : _currentCfi) % 100000 > 0;
       return dir > 0 ? page < _docPageCount - 1 : page > 0;
     }
     return true;
@@ -1798,22 +1776,31 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<bool> _vTurnAndWait(int dir) {
-    final int before = _docPage;
-    return _vWaitRelocate(dir > 0 ? _readerNext : _readerPrevious, () => _docPage != before);
+    // 쪽 번호가 같아도 위치가 바뀌면 넘어간 것 (파워포인트 애니메이션 단계)
+    final String? before = _currentCfi;
+    final int beforePage = _docPage;
+    return _vWaitRelocate(dir > 0 ? _readerNext : _readerPrevious, () => _docPage != beforePage || _currentCfi != before);
+  }
+
+  /// 문서 위치('docx:3', 'pptx:3:2' 등)를 앞뒤 비교용 숫자로 (쪽×100000 + 단계)
+  int _posOrder(String? pos) {
+    final m = RegExp(r'^[a-z]+:(\d+)(?::(\d+))?$').firstMatch(pos ?? '');
+    if (m == null) return _docPage * 100000;
+    return int.parse(m.group(1)!) * 100000 + int.parse(m.group(2) ?? '0');
   }
 
   /// 실제 화면을 밀기 시작한 쪽으로 되돌린다
   Future<void> _vRestoreBase() async {
     if (_isOfflineDocument) {
-      if (_docPage == _vBasePage) return;
       final pos = _vBasePos;
-      await _vWaitRelocate(() {
+      final bool atBase = pos != null ? _currentCfi == pos : _docPage == _vBasePage;
+      if (!atBase) await _vWaitRelocate(() {
         if (pos != null) {
           _readerDisplay(pos);
         } else {
           (_docPage > _vBasePage ? _readerPrevious : _readerNext)();
         }
-      }, () => _docPage == _vBasePage);
+      }, () => pos != null ? _currentCfi == pos : _docPage == _vBasePage);
     } else if (_vTurned != 0) {
       final pos = _vBasePos;
       if (pos != null) {
@@ -1827,7 +1814,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// 실제 화면이 밀기 시작한 쪽에서 어느 방향으로 넘어가 있는지
   int _vActualTurn() {
-    if (_isOfflineDocument) return (_docPage - _vBasePage).sign;
+    if (_isOfflineDocument) {
+      final base = _vBasePos;
+      if (base != null && _currentCfi != null) return (_posOrder(_currentCfi) - _posOrder(base)).sign;
+      return (_docPage - _vBasePage).sign;
+    }
     return _vTurned;
   }
 
@@ -2501,7 +2492,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _vPageSwipe.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     _epubLoadWatchdog?.cancel();
-    _epubBatteryPatchTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _volumeKeyService.stopListening();
     super.dispose();
@@ -2799,7 +2789,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                             ? (_) {}
                             : (_swipeFlutterOwned ? _onFlickUpdate : null),
                         onHorizontalDragEnd: _swipeFlutterOwned ? _onFlickEnd : null,
-                        child: _isOfflineDocument ? _buildDocumentViewer(isLandscape) : EpubViewer(
+                        child: AfterRouteTransition(builder: (_) => _isOfflineDocument ? _buildDocumentViewer(isLandscape) : EpubViewer(
                           key: ValueKey(epubViewerKey),
                           epubController: _epubController,
                     epubSource: EpubSource.fromFile(File(_activeFilePath)),
@@ -2890,7 +2880,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         });
                       }
                     },
-                    ),
+                    )),
                       ),
                     ),
                     ),
@@ -2980,7 +2970,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                             dyList: _activeStrokePoints
                                 .map((p) => (p.dy / drawHeight).clamp(0.0, 1.0).toDouble())
                                 .toList(),
-                            colorValue: _penColor.value,
+                            colorValue: _penColor.toARGB32(),
                             strokeWidth: _penWidth,
                           );
                           _memoHistory.record(locKey, _epubStrokes);
