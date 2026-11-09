@@ -1020,7 +1020,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
-          title: Text(_tr('cbz 파일 만들기', 'Create cbz File', '创建 cbz 文件', 'cbzファイル作成')),
+          title: Text(_tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1105,7 +1105,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
           progressSetState = setDialogState;
           final double ratio = totalSteps > 0 ? (currentStep / totalSteps).clamp(0.0, 1.0).toDouble() : 0.0;
           return AlertDialog(
-            title: Text(_tr('cbz 파일 생성 중', 'Creating cbz File', '正在生成 cbz 文件', 'cbzファイル作成中')),
+            title: Text(_tr('이미지 병합 중', 'Merging Images', '正在合并图片', '画像結合中')),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [

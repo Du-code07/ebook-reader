@@ -269,7 +269,30 @@ class StorageService {
 
   static Future<bool> getUseSwipeTurn() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('use_swipe_turn') ?? true;
+    return prefs.getBool('use_swipe_turn') ?? false;
+  }
+
+  // 위로 밀어서 다음 페이지 / 아래로 밀어서 이전 페이지 (기본값: 켜짐)
+  static Future<void> setUseSwipeUpTurn(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('use_swipe_up_turn', enabled);
+  }
+
+  static Future<bool> getUseSwipeUpTurn() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('use_swipe_up_turn') ?? true;
+  }
+
+  // 메모 지우개 종류: 'area'(닿은 부분만) / 'stroke'(닿은 획 전체)
+  static Future<void> setMemoEraserType(String type) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('memo_eraser_type', type);
+  }
+
+  static Future<String> getMemoEraserType() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString('memo_eraser_type');
+    return (v == 'stroke' || v == 'area') ? v! : 'area';
   }
 
   static Future<bool> getUseSpenTurn() async {
