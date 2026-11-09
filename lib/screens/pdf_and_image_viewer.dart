@@ -199,7 +199,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _useShakeLock = false;
   bool _useVolumeComboLock = true;
 
-  bool _useSwipeTurn = false;
+  bool _useSwipeTurn = true;
   bool _useSwipeUpTurn = true;
 
   // 위로 밀기 판정용 (한 손가락 제스처의 시작 위치/시간)
@@ -268,7 +268,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   String _eraserType = 'area';
   List<MemoStroke>? _eraseStartStrokes;
 
-  String _footerInfoMode = 'both';
+  String _footerInfoMode = 'none';
   String _progressBarPos = 'bottom';
   List<BookmarkItem> _bookmarks = [];
 
@@ -1029,20 +1029,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   runSpacing: 6,
                   children: [
                     FilterChip(
-                      label: Text(_tr('흔들어서 끄기', 'Shake to Unlock', '摇晃关闭锁定', '振って解除')),
-                      selected: _useShakeLock,
-                      onSelected: (val) async {
-                        await StorageService.setUseShakeLock(val);
-                        setState(() => _useShakeLock = val);
-                        setModalState(() {});
-                      },
-                    ),
-                    FilterChip(
                       label: Text(_tr('음량 버튼 동시에 눌러서 끄기', 'Press Both Volume Keys to Unlock', '同时按音量键关闭锁定', '音量ボタン同時押しで解除')),
                       selected: _useVolumeComboLock,
                       onSelected: (val) async {
                         await StorageService.setUseVolumeComboLock(val);
                         setState(() => _useVolumeComboLock = val);
+                        setModalState(() {});
+                      },
+                    ),
+                    FilterChip(
+                      label: Text(_tr('흔들어서 끄기', 'Shake to Unlock', '摇晃关闭锁定', '振って解除')),
+                      selected: _useShakeLock,
+                      onSelected: (val) async {
+                        await StorageService.setUseShakeLock(val);
+                        setState(() => _useShakeLock = val);
                         setModalState(() {});
                       },
                     ),
@@ -1117,6 +1117,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   runSpacing: 6,
                   children: [
                     ChoiceChip(
+                      label: Text(_tr('하단', 'Bottom', '底部', '下部')),
+                      selected: _progressBarPos == 'bottom',
+                      onSelected: (_) async {
+                        await StorageService.setProgressBarPosition('bottom');
+                        setState(() => _progressBarPos = 'bottom');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
                       label: Text(_tr('오른쪽', 'Right', '右侧', '右')),
                       selected: _progressBarPos == 'right',
                       onSelected: (_) async {
@@ -1131,15 +1140,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('left');
                         setState(() => _progressBarPos = 'left');
-                        setModalState(() {});
-                      },
-                    ),
-                    ChoiceChip(
-                      label: Text(_tr('하단', 'Bottom', '底部', '下部')),
-                      selected: _progressBarPos == 'bottom',
-                      onSelected: (_) async {
-                        await StorageService.setProgressBarPosition('bottom');
-                        setState(() => _progressBarPos = 'bottom');
                         setModalState(() {});
                       },
                     ),
@@ -1165,6 +1165,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   runSpacing: 6,
                   children: [
                     ChoiceChip(
+                      label: Text(_tr('정보 표시 없음', 'None', '不显示', '表示なし')),
+                      selected: _footerInfoMode == 'none',
+                      onSelected: (_) async {
+                        await StorageService.setFooterInfoMode('none');
+                        setState(() => _footerInfoMode = 'none');
+                        setModalState(() {});
+                      },
+                    ),
+                    ChoiceChip(
                       label: Text(_tr('진행률', 'Progress %', '进度百分比', '進行率')),
                       selected: _footerInfoMode == 'progress',
                       onSelected: (_) async {
@@ -1188,15 +1197,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       onSelected: (_) async {
                         await StorageService.setFooterInfoMode('both');
                         setState(() => _footerInfoMode = 'both');
-                        setModalState(() {});
-                      },
-                    ),
-                    ChoiceChip(
-                      label: Text(_tr('정보 표시 없음', 'None', '不显示', '表示なし')),
-                      selected: _footerInfoMode == 'none',
-                      onSelected: (_) async {
-                        await StorageService.setFooterInfoMode('none');
-                        setState(() => _footerInfoMode = 'none');
                         setModalState(() {});
                       },
                     ),

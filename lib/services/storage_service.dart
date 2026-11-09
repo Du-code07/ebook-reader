@@ -269,7 +269,7 @@ class StorageService {
 
   static Future<bool> getUseSwipeTurn() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('use_swipe_turn') ?? false;
+    return prefs.getBool('use_swipe_turn') ?? true;
   }
 
   // 위로 밀어서 다음 페이지 / 아래로 밀어서 이전 페이지 (기본값: 켜짐)
@@ -307,7 +307,7 @@ class StorageService {
 
   static Future<String> getFooterInfoMode() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('footer_info_mode') ?? 'both';
+    return prefs.getString('footer_info_mode') ?? 'none';
   }
 
   // 9. 진행바 UI 하단('bottom')을 기본값으로 설정

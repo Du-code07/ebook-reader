@@ -35,11 +35,12 @@ class QuickArcMenu extends StatefulWidget {
 
 class _QuickArcMenuState extends State<QuickArcMenu>
     with TickerProviderStateMixin {
-  // ── 모양 ──
-  static const double _circleRadius = 28.0; // 흰 동그라미 반지름
-  static const double _arcRadius = 104.0; // 동그라미 중심 ~ 아이콘 중심 거리
-  static const double _itemRadius = 22.0; // 아이콘 버튼 반지름
-  static const double _bandWidth = 54.0; // 호 띠 두께
+  // ── 모양 (전체적으로 작게) ──
+  static const double _toggleRadius = 22.0; // 도구 모음 버튼(사각형 4개 아이콘) 터치 영역 반지름
+  static const double _arcRadius = 78.0; // 버튼 중심 ~ 아이콘 중심 거리
+  static const double _itemRadius = 17.0; // 아이콘 버튼 반지름
+  static const double _itemIconSize = 18.0; // 아이콘 그림 크기
+  static const double _bandWidth = 40.0; // 호 띠 두께
 
   // 호가 보이는 각도 범위 (화면 좌표: 0°=오른쪽, 90°=아래, 180°=왼쪽, 270°=위)
   // 동그라미 왼쪽 약간 아래(170°)에서 시작해 동그라미 바로 위(270°)까지
@@ -47,11 +48,17 @@ class _QuickArcMenuState extends State<QuickArcMenu>
   static const double _endDeg = 270.0;
   static const double _stepDeg = 25.0; // 아이콘 간격 → 한 번에 5개 보임
 
-  // 상자 크기: 동그라미 중심이 상자 오른쪽 아래에서 (_rightPad, _bottomPad) 만큼 떨어진 곳
-  static const double _rightPad = _circleRadius + 4.0;
-  static const double _bottomPad = _itemRadius + 22.0;
-  static const double _boxW = _arcRadius + _itemRadius + 6.0 + _rightPad;
-  static const double _boxH = _arcRadius + _itemRadius + 6.0 + _bottomPad;
+  // 띠가 그려지는 실제 각도 범위 (양 끝 둥근 부분 포함)
+  static const double _bandStartDeg = _startDeg - _stepDeg * 0.5;
+  static const double _bandEndDeg = _endDeg + _stepDeg * 0.4;
+
+  // 상자 크기: 띠 전체(양 끝 포함)가 상자 안에 들어오도록 계산 → 아래/오른쪽이 잘리지 않음
+  static final double _rightPad =
+      math.max(_toggleRadius, _arcRadius * math.cos(_bandEndDeg * math.pi / 180.0) + _bandWidth / 2) + 4.0;
+  static final double _bottomPad =
+      math.max(_toggleRadius, _arcRadius * math.sin(_bandStartDeg * math.pi / 180.0) + _bandWidth / 2) + 4.0;
+  static final double _boxW = _arcRadius + _bandWidth / 2 + 4.0 + _rightPad;
+  static final double _boxH = _arcRadius + _bandWidth / 2 + 4.0 + _bottomPad;
 
   late final AnimationController _openCtrl = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 200));
@@ -64,7 +71,7 @@ class _QuickArcMenuState extends State<QuickArcMenu>
   double _snapFrom = 0.0;
   double _snapTo = 0.0;
 
-  Offset get _center => const Offset(_boxW - _rightPad, _boxH - _bottomPad);
+  Offset get _center => Offset(_boxW - _rightPad, _boxH - _bottomPad);
 
   double get _maxScrollDeg {
     final double needed =
@@ -165,8 +172,8 @@ class _QuickArcMenuState extends State<QuickArcMenu>
                     center: _center,
                     radius: _arcRadius * t,
                     bandWidth: _bandWidth,
-                    startDeg: _startDeg - _stepDeg * 0.5,
-                    endDeg: _endDeg + _stepDeg * 0.4,
+                    startDeg: _bandStartDeg,
+                    endDeg: _bandEndDeg,
                     opacity: t,
                   ),
                 ),
@@ -207,7 +214,12 @@ class _QuickArcMenuState extends State<QuickArcMenu>
                               item.onTap();
                               if (item.closeAfterTap) _close();
                             },
-                            child: Center(child: item.icon),
+                            child: Center(
+                              child: SizedBox.square(
+                                dimension: _itemIconSize,
+                                child: FittedBox(fit: BoxFit.contain, child: item.icon),
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -217,24 +229,19 @@ class _QuickArcMenuState extends State<QuickArcMenu>
               }
             }
 
-            // 흰 동그라미 버튼
+            // 도구 모음 버튼 (둥근 사각형 4개 아이콘, 열리면 45° 회전)
             children.add(Positioned(
-              left: _center.dx - _circleRadius,
-              top: _center.dy - _circleRadius,
-              width: _circleRadius * 2,
-              height: _circleRadius * 2,
+              left: _center.dx - _toggleRadius,
+              top: _center.dy - _toggleRadius,
+              width: _toggleRadius * 2,
+              height: _toggleRadius * 2,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _toggle,
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.black.withValues(alpha: 0.55),
-                    border: Border.all(
-                      color: Color.lerp(Colors.white, Colors.amber, t) ??
-                          Colors.white,
-                      width: 2.6,
-                    ),
+                child: Center(
+                  child: Transform.rotate(
+                    angle: t * math.pi / 4,
+                    child: const CustomPaint(size: Size.square(30), painter: _GridIconPainter()),
                   ),
                 ),
               ),
@@ -275,12 +282,12 @@ class _ArcBandPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = bandWidth
       ..strokeCap = StrokeCap.round
-      ..color = Colors.black.withValues(alpha: 0.78 * opacity);
+      ..color = const Color(0xFF3A3A3C).withValues(alpha: 0.94 * opacity); // 흰/검은 배경 모두 구분되는 짙은 회색
     canvas.drawArc(rect, start, sweep, false, band);
     final outline = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0
-      ..color = Colors.white.withValues(alpha: 0.18 * opacity);
+      ..color = Colors.white.withValues(alpha: 0.30 * opacity);
     canvas.drawArc(
         Rect.fromCircle(center: center, radius: radius + bandWidth / 2),
         start,
@@ -309,4 +316,37 @@ class _ArcBandPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _ArcBandPainter old) =>
       old.radius != radius || old.opacity != opacity || old.center != center;
+}
+
+/// 도구 모음 버튼 아이콘: 둥근 사각형 4개 (2×2)
+/// 흰 배경·검은 배경 모두에서 잘 보이도록 노란 칸 + 어두운 테두리 + 옅은 그림자
+class _GridIconPainter extends CustomPainter {
+  const _GridIconPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double s = size.width;
+    final double gap = s * 0.10;
+    final double cell = (s - gap) / 2;
+    final radius = Radius.circular(cell * 0.38);
+    final fill = Paint()..color = const Color(0xFFFFB300);
+    final outline = Paint()
+      ..color = const Color(0xE6000000)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
+    final shadow = Paint()
+      ..color = const Color(0x55000000)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.0);
+    for (int r = 0; r < 2; r++) {
+      for (int c = 0; c < 2; c++) {
+        final rect = RRect.fromRectAndRadius(Rect.fromLTWH(c * (cell + gap), r * (cell + gap), cell, cell), radius);
+        canvas.drawRRect(rect.shift(const Offset(0, 1)), shadow);
+        canvas.drawRRect(rect, fill);
+        canvas.drawRRect(rect, outline);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _GridIconPainter oldDelegate) => false;
 }

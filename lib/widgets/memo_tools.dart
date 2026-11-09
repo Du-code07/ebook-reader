@@ -109,13 +109,13 @@ class MemoToolButton extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              iconBuilder != null ? iconBuilder!(color) : Icon(icon, color: color, size: 21),
+              iconBuilder != null ? iconBuilder!(color) : Icon(icon, color: color, size: 18),
               if (dotColor != null)
                 Positioned(
-                  bottom: 3,
+                  bottom: 5,
                   child: Container(
-                    width: 7,
-                    height: 7,
+                    width: 6,
+                    height: 6,
                     decoration: BoxDecoration(
                       color: dotColor,
                       shape: BoxShape.circle,
@@ -523,7 +523,7 @@ class _NumberThumbShape extends SliderComponentShape {
 // ─────────────────────────────────────────────────────────────────────────────
 // 지우개 모양 아이콘 (비스듬한 지우개 + 고무 부분 채움 + 바닥 선)
 class EraserIcon extends StatelessWidget {
-  const EraserIcon({super.key, required this.color, this.size = 22});
+  const EraserIcon({super.key, required this.color, this.size = 18});
   final Color color;
   final double size;
 
