@@ -102,8 +102,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       context: context,
       title: _t('파일 표시 방식', 'Bookshelf View Mode', '文件显示样式', 'ファイル表示形式'),
       options: [
-        ChoiceOption('grid', _viewModeLabel('grid'), icon: Icons.grid_view_rounded),
         ChoiceOption('list', _viewModeLabel('list'), icon: Icons.view_list_rounded),
+        ChoiceOption('grid', _viewModeLabel('grid'), icon: Icons.grid_view_rounded),
       ],
       current: _viewMode,
       toggleIcon: Icons.visibility_off_outlined,

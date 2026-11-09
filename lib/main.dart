@@ -83,9 +83,6 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     super.dispose();
   }
 
-  void _toggleDarkMode() async {
-    await _changeThemeMode(_isDarkMode ? 'light' : 'dark');
-  }
 
   /// 앱 테마 바꾸기 ('system' | 'light' | 'dark')
   Future<void> _changeThemeMode(String mode) async {
@@ -152,7 +149,6 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
           : BookshelfScreen(
               isDarkMode: _isDarkMode,
               appLang: _appLang,
-              onToggleDarkMode: _toggleDarkMode,
               themeMode: _themeMode,
               onChangeThemeMode: _changeThemeMode,
               onChangeLanguage: _changeAppLanguage,
@@ -528,7 +524,6 @@ class _KeepAliveBookItemState extends State<_KeepAliveBookItem>
 class BookshelfScreen extends StatefulWidget {
   final bool isDarkMode;
   final String appLang;
-  final VoidCallback onToggleDarkMode;
   final String themeMode;
   final Future<void> Function(String mode) onChangeThemeMode;
   final ValueChanged<String> onChangeLanguage;
@@ -537,7 +532,6 @@ class BookshelfScreen extends StatefulWidget {
     super.key,
     required this.isDarkMode,
     required this.appLang,
-    required this.onToggleDarkMode,
     required this.themeMode,
     required this.onChangeThemeMode,
     required this.onChangeLanguage,
@@ -824,12 +818,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       thumbDir.createSync(recursive: true);
     }
     final Map<String, String> existingThumbBySafeKey = {};
+    final Map<String, String> existingDocThumbBySafeKey = {}; // 한글·워드 표지 (흐린 옛 표지와 구분)
     for (final entity in thumbDir.listSync()) {
       if (entity is File) {
         final name = entity.path.split(Platform.pathSeparator).last;
         if (name.startsWith('thumb_v36_') && name.endsWith('.jpg')) {
           final k = name.substring('thumb_v36_'.length, name.length - 4);
           existingThumbBySafeKey[k] = entity.path;
+        } else if (name.startsWith('thumb_d2_') && name.endsWith('.jpg')) {
+          final k = name.substring('thumb_d2_'.length, name.length - 4);
+          existingDocThumbBySafeKey[k] = entity.path;
         } else if (name.startsWith('thumb_hq26_') && name.endsWith('.jpg')) {
           final parts = name.split('_');
           if (parts.length >= 3) {
@@ -851,9 +849,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         continue;
       }
       final safeKey = path.hashCode.toUnsigned(32).toString();
-      final existingThumbPath = existingThumbBySafeKey[safeKey];
+      final existingThumbPath = DocThumbnailService.supportedExts.contains(ext)
+          ? existingDocThumbBySafeKey[safeKey]
+          : existingThumbBySafeKey[safeKey];
       if (existingThumbPath != null) {
         _cacheThumbnailFromFileSync(path, existingThumbPath);
+        if (DocThumbnailService.supportedExts.contains(ext)) _noteDocThumbQuality(path, existingThumbPath);
       }
     }
 
@@ -876,7 +877,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         }
       });
       for (final f in files) {
-        if (!_globalThumbMemoryCache.containsKey(f.path)) {
+        if (!_globalThumbMemoryCache.containsKey(f.path) || _wantsSharpDocThumb(f.path)) {
           _ensureBookThumbnail(f, thumbDir.path);
         }
       }
@@ -886,10 +887,24 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   /// 한글·워드 표지를 화면 밖에서 그리다 실패한 파일 (앱을 다시 켤 때까지 다시 시도하지 않음)
   static final Set<String> _docThumbFailed = {};
 
+  /// 파일 안의 작은 미리보기 그림으로 임시 표지를 쓴 한글·워드 (표지형 보기에서 첫 페이지를 다시 그림)
+  static final Set<String> _docThumbLowRes = {};
+
+  void _noteDocThumbQuality(String bookPath, String thumbPath) {
+    if (File('$thumbPath.low').existsSync()) {
+      _docThumbLowRes.add(bookPath);
+    } else {
+      _docThumbLowRes.remove(bookPath);
+    }
+  }
+
+  bool _wantsSharpDocThumb(String bookPath) =>
+      _bookshelfViewMode == 'grid' && _docThumbLowRes.contains(bookPath) && !_docThumbFailed.contains(bookPath);
+
   /// 13. 각 파일의 가장 첫 페이지를 초고속 네이티브 스레드 풀에서 썸네일 이미지로 생성 및 MemoryImage로 영구 고정
   Future<void> _ensureBookThumbnail(File file, [String? cachedThumbDirPath]) async {
     final path = file.path;
-    if (_globalThumbMemoryCache.containsKey(path)) return;
+    if (_globalThumbMemoryCache.containsKey(path) && !_wantsSharpDocThumb(path)) return;
     if (_thumbnailGeneratingPaths.contains(path)) return;
     _thumbnailGeneratingPaths.add(path);
 
@@ -903,12 +918,24 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       final String thumbDirPath = cachedThumbDirPath ??
           '${(await getApplicationDocumentsDirectory()).path}/.thumbnails';
       final safeKey = path.hashCode.toUnsigned(32).toString();
-      final thumbPath = '$thumbDirPath/thumb_v36_$safeKey.jpg';
+      final bool isDocType = DocThumbnailService.supportedExts.contains(ext);
+      final thumbPath = isDocType ? '$thumbDirPath/thumb_d2_$safeKey.jpg' : '$thumbDirPath/thumb_v36_$safeKey.jpg';
       final thumbFile = File(thumbPath);
 
       if (thumbFile.existsSync() && thumbFile.lengthSync() > 64) {
         _cacheThumbnailFromFileSync(path, thumbPath);
-        return;
+        // 작은 미리보기로 임시 표지를 쓴 한글·워드는 표지형 보기에서 첫 페이지를 다시 선명하게 그린다
+        if (isDocType) _noteDocThumbQuality(path, thumbPath);
+        if (!isDocType || !_wantsSharpDocThumb(path)) return;
+      }
+      if (isDocType) {
+        // 예전 버전이 만든 (흐릴 수 있는) 표지는 지운다
+        final old = File('$thumbDirPath/thumb_v36_$safeKey.jpg');
+        if (old.existsSync()) {
+          try {
+            old.deleteSync();
+          } catch (_) {}
+        }
       }
 
       if (ext == 'pdf') {
@@ -930,7 +957,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         final bool allowRender = _bookshelfViewMode == 'grid';
         final ok = await DocThumbnailService.make(path, thumbPath, allowRender: allowRender);
         if (ok) {
+          _globalThumbMemoryCache.remove(path); // 임시(흐린) 표지를 새 표지로 바꾼다
           _cacheThumbnailFromFileSync(path, thumbPath);
+          _noteDocThumbQuality(path, thumbPath);
           return;
         }
         if (allowRender) _docThumbFailed.add(path);
@@ -2067,7 +2096,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             // 표지형으로 바꾸면 아직 표지가 없는 한글·워드 문서의 첫 페이지를 만든다
             if (mode == 'grid') {
               for (final f in _allBooks) {
-                if (!_globalThumbMemoryCache.containsKey(f.path)) _ensureBookThumbnail(f);
+                if (!_globalThumbMemoryCache.containsKey(f.path) || _wantsSharpDocThumb(f.path)) _ensureBookThumbnail(f);
               }
             }
           },
@@ -2423,11 +2452,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           : AppBar(
               title: const Text('MY'),
               actions: [
-                IconButton(
-                  icon: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode),
-                  tooltip: _tr('다크 모드 전환', 'Toggle Dark Mode', '切换深色模式', 'ダークモード切替'),
-                  onPressed: widget.onToggleDarkMode,
-                ),
                 IconButton(
                   icon: const Icon(Icons.picture_as_pdf_outlined),
                   tooltip: _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'),

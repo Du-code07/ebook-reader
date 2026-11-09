@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 /// - 위로 밀면: 지금 페이지가 위로 올라가고 다음 페이지가 아래에서 올라옴
 /// - 아래로 밀면: 지금 페이지가 아래로 내려가고 이전 페이지가 위에서 내려옴
 /// - 조금만 밀고 놓으면 제자리로 돌아감
+/// - [up]에 seamless: true를 주면, 밀리는 동안 화면 쪽에서 다음(이전) 페이지를 미리 그려 둔 것으로 보고
+///   끝까지 민 뒤 페이지만 바꾼다 (가로로 넘길 때처럼 다음 장이 따라 들어옴)
 ///
 /// 사용법: 뷰어의 Listener에서 [down]/[move]/[up]을 호출하고,
 /// 페이지 영역을 Transform.translate(offset: Offset(0, swipe.offset))로 감싼다.
@@ -103,6 +105,7 @@ class VerticalPageSwipe extends ChangeNotifier {
     required bool Function(int dir) canTurn,
     required Future<void> Function(int dir) turnPage,
     bool cancelled = false,
+    bool seamless = false,
   }) async {
     if (_pointers > 0) _pointers--;
     if (_pointers > 0) return;
@@ -126,6 +129,12 @@ class VerticalPageSwipe extends ChangeNotifier {
     try {
       if (!commit) {
         await _animateTo(0.0, 180, Curves.easeOut);
+        return;
+      }
+      if (seamless) {
+        // 다음(이전) 페이지가 이미 뒤따라 보이고 있으므로: 끝까지 밀어 올린 뒤 페이지만 바꾸고 제자리로
+        await _animateTo(-dir * height, 230, Curves.easeOutCubic);
+        await turnPage(dir);
         return;
       }
       // 1) 지금 페이지가 민 방향으로 화면 밖까지 이동

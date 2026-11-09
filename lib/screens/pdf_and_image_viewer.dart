@@ -910,7 +910,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         // 도구 모음과 같은 쪽이면 활 메뉴가 펼쳐지는 영역까지 비켜 간다 ('완료' 버튼이 가려지지 않게)
         final bool sameSideAsQuickMenu = _showControls && (_quickMenuSide == 'left') == isLeft;
         final double quickMenuBottom =
-            baseBottom + ((_progressBarPos == 'bottom' || (_useQuickNavTurn && _quickMenuSide != 'left')) ? 38.0 : 0.0);
+            baseBottom + ((_progressBarPos == 'bottom' || (_useQuickNavTurn && _quickMenuSide != 'left')) ? 44.0 : 0.0);
         final double bottomLimit = _memoBarToFloorLandscape
             // 5. 가로 모드: 바닥까지 (오른쪽 아래 페이지 이동 버튼이 있으면 그 위까지)
             ? baseBottom + ((_useQuickNavTurn && _memoToolbarPos == 'right') ? 46.0 : 0.0)
@@ -965,7 +965,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   static const double _memoBarSideInset = 54.0;
 
   /// 파일 내보내기: 모든 페이지 + 직접 쓴 필기·텍스트 메모를 PDF 한 파일로 저장 (다운로드/FReader 폴더)
+  /// 파일 내보내기는 CBZ·이미지만 (PDF는 제외)
+  bool get _canExport => !(widget.isPdf || widget.files.first.path.toLowerCase().endsWith('.pdf'));
+
   Future<void> _exportToPdf() async {
+    if (!_canExport) return;
     if (_imagePages.isEmpty) return;
     final Size view = MediaQuery.sizeOf(context);
     final progress = showExportProgress(context, _tr);
@@ -1474,6 +1478,51 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ),
     );
     disposeSheetControllerWhenDone(sheetCtrl);
+  }
+
+  /// 한 화면(1쪽 또는 2쪽 펼침)에 들어갈 페이지 내용
+  Widget _buildViewPageContent(int viewIdx, bool isSpread) {
+    if (!isSpread) return _buildSinglePagePanel(viewIdx);
+    final int firstPage = viewIdx * 2;
+    final int secondPage = firstPage + 1;
+    final Widget leftPanel = _isMangaRtlMode
+        ? (secondPage < _totalPages ? _buildSinglePagePanel(secondPage, spreadSide: -1) : const SizedBox.expand())
+        : _buildSinglePagePanel(firstPage, spreadSide: -1);
+    final Widget rightPanel = _isMangaRtlMode
+        ? _buildSinglePagePanel(firstPage, spreadSide: 1)
+        : (secondPage < _totalPages ? _buildSinglePagePanel(secondPage, spreadSide: 1) : const SizedBox.expand());
+    return Row(
+      children: [
+        Expanded(child: leftPanel),
+        Expanded(child: rightPanel),
+      ],
+    );
+  }
+
+  /// 위/아래로 미는 동안 지금 화면이 움직이는 만큼, 비는 자리에 다음(이전) 화면을 미리 보여준다
+  int? _vPreviewBaseView;
+
+  Widget _buildVerticalSwipeStage(BuildContext context, Widget pages, bool isSpread, int viewItemCount) {
+    final double off = _vPageSwipe.offset;
+    if (off == 0.0) _vPreviewBaseView = null;
+    final List<Widget> children = [Transform.translate(offset: Offset(0, off), child: pages)];
+    if (off != 0.0) {
+      final int base = _vPreviewBaseView ??= isSpread ? _currentPage ~/ 2 : _currentPage;
+      final int dir = off < 0 ? 1 : -1;
+      final int target = base + dir;
+      if (target >= 0 && target < viewItemCount) {
+        final double h = MediaQuery.of(context).size.height;
+        children.add(
+          Transform.translate(
+            offset: Offset(0, off + (dir > 0 ? h : -h)),
+            child: IgnorePointer(
+              child: ColoredBox(color: Colors.black, child: _buildViewPageContent(target, isSpread)),
+            ),
+          ),
+        );
+      }
+    }
+    return Stack(fit: StackFit.expand, clipBehavior: Clip.hardEdge, children: children);
   }
 
   Widget _buildSinglePagePanel(int pageIndex, {int spreadSide = 0}) {
@@ -2230,6 +2279,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     height: MediaQuery.of(context).size.height,
                     canTurn: _canStepPage,
                     turnPage: _stepPageInstant,
+                    seamless: true,
                   );
                   if (_isStylusDown &&
                       (event.kind == PointerDeviceKind.stylus ||
@@ -2243,6 +2293,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     height: MediaQuery.of(context).size.height,
                     canTurn: _canStepPage,
                     turnPage: _stepPageInstant,
+                    seamless: true,
                     cancelled: true,
                   );
                   if (_activeTouchPointerIds.remove(event.pointer)) {
@@ -2258,10 +2309,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   // 위/아래로 밀 때 페이지 영역이 손가락을 따라 움직임
                   child: AnimatedBuilder(
                     animation: _vPageSwipe,
-                    builder: (context, child) => Transform.translate(
-                      offset: Offset(0, _vPageSwipe.offset),
-                      child: child,
-                    ),
+                    builder: (context, child) => _buildVerticalSwipeStage(context, child!, isSpread, viewItemCount),
                     child: PageView.builder(
                     key: ValueKey('pageview_spread_$isSpread'),
                     controller: _pageController,
@@ -2290,25 +2338,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     StorageService.saveProgress(_bookKey, (actualPage + 1) / _totalPages);
                   },
                   itemBuilder: (context, viewIdx) {
-                    final Widget pageChild;
-                    if (!isSpread) {
-                      pageChild = _buildSinglePagePanel(viewIdx);
-                    } else {
-                      final int firstPage = viewIdx * 2;
-                      final int secondPage = firstPage + 1;
-                      final Widget leftPanel = _isMangaRtlMode
-                          ? (secondPage < _totalPages ? _buildSinglePagePanel(secondPage, spreadSide: -1) : const SizedBox.expand())
-                          : _buildSinglePagePanel(firstPage, spreadSide: -1);
-                      final Widget rightPanel = _isMangaRtlMode
-                          ? _buildSinglePagePanel(firstPage, spreadSide: 1)
-                          : (secondPage < _totalPages ? _buildSinglePagePanel(secondPage, spreadSide: 1) : const SizedBox.expand());
-                      pageChild = Row(
-                        children: [
-                          Expanded(child: leftPanel),
-                          Expanded(child: rightPanel),
-                        ],
-                      );
-                    }
+                    final Widget pageChild = _buildViewPageContent(viewIdx, isSpread);
 
                     return InteractiveViewer(
                       transformationController: _zoomController,
@@ -2392,6 +2422,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         const btnPadding = EdgeInsets.symmetric(horizontal: 6, vertical: 4);
 
                         final actionButtons = <Widget>[
+                          if (_canExport)
                           IconButton(
                             visualDensity: VisualDensity.compact,
                             padding: btnPadding,
@@ -2454,7 +2485,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               left: _quickMenuSide == 'left' ? ((_progressBarPos == 'left' ? 56.0 : 12.0) + _safeSides.left + (_quickMenuBesideMemoBar ? 56.0 : 0.0)) : null,
               bottom: math.max<double>(bottomInset + 24.0, 28.0) +
                   // 아래 진행바(또는 오른쪽 아래 페이지 이동 버튼)가 있을 때만 그 위에 붙는다
-              ((_progressBarPos == 'bottom' || (_useQuickNavTurn && _quickMenuSide != 'left')) ? 38.0 : 0.0) +
+              ((_progressBarPos == 'bottom' || (_useQuickNavTurn && _quickMenuSide != 'left')) ? 44.0 : 0.0) +
                   ((_isMemoMode && _memoToolbarPos == 'bottom') ? 56.0 : 0.0),
               child: QuickArcMenu(
                 key: ValueKey('quick_menu_$_quickMenuSide'),

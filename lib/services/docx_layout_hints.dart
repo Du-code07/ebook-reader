@@ -30,7 +30,17 @@ class DocxLayoutHints {
       };
     }
     final extent = shape.getElement('extent', namespace: _wp);
+    // 사진 여부와 Word에서 자른 영역(a:srcRect, 1/100000 단위)
+    final blip = node.findAllElements('blip', namespace: _a).firstOrNull;
+    final bool picture = blip != null &&
+        (blip.getAttribute('embed', namespace: _r) != null || blip.getAttribute('link', namespace: _r) != null);
+    final srcRect = blip?.parentElement?.getElement('srcRect', namespace: _a);
+    int? crop(String n) => int.tryParse(srcRect?.getAttribute(n) ?? '');
+    final bool cropped = srcRect != null && [crop('l'), crop('t'), crop('r'), crop('b')].any((v) => v != null && v != 0);
     return {
+      'picture': picture,
+      if (cropped)
+        'crop': {'l': crop('l') ?? 0, 't': crop('t') ?? 0, 'r': crop('r') ?? 0, 'b': crop('b') ?? 0},
       'index': index,
       'kind': anchor == null ? 'inline' : 'anchor',
       'wrap': shape.children.whereType<XmlElement>()
@@ -221,6 +231,41 @@ class DocxLayoutHints {
           'eastAsia': ea.isNotEmpty ? ea : hang ?? latin,
         };
       }
+      // 각주·미주 본문 (변환 엔진이 빠뜨리므로 따로 읽어 화면에 붙인다)
+      final notes = <String, String>{};
+      for (final kind in ['footnote', 'endnote']) {
+        final notesPart = part('word/${kind}s.xml');
+        for (final note in notesPart?.findAllElements(kind, namespace: _w) ?? <XmlElement>[]) {
+          final type = _attr(note, 'type');
+          if (type != null && type != 'normal') continue; // 구분선 등
+          final id = _attr(note, 'id');
+          if (id == null) continue;
+          final lines = <String>[];
+          for (final np in note.findAllElements('p', namespace: _w)) {
+            final b = StringBuffer();
+            for (final n in np.descendants.whereType<XmlElement>()) {
+              if (n.name.namespaceUri != _w) continue;
+              if (n.name.local == 't') b.write(n.innerText);
+              if (n.name.local == 'tab') b.write(' ');
+            }
+            lines.add(b.toString());
+          }
+          notes['${kind == 'footnote' ? 'f' : 'e'}:$id'] = lines.join('\n').trim();
+        }
+      }
+      var footnoteNumber = 0, endnoteNumber = 0;
+      String roman(int n) {
+        const vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+        const syms = ['m', 'cm', 'd', 'cd', 'c', 'xc', 'l', 'xl', 'x', 'ix', 'v', 'iv', 'i'];
+        final out = StringBuffer();
+        for (int i = 0; i < vals.length; i++) {
+          while (n >= vals[i]) {
+            out.write(syms[i]);
+            n -= vals[i];
+          }
+        }
+        return out.toString();
+      }
       final body = doc.findAllElements('body', namespace: _w).first;
       final paragraphs = <Map<String, Object>>[];
       final indices = <XmlElement, int>{};
@@ -254,6 +299,7 @@ class DocxLayoutHints {
         final cached = <int>[];
         final drawingBreaks = <Map<String, Object>>[];
         final drawings = <Map<String, Object>>[];
+        final noteRefs = <Map<String, Object>>[];
         var drawingCount = 0;
         bool? pendingDrawingBreak;
         for (final run in p.findAllElements('r', namespace: _w)) {
@@ -280,6 +326,19 @@ class DocxLayoutHints {
                 if (_attr(n, 'type') == 'page') {
                   breaks.add(text.length);
                   pendingDrawingBreak = false;
+                }
+              case 'footnoteReference':
+              case 'endnoteReference':
+                // 각주 번호 위치: 탭·줄바꿈을 뺀 글자 수 기준 (화면 쪽 문단 맞추기와 같은 기준)
+                final bool foot = n.name.local == 'footnoteReference';
+                final id = _attr(n, 'id');
+                if (id != null && _attr(n, 'customMarkFollows') != '1') {
+                  final key = '${foot ? 'f' : 'e'}:$id';
+                  noteRefs.add({
+                    'offset': text.toString().replaceAll(RegExp(r'[\t\r\n\u200b]'), '').length,
+                    'key': key,
+                    'label': foot ? '${++footnoteNumber}' : roman(++endnoteNumber),
+                  });
                 }
               case 'lastRenderedPageBreak':
                 cached.add(text.length);
@@ -324,6 +383,7 @@ class DocxLayoutHints {
           'drawingCount': drawingCount,
           'drawings': drawings,
           'drawingBreaks': drawingBreaks,
+          if (noteRefs.isNotEmpty) 'notes': noteRefs,
         });
       }
       final tables = <Map<String, Object>>[];
@@ -378,6 +438,7 @@ class DocxLayoutHints {
       return {
         'version': 1,
         'paragraphs': paragraphs,
+        if (notes.isNotEmpty) 'notes': notes,
         'tables': tables,
         'sections': sections,
         'theme': themeFonts,

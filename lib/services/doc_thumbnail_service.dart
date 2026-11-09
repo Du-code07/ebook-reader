@@ -22,15 +22,64 @@ class DocThumbnailService {
   /// 표지 그림을 [outPath]에 저장. 성공하면 true.
   /// [allowRender]가 false면 파일 안의 미리보기 그림만 쓴다 (화면 밖 그리기는 무거우므로).
   static Future<bool> make(String path, String outPath, {bool allowRender = true}) async {
+    Uint8List? embedded;
     try {
-      final embedded = await Isolate.run(() => extractEmbeddedPreview(path));
-      if (embedded != null && embedded.length > 64) {
-        await File(outPath).writeAsBytes(embedded, flush: true);
-        return true;
-      }
+      embedded = await Isolate.run(() => extractEmbeddedPreview(path));
+      if (embedded != null && embedded.length <= 64) embedded = null;
     } catch (_) {}
-    if (!allowRender) return false;
-    return _enqueueRender(path, outPath);
+    final lowRes = File('$outPath.low');
+    // 오래된 한글 파일의 미리보기 그림은 아주 작아서(예: 177×250) 서재 표지로 늘리면 흐리다 → 충분히 클 때만 그대로 쓴다
+    if (embedded != null && (imageWidth(embedded) ?? 0) >= minSharpWidth) {
+      await File(outPath).writeAsBytes(embedded, flush: true);
+      if (lowRes.existsSync()) lowRes.deleteSync();
+      return true;
+    }
+    if (allowRender && await _enqueueRender(path, outPath)) {
+      if (lowRes.existsSync()) lowRes.deleteSync();
+      return true;
+    }
+    if (embedded != null) {
+      // 작은 미리보기라도 우선 보여주고, 표지형 보기에서 다시 선명하게 그리도록 표시해 둔다
+      await File(outPath).writeAsBytes(embedded, flush: true);
+      if (allowRender) {
+        if (lowRes.existsSync()) lowRes.deleteSync();
+      } else {
+        lowRes.writeAsStringSync('');
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// 이보다 좁은 미리보기 그림은 흐리게 보이므로 첫 페이지를 직접 그린다
+  static const int minSharpWidth = 360;
+
+  /// 그림 바이트의 가로 픽셀 수 (PNG/GIF/BMP/JPEG). 알 수 없으면 null.
+  static int? imageWidth(Uint8List b) {
+    if (b.length < 26) return null;
+    if (b[0] == 0x89 && b[1] == 0x50) return (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19];
+    if (b[0] == 0x47 && b[1] == 0x49) return b[6] | (b[7] << 8);
+    if (b[0] == 0x42 && b[1] == 0x4D) return (b[18] | (b[19] << 8) | (b[20] << 16) | (b[21] << 24)).abs();
+    if (b[0] == 0xFF && b[1] == 0xD8) {
+      var i = 2;
+      while (i + 9 < b.length) {
+        if (b[i] != 0xFF) {
+          i++;
+          continue;
+        }
+        final marker = b[i + 1];
+        if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7) || marker == 0xFF) {
+          i += marker == 0xFF ? 1 : 2;
+          continue;
+        }
+        final len = (b[i + 2] << 8) | b[i + 3];
+        if (marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC) {
+          return (b[i + 7] << 8) | b[i + 8];
+        }
+        i += 2 + len;
+      }
+    }
+    return null;
   }
 
   // ───────────────────────── 1) 파일 안의 미리보기 그림 ─────────────────────────

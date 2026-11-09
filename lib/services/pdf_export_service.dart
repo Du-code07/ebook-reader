@@ -10,13 +10,13 @@ typedef ExportTr = String Function(String ko, String en, String zh, String ja);
 class PdfExportService {
   static const MethodChannel _channel = MethodChannel('ebook_reader/pdf_renderer');
 
-  /// 파일 이름: "원래 이름_메모 포함.pdf" (확장자 제거)
+  /// 파일 이름: "원래 이름.pdf" (원래 확장자는 뺌. 같은 이름이 있으면 시스템이 (1) 등을 붙임)
   static String exportFileName(String title, ExportTr tr) {
     String base = title.trim();
     final dot = base.lastIndexOf('.');
     if (dot > 0 && base.length - dot <= 6) base = base.substring(0, dot);
     if (base.isEmpty) base = 'FReader';
-    return '${base}_${tr('메모 포함', 'with notes', '含笔记', 'メモ付き')}.pdf';
+    return '$base.pdf';
   }
 
   /// 페이지 그림 + 필기 + 텍스트 메모를 PDF로 만들어 다운로드/FReader 폴더에 저장.
