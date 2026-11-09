@@ -14,6 +14,8 @@ import '../widgets/sheet_pull_to_close.dart';
 import '../services/pdf_export_service.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/vertical_page_swipe.dart';
+import '../widgets/direction_arrow_icon.dart';
+import '../widgets/find_in_file_bar.dart';
 import 'reader_screen.dart';
 
 /// 1. S펜 전용 즉시 승리 제스처 인식기 (Eager Stylus Gesture Recognizer):
@@ -251,7 +253,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   List<MemoStroke>? _eraseStartStrokes;
 
   String _footerInfoMode = 'none';
-  String _progressBarPos = 'bottom';
+  String _progressBarPosSetting = 'bottom';
+  /// 실제 진행바 위치: 1쪽짜리 문서는 설정과 상관없이 숨김 (다른 버튼 배치도 숨김 기준으로)
+  String get _progressBarPos => (_totalPages == 1) ? 'hidden' : _progressBarPosSetting;
   String _memoToolbarPos = 'bottom'; // 메모 도구모음 위치
   String _quickMenuSide = 'right'; // 도구 모음(활 메뉴) 위치
   int _rotateTapCount = 0; // 화면 회전 아이콘 흔들림 애니메이션용
@@ -527,7 +531,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _eraserType = await StorageService.getMemoEraserType();
       _useSpenTurn = await StorageService.getUseSpenTurn();
       _footerInfoMode = await StorageService.getFooterInfoMode();
-      _progressBarPos = await StorageService.getProgressBarPosition();
+      _progressBarPosSetting = await StorageService.getProgressBarPosition();
       _memoToolbarPos = await StorageService.getMemoToolbarPosition();
       _quickMenuSide = await StorageService.getQuickMenuSide();
       _bookmarks = await StorageService.getBookmarks(_bookKey);
@@ -685,6 +689,97 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
+  // ── 파일 내 단어 검색 (PDF만) ──
+  bool get _isPdfFile => widget.isPdf || widget.files.first.path.toLowerCase().endsWith('.pdf');
+  bool _findOpen = false;
+  List<({int page, List<Rect> rects})> _findHits = const [];
+  int _findCurrent = -1;
+
+  Future<void> _openFind() async {
+    bool supported = false;
+    try {
+      supported = await _pdfChannel.invokeMethod<bool>('pdfSearchSupported') ?? false;
+    } catch (_) {}
+    if (!mounted) return;
+    if (!supported) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(_tr(
+          '이 기기에서는 PDF 단어 검색을 쓸 수 없습니다 (안드로이드 15 이상 또는 최신 시스템 업데이트 필요).',
+          'PDF search needs Android 15 or a recent system update on this device.',
+          '此设备不支持 PDF 搜索（需要 Android 15 或最新系统更新）。',
+          'この端末ではPDF検索を使えません（Android 15以上または最新のシステム更新が必要）。',
+        )),
+        duration: const Duration(seconds: 3),
+      ));
+      return;
+    }
+    setState(() {
+      _findOpen = true;
+      _showControls = false;
+    });
+  }
+
+  void _closeFind() {
+    setState(() {
+      _findOpen = false;
+      _findHits = const [];
+      _findCurrent = -1;
+    });
+  }
+
+  Future<int> _findSearch(String query) async {
+    try {
+      final raw = await _pdfChannel.invokeMethod<List<dynamic>>('pdfSearch', {'path': widget.files.first.path, 'query': query});
+      final hits = <({int page, List<Rect> rects})>[];
+      for (final item in raw ?? const []) {
+        if (item is! Map) continue;
+        final page = (item['page'] as num?)?.toInt();
+        final flat = (item['rects'] as List?)?.map((v) => (v as num).toDouble()).toList() ?? const <double>[];
+        if (page == null || flat.length < 4) continue;
+        final rects = <Rect>[for (int i = 0; i + 3 < flat.length; i += 4) Rect.fromLTRB(flat[i], flat[i + 1], flat[i + 2], flat[i + 3])];
+        hits.add((page: page, rects: rects));
+      }
+      if (mounted) {
+        setState(() {
+          _findHits = hits;
+          _findCurrent = hits.isEmpty ? -1 : 0;
+        });
+      }
+      return hits.length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<void> _findGoto(int index) async {
+    if (index < 0 || index >= _findHits.length) return;
+    setState(() => _findCurrent = index);
+    final page = _findHits[index].page;
+    if (page != _currentPage && !(_lastIsSpreadMode && page ~/ 2 == _currentPage ~/ 2)) {
+      _goToPage(page, smoothAnimation: false);
+    }
+  }
+
+  /// 쪽 그림 위에 찾은 단어를 노란 형광펜으로
+  Widget? _findMarks(int pageIndex, double left, double top, double width, double height) {
+    if (_findHits.isEmpty) return null;
+    final all = <Rect>[], current = <Rect>[];
+    for (int i = 0; i < _findHits.length; i++) {
+      final hit = _findHits[i];
+      if (hit.page != pageIndex) continue;
+      (i == _findCurrent ? current : all).addAll(hit.rects);
+    }
+    if (all.isEmpty && current.isEmpty) return null;
+    return Positioned(
+      left: left,
+      top: top,
+      width: width,
+      height: height,
+      child: IgnorePointer(child: CustomPaint(painter: _FindMarkPainter(all, current))),
+    );
+  }
+
   void _goToPage(
     int page, {
     bool smoothAnimation = true,
@@ -721,37 +816,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     setState(() => _showControls = !_showControls);
   }
 
-  Widget _buildDualDirectionIcon() {
-    final bool isRightActive = !_isMangaRtlMode;
-    const Color activeColor = Colors.amber;
-    const Color inactiveColor = Colors.white38;
-
-    return SizedBox(
-      width: 24,
-      height: 22,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Positioned(
-            top: 1,
-            child: Icon(
-              Icons.east,
-              size: 14,
-              color: isRightActive ? activeColor : inactiveColor,
-            ),
-          ),
-          Positioned(
-            bottom: 1,
-            child: Icon(
-              Icons.west,
-              size: 14,
-              color: !isRightActive ? activeColor : inactiveColor,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // 읽기 방향 아이콘: ↔ (지금 방향 쪽 화살촉만 노란색)
+  Widget _buildDualDirectionIcon() => DirectionArrowIcon(rightToLeft: _isMangaRtlMode, size: 22);
 
   double _distToEraserSegment(Offset p, Offset a, Offset b) {
     final ab = b - a;
@@ -1342,37 +1408,37 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   children: [
                     ChoiceChip(
                       label: Text(_tr('하단', 'Bottom', '底部', '下部')),
-                      selected: _progressBarPos == 'bottom',
+                      selected: _progressBarPosSetting == 'bottom',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('bottom');
-                        setState(() => _progressBarPos = 'bottom');
+                        setState(() => _progressBarPosSetting = 'bottom');
                         setModalState(() {});
                       },
                     ),
                     ChoiceChip(
                       label: Text(_tr('오른쪽', 'Right', '右侧', '右')),
-                      selected: _progressBarPos == 'right',
+                      selected: _progressBarPosSetting == 'right',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('right');
-                        setState(() => _progressBarPos = 'right');
+                        setState(() => _progressBarPosSetting = 'right');
                         setModalState(() {});
                       },
                     ),
                     ChoiceChip(
                       label: Text(_tr('왼쪽', 'Left', '左侧', '左')),
-                      selected: _progressBarPos == 'left',
+                      selected: _progressBarPosSetting == 'left',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('left');
-                        setState(() => _progressBarPos = 'left');
+                        setState(() => _progressBarPosSetting = 'left');
                         setModalState(() {});
                       },
                     ),
                     ChoiceChip(
                       label: Text(_tr('숨김', 'Hidden', '隐藏', '非表示')),
-                      selected: _progressBarPos == 'hidden',
+                      selected: _progressBarPosSetting == 'hidden',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('hidden');
-                        setState(() => _progressBarPos = 'hidden');
+                        setState(() => _progressBarPosSetting = 'hidden');
                         setModalState(() {});
                       },
                     ),
@@ -1582,6 +1648,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
               ),
             ),
+            // 파일 내 단어 검색: 찾은 곳 형광펜
+            ?_findMarks(pageIndex, drawLeft, drawTop, drawWidth, drawHeight),
             // 1. S펜 필기 레이어: EagerStylusPanGestureRecognizer를 통해 S펜이 닿는 즉시 제스처 아레나를 독점하여
             // S펜으로 필기할 때 화면이 같이 움직이거나 페이지가 넘어가는 현상을 100% 차단! (손가락 스와이프로는 페이지 이동 가능)
             if (_isMemoMode)
@@ -2234,7 +2302,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final String footerText = _formatFooterText(isSpread);
 
     return PopScope(
+      canPop: !_findOpen,
       onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _findOpen) {
+          _closeFind(); // 뒤로 가기: 검색만 닫음
+          return;
+        }
         if (_isTouchLocked) {
           _isTouchLocked = false;
         }
@@ -2407,7 +2480,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
           if (_isMemoMode && !_isTouchLocked) _buildMemoToolbar(bottomInset),
 
-          if (_showControls && !_isTouchLocked)
+          if (_findOpen && !_isTouchLocked)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: FindInFileBar(onSearch: _findSearch, onGoto: _findGoto, onClose: _closeFind, tr: _tr),
+            ),
+          if (_showControls && !_isTouchLocked && !_findOpen)
             Positioned(
               top: 0,
               left: 0,
@@ -2424,6 +2504,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         const btnPadding = EdgeInsets.symmetric(horizontal: 6, vertical: 4);
 
                         final actionButtons = <Widget>[
+                          // 파일 내 단어 검색 (PDF만)
+                          if (_isPdfFile)
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.search, color: Colors.white, size: 21),
+                              tooltip: _tr('파일 내 단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
+                              onPressed: _openFind,
+                            ),
                           if (_canExport)
                           IconButton(
                             visualDensity: VisualDensity.compact,
@@ -2502,4 +2592,28 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ),
     );
   }
+}
+
+/// 찾은 단어 형광펜 (쪽 크기 대비 0~1 좌표의 사각형)
+class _FindMarkPainter extends CustomPainter {
+  _FindMarkPainter(this.all, this.current);
+  final List<Rect> all;
+  final List<Rect> current;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    void draw(List<Rect> rects, Color color) {
+      final paint = Paint()
+        ..color = color
+        ..blendMode = BlendMode.multiply;
+      for (final r in rects) {
+        canvas.drawRect(Rect.fromLTRB(r.left * size.width, r.top * size.height, r.right * size.width, r.bottom * size.height), paint);
+      }
+    }
+    draw(all, const Color(0x99FFEB3B));
+    draw(current, const Color(0xE6FFC107));
+  }
+
+  @override
+  bool shouldRepaint(_FindMarkPainter old) => old.all != all || old.current != current;
 }

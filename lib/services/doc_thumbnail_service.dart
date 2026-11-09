@@ -206,7 +206,12 @@ class DocThumbnailService {
       }
     }
 
+    Timer? fallbackCapture;
+    var capturing = false;
     Future<void> capture() async {
+      if (capturing) return;
+      capturing = true;
+      fallbackCapture?.cancel();
       // 글꼴·그림이 다 그려질 시간을 조금 준다
       await Future<void>.delayed(Duration(milliseconds: isSlides ? 1400 : 700));
       try {
@@ -250,6 +255,15 @@ class DocThumbnailService {
                 unawaited(transfer());
                 break;
               case 'loaded':
+                // 워드·한글은 쪽 안 그림까지 다 그려졌다는 알림(pageReady)을 기다린다 (늦으면 그냥 찍음)
+                if (isSlides) {
+                  unawaited(capture());
+                } else {
+                  fallbackCapture ??= Timer(const Duration(seconds: 8), () => unawaited(capture()));
+                }
+                break;
+              case 'pageReady':
+                fallbackCapture?.cancel();
                 unawaited(capture());
                 break;
               case 'password':

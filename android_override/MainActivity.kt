@@ -258,7 +258,25 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         val pChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
         pdfMethodChannel = pChannel
         pChannel.setMethodCallHandler { call, result ->
-            if (call.method == "renderPdfFirstPageThumbnail") {
+            if (call.method == "pdfSearchSupported") {
+                result.success(pdfSearchSupported())
+            } else if (call.method == "pdfSearch") {
+                // 파일 내 단어 검색: 쪽마다 찾은 곳의 사각형(쪽 크기 대비 0~1)을 돌려 준다
+                val path = call.argument<String>("path") ?: ""
+                val query = call.argument<String>("query") ?: ""
+                if (!pdfSearchSupported()) {
+                    result.error("UNSUPPORTED", "PDF search needs Android 15 or a recent system update", null)
+                    return@setMethodCallHandler
+                }
+                thumbExecutor.execute {
+                    try {
+                        val found = searchPdfText(path, query)
+                        runOnUiThread { result.success(found) }
+                    } catch (e: Exception) {
+                        runOnUiThread { result.error("SEARCH_ERR", e.message, null) }
+                    }
+                }
+            } else if (call.method == "renderPdfFirstPageThumbnail") {
                 val pdfPath = call.argument<String>("pdfPath") ?: call.argument<String>("filePath")
                 val thumbPath = call.argument<String>("thumbPath") ?: call.argument<String>("outPath")
                 val requestedW = call.argument<Int>("maxWidth") ?: 420
@@ -1159,5 +1177,58 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
         src.copyTo(out)
         return out.absolutePath
+    }
+
+    // ── PDF 글자 검색 (안드로이드 15+, 또는 시스템 업데이트로 PDF 확장 13 이상인 11~14) ──
+    private fun pdfSearchSupported(): Boolean {
+        if (Build.VERSION.SDK_INT >= 35) return true
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        return try {
+            android.os.ext.SdkExtensions.getExtensionVersion(Build.VERSION_CODES.S) >= 13
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    @android.annotation.SuppressLint("NewApi")
+    private fun searchPdfText(path: String, query: String): List<Map<String, Any>> {
+        val out = ArrayList<Map<String, Any>>()
+        if (query.isBlank()) return out
+        val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            if (Build.VERSION.SDK_INT >= 35) {
+                PdfRenderer(pfd).use { renderer ->
+                    for (i in 0 until renderer.pageCount) {
+                        renderer.openPage(i).use { page ->
+                            addPdfMatches(out, i, page.width.toFloat(), page.height.toFloat(), page.searchText(query))
+                        }
+                    }
+                }
+            } else {
+                android.graphics.pdf.PdfRendererPreV(pfd).use { renderer ->
+                    for (i in 0 until renderer.pageCount) {
+                        renderer.openPage(i).use { page ->
+                            addPdfMatches(out, i, page.width.toFloat(), page.height.toFloat(), page.searchText(query))
+                        }
+                    }
+                }
+            }
+        } finally {
+            try { pfd.close() } catch (_: Exception) {}
+        }
+        return out
+    }
+
+    @android.annotation.SuppressLint("NewApi")
+    private fun addPdfMatches(out: ArrayList<Map<String, Any>>, pageIndex: Int, w: Float, h: Float, matches: List<android.graphics.pdf.models.PageMatchBounds>) {
+        if (w <= 0f || h <= 0f) return
+        for (m in matches) {
+            val rects = ArrayList<Double>()
+            for (r in m.bounds) {
+                rects.add((r.left / w).toDouble()); rects.add((r.top / h).toDouble())
+                rects.add((r.right / w).toDouble()); rects.add((r.bottom / h).toDouble())
+            }
+            if (rects.isNotEmpty()) out.add(mapOf("page" to pageIndex, "rects" to rects))
+        }
     }
 }

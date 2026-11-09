@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../services/docx_layout_hints.dart';
 
@@ -16,6 +17,19 @@ class HwpReaderController {
   Future<void> previous() async => _invoke?.call('previous', []);
   Future<void> toProgress(double progress) async =>
       _invoke?.call('progress', [progress]);
+
+  // ── 파일 내 단어 검색 ──
+  Future<Object?> Function(String, List<Object?>)? _query;
+
+  /// 찾은 곳 수 (못 찾거나 아직 열리지 않았으면 0)
+  Future<int> search(String text) async {
+    final result = await _query?.call('search', [text]);
+    if (result is Map) return (result['count'] as num?)?.toInt() ?? 0;
+    return 0;
+  }
+
+  Future<void> showSearchResult(int index) async => _query?.call('showSearchResult', [index]);
+  Future<void> clearSearch() async => _query?.call('clearSearch', []);
 }
 
 class HwpViewer extends StatefulWidget {
@@ -31,6 +45,8 @@ class HwpViewer extends StatefulWidget {
   onLocation;
   final ValueChanged<String> onError;
   final VoidCallback onCancelled;
+  /// 쪽 안의 그림까지 다 그려졌을 때 (워드·한글)
+  final ValueChanged<int>? onPageReady;
 
   const HwpViewer({
     super.key,
@@ -45,6 +61,7 @@ class HwpViewer extends StatefulWidget {
     required this.onLocation,
     required this.onError,
     required this.onCancelled,
+    this.onPageReady,
   });
 
   @override
@@ -66,6 +83,23 @@ class _HwpViewerState extends State<HwpViewer> {
       : 'HWP';
   String get _entry =>
       '$_origin/assets/flutter_assets/assets/${_isPresentation ? 'ppt' : _isWord ? 'docx' : 'hwp'}/index.html';
+  /// 표시 파일을 못 불러왔을 때: 앱 안에 그 파일이 아예 없으면(빌드에 빠짐) 무엇이 빠졌는지 알려 준다
+  Future<void> _reportMissingAsset(String url, String description) async {
+    final marker = '$_origin/assets/flutter_assets/';
+    if (url.startsWith(marker)) {
+      final asset = Uri.decodeComponent(url.substring(marker.length).split('?').first);
+      try {
+        await rootBundle.load(asset);
+      } catch (_) {
+        final folder = asset.contains('/') ? asset.substring(0, asset.lastIndexOf('/')) : asset;
+        _reportError('앱 안에 표시 파일($asset)이 없습니다. GitHub에 $folder 폴더가 올라가 있는지, '
+            'pubspec.yaml이 새 버전인지 확인한 뒤 다시 빌드해 주세요.');
+        return;
+      }
+    }
+    _reportError('문서 표시 파일을 불러오지 못했습니다: $description');
+  }
+
   String get _jsObject => _isPresentation ? 'freaderPpt' : _isWord ? 'freaderDocx' : 'freaderHwp';
   Map<String, Object> _docxLayout = {};
   static const _maxBytes = 256 * 1024 * 1024;
@@ -89,12 +123,16 @@ class _HwpViewerState extends State<HwpViewer> {
     if (_isWord) 'format': _isDoc ? 'doc' : 'docx',
     if (_isPresentation) 'format': _presentationFormat,
     if (_isDocx) 'docxLayout': _docxLayout,
+    if (_cacheKey != null) 'cacheKey': _cacheKey,
   };
+  /// 파일이 바뀌면 달라지는 열쇠 (변환된 그림 저장소 이름에 사용)
+  String? _cacheKey;
 
   @override
   void initState() {
     super.initState();
     widget.controller._invoke = _navigate;
+    widget.controller._query = _ask;
     _armTimeout();
   }
 
@@ -140,6 +178,20 @@ class _HwpViewerState extends State<HwpViewer> {
     }
   }
 
+  /// 결과를 돌려받는 호출 (검색). 실패해도 문서 오류로 띄우지 않는다.
+  Future<Object?> _ask(String method, List<Object?> args) async {
+    if (_disposed || _failed || _web == null || !_loaded) return null;
+    try {
+      final result = await _web!.callAsyncJavaScript(
+        functionBody: 'return await window[viewer][method](...args);',
+        arguments: {'viewer': _jsObject, 'method': method, 'args': args},
+      );
+      return result?.error == null ? result?.value : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _navigate(String method, List<Object?> args) async {
     // Hardware keys and the existing toolbar can be used during initialization.
     if (!_loaded) return;
@@ -153,6 +205,10 @@ class _HwpViewerState extends State<HwpViewer> {
     try {
       final source = File(widget.filePath);
       final length = await source.length();
+      try {
+        final modified = (await source.lastModified()).millisecondsSinceEpoch;
+        _cacheKey = '${widget.filePath.hashCode.toUnsigned(32)}-$length-$modified';
+      } catch (_) {}
       if (length < 1 || length > _maxBytes) {
         throw const FormatException('비어 있거나 256MB를 초과하는 문서입니다.');
       }
@@ -214,6 +270,9 @@ class _HwpViewerState extends State<HwpViewer> {
           (event['progress'] as num).toDouble(),
         );
         break;
+      case 'pageReady':
+        if (_loaded) widget.onPageReady?.call((event['page'] as num?)?.toInt() ?? -1);
+        break;
       case 'password':
         unawaited(_requestPassword(event['incorrect'] == true));
         break;
@@ -273,7 +332,9 @@ class _HwpViewerState extends State<HwpViewer> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller._invoke = null;
+      oldWidget.controller._query = null;
       widget.controller._invoke = _navigate;
+    widget.controller._query = _ask;
     }
     if (_loaded &&
         (oldWidget.theme != widget.theme ||
@@ -356,7 +417,7 @@ class _HwpViewerState extends State<HwpViewer> {
           onReceivedError: (controller, request, error) {
             if (request.isForMainFrame == true ||
                 request.url.toString().startsWith('$_origin/assets/')) {
-              _reportError('문서 표시 파일을 불러오지 못했습니다: ${error.description}');
+              unawaited(_reportMissingAsset(request.url.toString(), error.description));
             }
           },
           onReceivedHttpError: (controller, request, response) {

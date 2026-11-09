@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
+import '../services/page_snapshot_service.dart';
 import '../services/epub_validation.dart';
 import '../widgets/hwp_viewer.dart';
 import '../widgets/txt_paged_viewer.dart';
@@ -19,6 +20,8 @@ import '../services/pdf_export_service.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/vertical_page_swipe.dart';
 import '../widgets/after_route_transition.dart';
+import '../widgets/direction_arrow_icon.dart';
+import '../widgets/find_in_file_bar.dart';
 import 'pdf_and_image_viewer.dart';
 
 class _EpubMemoPainter extends CustomPainter {
@@ -250,7 +253,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   List<MemoStroke>? _eraseStartStrokes;
 
   String _footerInfoMode = 'none';
-  String _progressBarPos = 'bottom';
+  String _progressBarPosSetting = 'bottom';
+  /// 실제 진행바 위치: 1쪽짜리 문서는 설정과 상관없이 숨김 (다른 버튼 배치도 숨김 기준으로)
+  String get _progressBarPos => ((_isOfflineDocument && _docPageCount == 1) || _epubSinglePage) ? 'hidden' : _progressBarPosSetting;
+  bool _epubSinglePage = false; // EPUB 전체가 한 화면(장 1개, 화면 1쪽)
   String _memoToolbarPos = 'bottom'; // 메모 도구모음 위치
   String _quickMenuSide = 'right'; // 도구 모음(활 메뉴) 위치
   int _rotateTapCount = 0; // 화면 회전 아이콘 흔들림 애니메이션용
@@ -537,9 +543,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _enableTwoPageInLandscape = twoPage;
       _isMangaRtlMode = isRtl;
       // 기본값은 라이트. 종이색은 EPUB에서만 쓰므로 다른 문서에서는 라이트로 보여 준다.
-      _epubBgTheme = savedBg.isEmpty || (savedBg == 'sepia' && !_isEpub) ? 'white' : savedBg;
+      _epubBgTheme = savedBg.isEmpty || (savedBg == 'sepia' && !_isEpub) || _isPresentation ? 'white' : savedBg; // PPT는 배경 색상을 적용하지 않음
       _footerInfoMode = footerMode;
-      _progressBarPos = barPos;
+      _progressBarPosSetting = barPos;
       _memoToolbarPos = memoBarPos;
       _quickMenuSide = quickSide;
       _useShakeLock = shakeLock;
@@ -554,6 +560,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _bookmarks = loadedBookmarks;
       _isLoading = false;
     });
+    unawaited(_snapInit());
   }
 
   // ── 페이지 이동: EPUB이면 EPUB 뷰어, TXT·워드·한글이면 각 문서 뷰어로 보낸다 ──
@@ -561,6 +568,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_isTxt) {
       _txtController.next();
     } else if (_isOfflineDocument) {
+      _snapShow(_docPage + _snapStep);
       _hwpController.next();
     } else {
       _epubController.next();
@@ -571,6 +579,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_isTxt) {
       _txtController.previous();
     } else if (_isOfflineDocument) {
+      _snapShow(_docPage - _snapStep);
       _hwpController.previous();
     } else {
       _epubController.prev();
@@ -591,6 +600,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_isTxt) {
       _txtController.display(position);
     } else if (_isOfflineDocument) {
+      final m = RegExp(r':(\d+)$').firstMatch(position);
+      if (m != null) _snapShow(int.parse(m.group(1)!));
       _hwpController.display(position);
     } else {
       _epubController.display(cfi: position);
@@ -620,6 +631,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final waiter = _relocateWaiter;
     if (waiter != null && !waiter.isCompleted) waiter.complete();
     final relocation = ++_docRelocation;
+    if (page != _docPage) _lastReadyPage = -1;
+    if (_snapShownPage != null && _snapShownPage != page) _snapShow(page);
     setState(() {
       _docPage = page;
       _docPageCount = pageCount;
@@ -647,7 +660,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           initialPosition: _currentCfi ?? _initialCfi,
           initialProgress: _initialProgress,
           theme: _epubBgTheme,
-          spread: isLandscape && _enableTwoPageInLandscape,
+          spread: isLandscape && _enableTwoPageInLandscape && !_slideShow,
           rtl: _isMangaRtlMode,
           onLoaded: _onDocumentLoaded,
           onLocation: _onDocumentLocation,
@@ -655,22 +668,141 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         ),
       );
     }
-    return HwpViewer(
-      key: ValueKey('document:${widget.filePath}'),
-      filePath: widget.filePath,
-      controller: _hwpController,
-      initialPosition: _currentCfi ?? _initialCfi,
-      initialProgress: _initialProgress,
-      theme: _epubBgTheme,
-      spread: isLandscape && _enableTwoPageInLandscape,
-      rtl: _isMangaRtlMode,
-      onLoaded: _onDocumentLoaded,
-      onLocation: _onDocumentLocation,
-      onError: _handleEpubLoadError,
-      onCancelled: () {
-        if (mounted) Navigator.of(context).pop();
-      },
+    final shown = _snapShown;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        HwpViewer(
+          key: ValueKey('document:${widget.filePath}'),
+          filePath: widget.filePath,
+          controller: _hwpController,
+          initialPosition: _currentCfi ?? _initialCfi,
+          initialProgress: _initialProgress,
+          theme: _epubBgTheme,
+          spread: isLandscape && _enableTwoPageInLandscape && !_slideShow,
+          rtl: _isMangaRtlMode,
+          onLoaded: _onDocumentLoaded,
+          onLocation: _onDocumentLocation,
+          onPageReady: _onDocumentPageReady,
+          onError: _handleEpubLoadError,
+          onCancelled: () {
+            if (mounted) Navigator.of(context).pop();
+          },
+        ),
+        // 한 번 본 쪽: 실제 쪽(특히 사진)이 다 준비될 때까지 저장해 둔 화면을 먼저 보여 줌
+        if (shown != null)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Image.file(shown, fit: BoxFit.fill, gaplessPlayback: true, filterQuality: FilterQuality.medium),
+            ),
+          ),
+      ],
     );
+  }
+
+  // ── 쪽 화면 저장·미리 띄우기 (워드·한글) ──
+  bool get _snapEligible => _isOfflineDocument && !_isTxt && !_isPresentation;
+  Directory? _snapDir;
+  File? _snapShown;
+  int? _snapShownPage;
+  Timer? _snapHideTimer;
+  bool get _snapSpread {
+    final size = MediaQuery.sizeOf(context);
+    return size.width > size.height && _enableTwoPageInLandscape && !_slideShow;
+  }
+  int _snapCaptureSerial = 0;
+  int get _snapStep => _snapSpread ? 2 : 1;
+
+  Future<void> _snapInit() async {
+    if (!_snapEligible) return;
+    final dir = await PageSnapshotService.documentDir(widget.filePath);
+    if (!mounted || dir == null) return;
+    _snapDir = dir;
+    // 처음 열 때: 마지막으로 보던 쪽(없으면 첫 쪽)을 먼저 보여 준다
+    if (_docPageCount == 0) {
+      final m = RegExp(r':(\d+)$').firstMatch(_currentCfi ?? _initialCfi ?? '');
+      WidgetsBinding.instance.addPostFrameCallback((_) => _snapShow(m != null ? int.parse(m.group(1)!) : 0));
+    }
+  }
+
+  File? _snapFile(int page) {
+    final dir = _snapDir;
+    final box = _epubViewRectKey.currentContext?.size;
+    if (dir == null || box == null || box.isEmpty) return null;
+    final name = PageSnapshotService.fileName(
+      page: page,
+      width: box.width.round(),
+      height: box.height.round(),
+      spread: _snapSpread,
+      rtl: _isMangaRtlMode,
+      theme: _epubBgTheme,
+    );
+    return File('${dir.path}/$name');
+  }
+
+  void _snapShow(int page) {
+    if (!_snapEligible || !mounted) return;
+    if (page < 0 || (_docPageCount > 0 && page >= _docPageCount) || _epubZoomScale > 1.03) {
+      _snapHide();
+      return;
+    }
+    final file = _snapFile(page);
+    if (file == null || !file.existsSync()) {
+      _snapHide();
+      return;
+    }
+    _snapHideTimer?.cancel();
+    _snapHideTimer = Timer(const Duration(seconds: 8), _snapHide); // 혹시 준비 알림이 안 와도 가린 채 두지 않음
+    setState(() {
+      _snapShown = file;
+      _snapShownPage = page;
+    });
+  }
+
+  void _snapHide() {
+    _snapHideTimer?.cancel();
+    if (_snapShown == null || !mounted) return;
+    setState(() {
+      _snapShown = null;
+      _snapShownPage = null;
+    });
+  }
+
+  /// 쪽 안 그림까지 다 그려졌을 때: 미리 띄운 화면을 걷어 내고, 저장된 화면이 없으면 지금 화면을 저장
+  int _lastReadyPage = -1; // 사진까지 다 그려진 마지막 쪽 (내보내기에서 기다림)
+
+  void _onDocumentPageReady(int page) {
+    _lastReadyPage = page;
+    if (!mounted || !_snapEligible) return;
+    if (page != _docPage) return;
+    if (_snapShownPage == page) {
+      // 실제 쪽이 화면에 그려질 시간을 한 프레임 준 뒤 걷어 냄
+      WidgetsBinding.instance.addPostFrameCallback((_) => _snapHide());
+    }
+    // 다음 쪽 저장 화면을 미리 풀어 두면 넘기는 순간 바로 보인다
+    final ahead = _snapFile(page + _snapStep);
+    if (ahead != null && ahead.existsSync()) unawaited(precacheImage(FileImage(ahead), context).catchError((_) {}));
+    final file = _snapFile(page);
+    if (file == null || file.existsSync()) return;
+    final serial = ++_snapCaptureSerial;
+    Future<void>.delayed(const Duration(milliseconds: 400), () async {
+      if (!mounted || serial != _snapCaptureSerial || page != _docPage) return;
+      // 넘기는 중·확대 중·필기 중·다른 화면이 덮고 있을 때는 저장하지 않음
+      if (_vPeekActive || _vPageSwipe.isAnimating || _vPageSwipe.isVerticalGesture || _snapShown != null) return;
+      if (_epubZoomScale > 1.03 || _isStylusDown || _activeStrokePoints.isNotEmpty || _slideShow || _isExporting || _findOpen) return;
+      try {
+        final bytes = await _pdfChannel.invokeMethod<Uint8List>(
+          'snapshotWebView',
+          {'background': _getBgColor().toARGB32(), 'scale': 1.0},
+        );
+        if (bytes == null || bytes.length < 1024 || !mounted || page != _docPage) return;
+        final again = _snapFile(page); // 저장하는 사이 화면 크기가 바뀌었을 수 있음
+        if (again == null || again.path != file.path) return;
+        final tmp = File('${file.path}.tmp');
+        await tmp.writeAsBytes(bytes, flush: true);
+        await tmp.rename(file.path);
+      } catch (_) {}
+    });
   }
 
   void _turnNext() {
@@ -739,37 +871,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     );
   }
 
-  Widget _buildDualDirectionIcon() {
-    final bool isRightActive = !_isMangaRtlMode;
-    const Color activeColor = Colors.amber;
-    const Color inactiveColor = Colors.white38;
-
-    return SizedBox(
-      width: 24,
-      height: 22,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Positioned(
-            top: 1,
-            child: Icon(
-              Icons.east,
-              size: 14,
-              color: isRightActive ? activeColor : inactiveColor,
-            ),
-          ),
-          Positioned(
-            bottom: 1,
-            child: Icon(
-              Icons.west,
-              size: 14,
-              color: !isRightActive ? activeColor : inactiveColor,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // 읽기 방향 아이콘: ↔ (지금 방향 쪽 화살촉만 노란색)
+  Widget _buildDualDirectionIcon() => DirectionArrowIcon(rightToLeft: _isMangaRtlMode, size: 22);
 
   double _distToEraserSegment(Offset p, Offset a, Offset b) {
     final ab = b - a;
@@ -1064,6 +1167,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         if (progress.cancelled || !mounted) break;
         // 새 페이지가 다 그려지고 필기 정보가 바뀔 때까지 잠깐 기다림
         await Future<void>.delayed(const Duration(milliseconds: 350));
+        // 워드·한글: 쪽 안 사진까지 다 채워질 때까지 기다림 (사진은 글자보다 늦게 채워짐)
+        if (_snapEligible) {
+          for (int w = 0; w < 120 && _lastReadyPage != _docPage && mounted; w++) {
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+          }
+        }
         final String? cfi = _currentCfi;
         if (i > 0 && cfi == lastCfi) break; // 더 이상 넘어가지 않음 = 마지막 페이지
         lastCfi = cfi;
@@ -1339,6 +1448,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ),
                   ],
                 ),
+                // PPT는 배경 색상을 적용하지 않으므로 항목도 숨김
+                if (!_isPresentation) ...[
                 const SizedBox(height: 8),
                 _settingsHeader(Icons.palette_outlined, _tr('배경 색상', 'Background Color', '背景颜色', '背景色')),
                 const SizedBox(height: 6),
@@ -1374,6 +1485,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       ),
                   ],
                 ),
+                ],
                 const Divider(height: 16),
                 _settingsHeader(Icons.lock_open_outlined, _tr('화면 잠금 끄기 설정 (동시 사용 가능)', 'Screen Unlock Settings (Multiple allowed)', '解除屏幕锁定设置 (可同时启用)', '画面ロック解除設定 (同時使用可)')),
                 const SizedBox(height: 6),
@@ -1465,37 +1577,37 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   children: [
                     ChoiceChip(
                       label: Text(_tr('하단', 'Bottom', '底部', '下部')),
-                      selected: _progressBarPos == 'bottom',
+                      selected: _progressBarPosSetting == 'bottom',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('bottom');
-                        setState(() => _progressBarPos = 'bottom');
+                        setState(() => _progressBarPosSetting = 'bottom');
                         setModalState(() {});
                       },
                     ),
                     ChoiceChip(
                       label: Text(_tr('오른쪽', 'Right', '右侧', '右')),
-                      selected: _progressBarPos == 'right',
+                      selected: _progressBarPosSetting == 'right',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('right');
-                        setState(() => _progressBarPos = 'right');
+                        setState(() => _progressBarPosSetting = 'right');
                         setModalState(() {});
                       },
                     ),
                     ChoiceChip(
                       label: Text(_tr('왼쪽', 'Left', '左侧', '左')),
-                      selected: _progressBarPos == 'left',
+                      selected: _progressBarPosSetting == 'left',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('left');
-                        setState(() => _progressBarPos = 'left');
+                        setState(() => _progressBarPosSetting = 'left');
                         setModalState(() {});
                       },
                     ),
                     ChoiceChip(
                       label: Text(_tr('숨김', 'Hidden', '隐藏', '非表示')),
-                      selected: _progressBarPos == 'hidden',
+                      selected: _progressBarPosSetting == 'hidden',
                       onSelected: (_) async {
                         await StorageService.setProgressBarPosition('hidden');
-                        setState(() => _progressBarPos = 'hidden');
+                        setState(() => _progressBarPosSetting = 'hidden');
                         setModalState(() {});
                       },
                     ),
@@ -1680,6 +1792,118 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void _toggleControls() {
     if (_isTouchLocked) return;
     setState(() => _showControls = !_showControls);
+  }
+
+  // ── 파일 내 단어 검색 (한글·워드) ──
+  bool _findOpen = false;
+
+  void _closeFind() {
+    unawaited(_hwpController.clearSearch());
+    setState(() => _findOpen = false);
+  }
+
+  // ── PPT 슬라이드 쇼: 가로 전체 화면, 검은 바탕, 화면을 누르거나 밀어서 넘김 ──
+  bool _slideShow = false;
+  bool _slideShowExitVisible = false;
+  Timer? _slideShowExitTimer;
+  double _slideShowDragDx = 0;
+
+  Future<void> _startSlideShow() async {
+    setState(() {
+      _slideShow = true;
+      _showControls = false;
+      _isMemoMode = false;
+      _initialCfi = _currentCfi;
+    });
+    _showSlideShowExit();
+    try {
+      await _pdfChannel.invokeMethod('setScreenOrientation', {'mode': 'landscape'});
+    } catch (_) {}
+  }
+
+  Future<void> _endSlideShow() async {
+    _slideShowExitTimer?.cancel();
+    setState(() {
+      _slideShow = false;
+      _slideShowExitVisible = false;
+      _initialCfi = _currentCfi;
+    });
+    final bool? want = StorageService.desiredLandscapeNotifier.value;
+    try {
+      await _pdfChannel.invokeMethod('setScreenOrientation', {
+        'mode': want == null ? 'unspecified' : (want ? 'landscape' : 'portrait'),
+      });
+    } catch (_) {}
+  }
+
+  void _showSlideShowExit() {
+    _slideShowExitTimer?.cancel();
+    setState(() => _slideShowExitVisible = true);
+    _slideShowExitTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _slideShowExitVisible = false);
+    });
+  }
+
+  /// 슬라이드 쇼 화면 맨 위: 누르거나 밀어 넘기기, 위쪽을 누르면 끝내기 버튼
+  Widget _buildSlideShowLayer() {
+    return Positioned.fill(
+      child: LayoutBuilder(
+        builder: (context, box) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (d) {
+            if (d.localPosition.dy < box.maxHeight * 0.15) {
+              _showSlideShowExit();
+            } else if (d.localPosition.dx < box.maxWidth * 0.3) {
+              _readerPrevious();
+            } else {
+              _readerNext();
+            }
+          },
+          onHorizontalDragStart: (_) => _slideShowDragDx = 0,
+          onHorizontalDragUpdate: (d) => _slideShowDragDx += d.delta.dx,
+          onHorizontalDragEnd: (d) {
+            final v = d.primaryVelocity ?? 0;
+            if (_slideShowDragDx < -40 || v < -400) _readerNext();
+            if (_slideShowDragDx > 40 || v > 400) _readerPrevious();
+          },
+          child: Align(
+            alignment: Alignment.topRight,
+            child: AnimatedOpacity(
+              opacity: _slideShowExitVisible ? 1 : 0,
+              duration: const Duration(milliseconds: 200),
+              child: IgnorePointer(
+                ignoring: !_slideShowExitVisible,
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Material(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(20),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: _endSlideShow,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.close, color: Colors.white, size: 18),
+                              const SizedBox(width: 6),
+                              Text(_tr('슬라이드 쇼 끝내기', 'End Slide Show', '结束幻灯片放映', 'スライドショー終了'),
+                                  style: const TextStyle(color: Colors.white, fontSize: 13)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   // ── 위/아래로 밀기: 손가락을 따라 페이지가 위·아래로 움직이며 넘어감 ──
@@ -2489,6 +2713,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    _snapHideTimer?.cancel();
+    _slideShowExitTimer?.cancel();
+    if (_slideShow) {
+      // 슬라이드 쇼 중에 나가면 화면 방향을 원래대로
+      final bool? want = StorageService.desiredLandscapeNotifier.value;
+      _pdfChannel.invokeMethod('setScreenOrientation', {
+        'mode': want == null ? 'unspecified' : (want ? 'landscape' : 'portrait'),
+      }).catchError((_) => null);
+    }
     _vPageSwipe.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     _epubLoadWatchdog?.cancel();
@@ -2652,7 +2885,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final footerText = _formatEpubFooterText();
 
     return PopScope(
+      canPop: !_slideShow && !_findOpen,
       onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _findOpen) {
+          _closeFind(); // 뒤로 가기: 검색만 닫음
+          return;
+        }
+        if (!didPop && _slideShow) {
+          _endSlideShow(); // 뒤로 가기: 슬라이드 쇼만 끝냄
+          return;
+        }
         if (_isTouchLocked) {
           _isTouchLocked = false;
         }
@@ -2661,7 +2903,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       // 페이지 이동 창의 키보드가 올라와도 뒤의 책 화면은 줄이지 않는다 (줄어드는 동안 버벅임)
       resizeToAvoidBottomInset: false,
       key: _scaffoldKey,
-      backgroundColor: bgColor,
+      backgroundColor: _slideShow ? Colors.black : bgColor,
       drawer: Drawer(
         child: SafeArea(
           child: Column(
@@ -2706,10 +2948,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             // 1. EPUB 뷰어 본문 (Listener를 EpubViewer에만 감싸서 우측 하단 페이지 이동 버튼 클릭 시 상단/하단 UI가 뜨지 않도록 완벽 분리!)
             Positioned.fill(
               child: Padding(
-                padding: EdgeInsets.only(
-                  top: 12.0,
-                  bottom: (bottomPadding > 0 ? bottomPadding : 8.0) + 20.0,
-                ),
+                padding: _slideShow
+                    ? EdgeInsets.zero
+                    : EdgeInsets.only(
+                        top: 12.0,
+                        bottom: (bottomPadding > 0 ? bottomPadding : 8.0) + 20.0,
+                      ),
                 child: IgnorePointer(
                   key: _epubViewRectKey,
                   ignoring: _isTouchLocked || (_isMemoMode && (_isStylusDown || _allowFingerDrawing)),
@@ -2873,6 +3117,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       );
                       if (mounted) {
                         setState(() {
+                          _epubSinglePage = _chapters.length <= 1 && value.chapterTotalPages == 1;
                           _progress = clampedProg;
                           _currentPageLocationKey = newLocKey;
                           _epubStrokes = pageStrokes;
@@ -3008,7 +3253,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 ),
               ),
 
-            if (footerText.isNotEmpty)
+            if (footerText.isNotEmpty && !_slideShow)
               Positioned(
                 left: 20 + _safeSides.left,
                 right: 20 + _safeSides.right,
@@ -3041,8 +3286,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             // S펜 필기 모드 하단 미니 툴바 (진행바 UI 위에 위치 + 색상과 선 굵기 사이에 지우개 배치 + 선 굵기 숫자 터치 입력)
             if (_isMemoMode && !_isTouchLocked) _buildMemoToolbar(bottomPadding),
 
+            // 파일 내 단어 검색 막대
+            if (_findOpen && !_isTouchLocked)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: FindInFileBar(
+                  onSearch: _hwpController.search,
+                  onGoto: _hwpController.showSearchResult,
+                  onClose: _closeFind,
+                  tr: _tr,
+                ),
+              ),
             // 상단 컨트롤 바
-            if (_showControls && !_isTouchLocked)
+            if (_showControls && !_isTouchLocked && !_findOpen)
               Positioned(
                 top: 0,
                 left: 0,
@@ -3067,6 +3325,29 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                               tooltip: _tr('목차', 'Contents', '目录', '目次'),
                               onPressed: () => _scaffoldKey.currentState?.openDrawer(),
                             ),
+                            // 파일 내 단어 검색 (한글·워드)
+                            if (_snapEligible)
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.search, color: Colors.white, size: 21),
+                                tooltip: _tr('파일 내 단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
+                                onPressed: () => setState(() {
+                                  _findOpen = true;
+                                  _showControls = false;
+                                }),
+                              ),
+                            // PPT에서만: 슬라이드 쇼
+                            if (_isPresentation)
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: btnPadding,
+                                constraints: btnConstraints,
+                                icon: const Icon(Icons.slideshow, color: Colors.white, size: 20),
+                                tooltip: _tr('슬라이드 쇼', 'Slide Show', '幻灯片放映', 'スライドショー'),
+                                onPressed: _startSlideShow,
+                              ),
                             if (_canExport)
                             IconButton(
                               visualDensity: VisualDensity.compact,
@@ -3119,7 +3400,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
             _buildEpubProgressBar(bottomPadding),
 
-            if (_useQuickNavTurn && !_isTouchLocked)
+            if (_useQuickNavTurn && !_isTouchLocked && !_slideShow)
               _buildQuickNavButtons(bottomPadding),
 
             // 도구 모음 버튼 + 활 모양 메뉴 (상단바/진행바와 함께 보였다 사라짐)
@@ -3140,6 +3421,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   items: _buildQuickMenuItems(),
                 ),
               ),
+            // PPT 슬라이드 쇼: 맨 위에서 모든 터치를 받는다
+            if (_slideShow) _buildSlideShowLayer(),
           ],
         ),
       ),
