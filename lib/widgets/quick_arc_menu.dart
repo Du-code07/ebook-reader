@@ -198,6 +198,9 @@ class _QuickArcMenuState extends State<QuickArcMenu>
                   painter: _ArcBandPainter(
                     center: center,
                     mirrored: widget.leftSide,
+                    // 더 넘길 아이콘이 없는 끝에는 양옆과 같은 선으로 끝을 막아 준다
+                    startCap: (1.0 - _scrollDeg / _stepDeg).clamp(0.0, 1.0).toDouble(),
+                    endCap: (1.0 - (_maxScrollDeg - _scrollDeg) / _stepDeg).clamp(0.0, 1.0).toDouble(),
                     radius: _arcRadius * t,
                     bandWidth: _bandWidth,
                     startDeg: _bandStartDeg,
@@ -222,6 +225,7 @@ class _QuickArcMenuState extends State<QuickArcMenu>
                     Offset(math.cos(rad), math.sin(rad)) * (_arcRadius * t);
                 final item = widget.items[i];
                 children.add(Positioned(
+                  key: ValueKey('arc_item_$i'),
                   left: p.dx - _itemRadius,
                   top: p.dy - _itemRadius,
                   width: _itemRadius * 2,
@@ -293,10 +297,16 @@ class _ArcBandPainter extends CustomPainter {
     required this.endDeg,
     required this.opacity,
     this.mirrored = false,
+    this.startCap = 0.0,
+    this.endCap = 0.0,
   });
 
   final Offset center;
   final bool mirrored;
+
+  /// 끝 막음 선의 진하기 (0~1). 내부 각도 기준 시작(아래쪽)/끝(위쪽)
+  final double startCap;
+  final double endCap;
   final double radius;
   final double bandWidth;
   final double startDeg;
@@ -333,6 +343,23 @@ class _ArcBandPainter extends CustomPainter {
         sweep,
         false,
         outline);
+
+    // 끝 막음 선: 띠의 둥근 끝을 따라 반원 모양으로 (양옆 선과 같은 색)
+    void drawCap(double screenDeg, bool forward, double strength) {
+      if (strength <= 0.01) return;
+      final double rad = screenDeg * math.pi / 180.0;
+      final Offset p = center + Offset(math.cos(rad), math.sin(rad)) * radius;
+      final capPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0
+        ..color = Colors.white.withValues(alpha: 0.30 * opacity * strength);
+      canvas.drawArc(Rect.fromCircle(center: p, radius: bandWidth / 2), rad, forward ? math.pi : -math.pi, false, capPaint);
+    }
+
+    final double endScreen = startScreen + (endDeg - startDeg);
+    // 좌우 반전이면 화면상 시작/끝과 내부 시작/끝이 서로 바뀐다
+    drawCap(endScreen, true, mirrored ? startCap : endCap);
+    drawCap(startScreen, false, mirrored ? endCap : startCap);
   }
 
   // 띠 영역에서만 터치를 받고, 나머지 빈 공간은 아래 화면(본문)으로 통과시킨다
@@ -354,7 +381,12 @@ class _ArcBandPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ArcBandPainter old) =>
-      old.radius != radius || old.opacity != opacity || old.center != center || old.mirrored != mirrored;
+      old.radius != radius ||
+      old.opacity != opacity ||
+      old.center != center ||
+      old.mirrored != mirrored ||
+      old.startCap != startCap ||
+      old.endCap != endCap;
 }
 
 /// 도구 모음 버튼 아이콘: 둥근 사각형 4개 (2×2)
@@ -390,4 +422,45 @@ class _GridIconPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GridIconPainter oldDelegate) => oldDelegate.color != color;
+}
+
+/// [trigger] 값이 바뀔 때마다 아이콘을 살짝 흔든다 (눌렀다는 반응 표시)
+class WiggleOnChange extends StatefulWidget {
+  const WiggleOnChange({super.key, required this.trigger, required this.child});
+
+  final int trigger;
+  final Widget child;
+
+  @override
+  State<WiggleOnChange> createState() => _WiggleOnChangeState();
+}
+
+class _WiggleOnChangeState extends State<WiggleOnChange> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
+
+  @override
+  void didUpdateWidget(WiggleOnChange oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.trigger != widget.trigger) _ctrl.forward(from: 0.0);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      child: widget.child,
+      builder: (context, child) {
+        final double t = _ctrl.value;
+        // 회전 방향으로 한 번 크게(약 25°), 되돌아오며 점점 작게 흔들림
+        final double angle = math.sin(t * math.pi * 3) * (1.0 - t) * 0.45;
+        return Transform.rotate(angle: angle, child: child);
+      },
+    );
+  }
 }
