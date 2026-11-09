@@ -11,6 +11,7 @@ import '../services/storage_service.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
 import '../widgets/memo_tools.dart';
+import '../widgets/vertical_page_swipe.dart';
 import 'reader_screen.dart';
 
 /// 1. S펜 전용 즉시 승리 제스처 인식기 (Eager Stylus Gesture Recognizer):
@@ -180,7 +181,8 @@ class UniversalMediaReaderScreen extends StatefulWidget {
   State<UniversalMediaReaderScreen> createState() => _UniversalMediaReaderScreenState();
 }
 
-class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen> with WidgetsBindingObserver {
+class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
   PageController? _pageController;
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
@@ -202,47 +204,25 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _useSwipeTurn = true;
   bool _useSwipeUpTurn = true;
 
-  // 위로 밀기 판정용 (한 손가락 제스처의 시작 위치/시간)
-  Offset? _vSwipeStart;
-  DateTime? _vSwipeStartTime;
-  DateTime? _vSwipeFirstMoveTime;
-  bool _vSwipeMulti = false;
+  // 위/아래로 밀기: 손가락을 따라 페이지가 위·아래로 움직이며 넘어감
+  late final VerticalPageSwipe _vPageSwipe = VerticalPageSwipe(vsync: this);
 
-  void _vSwipeDown(PointerDownEvent e) {
-    if (e.kind != PointerDeviceKind.touch) return;
-    if (_activeTouchPointerIds.length <= 1) {
-      _vSwipeStart = e.position;
-      _vSwipeStartTime = DateTime.now();
-      _vSwipeFirstMoveTime = null;
-      _vSwipeMulti = false;
-    } else {
-      _vSwipeMulti = true;
-    }
+  bool _vSwipeEnabled(PointerEvent e) =>
+      _useSwipeUpTurn &&
+      !_isTouchLocked &&
+      _currentZoomScale <= 1.03 &&
+      !(_isMemoMode && (_allowFingerDrawing || isStylusPointer(e)));
+
+  int _stepTarget(int dir) {
+    final int step = _lastIsSpreadMode ? 2 : 1;
+    return (_currentPage + dir * step).clamp(0, _totalPages - 1).toInt();
   }
 
-  void _vSwipeMove(PointerMoveEvent e) {
-    final start = _vSwipeStart;
-    if (start == null || _vSwipeFirstMoveTime != null || e.kind != PointerDeviceKind.touch) return;
-    if ((e.position - start).distance > 12.0) _vSwipeFirstMoveTime = DateTime.now();
-  }
+  bool _canStepPage(int dir) => _totalPages > 1 && _stepTarget(dir) != _currentPage;
 
-  void _vSwipeUp(PointerUpEvent e) {
-    if (e.kind != PointerDeviceKind.touch) return;
-    final start = _vSwipeStart;
-    final startTime = _vSwipeStartTime;
-    if (_activeTouchPointerIds.isNotEmpty) return; // 다른 손가락이 아직 닿아 있음
-    _vSwipeStart = null;
-    _vSwipeStartTime = null;
-    if (start == null || startTime == null || _vSwipeMulti) return;
-    if (!_useSwipeUpTurn || _isTouchLocked || _currentZoomScale > 1.03) return;
-    if (_isMemoMode && _allowFingerDrawing) return;
-    final int holdMs = (_vSwipeFirstMoveTime ?? DateTime.now()).difference(startTime).inMilliseconds;
-    if (holdMs > 400) return;
-    final Offset d = e.position - start;
-    if (d.dy.abs() >= 60.0 && d.dy.abs() > d.dx.abs() * 1.2) {
-      // 위로 밀면 다음, 아래로 밀면 이전 페이지
-      _stepPage(d.dy < 0 ? 1 : -1);
-    }
+  Future<void> _stepPageInstant(int dir) async {
+    _goToPage(_stepTarget(dir), smoothAnimation: false);
+    await Future<void>.delayed(const Duration(milliseconds: 16));
   }
   bool _useVolumeTurn = true;
   bool _useQuickNavTurn = false;
@@ -270,6 +250,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   String _footerInfoMode = 'none';
   String _progressBarPos = 'bottom';
+  String _memoToolbarPos = 'bottom'; // 메모 도구모음 위치
+  String _quickMenuSide = 'right'; // 도구 모음(활 메뉴) 위치
   List<BookmarkItem> _bookmarks = [];
 
   bool get _isCurrentPageBookmarked {
@@ -542,6 +524,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _useSpenTurn = await StorageService.getUseSpenTurn();
       _footerInfoMode = await StorageService.getFooterInfoMode();
       _progressBarPos = await StorageService.getProgressBarPosition();
+      _memoToolbarPos = await StorageService.getMemoToolbarPosition();
+      _quickMenuSide = await StorageService.getQuickMenuSide();
       _bookmarks = await StorageService.getBookmarks(_bookKey);
 
       final tempDir = await getTemporaryDirectory();
@@ -814,6 +798,142 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
+  /// 메모 도구모음 항목: 모두 같은 크기 칸(MemoToolButton)이라 간격이 똑같다
+  List<Widget> _memoToolItems() {
+    return [
+      MemoToolButton(
+        icon: Icons.touch_app,
+        label: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
+        active: _allowFingerDrawing,
+        onTap: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
+      ),
+      // 펜: 누르면 펜 선택, 꾹 누르면 선 굵기·색상 설정 창
+      MemoToolButton(
+        icon: Icons.edit,
+        label: _tr('펜 (꾹 누르면 굵기·색상)', 'Pen (long-press: size & color)', '笔 (长按: 粗细·颜色)', 'ペン (長押し: 太さ・色)'),
+        active: !_isEraserMode,
+        dotColor: _penColor,
+        onTap: () => setState(() => _isEraserMode = false),
+        onLongPress: (_) {
+          setState(() => _isEraserMode = false);
+          _openPenSettings();
+        },
+      ),
+      // 지우개: 누르면 켜고 끄기, 꾹 누르면 획/영역 지우개 선택
+      MemoToolButton(
+        iconBuilder: (c) => EraserIcon(color: c),
+        label: _eraserType == 'stroke'
+            ? _tr('획 지우개 (꾹 누르면 종류 선택)', 'Stroke Eraser (long-press: type)', '笔画橡皮擦 (长按: 类型)', 'ストローク消しゴム (長押し: 種類)')
+            : _tr('영역 지우개 (꾹 누르면 종류 선택)', 'Area Eraser (long-press: type)', '区域橡皮擦 (长按: 类型)', '部分消しゴム (長押し: 種類)'),
+        active: _isEraserMode,
+        onTap: () => setState(() => _isEraserMode = !_isEraserMode),
+        onLongPress: _chooseEraserType,
+      ),
+      // 되돌리기 / 다시 실행
+      MemoToolButton(
+        icon: Icons.undo,
+        label: _tr('되돌리기', 'Undo', '撤销', '元に戻す'),
+        enabled: _memoHistory.canUndo(_visibleMemoPages()),
+        onTap: _undoMemo,
+      ),
+      MemoToolButton(
+        icon: Icons.redo,
+        label: _tr('다시 실행', 'Redo', '重做', 'やり直し'),
+        enabled: _memoHistory.canRedo(_visibleMemoPages()),
+        onTap: _redoMemo,
+      ),
+      MemoToolButton(
+        icon: Icons.note_alt_outlined,
+        label: _tr('텍스트 메모 입력', 'Text Memo', '输入文字笔记', 'テキストメモ入力'),
+        onTap: _showMemoTextDialog,
+      ),
+      MemoToolButton(
+        icon: Icons.delete_sweep_outlined,
+        color: Colors.redAccent,
+        label: _tr('필기 전체 지우기', 'Clear All Strokes', '清空全部手写', '手書きを全消去'),
+        onTap: () async {
+          final bool isSpreadNow = _isSpreadActive(context);
+          final int firstPage = isSpreadNow ? ((_currentPage ~/ 2) * 2) : _currentPage;
+          final int secondPage = firstPage + 1;
+          for (final pg in {_currentPage, firstPage, if (isSpreadNow && secondPage < _totalPages) secondPage}) {
+            final before = _memoStrokesByPage[pg];
+            if (before != null && before.isNotEmpty) _memoHistory.record(pg, before);
+          }
+          setState(() {
+            _memoStrokesByPage.remove(_currentPage);
+            _memoStrokesByPage.remove(firstPage);
+            if (isSpreadNow && secondPage < _totalPages) {
+              _memoStrokesByPage.remove(secondPage);
+            }
+          });
+          await StorageService.savePageMemoStrokes(_bookKey, _currentPage, []);
+          if (firstPage != _currentPage) {
+            await StorageService.savePageMemoStrokes(_bookKey, firstPage, []);
+          }
+          if (isSpreadNow && secondPage < _totalPages) {
+            await StorageService.savePageMemoStrokes(_bookKey, secondPage, []);
+          }
+        },
+      ),
+      MemoDoneButton(
+        label: _tr('완료', 'Done', '完成', '完了'),
+        onTap: () => setState(() {
+          _isMemoMode = false;
+          _isEraserMode = false;
+          _allowFingerDrawing = false;
+        }),
+      ),
+    ];
+  }
+
+  /// 메모 도구모음 배치: 하단(기본) / 상단 / 왼쪽 / 오른쪽
+  Widget _buildMemoToolbar(double bottomInset) {
+    final List<Widget> items = _memoToolItems();
+    final double topInset = MediaQuery.of(context).padding.top;
+    final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
+    final double bottomBarSpace = (((_showControls && _progressBarPos == 'bottom') || _useQuickNavTurn) ? 46.0 : 0.0);
+    final double topOffset = topInset + (_showControls ? 64.0 : 16.0);
+    switch (_memoToolbarPos) {
+      case 'top':
+        return Positioned(
+          key: const ValueKey('memo_toolbar_top'),
+          top: topOffset,
+          left: 12,
+          right: 12,
+          child: Center(child: MemoToolbar(children: items)),
+        );
+      case 'left':
+      case 'right':
+        final bool isLeft = _memoToolbarPos == 'left';
+        // 같은 쪽에 세로 진행바가 있으면 그 안쪽으로 비켜서 배치
+        final double edge = (_showControls && _progressBarPos == _memoToolbarPos) ? 56.0 : 12.0;
+        // 아래쪽 진행바·도구 모음 버튼과 겹치지 않도록.
+        // 도구 모음과 같은 쪽이면 활 메뉴가 펼쳐지는 영역까지 비켜 간다 ('완료' 버튼이 가려지지 않게)
+        final bool sameSideAsQuickMenu = _showControls && (_quickMenuSide == 'left') == isLeft;
+        final double quickMenuBottom =
+            baseBottom + ((_progressBarPos == 'bottom' || (_useQuickNavTurn && _quickMenuSide != 'left')) ? 38.0 : 0.0);
+        final double bottomLimit = sameSideAsQuickMenu
+            ? math.max(baseBottom + bottomBarSpace, quickMenuBottom + QuickArcMenu.boxHeight + 4.0)
+            : baseBottom + bottomBarSpace + (_showControls ? 52.0 : 8.0);
+        return Positioned(
+          key: ValueKey('memo_toolbar_$_memoToolbarPos'),
+          top: topOffset,
+          bottom: bottomLimit,
+          left: isLeft ? edge : null,
+          right: isLeft ? null : edge,
+          child: Center(widthFactor: 1, child: MemoToolbar(vertical: true, children: items)),
+        );
+      default:
+        return Positioned(
+          key: const ValueKey('memo_toolbar_bottom'),
+          bottom: baseBottom + bottomBarSpace,
+          left: 12,
+          right: 12,
+          child: Center(child: MemoToolbar(children: items)),
+        );
+    }
+  }
+
   Future<void> _openPenSettings() {
     return showPenSettingsPanel(
       context: context,
@@ -829,7 +949,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Future<void> _chooseEraserType(BuildContext buttonContext) async {
-    final v = await showEraserTypeMenu(buttonContext, _eraserType, _tr);
+    final v = await showEraserTypeMenu(buttonContext, _eraserType, _tr, barPos: _memoToolbarPos);
     if (v == null || !mounted) return;
     setState(() {
       _eraserType = v;
@@ -1152,6 +1272,58 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         setModalState(() {});
                       },
                     ),
+                  ],
+                ),
+                const Divider(height: 24),
+                Text(
+                  _tr('메모 도구 모음 위치', 'Memo Toolbar Position', '笔记工具栏位置', 'メモツールバーの位置'),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    for (final opt in <(String, String)>[
+                      ('bottom', _tr('하단', 'Bottom', '底部', '下部')),
+                      ('top', _tr('상단', 'Top', '顶部', '上部')),
+                      ('left', _tr('왼쪽', 'Left', '左侧', '左')),
+                      ('right', _tr('오른쪽', 'Right', '右侧', '右')),
+                    ])
+                      ChoiceChip(
+                        label: Text(opt.$2),
+                        selected: _memoToolbarPos == opt.$1,
+                        onSelected: (_) async {
+                          await StorageService.setMemoToolbarPosition(opt.$1);
+                          setState(() => _memoToolbarPos = opt.$1);
+                          setModalState(() {});
+                        },
+                      ),
+                  ],
+                ),
+                const Divider(height: 24),
+                Text(
+                  _tr('도구 모음 위치', 'Toolbox Position', '工具箱位置', 'ツールボックスの位置'),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    for (final opt in <(String, String)>[
+                      ('right', _tr('오른쪽', 'Right', '右侧', '右')),
+                      ('left', _tr('왼쪽', 'Left', '左侧', '左')),
+                    ])
+                      ChoiceChip(
+                        label: Text(opt.$2),
+                        selected: _quickMenuSide == opt.$1,
+                        onSelected: (_) async {
+                          await StorageService.setQuickMenuSide(opt.$1);
+                          setState(() => _quickMenuSide = opt.$1);
+                          setModalState(() {});
+                        },
+                      ),
                   ],
                 ),
                 const Divider(height: 24),
@@ -1644,8 +1816,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     final double topInset = MediaQuery.of(context).padding.top;
-    final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0);
-    final double safeBottomOffset = baseBottom + (_isMemoMode ? 96.0 : (_useQuickNavTurn && _progressBarPos == 'right' ? 48.0 : 8.0));
+    final bool memoBarVisible = _isMemoMode && !_isTouchLocked;
+    // 메모 도구모음이 상단/하단에 있으면 세로 진행바가 그만큼 비켜 준다
+    final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
+    final double safeBottomOffset = baseBottom + ((memoBarVisible && _memoToolbarPos == 'bottom') ? 96.0 : (_useQuickNavTurn && _progressBarPos == 'right' ? 48.0 : 8.0));
     return Positioned(
       key: ValueKey('progress_bar_$_progressBarPos'),
       top: safeTopOffset,
@@ -1755,6 +1929,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   void dispose() {
+    _vPageSwipe.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     // 서재로 완전히 복귀할 때 방향이 초기화됨
     _zoomController.dispose();
@@ -1898,9 +2073,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               child: Listener(
                 behavior: HitTestBehavior.translucent,
                 onPointerDown: (event) {
+                  _vPageSwipe.down(event);
                   if (event.kind == PointerDeviceKind.touch) {
                     _activeTouchPointerIds.add(event.pointer);
-                    _vSwipeDown(event);
                     if (_activeTouchPointerIds.length >= 2) {
                       setState(() {});
                     }
@@ -1913,12 +2088,21 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     }
                   }
                 },
-                onPointerMove: _vSwipeMove,
+                onPointerMove: (event) => _vPageSwipe.move(
+                  event,
+                  enabled: _vSwipeEnabled(event),
+                  canTurn: _canStepPage,
+                ),
                 onPointerUp: (event) {
                   if (_activeTouchPointerIds.remove(event.pointer)) {
                     setState(() {});
                   }
-                  _vSwipeUp(event);
+                  _vPageSwipe.up(
+                    event,
+                    height: MediaQuery.of(context).size.height,
+                    canTurn: _canStepPage,
+                    turnPage: _stepPageInstant,
+                  );
                   if (_isStylusDown &&
                       (event.kind == PointerDeviceKind.stylus ||
                           event.kind == PointerDeviceKind.invertedStylus)) {
@@ -1926,6 +2110,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   }
                 },
                 onPointerCancel: (event) {
+                  _vPageSwipe.up(
+                    event,
+                    height: MediaQuery.of(context).size.height,
+                    canTurn: _canStepPage,
+                    turnPage: _stepPageInstant,
+                    cancelled: true,
+                  );
                   if (_activeTouchPointerIds.remove(event.pointer)) {
                     setState(() {});
                   }
@@ -1936,7 +2127,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTap: _toggleControls,
-                  child: PageView.builder(
+                  // 위/아래로 밀 때 페이지 영역이 손가락을 따라 움직임
+                  child: AnimatedBuilder(
+                    animation: _vPageSwipe,
+                    builder: (context, child) => Transform.translate(
+                      offset: Offset(0, _vPageSwipe.offset),
+                      child: child,
+                    ),
+                    child: PageView.builder(
                     key: ValueKey('pageview_spread_$isSpread'),
                     controller: _pageController,
                     reverse: _isMangaRtlMode,
@@ -2011,6 +2209,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     );
                   },
                   ),
+                  ),
                 ),
               ),
             ),
@@ -2046,122 +2245,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
             ),
 
-          if (_isMemoMode && !_isTouchLocked)
-            Positioned(
-              bottom: math.max<double>(bottomInset + 24.0, 28.0) +
-                  (((_showControls && _progressBarPos == 'bottom') || _useQuickNavTurn) ? 46.0 : 0.0),
-              left: 12,
-              right: 12,
-              child: Center(
-                child: Material(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(24),
-                  elevation: 6,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            constraints: const BoxConstraints(),
-                            splashColor: Colors.transparent,
-                            highlightColor: Colors.transparent,
-                            hoverColor: Colors.transparent,
-                            icon: Icon(
-                              Icons.touch_app,
-                              color: _allowFingerDrawing ? Colors.amber : Colors.white,
-                              size: 20,
-                            ),
-                            tooltip: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
-                            onPressed: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
-                          ),
-                          const SizedBox(width: 4),
-                          // 펜: 누르면 펜 선택, 꾹 누르면 선 굵기·색상 설정 창
-                          MemoToolButton(
-                            icon: Icons.edit,
-                            label: _tr('펜 (꾹 누르면 굵기·색상)', 'Pen (long-press: size & color)', '笔 (长按: 粗细·颜色)', 'ペン (長押し: 太さ・色)'),
-                            active: !_isEraserMode,
-                            dotColor: _penColor,
-                            onTap: () => setState(() => _isEraserMode = false),
-                            onLongPress: (_) {
-                              setState(() => _isEraserMode = false);
-                              _openPenSettings();
-                            },
-                          ),
-                          // 지우개: 누르면 켜고 끄기, 꾹 누르면 획/영역 지우개 선택
-                          MemoToolButton(
-                            iconBuilder: (c) => EraserIcon(color: c),
-                            label: _eraserType == 'stroke'
-                                ? _tr('획 지우개 (꾹 누르면 종류 선택)', 'Stroke Eraser (long-press: type)', '笔画橡皮擦 (长按: 类型)', 'ストローク消しゴム (長押し: 種類)')
-                                : _tr('영역 지우개 (꾹 누르면 종류 선택)', 'Area Eraser (long-press: type)', '区域橡皮擦 (长按: 类型)', '部分消しゴム (長押し: 種類)'),
-                            active: _isEraserMode,
-                            onTap: () => setState(() => _isEraserMode = !_isEraserMode),
-                            onLongPress: _chooseEraserType,
-                          ),
-                          // 되돌리기 / 다시 실행
-                          MemoToolButton(
-                            icon: Icons.undo,
-                            label: _tr('되돌리기', 'Undo', '撤销', '元に戻す'),
-                            enabled: _memoHistory.canUndo(_visibleMemoPages()),
-                            onTap: _undoMemo,
-                          ),
-                          MemoToolButton(
-                            icon: Icons.redo,
-                            label: _tr('다시 실행', 'Redo', '重做', 'やり直し'),
-                            enabled: _memoHistory.canRedo(_visibleMemoPages()),
-                            onTap: _redoMemo,
-                          ),
-                          const SizedBox(width: 4),
-                          IconButton(
-                            icon: const Icon(Icons.note_alt_outlined, color: Colors.white, size: 18),
-                            tooltip: _tr('텍스트 메모 입력', 'Text Memo', '输入文字笔记', 'テキストメモ入力'),
-                            onPressed: _showMemoTextDialog,
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_sweep_outlined, color: Colors.redAccent, size: 18),
-                            tooltip: _tr('필기 전체 지우기', 'Clear All Strokes', '清空全部手写', '手書きを全消去'),
-                            onPressed: () async {
-                              final bool isSpreadNow = _isSpreadActive(context);
-                              final int firstPage = isSpreadNow ? ((_currentPage ~/ 2) * 2) : _currentPage;
-                              final int secondPage = firstPage + 1;
-                              for (final pg in {_currentPage, firstPage, if (isSpreadNow && secondPage < _totalPages) secondPage}) {
-                                final before = _memoStrokesByPage[pg];
-                                if (before != null && before.isNotEmpty) _memoHistory.record(pg, before);
-                              }
-                              setState(() {
-                                _memoStrokesByPage.remove(_currentPage);
-                                _memoStrokesByPage.remove(firstPage);
-                                if (isSpreadNow && secondPage < _totalPages) {
-                                  _memoStrokesByPage.remove(secondPage);
-                                }
-                              });
-                              await StorageService.savePageMemoStrokes(_bookKey, _currentPage, []);
-                              if (firstPage != _currentPage) {
-                                await StorageService.savePageMemoStrokes(_bookKey, firstPage, []);
-                              }
-                              if (isSpreadNow && secondPage < _totalPages) {
-                                await StorageService.savePageMemoStrokes(_bookKey, secondPage, []);
-                              }
-                            },
-                          ),
-                          TextButton(
-                            onPressed: () => setState(() {
-                              _isMemoMode = false;
-                              _isEraserMode = false;
-                              _allowFingerDrawing = false;
-                            }),
-                            child: Text(_tr('완료', 'Done', '完成', '完了'), style: const TextStyle(color: Colors.amber)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          if (_isMemoMode && !_isTouchLocked) _buildMemoToolbar(bottomInset),
 
           if (_showControls && !_isTouchLocked)
             Positioned(
@@ -2245,12 +2329,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               ...actionButtons
                             else
                               Expanded(
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  physics: const BouncingScrollPhysics(),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: actionButtons,
+                                // 뒤로가기 외 아이콘은 오른쪽 끝에 정렬
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    physics: const BouncingScrollPhysics(),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: actionButtons,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2268,15 +2356,21 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           if (_useQuickNavTurn && !_isTouchLocked && _totalPages > 1)
             _buildQuickNavButtons(bottomInset),
 
-          // 오른쪽 아래 흰 동그라미 빠른 메뉴 (상단바/진행바와 함께 보였다 사라짐)
+          // 도구 모음 버튼 + 활 모양 메뉴 (상단바/진행바와 함께 보였다 사라짐)
+          // 평소엔 진행바 바로 위에 붙어 있고, 열리면 호가 진행바에 닿지 않을 만큼 올라간다
           if (_showControls && !_isTouchLocked)
             Positioned(
-              right: _progressBarPos == 'right' ? 56.0 : 12.0,
+              right: _quickMenuSide == 'left' ? null : (_progressBarPos == 'right' ? 56.0 : 12.0),
+              left: _quickMenuSide == 'left' ? (_progressBarPos == 'left' ? 56.0 : 12.0) : null,
               bottom: math.max<double>(bottomInset + 24.0, 28.0) +
-                  ((_progressBarPos == 'bottom' || _useQuickNavTurn) ? 46.0 : 0.0) +
-                  (_isMemoMode ? 56.0 : 0.0) +
-                  4.0,
-              child: QuickArcMenu(items: _buildQuickMenuItems()),
+                  // 아래 진행바(또는 오른쪽 아래 페이지 이동 버튼)가 있을 때만 그 위에 붙는다
+              ((_progressBarPos == 'bottom' || (_useQuickNavTurn && _quickMenuSide != 'left')) ? 38.0 : 0.0) +
+                  ((_isMemoMode && _memoToolbarPos == 'bottom') ? 56.0 : 0.0),
+              child: QuickArcMenu(
+                key: ValueKey('quick_menu_$_quickMenuSide'),
+                leftSide: _quickMenuSide == 'left',
+                items: _buildQuickMenuItems(),
+              ),
             ),
         ],
       ),

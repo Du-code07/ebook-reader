@@ -321,6 +321,28 @@ class StorageService {
     return prefs.getString('progress_bar_pos_v26') ?? 'bottom';
   }
 
+  // 메모 도구모음 위치: 'bottom'(기본) / 'top' / 'left' / 'right'
+  static Future<void> setMemoToolbarPosition(String pos) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('memo_toolbar_pos', pos);
+  }
+
+  static Future<String> getMemoToolbarPosition() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('memo_toolbar_pos') ?? 'bottom';
+  }
+
+  // 도구 모음(활 모양 메뉴) 위치: 'right'(기본) / 'left'
+  static Future<void> setQuickMenuSide(String side) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('quick_menu_side', side);
+  }
+
+  static Future<String> getQuickMenuSide() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('quick_menu_side') ?? 'right';
+  }
+
   static Future<void> savePageMemoStrokes(
       String bookKey, int pageIndex, List<MemoStroke> strokes) async {
     final prefs = await SharedPreferences.getInstance();

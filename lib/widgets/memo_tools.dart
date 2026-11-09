@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../services/storage_service.dart';
@@ -65,6 +67,9 @@ class _HistoryEntry {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 메모바 아이콘 버튼 (누르기 + 꾹 누르기)
+/// 메모 도구모음의 모든 도구가 쓰는 같은 크기의 칸 (간격을 똑같이 맞추기 위함)
+const double kMemoToolExtent = 40.0;
+
 class MemoToolButton extends StatelessWidget {
   const MemoToolButton({
     super.key,
@@ -76,6 +81,7 @@ class MemoToolButton extends StatelessWidget {
     this.active = false,
     this.enabled = true,
     this.dotColor,
+    this.color,
   });
 
   final IconData? icon;
@@ -93,9 +99,12 @@ class MemoToolButton extends StatelessWidget {
   /// 아이콘 아래 작은 점 (현재 펜 색상 표시)
   final Color? dotColor;
 
+  /// 기본(흰색) 대신 쓸 아이콘 색 (예: 필기 전체 지우기 = 빨강)
+  final Color? color;
+
   @override
   Widget build(BuildContext context) {
-    final Color color = !enabled ? Colors.white30 : (active ? Colors.amber : Colors.white);
+    final Color color = !enabled ? Colors.white30 : (active ? Colors.amber : (this.color ?? Colors.white));
     return Semantics(
       button: true,
       label: label,
@@ -104,8 +113,8 @@ class MemoToolButton extends StatelessWidget {
         onTap: enabled ? onTap : null,
         onLongPress: (enabled && onLongPress != null) ? () => onLongPress!(context) : null,
         child: SizedBox(
-          width: 38,
-          height: 40,
+          width: kMemoToolExtent,
+          height: kMemoToolExtent,
           child: Stack(
             alignment: Alignment.center,
             children: [
@@ -131,19 +140,102 @@ class MemoToolButton extends StatelessWidget {
   }
 }
 
+/// 메모 도구모음의 '완료' 버튼. 아이콘 칸과 같은 높이·좌우 여백을 써서 간격을 맞춘다.
+class MemoDoneButton extends StatelessWidget {
+  const MemoDoneButton({super.key, required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkResponse(
+        radius: 22,
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: kMemoToolExtent, minHeight: kMemoToolExtent),
+          child: Padding(
+            // 18px 아이콘이 40px 칸 안에서 갖는 좌우 여백(11px)과 같게
+            padding: const EdgeInsets.symmetric(horizontal: 11),
+            child: Center(
+              widthFactor: 1,
+              heightFactor: 1,
+              child: Text(label, style: const TextStyle(color: Colors.amber, fontSize: 14, fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 메모 도구모음 바탕. [vertical]이면 세로(왼쪽/오른쪽 배치), 아니면 가로(상단/하단 배치).
+class MemoToolbar extends StatelessWidget {
+  const MemoToolbar({super.key, required this.children, this.vertical = false});
+
+  final List<Widget> children;
+  final bool vertical;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black87,
+      borderRadius: BorderRadius.circular(24),
+      elevation: 6,
+      child: Padding(
+        padding: vertical ? const EdgeInsets.symmetric(horizontal: 4, vertical: 8) : const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: SingleChildScrollView(
+          scrollDirection: vertical ? Axis.vertical : Axis.horizontal,
+          child: Flex(
+            direction: vertical ? Axis.vertical : Axis.horizontal,
+            mainAxisSize: MainAxisSize.min,
+            children: children,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 지우개 종류 선택 (지우개 아이콘을 꾹 눌렀을 때)
 // 'area' = 닿은 부분만 지움, 'stroke' = 닿은 획 전체를 지움
 // 메모바를 가리지 않도록 메모바 바로 위에, 지우개 아이콘 위치에 맞춰 띄운다.
-Future<String?> showEraserTypeMenu(BuildContext buttonContext, String current, MemoTr tr) {
+Future<String?> showEraserTypeMenu(BuildContext buttonContext, String current, MemoTr tr, {String barPos = 'bottom'}) {
   final box = buttonContext.findRenderObject() as RenderBox;
   final overlay = Overlay.of(buttonContext).context.findRenderObject() as RenderBox;
   final Offset btnTopLeft = box.localToGlobal(Offset.zero, ancestor: overlay);
   const double menuWidth = 220.0;
-  const double gapAboveBar = 22.0; // 메모바 위 여백 (메모바 안쪽 여백 4 + 간격 18)
-  final double bottom = overlay.size.height - btnTopLeft.dy + gapAboveBar;
+  const double gapAboveBar = 22.0; // 메모바 바깥 여백 (메모바 안쪽 여백 4 + 간격 18)
+  const double gapBesideBar = 26.0; // 세로 메모바일 때 옆 여백 (안쪽 여백 8 + 간격 18)
+  const double menuHeight = 2 * 48.0; // 메뉴 두 줄 높이(대략)
+  final Size ov = overlay.size;
   final double centerX = btnTopLeft.dx + box.size.width / 2;
-  final double left = (centerX - menuWidth / 2).clamp(8.0, overlay.size.width - menuWidth - 8.0).toDouble();
+  final double centerY = btnTopLeft.dy + box.size.height / 2;
+  final double hLeft = (centerX - menuWidth / 2).clamp(8.0, ov.width - menuWidth - 8.0).toDouble();
+  final double vTop = (centerY - menuHeight / 2).clamp(8.0, math.max(8.0, ov.height - menuHeight - 8.0)).toDouble();
+  // 메모바가 있는 쪽의 반대편(화면 안쪽)으로 메뉴를 띄운다
+  double? left, right, top, bottom;
+  switch (barPos) {
+    case 'top':
+      left = hLeft;
+      top = btnTopLeft.dy + box.size.height + gapAboveBar;
+      break;
+    case 'left':
+      left = btnTopLeft.dx + box.size.width + gapBesideBar;
+      top = vTop;
+      break;
+    case 'right':
+      right = ov.width - btnTopLeft.dx + gapBesideBar;
+      top = vTop;
+      break;
+    default:
+      left = hLeft;
+      bottom = ov.height - btnTopLeft.dy + gapAboveBar;
+  }
 
   Widget row(BuildContext ctx, String value, IconData icon, String text) => InkWell(
         onTap: () => Navigator.pop(ctx, value),
@@ -171,6 +263,8 @@ Future<String?> showEraserTypeMenu(BuildContext buttonContext, String current, M
       children: [
         Positioned(
           left: left,
+          right: right,
+          top: top,
           bottom: bottom,
           width: menuWidth,
           child: Material(

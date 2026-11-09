@@ -23,11 +23,19 @@ class QuickArcMenuItem {
 /// - 동그라미를 누르면 열림/닫힘
 /// - 호 위를 손가락으로 밀면 아이콘이 호를 따라 돌아가며 나머지 아이콘이 나타남
 ///
-/// 이 위젯은 화면 오른쪽 아래에 Positioned(right, bottom)로 배치하는 것을 전제로 한다.
+/// - 닫혀 있을 때는 상자 맨 아래쪽(진행바 바로 위)에 붙어 있다가, 열리면 호가 진행바에
+///   닿지 않을 만큼 위로 올라가며 펼쳐진다.
+///
+/// 이 위젯은 화면 아래 모서리에 Positioned(right 또는 left, bottom)로 배치하는 것을 전제로 한다.
+/// [leftSide]가 true면 왼쪽 아래에 두는 것으로 보고 호를 좌우 반전해서 그린다.
 class QuickArcMenu extends StatefulWidget {
-  const QuickArcMenu({super.key, required this.items});
+  const QuickArcMenu({super.key, required this.items, this.leftSide = false});
 
   final List<QuickArcMenuItem> items;
+  final bool leftSide;
+
+  /// 메뉴 상자 높이 (열렸을 때 호가 차지하는 높이). 다른 UI가 이 영역을 비켜 가도록 할 때 사용.
+  static double get boxHeight => _QuickArcMenuState._boxH;
 
   @override
   State<QuickArcMenu> createState() => _QuickArcMenuState();
@@ -60,6 +68,9 @@ class _QuickArcMenuState extends State<QuickArcMenu>
   static final double _boxW = _arcRadius + _bandWidth / 2 + 4.0 + _rightPad;
   static final double _boxH = _arcRadius + _bandWidth / 2 + 4.0 + _bottomPad;
 
+  // 닫혔을 때 버튼 중심 ~ 상자 아래 끝 거리 (진행바에 살짝 붙어 있도록)
+  static const double _closedBottomPad = _toggleRadius;
+
   late final AnimationController _openCtrl = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 200));
   late final AnimationController _snapCtrl = AnimationController(
@@ -71,7 +82,22 @@ class _QuickArcMenuState extends State<QuickArcMenu>
   double _snapFrom = 0.0;
   double _snapTo = 0.0;
 
-  Offset get _center => Offset(_boxW - _rightPad, _boxH - _bottomPad);
+  // 열림 정도(t: 0=닫힘, 1=열림)에 따라 버튼 중심이 위로 올라간다
+  Offset _centerAt(double t) {
+    final double cx = widget.leftSide ? _rightPad : _boxW - _rightPad;
+    final double cy = _boxH - (_closedBottomPad + (_bottomPad - _closedBottomPad) * t);
+    return Offset(cx, cy);
+  }
+
+  Offset get _center => _centerAt(Curves.easeOutCubic.transform(_openCtrl.value));
+
+  /// 내부 각도(오른쪽 배치 기준) <-> 화면 각도. 왼쪽 배치면 좌우 반전(180°-θ).
+  double _toScreenDeg(double deg) {
+    if (!widget.leftSide) return deg;
+    double r = 180.0 - deg;
+    if (r < 0) r += 360.0;
+    return r;
+  }
 
   double get _maxScrollDeg {
     final double needed =
@@ -114,7 +140,7 @@ class _QuickArcMenuState extends State<QuickArcMenu>
     final d = local - _center;
     double deg = math.atan2(d.dy, d.dx) * 180.0 / math.pi;
     if (deg < 0) deg += 360.0;
-    return deg;
+    return _toScreenDeg(deg); // 좌우 반전은 그 자체가 역변환
   }
 
   void _onPanStart(DragStartDetails d) {
@@ -162,6 +188,7 @@ class _QuickArcMenuState extends State<QuickArcMenu>
           animation: _openCtrl,
           builder: (context, _) {
             final double t = Curves.easeOutCubic.transform(_openCtrl.value);
+            final Offset center = _centerAt(t);
             final List<Widget> children = [];
 
             if (t > 0.0) {
@@ -169,7 +196,8 @@ class _QuickArcMenuState extends State<QuickArcMenu>
               children.add(Positioned.fill(
                 child: CustomPaint(
                   painter: _ArcBandPainter(
-                    center: _center,
+                    center: center,
+                    mirrored: widget.leftSide,
                     radius: _arcRadius * t,
                     bandWidth: _bandWidth,
                     startDeg: _bandStartDeg,
@@ -189,8 +217,8 @@ class _QuickArcMenuState extends State<QuickArcMenu>
                     .clamp(0.0, 1.0)
                     .toDouble();
                 if (fade <= 0.01) continue;
-                final double rad = deg * math.pi / 180.0;
-                final Offset p = _center +
+                final double rad = _toScreenDeg(deg) * math.pi / 180.0;
+                final Offset p = center +
                     Offset(math.cos(rad), math.sin(rad)) * (_arcRadius * t);
                 final item = widget.items[i];
                 children.add(Positioned(
@@ -229,10 +257,11 @@ class _QuickArcMenuState extends State<QuickArcMenu>
               }
             }
 
-            // 도구 모음 버튼 (둥근 사각형 4개 아이콘, 열리면 45° 회전)
+            // 도구 모음 버튼 (둥근 사각형 4개 아이콘, 열리면 45° 회전 + 노란색, 닫히면 흰색)
+            final Color toggleColor = Color.lerp(Colors.white, const Color(0xFFFFB300), t)!;
             children.add(Positioned(
-              left: _center.dx - _toggleRadius,
-              top: _center.dy - _toggleRadius,
+              left: center.dx - _toggleRadius,
+              top: center.dy - _toggleRadius,
               width: _toggleRadius * 2,
               height: _toggleRadius * 2,
               child: GestureDetector(
@@ -240,8 +269,8 @@ class _QuickArcMenuState extends State<QuickArcMenu>
                 onTap: _toggle,
                 child: Center(
                   child: Transform.rotate(
-                    angle: t * math.pi / 4,
-                    child: const CustomPaint(size: Size.square(30), painter: _GridIconPainter()),
+                    angle: (widget.leftSide ? -t : t) * math.pi / 4,
+                    child: CustomPaint(size: const Size.square(30), painter: _GridIconPainter(toggleColor)),
                   ),
                 ),
               ),
@@ -263,9 +292,11 @@ class _ArcBandPainter extends CustomPainter {
     required this.startDeg,
     required this.endDeg,
     required this.opacity,
+    this.mirrored = false,
   });
 
   final Offset center;
+  final bool mirrored;
   final double radius;
   final double bandWidth;
   final double startDeg;
@@ -276,7 +307,9 @@ class _ArcBandPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (radius <= 1) return;
     final rect = Rect.fromCircle(center: center, radius: radius);
-    final double start = startDeg * math.pi / 180.0;
+    // 좌우 반전이면 각도 범위가 (180-end) ~ (180-start)가 된다
+    final double startScreen = mirrored ? 180.0 - endDeg : startDeg;
+    final double start = startScreen * math.pi / 180.0;
     final double sweep = (endDeg - startDeg) * math.pi / 180.0;
     final band = Paint()
       ..style = PaintingStyle.stroke
@@ -309,19 +342,27 @@ class _ArcBandPainter extends CustomPainter {
     final double dist = d.distance;
     if ((dist - radius).abs() > bandWidth / 2 + 4) return false;
     double deg = math.atan2(d.dy, d.dx) * 180.0 / math.pi;
-    if (deg < 0) deg += 360.0;
+    if (mirrored) deg = 180.0 - deg;
+    while (deg < 0) {
+      deg += 360.0;
+    }
+    while (deg >= 360.0) {
+      deg -= 360.0;
+    }
     return deg >= startDeg - 12 && deg <= endDeg + 12;
   }
 
   @override
   bool shouldRepaint(covariant _ArcBandPainter old) =>
-      old.radius != radius || old.opacity != opacity || old.center != center;
+      old.radius != radius || old.opacity != opacity || old.center != center || old.mirrored != mirrored;
 }
 
 /// 도구 모음 버튼 아이콘: 둥근 사각형 4개 (2×2)
-/// 흰 배경·검은 배경 모두에서 잘 보이도록 노란 칸 + 어두운 테두리 + 옅은 그림자
+/// 닫힘 = 흰색, 열림 = 노란색. 흰 배경에서도 보이도록 어두운 테두리 + 옅은 그림자
 class _GridIconPainter extends CustomPainter {
-  const _GridIconPainter();
+  const _GridIconPainter(this.color);
+
+  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -329,7 +370,7 @@ class _GridIconPainter extends CustomPainter {
     final double gap = s * 0.10;
     final double cell = (s - gap) / 2;
     final radius = Radius.circular(cell * 0.38);
-    final fill = Paint()..color = const Color(0xFFFFB300);
+    final fill = Paint()..color = color;
     final outline = Paint()
       ..color = const Color(0xE6000000)
       ..style = PaintingStyle.stroke
@@ -348,5 +389,5 @@ class _GridIconPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _GridIconPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _GridIconPainter oldDelegate) => oldDelegate.color != color;
 }
