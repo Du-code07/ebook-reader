@@ -2,12 +2,16 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
+import '../services/epub_validation.dart';
+import '../widgets/hwp_viewer.dart';
+import '../widgets/txt_paged_viewer.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
 import '../widgets/sheet_pull_to_close.dart';
@@ -87,6 +91,25 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final EpubController _epubController = EpubController();
+
+  // ── TXT / 워드(DOC·DOCX) / 한글(HWP·HWPX): EPUB과 같은 화면·메모·북마크를 쓰고 본문만 각자의 뷰어로 표시 ──
+  final HwpReaderController _hwpController = HwpReaderController(); // DOC·DOCX·HWP·HWPX (WebView)
+  final TxtPageController _txtController = TxtPageController(); // TXT (종이 쪽 단위)
+  final GlobalKey _txtCaptureKey = GlobalKey(); // TXT 화면 캡처(PDF 내보내기)용
+  bool get _isTxt => widget.filePath.toLowerCase().endsWith('.txt');
+  bool get _isOfflineDocument => RegExp(r'\.(hwp|hwpx|docx|doc|txt)$', caseSensitive: false).hasMatch(widget.filePath);
+  String get _documentPositionPrefix {
+    final lower = widget.filePath.toLowerCase();
+    if (_isTxt) return 'txt';
+    if (lower.endsWith('.docx')) return 'docx';
+    if (lower.endsWith('.doc')) return 'doc';
+    return 'hwp';
+  }
+
+  int _docPage = 0; // 문서의 현재 쪽 (0부터)
+  int _docPageCount = 0; // 문서 전체 쪽 수
+  int _docRelocation = 0;
+  double _initialProgress = 0.0;
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
 
   late String _activeFilePath;
@@ -200,7 +223,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _epubLoadWatchdog?.cancel();
     // 예전에 저장된 읽던 위치(CFI)가 지금 파일과 맞지 않으면 열기에 실패할 수 있으므로
     // 메모·책갈피는 그대로 두고 처음부터 한 번 다시 연다.
-    if (!_epubRetriedWithoutCfi && (_initialCfi?.isNotEmpty ?? false)) {
+    if (!_isOfflineDocument && !_epubRetriedWithoutCfi && (_initialCfi?.isNotEmpty ?? false)) {
       setState(() {
         _epubRetriedWithoutCfi = true;
         _initialCfi = null;
@@ -247,7 +270,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   final MemoHistory _memoHistory = MemoHistory();
   String _eraserType = 'area';
   List<MemoStroke>? _eraseStartStrokes;
-  String _bookMemoNote = '';
 
   String _footerInfoMode = 'none';
   String _progressBarPos = 'bottom';
@@ -386,7 +408,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final favs = await StorageService.getFavoriteBooks();
     final dir = await getApplicationDocumentsDirectory();
     const supportedExts = [
-      'epub', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+      'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+      'docx', 'doc', 'hwpx', 'hwp',
     ];
     const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
 
@@ -442,7 +465,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       ),
     );
 
-    if (nextExt == 'epub') {
+    if (const ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp'].contains(nextExt)) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -487,6 +510,18 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<void> _initReader() async {
+    if (!_isOfflineDocument) {
+      // 깨진 EPUB은 화면을 띄우기 전에 알기 쉬운 오류로 알려 준다
+      try {
+        await EpubValidation.validate(File(_activeFilePath));
+      } catch (e) {
+        if (mounted) {
+          setState(() => _isLoading = false);
+          _handleEpubLoadError(e.toString());
+        }
+        return;
+      }
+    }
     final savedCfi = await StorageService.getLastPosition(widget.filePath);
     final savedProg = await StorageService.getProgress(widget.filePath);
     final twoPage = await StorageService.getTwoPageLandscape();
@@ -505,9 +540,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final swipeUpTurn = await StorageService.getUseSwipeUpTurn();
     final eraserType = await StorageService.getMemoEraserType();
     final spenTurn = await StorageService.getUseSpenTurn();
-    final memo = await StorageService.getPageMemoNote(widget.filePath, 0);
 
-    final initLocKey = _computeLocationKey(savedCfi, savedProg);
+    // 문서(TXT·워드·한글)는 저장된 위치(예: txt:12) 자체가 그 쪽의 메모 열쇠
+    final initLocKey = (_isOfflineDocument && savedCfi != null && savedCfi.isNotEmpty)
+        ? savedCfi
+        : _computeLocationKey(savedCfi, savedProg);
     final strokes = await StorageService.getEpubLocationStrokes(widget.filePath, initLocKey);
     final loadedBookmarks = await StorageService.getBookmarks(widget.filePath);
 
@@ -518,6 +555,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _initialCfi = savedCfi;
       _currentCfi = savedCfi;
       _progress = savedProg.clamp(0.0, 1.0).toDouble();
+      _initialProgress = _progress;
       _currentPageLocationKey = initLocKey;
       _enableTwoPageInLandscape = twoPage;
       _isMangaRtlMode = isRtl;
@@ -534,28 +572,144 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _useSwipeUpTurn = swipeUpTurn;
       _eraserType = eraserType;
       _useSpenTurn = spenTurn;
-      _bookMemoNote = memo;
       _epubStrokes = strokes;
       _bookmarks = loadedBookmarks;
       _isLoading = false;
     });
   }
 
+  // ── 페이지 이동: EPUB이면 EPUB 뷰어, TXT·워드·한글이면 각 문서 뷰어로 보낸다 ──
+  void _readerNext() {
+    if (_isTxt) {
+      _txtController.next();
+    } else if (_isOfflineDocument) {
+      _hwpController.next();
+    } else {
+      _epubController.next();
+    }
+  }
+
+  void _readerPrevious() {
+    if (_isTxt) {
+      _txtController.previous();
+    } else if (_isOfflineDocument) {
+      _hwpController.previous();
+    } else {
+      _epubController.prev();
+    }
+  }
+
+  void _readerProgress(double value) {
+    if (_isTxt) {
+      _txtController.toProgress(value);
+    } else if (_isOfflineDocument) {
+      _hwpController.toProgress(value);
+    } else {
+      _epubController.toProgressPercentage(value);
+    }
+  }
+
+  void _readerDisplay(String position) {
+    if (_isTxt) {
+      _txtController.display(position);
+    } else if (_isOfflineDocument) {
+      _hwpController.display(position);
+    } else {
+      _epubController.display(cfi: position);
+    }
+  }
+
+  /// 문서를 다 읽어 들였을 때: 쪽 수를 알게 되므로 목차를 '쪽' 목록으로 만든다
+  void _onDocumentLoaded(int pageCount) {
+    if (!mounted) return;
+    setState(() {
+      _docPageCount = pageCount;
+      _chapters = List.generate(
+        pageCount,
+        (index) => EpubChapter(
+          title: _tr('${index + 1}쪽', 'Page ${index + 1}', '第${index + 1}页', '${index + 1}ページ'),
+          href: '$_documentPositionPrefix:$index',
+          id: '$_documentPositionPrefix:$index',
+          subitems: const [],
+        ),
+      );
+    });
+  }
+
+  /// 문서의 쪽이 바뀌었을 때: 위치 저장 + 그 쪽의 필기 불러오기
+  Future<void> _onDocumentLocation(int page, int pageCount, String position, double progress) async {
+    if (!mounted) return;
+    final waiter = _relocateWaiter;
+    if (waiter != null && !waiter.isCompleted) waiter.complete();
+    final relocation = ++_docRelocation;
+    setState(() {
+      _docPage = page;
+      _docPageCount = pageCount;
+      _currentCfi = position;
+      _currentPageLocationKey = position;
+      _progress = progress.clamp(0.0, 1.0).toDouble();
+      _hasRestoredInitialPosition = true;
+      _activeStrokePoints.clear();
+      _epubStrokes = [];
+    });
+    await StorageService.saveLastPosition(widget.filePath, position);
+    await StorageService.saveProgress(widget.filePath, progress);
+    final strokes = await StorageService.getEpubLocationStrokes(widget.filePath, position);
+    if (mounted && relocation == _docRelocation) setState(() => _epubStrokes = strokes);
+  }
+
+  Widget _buildDocumentViewer(bool isLandscape) {
+    if (_isTxt) {
+      return RepaintBoundary(
+        key: _txtCaptureKey,
+        child: TxtPagedViewer(
+          key: ValueKey('text:${widget.filePath}'),
+          filePath: widget.filePath,
+          controller: _txtController,
+          initialPosition: _currentCfi ?? _initialCfi,
+          initialProgress: _initialProgress,
+          theme: _epubBgTheme,
+          spread: isLandscape && _enableTwoPageInLandscape,
+          rtl: _isMangaRtlMode,
+          onLoaded: _onDocumentLoaded,
+          onLocation: _onDocumentLocation,
+          onError: _handleEpubLoadError,
+        ),
+      );
+    }
+    return HwpViewer(
+      key: ValueKey('document:${widget.filePath}'),
+      filePath: widget.filePath,
+      controller: _hwpController,
+      initialPosition: _currentCfi ?? _initialCfi,
+      initialProgress: _initialProgress,
+      theme: _epubBgTheme,
+      spread: isLandscape && _enableTwoPageInLandscape,
+      rtl: _isMangaRtlMode,
+      onLoaded: _onDocumentLoaded,
+      onLocation: _onDocumentLocation,
+      onError: _handleEpubLoadError,
+      onCancelled: () {
+        if (mounted) Navigator.of(context).pop();
+      },
+    );
+  }
+
   void _turnNext() {
     setState(() => _activeStrokePoints.clear());
     if (_isMangaRtlMode) {
-      _epubController.prev();
+      _readerPrevious();
     } else {
-      _epubController.next();
+      _readerNext();
     }
   }
 
   void _turnPrev() {
     setState(() => _activeStrokePoints.clear());
     if (_isMangaRtlMode) {
-      _epubController.next();
+      _readerNext();
     } else {
-      _epubController.prev();
+      _readerPrevious();
     }
   }
 
@@ -566,7 +720,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         _activeStrokePoints.clear();
       });
     }
-    _epubController.toProgressPercentage(0.0);
+    _readerProgress(0.0);
   }
 
   void _jumpToLastPage() {
@@ -576,7 +730,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         _activeStrokePoints.clear();
       });
     }
-    _epubController.toProgressPercentage(1.0);
+    _readerProgress(1.0);
   }
 
   void _bindHardwareButtons() {
@@ -721,11 +875,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         onTap: _redoMemo,
       ),
       MemoToolButton(
-        icon: Icons.note_alt_outlined,
-        label: '텍스트 메모 입력',
-        onTap: _showEpubMemoDialog,
-      ),
-      MemoToolButton(
         icon: Icons.delete_sweep_outlined,
         color: Colors.redAccent,
         label: _tr('필기 전체 지우기', 'Clear All Strokes', '清空全部手写', '手書きを全消去'),
@@ -836,6 +985,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (identical(_relocateWaiter, waiter)) _relocateWaiter = null;
   }
 
+  /// 지금 보이는 본문을 그림 파일로 저장: EPUB·워드·한글은 WebView 캡처, TXT는 Flutter 화면 캡처
+  Future<void> _captureReaderView(String path, double dpr) async {
+    if (_isTxt) {
+      final boundary = _txtCaptureKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) throw Exception('TXT view not ready');
+      final image = await boundary.toImage(pixelRatio: dpr);
+      final png = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      if (png == null) throw Exception('PNG encode failed');
+      await File(path).writeAsBytes(png.buffer.asUint8List(), flush: true);
+      return;
+    }
+    await _pdfChannel.invokeMethod('captureWebView', {'path': path});
+  }
+
   /// 본문 그림(WebView 캡처) + 그 페이지 필기를 합쳐 한 장의 그림으로 저장
   Future<void> _composeEpubExportPage({
     required String shotPath,
@@ -910,7 +1074,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     String? saved;
     try {
       await tmpDir.create(recursive: true);
-      await _runAndWaitRelocate(() => _epubController.toProgressPercentage(0.0), const Duration(milliseconds: 2500));
+      await _runAndWaitRelocate(() => _readerProgress(0.0), const Duration(milliseconds: 2500));
 
       final pages = <Map<String, Object?>>[];
       String? lastCfi;
@@ -923,7 +1087,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         lastCfi = cfi;
 
         final shotPath = '${tmpDir.path}/shot_$i.png';
-        await _pdfChannel.invokeMethod('captureWebView', {'path': shotPath});
+        await _captureReaderView(shotPath, dpr);
         final strokes = await StorageService.getEpubLocationStrokes(widget.filePath, _currentPageLocationKey);
         final pagePath = '${tmpDir.path}/page_${i.toString().padLeft(5, '0')}.png';
         await _composeEpubExportPage(
@@ -943,7 +1107,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               '正在截取页面… 第${i + 1}页 (${(_progress * 100).toStringAsFixed(0)}%)', 'ページ取得中… ${i + 1}ページ (${(_progress * 100).toStringAsFixed(0)}%)'),
           _progress.clamp(0.0, 1.0).toDouble(),
         );
-        await _runAndWaitRelocate(() => _epubController.next(), const Duration(milliseconds: 1500));
+        await _runAndWaitRelocate(() => _readerNext(), const Duration(milliseconds: 1500));
       }
 
       if (!progress.cancelled && pages.isNotEmpty) {
@@ -962,9 +1126,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     } finally {
       // 원래 읽던 위치로 돌아가기
       if (savedCfi != null && savedCfi.isNotEmpty) {
-        _epubController.display(cfi: savedCfi);
+        _readerDisplay(savedCfi);
       } else {
-        _epubController.toProgressPercentage(savedProgress);
+        _readerProgress(savedProgress);
       }
       progress.close();
       if (mounted) setState(() => _isExporting = false);
@@ -1123,51 +1287,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
   }
 
-  Future<void> _showEpubMemoDialog() async {
-    final ctrl = TextEditingController(text: _bookMemoNote);
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('S펜 간단 메모'),
-        content: TextField(
-          controller: ctrl,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            hintText: 'S펜이나 키보드로 메모를 남겨보세요.',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          if (_epubStrokes.isNotEmpty || _bookMemoNote.isNotEmpty)
-            TextButton(
-              onPressed: () async {
-                final locKey = _currentPageLocationKey;
-                if (_epubStrokes.isNotEmpty) _memoHistory.record(locKey, _epubStrokes);
-                await StorageService.saveEpubLocationStrokes(widget.filePath, locKey, []);
-                await StorageService.savePageMemoNote(widget.filePath, 0, '');
-                setState(() {
-                  _epubStrokes = [];
-                  _bookMemoNote = '';
-                });
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('현재 페이지 필기/메모 지우기', style: TextStyle(color: Colors.redAccent)),
-            ),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
-          ElevatedButton(
-            onPressed: () async {
-              final text = ctrl.text.trim();
-              await StorageService.savePageMemoNote(widget.filePath, 0, text);
-              setState(() => _bookMemoNote = text);
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: Text(_tr('저장', 'Save', '保存', '保存')),
-          ),
-        ],
-      ),
-    );
-  }
-
   /// 뷰어 표시 설정 (JPG 뷰어와 100% 동일한 UI + EPUB 글자 크기 및 다크 모드 설정 포함)
   /// 뷰어 표시 설정 항목 제목: 관련 아이콘 + 문구 (줄바꿈돼도 아이콘이 문구 앞에 붙어 있음)
   Widget _settingsHeader(IconData icon, String text, {bool isTitle = false}) {
@@ -1212,6 +1331,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               children: [
                 _settingsHeader(Icons.tune, _tr('뷰어 표시 설정', 'Viewer Display Settings', '阅读器显示设置', '뷰어表示設定'), isTitle: true),
                 const SizedBox(height: 12),
+                if (!_isOfflineDocument)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -1561,7 +1681,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       ),
                       onTap: () {
                         Navigator.pop(ctx);
-                        _epubController.display(cfi: bm.position);
+                        _readerDisplay(bm.position);
                       },
                     );
                   },
@@ -1604,9 +1724,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final waiter = Completer<void>();
     _relocateWaiter = waiter;
     if (dir > 0) {
-      _epubController.next();
+      _readerNext();
     } else {
-      _epubController.prev();
+      _readerPrevious();
     }
     await waiter.future.timeout(const Duration(milliseconds: 550), onTimeout: () {});
     if (identical(_relocateWaiter, waiter)) _relocateWaiter = null;
@@ -1681,6 +1801,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final bool isSwipe = adx >= 40.0 && adx > ady * 1.2;
     if (!isSwipe) return;
 
+    if (_isOfflineDocument) {
+      // TXT·워드·한글 화면은 스스로 스와이프를 처리하지 않으므로 항상 여기서 넘긴다
+      _turnBySwipeDirection(d.dx);
+      return;
+    }
     if (_swipeScaleStarted) {
       // 확대 제스처가 터치를 가져가 WebView가 못 받은 스와이프
       _turnBySwipeDirection(d.dx);
@@ -1700,9 +1825,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _hasTextSelection = false;
     setState(() => _activeStrokePoints.clear());
     if (dx < 0) {
-      _epubController.next();
+      _readerNext();
     } else {
-      _epubController.prev();
+      _readerPrevious();
     }
   }
 
@@ -1815,13 +1940,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _epubBgTheme = mode;
     });
     try {
-      _epubController.updateTheme(theme: _buildTheme());
+      if (!_isOfflineDocument) _epubController.updateTheme(theme: _buildTheme());
     } catch (_) {}
   }
 
   void _changeFontSize(int delta) {
     setState(() => _fontSize = (_fontSize + delta).clamp(12, 32).toInt());
-    _epubController.setFontSize(fontSize: _fontSize.toDouble());
+    if (!_isOfflineDocument) _epubController.setFontSize(fontSize: _fontSize.toDouble());
   }
 
   /// 1. 뷰어 표시에서 페이지 번호를 누르고 숫자를 입력하면 해당 페이지로 이동 (설정에서 페이지 번호가 활성화된 경우만 작동)
@@ -1830,8 +1955,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         ? (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
         : (_footerInfoMode == 'page' || _footerInfoMode == 'both');
     if (_isTouchLocked || !allowed) return;
-    final int totalEstPages = (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
-    final int curEstPage = ((_progress * totalEstPages).round()).clamp(1, totalEstPages).toInt();
+    final int totalEstPages = _isOfflineDocument ? math.max(1, _docPageCount) : (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
+    final int curEstPage = _isOfflineDocument
+        ? (_docPage + 1).clamp(1, totalEstPages).toInt()
+        : ((_progress * totalEstPages).round()).clamp(1, totalEstPages).toInt();
     final ctrl = TextEditingController(text: '$curEstPage');
     ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
 
@@ -1880,19 +2007,23 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       final int clamped = targetPageOneBased.clamp(1, totalEstPages).toInt();
       final double targetProg = totalEstPages <= 1
           ? 0.0
-          : ((clamped - 1) / totalEstPages).clamp(0.0, 1.0).toDouble();
+          : _isOfflineDocument
+              ? ((clamped - 1) / (totalEstPages - 1)).clamp(0.0, 1.0).toDouble() // 문서: 정확히 그 쪽으로
+              : ((clamped - 1) / totalEstPages).clamp(0.0, 1.0).toDouble();
       setState(() {
         _progress = targetProg;
         _activeStrokePoints.clear();
       });
-      _epubController.toProgressPercentage(targetProg);
+      _readerProgress(targetProg);
     }
   }
 
   String _formatEpubFooterText() {
     if (_footerInfoMode == 'none') return '';
-    final int totalEstPages = (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
-    final int curEstPage = ((_progress * totalEstPages).round()).clamp(1, totalEstPages).toInt();
+    final int totalEstPages = _isOfflineDocument ? math.max(1, _docPageCount) : (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
+    final int curEstPage = _isOfflineDocument
+        ? (_docPage + 1).clamp(1, totalEstPages).toInt()
+        : ((_progress * totalEstPages).round()).clamp(1, totalEstPages).toInt();
     final String progStr = '${(_progress * 100).toStringAsFixed(1)}%';
     final String pageStr = '$curEstPage / $totalEstPages';
 
@@ -1959,7 +2090,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       max: 1.0,
                       onChanged: (v) => setState(() => _progress = v),
                       onChangeEnd: (v) {
-                        _epubController.toProgressPercentage(v);
+                        _readerProgress(v);
                       },
                     ),
                   ),
@@ -2035,7 +2166,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       max: 1.0,
                       onChanged: (v) => setState(() => _progress = v),
                       onChangeEnd: (v) {
-                        _epubController.toProgressPercentage(v);
+                        _readerProgress(v);
                       },
                     ),
                   ),
@@ -2265,7 +2396,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final String epubViewerKey =
         '${_activeFilePath}_${spreadSetting}_${_epubBgTheme}_$_epubViewerGeneration';
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _startEpubLoadWatchdog(epubViewerKey);
+      if (mounted && !_isOfflineDocument) _startEpubLoadWatchdog(epubViewerKey);
     });
 
     final bgColor = _getBgColor();
@@ -2300,7 +2431,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       title: Text(chapter.title.trim()),
                       onTap: () {
                         Navigator.pop(context);
-                        _epubController.display(cfi: chapter.href);
+                        _readerDisplay(chapter.href);
                         if (_showControls) _toggleControls();
                       },
                     );
@@ -2397,13 +2528,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                             ? (_) {}
                             : (_swipeFlutterOwned ? _onFlickUpdate : null),
                         onHorizontalDragEnd: _swipeFlutterOwned ? _onFlickEnd : null,
-                        child: EpubViewer(
+                        child: _isOfflineDocument ? _buildDocumentViewer(isLandscape) : EpubViewer(
                           key: ValueKey(epubViewerKey),
                           epubController: _epubController,
                     epubSource: EpubSource.fromFile(File(_activeFilePath)),
-                    // 안드로이드: 책을 가짜 https 주소로 가로채 서빙하는 방식(로컬 서버)은 기기/WebView에 따라
-                    // 요청이 막혀 흰 화면만 남는 경우가 있어, 책 데이터를 WebView에 직접 넘기는 방식을 사용
-                    useLocalServer: !Platform.isAndroid,
+                    // 프로젝트에 포함한 EPUB 뷰어(vendor)는 안드로이드에서 같은 출처의 https 주소로
+                    // 장(chapter)을 필요할 때마다 파일에서 읽어 보여 준다 (책 전체를 한 번에 넘기지 않음)
+                    useLocalServer: true,
                     initialCfi: _initialCfi,
                     onEpubLoaded: () {
                       _epubDisplayed = true;
@@ -2444,7 +2575,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                           });
                         } else if (_progress > 0.01) {
                           Future.delayed(const Duration(milliseconds: 150), () {
-                            _epubController.toProgressPercentage(_progress);
+                            _readerProgress(_progress);
                           });
                         }
                       }

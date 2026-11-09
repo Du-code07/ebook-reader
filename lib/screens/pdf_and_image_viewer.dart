@@ -403,7 +403,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final favs = await StorageService.getFavoriteBooks();
     final dir = await getApplicationDocumentsDirectory();
     const supportedExts = [
-      'epub', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+      'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+      'docx', 'doc', 'hwpx', 'hwp',
     ];
     const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
 
@@ -469,7 +470,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ),
     );
 
-    if (nextExt == 'epub') {
+    if (const ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp'].contains(nextExt)) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -844,11 +845,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         label: _tr('다시 실행', 'Redo', '重做', 'やり直し'),
         enabled: _memoHistory.canRedo(_visibleMemoPages()),
         onTap: _redoMemo,
-      ),
-      MemoToolButton(
-        icon: Icons.note_alt_outlined,
-        label: _tr('텍스트 메모 입력', 'Text Memo', '输入文字笔记', 'テキストメモ入力'),
-        onTap: _showMemoTextDialog,
       ),
       MemoToolButton(
         icon: Icons.delete_sweep_outlined,

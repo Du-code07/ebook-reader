@@ -107,15 +107,30 @@ class StorageService {
     return prefs.getDouble('prog_$bookPath') ?? 0.0;
   }
 
-  static Future<void> setDarkMode(bool isDark) async {
+  // 앱 테마: 'system'(기본 시스템, 휴대폰 설정 따라감) / 'light' / 'dark'
+  // (예전 버전의 다크 모드 켜기/끄기 값이 있으면 그대로 이어서 쓴다)
+  static Future<void> setAppThemeMode(String mode) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('dark_mode', isDark);
+    await prefs.setString('app_theme_mode', mode);
   }
 
-  static Future<bool> getDarkMode() async {
+  static Future<String> getAppThemeMode() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('dark_mode') ?? false;
+    final mode = prefs.getString('app_theme_mode');
+    if (mode != null) return mode;
+    final oldDark = prefs.getBool('dark_mode');
+    if (oldDark != null) return oldDark ? 'dark' : 'light';
+    return 'system';
   }
+
+  /// 앱 테마 설정값 → 지금 실제로 어두운 화면인지
+  static bool isDarkFor(String mode) => mode == 'dark' ||
+      (mode == 'system' && WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark);
+
+  static Future<void> setDarkMode(bool isDark) => setAppThemeMode(isDark ? 'dark' : 'light');
+
+  /// 지금 실제로 어두운 화면인지 (기본 시스템이면 휴대폰 설정에 따름)
+  static Future<bool> getDarkMode() async => isDarkFor(await getAppThemeMode());
 
   // 6. 앱 언어 설정 ('system': 기본 시스템, 'ko': 한국어, 'en': 영어, 'zh': 중국어, 'ja': 일본어)
   // 저장값은 'system'일 수 있고, 실제 화면 문구에 쓰는 언어(appLangNotifier)는 항상 ko/en/zh/ja 중 하나다.

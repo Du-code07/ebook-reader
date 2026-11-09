@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EPUB</title>
+    <script src="../dist/jszip.min.js"></script>
+    <script src="../dist/epub.js"></script>
+
+    <style type="text/css">
+      /* Application viewport, not the upstream demo's centered/min-height
+         layout. The reader must also work while Android attaches/resizes it. */
+      html, body {
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      body {
+        position: fixed;
+        top: 0;
+        left: 0;
+        display: block;
+        background: white;
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      }
+      #viewer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: white;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="viewer"></div>
+    <script src="epub_cfi_utils.js"></script>
+    <script src="epubView.js"></script>
+  </body>
+</html>

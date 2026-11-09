@@ -9,6 +9,8 @@ class AppSettingsScreen extends StatefulWidget {
   const AppSettingsScreen({
     super.key,
     required this.appLang,
+    required this.themeMode,
+    required this.onChangeThemeMode,
     required this.viewMode,
     required this.hideExtension,
     required this.onChangeLanguage,
@@ -22,6 +24,8 @@ class AppSettingsScreen extends StatefulWidget {
 
   /// 지금 화면 문구에 쓰는 언어 (ko/en/zh/ja)
   final String appLang;
+  final String themeMode; // 'system' | 'light' | 'dark'
+  final Future<void> Function(String mode) onChangeThemeMode;
   final String viewMode; // 'grid' | 'list'
   final bool hideExtension;
   final ValueChanged<String> onChangeLanguage; // 'system' | ko/en/zh/ja
@@ -43,6 +47,7 @@ class AppSettingsScreen extends StatefulWidget {
 class _AppSettingsScreenState extends State<AppSettingsScreen> {
   late String _lang = widget.appLang;
   late String _langSetting = StorageService.appLangSetting ?? 'system';
+  late String _themeMode = widget.themeMode;
   late String _viewMode = widget.viewMode;
   late bool _hideExt = widget.hideExtension;
 
@@ -51,6 +56,29 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   String _viewModeLabel(String mode) => mode == 'grid'
       ? _t('표지형 (썸네일)', 'Cover View (Thumbnail)', '封面视图 (缩略图)', '表紙表示 (サムネイル)')
       : _t('목록형 (리스트)', 'List View', '列表视图', 'リスト表示');
+
+  String _themeLabel(String mode) => mode == 'dark'
+      ? _t('다크 모드', 'Dark mode', '深色模式', 'ダークモード')
+      : mode == 'light'
+          ? _t('라이트 모드', 'Light mode', '浅色模式', 'ライトモード')
+          : _t('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト');
+
+  Future<void> _pickTheme() async {
+    final v = await showChoiceSheet<String>(
+      context: context,
+      title: _t('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'),
+      options: [
+        ChoiceOption('system', _themeLabel('system'), icon: Icons.brightness_auto_outlined),
+        ChoiceOption('light', _themeLabel('light'), icon: Icons.light_mode_outlined),
+        ChoiceOption('dark', _themeLabel('dark'), icon: Icons.dark_mode_outlined),
+      ],
+      current: _themeMode,
+      confirmLabel: _t('확인', 'OK', '确定', 'OK'),
+    );
+    if (v == null || !mounted) return;
+    setState(() => _themeMode = v);
+    await widget.onChangeThemeMode(v);
+  }
 
   Future<void> _pickLanguage() async {
     final v = await showChoiceSheet<String>(
@@ -68,8 +96,9 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     });
   }
 
+  /// 파일 표시 방식(표지형/목록형) + 파일 이름 뒤 형식 숨기기
   Future<void> _pickViewMode() async {
-    final v = await showChoiceSheet<String>(
+    final r = await showChoiceSheetWithToggle<String>(
       context: context,
       title: _t('파일 표시 방식', 'Bookshelf View Mode', '文件显示样式', 'ファイル表示形式'),
       options: [
@@ -77,16 +106,20 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ChoiceOption('list', _viewModeLabel('list'), icon: Icons.view_list_rounded),
       ],
       current: _viewMode,
+      toggleIcon: Icons.visibility_off_outlined,
+      toggleLabel: _t('파일 이름 뒤 형식 숨기기', 'Hide file extension', '隐藏文件扩展名', 'ファイル名の形式を隠す'),
+      toggleSubtitle: _t('.pdf, .epub 등', '.pdf, .epub, etc.', '.pdf、.epub 等', '.pdf、.epub など'),
+      toggleValue: _hideExt,
       confirmLabel: _t('확인', 'OK', '确定', 'OK'),
     );
-    if (v == null || !mounted) return;
-    await widget.onChangeViewMode(v);
-    if (mounted) setState(() => _viewMode = v);
-  }
-
-  Future<void> _toggleHideExt(bool v) async {
-    setState(() => _hideExt = v);
-    await widget.onChangeHideExtension(v);
+    if (r == null || !mounted) return;
+    final (mode, hide) = r;
+    setState(() {
+      _viewMode = mode;
+      _hideExt = hide;
+    });
+    await widget.onChangeViewMode(mode);
+    await widget.onChangeHideExtension(hide);
   }
 
   Widget _section(String text) {
@@ -153,6 +186,12 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
           children: [
             _section(_t('일반', 'General', '通用', '一般')),
             _item(
+              icon: Icons.dark_mode_outlined,
+              title: _t('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'),
+              subtitle: _themeLabel(_themeMode),
+              onTap: _pickTheme,
+            ),
+            _item(
               icon: Icons.language,
               title: _t('언어', 'Language', '语言', '言語'),
               subtitle: languageOptionLabel(_langSetting),
@@ -161,15 +200,11 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             _item(
               icon: _viewMode == 'grid' ? Icons.grid_view_rounded : Icons.view_list_rounded,
               title: _t('파일 표시 방식', 'Bookshelf View Mode', '文件显示样式', 'ファイル表示形式'),
-              subtitle: _viewModeLabel(_viewMode),
+              // 지금 방식 + 형식 숨김 여부
+              subtitle: _hideExt
+                  ? '${_viewModeLabel(_viewMode)} · ${_t('형식 숨김', 'extensions hidden', '隐藏扩展名', '形式を隠す')}'
+                  : _viewModeLabel(_viewMode),
               onTap: _pickViewMode,
-            ),
-            _item(
-              icon: Icons.visibility_off_outlined,
-              title: _t('파일 이름 뒤 형식 숨기기', 'Hide file extension', '隐藏文件扩展名', 'ファイル名の形式を隠す'),
-              subtitle: _t('.pdf, .epub 등', '.pdf, .epub, etc.', '.pdf、.epub 等', '.pdf、.epub など'),
-              trailing: Switch(value: _hideExt, onChanged: _toggleHideExt),
-              onTap: () => _toggleHideExt(!_hideExt),
             ),
             _section(_t('도움말', 'Help', '帮助', 'ヘルプ')),
             _item(

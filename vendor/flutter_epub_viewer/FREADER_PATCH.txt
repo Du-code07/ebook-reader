@@ -1,0 +1,34 @@
+FReader v46 Android transport patch
+
+Upstream: flutter_epub_viewer 2.2.1 (BSD-3-Clause; see LICENSE).
+The lib/ tree, LICENSE, README.md and pubspec.yaml are vendored from the published package.
+
+Changed upstream files:
+- lib/src/platform/epub_web_view_io.dart: Android WebViewAssetLoader uses HTTPS assets, with file cross-origin access disabled.
+- lib/src/server/epub_book_server.dart: same-origin /books/<token>/ URL routing; assets bypass book routing.
+- lib/src/epub_viewer.dart: await and report native bridge start errors.
+
+Book chapters are read from disk on demand. No external document upload or local HTTP port on Android.
+The app uses this package by path; upload this entire folder with pubspec.yaml.
+Original upstream documentation is kept unchanged and may describe the upstream transport.
+Original license and Epub.js licenses remain in the shipped tree/assets.
+
+FReader v50 loading patch
+- epubView.js: report initial chapter errors; recover an invalid saved CFI to
+  the first section; notify the native reader if PlatformReady preceded the script.
+- epub_viewer.dart: ignore duplicate ready messages so they cannot restart a book.
+- epub_web_view_io.dart: retry the ready handshake on main-page load completion.
+- Application EPUB validation now reads metadata lazily off the UI isolate and
+  supports encoded package paths, unique case-insensitive paths and UTF-16 XML.
+
+FReader v51 viewport and swipe patch
+- swipe.html: use a top-aligned, bounded application viewport instead of the
+  upstream demo's flex centering and 800px minimum body height.
+- epubView.js: remove the unitless innerHeight assignment. At early Android
+  startup, 0 became a persistent 0px viewer while positive values were ignored.
+  Wait for a nonzero viewport stable over two animation frames before creating
+  a rendition. Superseded loads are cancelled; a 15s limit reports a load error.
+- Keep the host size responsive to rotation; no one-time inline pixel height.
+- Use chapter-local swipe state and client coordinates; cancel multi-touch and
+  cancelled gestures. Reset navigation wrappers when reusing the same WebView.
+- Existing EPUB content, UI, native transport and licenses are unchanged.

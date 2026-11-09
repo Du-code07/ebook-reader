@@ -18,22 +18,66 @@ Future<T?> showChoiceSheet<T>({
   required List<ChoiceOption<T>> options,
   required T current,
   required String confirmLabel,
-}) {
-  return showModalBottomSheet<T>(
+}) async {
+  final r = await showModalBottomSheet<(T, bool)>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     builder: (ctx) => _ChoiceSheet<T>(title: title, options: options, current: current, confirmLabel: confirmLabel),
   );
+  return r?.$1;
+}
+
+/// 하나 고르기 + 아래에 켜기/끄기 스위치 한 줄이 함께 있는 창.
+/// '확인'을 누르면 (고른 값, 스위치 값)을 돌려준다. 그냥 닫으면 null.
+Future<(T, bool)?> showChoiceSheetWithToggle<T>({
+  required BuildContext context,
+  required String title,
+  required List<ChoiceOption<T>> options,
+  required T current,
+  required String toggleLabel,
+  String? toggleSubtitle,
+  IconData? toggleIcon,
+  required bool toggleValue,
+  required String confirmLabel,
+}) {
+  return showModalBottomSheet<(T, bool)>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (ctx) => _ChoiceSheet<T>(
+      title: title,
+      options: options,
+      current: current,
+      confirmLabel: confirmLabel,
+      toggleLabel: toggleLabel,
+      toggleSubtitle: toggleSubtitle,
+      toggleIcon: toggleIcon,
+      toggleValue: toggleValue,
+    ),
+  );
 }
 
 class _ChoiceSheet<T> extends StatefulWidget {
-  const _ChoiceSheet({required this.title, required this.options, required this.current, required this.confirmLabel});
+  const _ChoiceSheet({
+    required this.title,
+    required this.options,
+    required this.current,
+    required this.confirmLabel,
+    this.toggleLabel,
+    this.toggleSubtitle,
+    this.toggleIcon,
+    this.toggleValue = false,
+  });
 
   final String title;
   final List<ChoiceOption<T>> options;
   final T current;
   final String confirmLabel;
+  final String? toggleLabel;
+  final String? toggleSubtitle;
+  final IconData? toggleIcon;
+  final bool toggleValue;
 
   @override
   State<_ChoiceSheet<T>> createState() => _ChoiceSheetState<T>();
@@ -41,6 +85,7 @@ class _ChoiceSheet<T> extends StatefulWidget {
 
 class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
   late T _selected = widget.current;
+  late bool _toggle = widget.toggleValue;
 
   @override
   Widget build(BuildContext context) {
@@ -93,6 +138,34 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                         ),
                       ),
                     ),
+                  if (widget.toggleLabel != null) ...[
+                    const Divider(height: 16, indent: 24, endIndent: 24),
+                    InkWell(
+                      onTap: () => setState(() => _toggle = !_toggle),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 8, 16, 8),
+                        child: Row(
+                          children: [
+                            if (widget.toggleIcon != null) ...[
+                              Icon(widget.toggleIcon, size: 22, color: cs.onSurfaceVariant),
+                              const SizedBox(width: 14),
+                            ],
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(widget.toggleLabel!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                                  if (widget.toggleSubtitle != null)
+                                    Text(widget.toggleSubtitle!, style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                                ],
+                              ),
+                            ),
+                            Switch(value: _toggle, onChanged: (v) => setState(() => _toggle = v)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -104,7 +177,7 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                 minimumSize: const Size.fromHeight(52),
                 textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
-              onPressed: () => Navigator.pop(context, _selected),
+              onPressed: () => Navigator.pop(context, (_selected, _toggle)),
               child: Text(widget.confirmLabel),
             ),
           ),

@@ -12,25 +12,26 @@ import 'screens/language_select_screen.dart';
 import 'screens/app_settings_screen.dart';
 import 'widgets/sheet_pull_to_close.dart';
 import 'services/storage_service.dart';
+import 'services/doc_thumbnail_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   PaintingBinding.instance.imageCache.maximumSize = 3000;
   PaintingBinding.instance.imageCache.maximumSizeBytes = 300 << 20;
-  final initialDark = await StorageService.getDarkMode();
+  final initialThemeMode = await StorageService.getAppThemeMode();
   final initialLang = await StorageService.getAppLanguage();
   // 앱 처음 시작 시(언어를 고른 적 없을 때) 언어 선택 화면부터 보여 준다
   final needsLanguage = await StorageService.needsLanguageSelection();
-  runApp(MyEbookApp(initialDark: initialDark, initialLang: initialLang, needsLanguage: needsLanguage));
+  runApp(MyEbookApp(initialThemeMode: initialThemeMode, initialLang: initialLang, needsLanguage: needsLanguage));
 }
 
 class MyEbookApp extends StatefulWidget {
-  final bool initialDark;
+  final String initialThemeMode; // 'system' | 'light' | 'dark'
   final String initialLang;
   final bool needsLanguage;
   const MyEbookApp({
     super.key,
-    required this.initialDark,
+    required this.initialThemeMode,
     required this.initialLang,
     this.needsLanguage = false,
   });
@@ -40,7 +41,8 @@ class MyEbookApp extends StatefulWidget {
 }
 
 class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  late bool _isDarkMode;
+  late String _themeMode;
+  bool get _isDarkMode => StorageService.isDarkFor(_themeMode);
   late String _appLang;
   late bool _needsLanguage;
   late final AnimationController _rotationAnimController;
@@ -49,7 +51,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    _isDarkMode = widget.initialDark;
+    _themeMode = widget.initialThemeMode;
     _appLang = widget.initialLang;
     _needsLanguage = widget.needsLanguage;
     WidgetsBinding.instance.addObserver(this);
@@ -82,15 +84,25 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   }
 
   void _toggleDarkMode() async {
-    final nextVal = !_isDarkMode;
-    setState(() => _isDarkMode = nextVal);
-    await StorageService.setDarkMode(nextVal);
+    await _changeThemeMode(_isDarkMode ? 'light' : 'dark');
+  }
+
+  /// 앱 테마 바꾸기 ('system' | 'light' | 'dark')
+  Future<void> _changeThemeMode(String mode) async {
+    setState(() => _themeMode = mode);
+    await StorageService.setAppThemeMode(mode);
   }
 
   /// [setting]: 'system'(기본 시스템) 또는 'ko'/'en'/'zh'/'ja'
   void _changeAppLanguage(String setting) async {
     setState(() => _appLang = StorageService.resolveAppLanguage(setting));
     await StorageService.setAppLanguage(setting);
+  }
+
+  // '기본 시스템' 테마일 때 휴대폰의 밝게/어둡게가 바뀌면 다시 그린다
+  @override
+  void didChangePlatformBrightness() {
+    if (_themeMode == 'system' && mounted) setState(() {});
   }
 
   // '기본 시스템'일 때 휴대폰 언어를 바꾸면 앱 문구도 따라 바뀐다
@@ -108,7 +120,9 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'FReader',
-      themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      themeMode: _themeMode == 'dark'
+          ? ThemeMode.dark
+          : (_themeMode == 'light' ? ThemeMode.light : ThemeMode.system),
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.light,
@@ -139,6 +153,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
               isDarkMode: _isDarkMode,
               appLang: _appLang,
               onToggleDarkMode: _toggleDarkMode,
+              themeMode: _themeMode,
+              onChangeThemeMode: _changeThemeMode,
               onChangeLanguage: _changeAppLanguage,
             ),
     );
@@ -513,6 +529,8 @@ class BookshelfScreen extends StatefulWidget {
   final bool isDarkMode;
   final String appLang;
   final VoidCallback onToggleDarkMode;
+  final String themeMode;
+  final Future<void> Function(String mode) onChangeThemeMode;
   final ValueChanged<String> onChangeLanguage;
 
   const BookshelfScreen({
@@ -520,6 +538,8 @@ class BookshelfScreen extends StatefulWidget {
     required this.isDarkMode,
     required this.appLang,
     required this.onToggleDarkMode,
+    required this.themeMode,
+    required this.onChangeThemeMode,
     required this.onChangeLanguage,
   });
 
@@ -554,10 +574,34 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Timer? _dragEdgeScrollTimer;
   Offset? _lastDragGlobalPos;
 
+  // 메모장(.txt), 워드(.docx, .doc), 한글(.hwpx, .hwp)도 열람 (모두 기기 안에서 처리)
   static const _supportedExts = [
-    'epub', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+    'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+    'docx', 'doc', 'hwpx', 'hwp',
   ];
   static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
+
+  /// 글 문서(리더 화면에서 여는 형식)
+  static const _readerExts = ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp'];
+
+  /// 파일 형식별 기본 아이콘 (표지 그림이 없을 때)
+  static IconData _fileTypeIcon(String ext) {
+    switch (ext) {
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'docx':
+      case 'doc':
+      case 'hwpx':
+      case 'hwp':
+        return Icons.description_outlined;
+      case 'epub':
+      case 'txt':
+        return Icons.menu_book;
+      case 'cbz':
+        return Icons.auto_stories;
+    }
+    return Icons.image;
+  }
 
   String? _findFileRowPathAtGlobalPos(Offset globalPos) {
     for (final entry in _fileRowKeys.entries) {
@@ -839,6 +883,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }
   }
 
+  /// 한글·워드 표지를 화면 밖에서 그리다 실패한 파일 (앱을 다시 켤 때까지 다시 시도하지 않음)
+  static final Set<String> _docThumbFailed = {};
+
   /// 13. 각 파일의 가장 첫 페이지를 초고속 네이티브 스레드 풀에서 썸네일 이미지로 생성 및 MemoryImage로 영구 고정
   Future<void> _ensureBookThumbnail(File file, [String? cachedThumbDirPath]) async {
     final path = file.path;
@@ -877,6 +924,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           _cacheThumbnailFromFileSync(path, rendered);
           return;
         }
+      } else if (DocThumbnailService.supportedExts.contains(ext)) {
+        // 한글·워드: 파일 안의 미리보기 그림 → 없으면 (표지형 보기일 때만) 첫 페이지를 화면 밖에서 그림
+        if (_docThumbFailed.contains(path)) return;
+        final bool allowRender = _bookshelfViewMode == 'grid';
+        final ok = await DocThumbnailService.make(path, thumbPath, allowRender: allowRender);
+        if (ok) {
+          _cacheThumbnailFromFileSync(path, thumbPath);
+          return;
+        }
+        if (allowRender) _docThumbFailed.add(path);
       } else if (ext == 'cbz' || ext == 'epub') {
         final rendered = await _pdfChannel.invokeMethod<String>(
           'extractArchiveFirstImageThumbnail',
@@ -1580,7 +1637,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final displayName = _formatDisplayFileName(rawName);
     final ext = rawName.split('.').last.toLowerCase();
 
-    if (ext == 'epub') {
+    if (_readerExts.contains(ext)) {
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -1999,12 +2056,20 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           scrollController: scroll,
           scrollPhysics: physics,
           appLang: widget.appLang,
+          themeMode: widget.themeMode,
+          onChangeThemeMode: widget.onChangeThemeMode,
           viewMode: _bookshelfViewMode,
           hideExtension: _hideFileExtension,
           onChangeLanguage: widget.onChangeLanguage,
           onChangeViewMode: (mode) async {
             await StorageService.setBookshelfViewMode(mode);
             if (mounted) setState(() => _bookshelfViewMode = mode);
+            // 표지형으로 바꾸면 아직 표지가 없는 한글·워드 문서의 첫 페이지를 만든다
+            if (mode == 'grid') {
+              for (final f in _allBooks) {
+                if (!_globalThumbMemoryCache.containsKey(f.path)) _ensureBookThumbnail(f);
+              }
+            }
           },
           onChangeHideExtension: (hide) async {
             await StorageService.setHideFileExtension(hide);
@@ -2038,13 +2103,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final lowerExt = rawFileName.split('.').last.toLowerCase();
     final thumbNotifier = _getThumbNotifier(file.path);
 
-    final IconData fallbackIcon = lowerExt == 'pdf'
-        ? Icons.picture_as_pdf
-        : lowerExt == 'epub'
-            ? Icons.menu_book
-            : lowerExt == 'cbz'
-                ? Icons.auto_stories
-                : Icons.image;
+    final IconData fallbackIcon = _fileTypeIcon(lowerExt);
 
     return RepaintBoundary(
       child: Container(
@@ -2584,13 +2643,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                     },
                                   )
                                 : Icon(
-                                    lowerExt == 'pdf'
-                                        ? Icons.picture_as_pdf
-                                        : lowerExt == 'epub'
-                                            ? Icons.menu_book
-                                            : lowerExt == 'cbz'
-                                                ? Icons.auto_stories
-                                                : Icons.image,
+                                    _fileTypeIcon(lowerExt),
                                     color: Colors.indigo,
                                   ),
                             title: Text(
