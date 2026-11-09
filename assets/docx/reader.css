@@ -54,3 +54,7 @@ sup.docx-note-ref { font-size: 1em; vertical-align: baseline; line-height: 0; }
 .docx-note-area { position: absolute; z-index: 1; font: 8pt/1.35 FReaderSans, sans-serif; color: #000; white-space: pre-wrap; }
 .docx-note-area::before { content: ''; display: block; width: 33%; border-top: 0.75pt solid #000; margin-bottom: 3px; }
 .docx-note-area .docx-note sup { font-size: 0.75em; line-height: 0; }
+
+/* FReader: 파일 내 단어 검색 형광펜 */
+::highlight(freader-search) { background-color: rgba(255, 235, 59, 0.6); color: inherit; }
+::highlight(freader-search-current) { background-color: rgba(255, 193, 7, 0.95); color: inherit; }

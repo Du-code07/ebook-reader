@@ -18,6 +18,29 @@ function closeDocument() {
   rtfPictures.clear(); preparedRtf = null; rtfLayout = null;
   if (document) { document.close(); document = null; }
 }
+const SHRINK_MAX_SIDE = 2200;
+async function shrinkRaster(bytes, mimeType) {
+  if (!/^image\/(jpeg|jpg|png|webp|bmp)$/i.test(mimeType || '') || bytes.byteLength < 300 * 1024) return { bytes, mimeType };
+  if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas !== 'function') return { bytes, mimeType };
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(new Blob([bytes], { type: mimeType }));
+    const side = Math.max(bitmap.width, bitmap.height);
+    if (side <= SHRINK_MAX_SIDE) return { bytes, mimeType };
+    const scale = SHRINK_MAX_SIDE / side;
+    const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(bitmap.height * scale)));
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const type = /jpe?g/i.test(mimeType) ? 'image/jpeg' : 'image/webp';
+    const blob = await canvas.convertToBlob({ type, quality: 0.9 });
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), mimeType: blob.type || type };
+  } catch (_) {
+    return { bytes, mimeType };
+  } finally {
+    bitmap?.close?.();
+  }
+}
 async function perform({ action, bytes, password, path, session: requestedSession, format }) {
   const odr = await engine;
   if (action === 'resource') {
@@ -36,8 +59,10 @@ async function perform({ action, bytes, password, path, session: requestedSessio
       try { const { fixDisjointClipChains } = await import('./emf_fix.js'); svg = fixDisjointClipChains(svg); } catch (_) {}
       return { type: 'resource', bytes: new TextEncoder().encode(svg), mimeType: 'image/svg+xml', session };
     }
+    // FReader: 폰 카메라 사진처럼 아주 큰 그림은 화면에 필요한 크기로 줄여 보낸다 (푸는 시간·메모리 절약)
+    const shrunk = await shrinkRaster(result.bytes, result.mimeType);
     // This owned buffer can cross the worker boundary without another clone.
-    return { type: 'resource', bytes: result.bytes, mimeType: result.mimeType, session };
+    return { type: 'resource', bytes: shrunk.bytes, mimeType: shrunk.mimeType, session };
   }
   if (action === 'open') {
     closeDocument(); session++;

@@ -19,6 +19,7 @@ function bridge() {
 function emit(type, data = {}) {
   pendingEvents.push({ type, ...data });
   void flushEvents();
+  retryBridge();
 }
 async function flushEvents() {
   if (!bridge() || flushingEvents || disposed) return;
@@ -35,7 +36,15 @@ async function flushEvents() {
   } finally { flushingEvents = false; }
 }
 window.addEventListener('flutterInAppWebViewPlatformReady', flushEvents);
-const bridgeTimer = setInterval(flushEvents, 150);
+// FReader(배터리): 보낼 알림이 남아 있을 때만 0.15초마다 다시 시도한다 (예전에는 책을 펴 둔 내내 계속 깨어 있었음)
+let bridgeTimer = 0;
+function retryBridge() {
+  if (bridgeTimer || disposed) return;
+  bridgeTimer = setInterval(() => {
+    if (disposed || !pendingEvents.length) { clearInterval(bridgeTimer); bridgeTimer = 0; return; }
+    void flushEvents();
+  }, 150);
+}
 
 function fail(error) {
   const message = String(error?.message || error).slice(0, 600);
@@ -218,7 +227,29 @@ async function render() {
   const previousEntries = activeEntries; activeEntries = nextEntries;
   for (const entry of previousEntries) releaseIfUnused(entry);
   fitPages();
+  applySearchHighlights();
   await new Promise(resolve => requestAnimationFrame(resolve));
+  void finishPage(serial, [...nextEntries]);
+}
+// FReader: 쪽 안 그림을 다 풀면 'pageReady'를 알리고(앱이 이 쪽 화면을 저장해 다음에 먼저 띄움),
+// 잠시 뒤 다음 쪽을 미리 만들어 둔다 (그림이 많은 쪽은 만드는 데 오래 걸림).
+function decodeEntry(entry) {
+  return Promise.all(entry.urls.map(url => { const probe = new Image(); probe.src = url; return probe.decode().catch(() => {}); }));
+}
+async function finishPage(serial, entries) {
+  await Promise.all(entries.map(decodeEntry));
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  if (disposed || serial !== renderSerial) return;
+  emit('pageReady', { page, position: `hwp:${page}` });
+  setTimeout(() => {
+    if (disposed || serial !== renderSerial || !doc) return;
+    const ahead = page + (options.spread ? 2 : 1);
+    try {
+      for (let index = ahead; index < Math.min(count, ahead + (options.spread ? 2 : 1)); index++) {
+        if (!cache.has(index)) void decodeEntry(svgForPage(index));
+      }
+    } catch (_) {}
+  }, 350);
 }
 function fitPages() {
   const frames = [...host.children];
@@ -251,6 +282,7 @@ function highlightSelection() {
 function releaseDocument() {
   renderSerial++;
   if (doc) { doc.free(); doc = null; }
+  layoutCache.clear(); searchState = { query: '', results: [], current: -1 };
   if (incoming) incoming.fill(0);
   incoming = null; received = 0; count = 0; page = 0;
   for (const entry of new Set([...cache.values(), ...activeEntries])) releaseEntry(entry);
@@ -260,7 +292,82 @@ function destroy() {
   disposed = true; clearInterval(bridgeTimer); resizeObserver.disconnect(); releaseDocument(); pendingEvents = [];
 }
 const resizeObserver = new ResizeObserver(fitPages); resizeObserver.observe(host);
+// ── 파일 내 단어 검색: 엔진이 알려 주는 쪽별 글자 위치로 노란 형광펜을 그린다 ──
+let searchState = { query: '', results: [], current: -1 };
+const layoutCache = new Map();
+function searchNorm(text) { return text.replace(/\u00a0/g, ' ').toLowerCase(); }
+function pageRuns(index) {
+  if (layoutCache.has(index)) return layoutCache.get(index);
+  let runs = [];
+  try { runs = (JSON.parse(doc.getPageTextLayout(index)).runs || []).filter(r => r && typeof r.text === 'string' && r.text.length); } catch (_) {}
+  layoutCache.set(index, runs);
+  if (layoutCache.size > 60) layoutCache.delete(layoutCache.keys().next().value);
+  return runs;
+}
+/** 한 쪽에서 찾은 곳들: 찾은 곳마다 쪽 좌표의 사각형 목록 */
+function pageMatches(index, q) {
+  const runs = pageRuns(index), owner = [];
+  let text = '';
+  runs.forEach((run, r) => { for (let c = 0; c < run.text.length; c++) owner.push([r, c]); text += run.text; });
+  const hay = searchNorm(text), found = [];
+  for (let at = hay.indexOf(q); at >= 0; at = hay.indexOf(q, at + q.length)) {
+    const rects = [];
+    for (let i = at; i < at + q.length && i < owner.length; i++) {
+      const [r, c] = owner[i], run = runs[r], xs = run.charX || [];
+      const x0 = run.x + (xs[c] ?? 0), x1 = run.x + (xs[c + 1] ?? xs[c] ?? run.w);
+      const last = rects[rects.length - 1];
+      if (last && last.run === r && Math.abs(last.x + last.w - x0) < 0.5) last.w = x1 - last.x;
+      else rects.push({ run: r, x: x0, y: run.y, w: Math.max(0.5, x1 - x0), h: run.h });
+    }
+    found.push(rects);
+  }
+  return found;
+}
+async function search(query) {
+  const q = searchNorm(String(query || '').trim());
+  searchState = { query: q, results: [], current: -1 };
+  if (!q || !doc) { applySearchHighlights(); return { count: 0, pages: [] }; }
+  const results = [];
+  for (let i = 0; i < count; i++) {
+    const found = pageMatches(i, q);
+    for (let k = 0; k < found.length; k++) results.push({ page: i, k });
+    if (i % 15 === 14) await new Promise(resolve => setTimeout(resolve, 0)); // 긴 문서에서도 화면이 멈추지 않게
+    if (searchState.query !== q) return { count: 0, pages: [] }; // 그 사이 다른 검색이 시작됨
+  }
+  searchState.results = results;
+  applySearchHighlights();
+  return { count: results.length, pages: results.map(r => r.page) };
+}
+async function showSearchResult(index) {
+  const r = searchState.results[index]; if (!r) return;
+  searchState.current = index;
+  const shown = [...host.children].some(frame => Number(frame.dataset.page) === r.page);
+  if (shown) { applySearchHighlights(); return; }
+  await display(r.page);
+}
+function clearSearch() { searchState = { query: '', results: [], current: -1 }; applySearchHighlights(); }
+function applySearchHighlights() {
+  for (const old of host.querySelectorAll('.freader-search-mark')) old.remove();
+  if (!searchState.query || !searchState.results.length || !doc) return;
+  const current = searchState.results[searchState.current];
+  for (const frame of host.children) {
+    const index = Number(frame.dataset.page), svg = frame.firstElementChild;
+    if (!svg || !searchState.results.some(r => r.page === index)) continue;
+    const found = pageMatches(index, searchState.query);
+    found.forEach((rects, k) => {
+      const isCurrent = current && current.page === index && current.k === k;
+      for (const box of rects) {
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('class', 'freader-search-mark');
+        for (const [key, value] of Object.entries({ x: box.x, y: box.y, width: box.w, height: box.h, fill: isCurrent ? '#ffb300' : '#ffeb3b', opacity: isCurrent ? 0.6 : 0.45, 'pointer-events': 'none' })) rect.setAttribute(key, String(value));
+        rect.style.mixBlendMode = 'multiply';
+        svg.appendChild(rect);
+      }
+    });
+  }
+}
 window.freaderHwp = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
+  search, showSearchResult, clearSearch,
   getState: () => ({ ready: readyReported, page, count, cachedPages: cache.size, cachedBytes, received, spread: options.spread, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 

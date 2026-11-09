@@ -14,7 +14,7 @@ let options = { format: 'docx', theme: 'white', spread: false, rtl: false, posit
 const requests = new Map(), fonts = new Map();
 let pendingEvents = [], flushing = false;
 
-function emit(type, data = {}) { pendingEvents.push({ type, ...data }); void flush(); }
+function emit(type, data = {}) { pendingEvents.push({ type, ...data }); void flush(); retryBridge(); }
 async function flush() {
   if (!window.flutter_inappwebview?.callHandler || flushing || disposed) return;
   flushing = true;
@@ -26,7 +26,15 @@ async function flush() {
   } catch (_) { /* Retry when the Android bridge becomes ready. */ }
   finally { flushing = false; }
 }
-const bridgeTimer = setInterval(flush, 150);
+// FReader(배터리): 보낼 알림이 남아 있을 때만 0.15초마다 다시 시도한다 (예전에는 책을 펴 둔 내내 계속 깨어 있었음)
+let bridgeTimer = 0;
+function retryBridge() {
+  if (bridgeTimer || disposed) return;
+  bridgeTimer = setInterval(() => {
+    if (disposed || !pendingEvents.length) { clearInterval(bridgeTimer); bridgeTimer = 0; return; }
+    void flush();
+  }, 150);
+}
 window.addEventListener('flutterInAppWebViewPlatformReady', flush);
 function fail(error) { emit('error', { message: String(error?.message || error).slice(0, 600) }); return false; }
 
@@ -50,6 +58,7 @@ function clearPages() {
   imageCache.clear(); imageJobs.clear(); brokenImages.clear();
   resourceIndex.clear(); originalSources.clear(); activeImagePaths.clear(); imageCacheBytes = 0;
   pages = []; page = 0; unavailableImages = 0; host.replaceChildren(); measure.replaceChildren();
+  searchState = { query: '', results: [], current: -1 }; applySearchHighlights();
   document.querySelectorAll('style[data-document]').forEach(el => el.remove());
 }
 function beginDocument(length, config) {
@@ -57,6 +66,7 @@ function beginDocument(length, config) {
   generation++; clearPages();
   if (incoming) incoming.fill(0);
   incoming = new Uint8Array(length); received = 0; awaitingPassword = false;
+  imageStorePromise = null;
   configure(config);
 }
 function appendChunk(offset, encoded) {
@@ -293,6 +303,44 @@ function trimImages() {
     imageCache.delete(path); imageCacheBytes -= item.size; URL.revokeObjectURL(item.url);
   }
 }
+// ── 변환된 그림 저장소 (기기 안 Cache Storage, 문서마다 따로) ──
+// 열쇠(cacheKey)는 앱이 파일 경로·크기·수정 시각으로 만들어 넘긴다. 문서가 바뀌면 열쇠도 바뀐다.
+const IMAGE_STORE_PREFIX = 'freader-docx-img-v1-';
+const IMAGE_STORE_KEEP = 40; // 최근 문서 40개까지만 보관
+let imageStorePromise = null;
+function imageStore() {
+  if (!options.cacheKey || typeof caches === 'undefined') return Promise.resolve(null);
+  if (!imageStorePromise) {
+    const name = IMAGE_STORE_PREFIX + options.cacheKey;
+    imageStorePromise = caches.open(name).then(store => { void pruneImageStores(name); return store; }).catch(() => null);
+  }
+  return imageStorePromise;
+}
+async function pruneImageStores(current) {
+  try {
+    let order = [];
+    try { order = JSON.parse(localStorage.getItem('freaderDocxImgOrder') || '[]'); } catch (_) {}
+    order = [current, ...order.filter(name => name !== current)];
+    const keep = new Set(order.slice(0, IMAGE_STORE_KEEP));
+    for (const name of await caches.keys()) if (name.startsWith(IMAGE_STORE_PREFIX) && !keep.has(name)) await caches.delete(name);
+    try { localStorage.setItem('freaderDocxImgOrder', JSON.stringify([...keep])); } catch (_) {}
+  } catch (_) {}
+}
+const storeUrl = path => `https://freader.local/img/${encodeURIComponent(path)}`;
+async function storedImage(path) {
+  try {
+    const store = await imageStore(); if (!store) return null;
+    const hit = await store.match(storeUrl(path)); if (!hit) return null;
+    const blob = await hit.blob();
+    return blob.size ? blob : null;
+  } catch (_) { return null; }
+}
+async function storeImage(path, blob) {
+  try {
+    const store = await imageStore(); if (!store) return;
+    await store.put(storeUrl(path), new Response(blob, { headers: { 'content-type': blob.type || 'application/octet-stream' } }));
+  } catch (_) {}
+}
 async function imageFor(path) {
   if (brokenImages.has(path)) throw new Error('Unsupported image');
   if (imageCache.has(path)) {
@@ -301,10 +349,18 @@ async function imageFor(path) {
   if (imageJobs.has(path)) return imageJobs.get(path);
   const current = generation, requestedSession = resourceSession;
   const job = (async () => {
-    const result = await request('resource', { path, session: requestedSession });
+    // FReader: 한 번 꺼내고 변환한 그림은 기기에 저장해 두고 다음에 열 때 바로 쓴다
+    const stored = await storedImage(path);
+    let blob;
+    if (stored) blob = stored;
+    else {
+      const result = await request('resource', { path, session: requestedSession });
+      if (disposed || current !== generation || requestedSession !== resourceSession) throw new Error('Expired image');
+      if (result.type !== 'resource' || !result.bytes) throw new Error(result.message || 'Missing image');
+      blob = new Blob([result.bytes], { type: result.mimeType });
+      void storeImage(path, blob);
+    }
     if (disposed || current !== generation || requestedSession !== resourceSession) throw new Error('Expired image');
-    if (result.type !== 'resource' || !result.bytes) throw new Error(result.message || 'Missing image');
-    const blob = new Blob([result.bytes], { type: result.mimeType });
     const item = { url: URL.createObjectURL(blob), size: blob.size };
     imageCache.set(path, item); imageCacheBytes += item.size; return item;
   })();
@@ -355,12 +411,18 @@ async function render() {
   }
   host.replaceChildren(fragment); fitPages();
   renderNoteAreas();
+  applySearchHighlights();
   const visible = [...host.querySelectorAll('img[data-resource]')].filter(img => {
     const clip = (img.closest('.freader-content') || img.closest('.page')).getBoundingClientRect();
     return [...img.getClientRects()].some(r => r.width > 0 && r.height > 0 && r.right > clip.left + .1 && r.left < clip.right - .1 && r.bottom > clip.top + .1 && r.top < clip.bottom - .1);
   });
   activeImagePaths = new Set(visible.map(img => img.dataset.resource));
   trimImages();
+  // FReader: 글자는 바로 보이게 하고(쪽 위치도 바로 알림), 사진은 이어서 채운다.
+  // 사진까지 다 채워지면 'pageReady'를 알린다 (앱은 이때 이 쪽의 화면을 저장해 다음에 먼저 띄움).
+  void loadVisibleImages(serial, visible);
+}
+async function loadVisibleImages(serial, visible) {
   // Bounded decoding keeps temporary pixel buffers small for photo-heavy files.
   // FReader: 두 장씩 함께 불러와 사진이 많은 쪽도 빨리 채운다.
   const queue = [...visible];
@@ -377,7 +439,10 @@ async function render() {
   };
   await Promise.all([worker(), worker()]);
   if (disposed || serial !== renderSerial) return;
-  if (serial === renderSerial) trimImages();
+  trimImages();
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  if (disposed || serial !== renderSerial) return;
+  emit('pageReady', { page, position: `${options.format === 'doc' ? 'doc' : 'docx'}:${page}` });
   prefetchNearby(serial);
 }
 // FReader: 지금 쪽을 다 그린 뒤 다음 쪽(두 쪽 보기면 두 쪽)과 이전 쪽의 그림을 미리 준비해 둔다.
@@ -490,6 +555,94 @@ function destroy() {
   clearPages(); pendingEvents = [];
 }
 const resizeObserver = new ResizeObserver(fitPages); resizeObserver.observe(host);
+// ── 파일 내 단어 검색: 찾은 곳은 노란 형광펜(CSS Highlight), 지금 보는 결과는 조금 진하게 ──
+let searchState = { query: '', results: [], current: -1 };
+function searchNorm(text) { return text.replace(/\u00a0/g, ' ').toLowerCase(); }
+function textBlocksOf(root) {
+  const blocks = []; let current = null;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const el = node.parentElement;
+      if (!el || !node.data) return NodeFilter.FILTER_REJECT;
+      if (el.closest('.docx-note-area, .odr-list-marker, style, script, .freader-missing-image')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const key = node.parentElement.closest('x-p, li, td, th') || node.parentElement;
+    if (!current || current.key !== key) { current = { key, nodes: [], text: '' }; blocks.push(current); }
+    current.nodes.push({ node, start: current.text.length });
+    current.text += node.data;
+  }
+  return blocks;
+}
+function pointAt(block, index) {
+  let lo = 0;
+  for (let i = 0; i < block.nodes.length; i++) if (block.nodes[i].start <= index) lo = i;
+  const item = block.nodes[lo];
+  return { node: item.node, offset: Math.min(item.node.data.length, index - item.start) };
+}
+async function search(query) {
+  const q = searchNorm(String(query || '').trim());
+  searchState = { query: q, results: [], current: -1 };
+  if (!q || !pages.length) { applySearchHighlights(); return { count: 0, pages: [] }; }
+  const pageOf = new Map();
+  pages.forEach((entry, index) => {
+    if (!pageOf.has(entry.source)) pageOf.set(entry.source, []);
+    pageOf.get(entry.source)[entry.column] = index;
+  });
+  const results = [];
+  for (const [source, columns] of pageOf) {
+    const inner = source.querySelector('.freader-columns') || source.querySelector('.odr-page-inner');
+    if (!inner) continue;
+    const entry = pages[columns.find(i => i != null)];
+    const innerRect = inner.getBoundingClientRect();
+    const scale = inner.offsetWidth ? innerRect.width / inner.offsetWidth : 1;
+    const stride = (entry.columnStride || entry.bodyWidth || inner.offsetWidth) * (scale || 1);
+    for (const block of textBlocksOf(inner)) {
+      const hay = searchNorm(block.text);
+      for (let at = hay.indexOf(q); at >= 0; at = hay.indexOf(q, at + q.length)) {
+        const start = pointAt(block, at), end = pointAt(block, at + q.length);
+        const range = document.createRange();
+        try { range.setStart(start.node, start.offset); range.setEnd(end.node, end.offset); } catch (_) { continue; }
+        const rect = [...range.getClientRects()].find(r => r.width > 0 || r.height > 0);
+        let column = 0;
+        if (rect && stride > 0) column = Math.max(0, Math.floor((rect.left - innerRect.left + 0.5) / stride));
+        const pageIndex = columns[Math.min(column, columns.length - 1)] ?? columns.find(i => i != null);
+        if (pageIndex == null) continue;
+        results.push({ page: pageIndex, start, end });
+      }
+    }
+  }
+  results.sort((a, b) => a.page - b.page);
+  searchState.results = results;
+  applySearchHighlights();
+  return { count: results.length, pages: results.map(r => r.page) };
+}
+async function showSearchResult(index) {
+  const r = searchState.results[index]; if (!r) return;
+  searchState.current = index;
+  const shown = [...host.children].some(frame => Number(frame.dataset.page) === r.page);
+  if (shown) { applySearchHighlights(); return; }
+  await display(r.page);
+}
+function clearSearch() { searchState = { query: '', results: [], current: -1 }; applySearchHighlights(); }
+function applySearchHighlights() {
+  if (typeof CSS === 'undefined' || !CSS.highlights || typeof Highlight === 'undefined') return;
+  CSS.highlights.delete('freader-search'); CSS.highlights.delete('freader-search-current');
+  if (!searchState.results.length) return;
+  const visible = new Set([...host.children].map(frame => Number(frame.dataset.page)));
+  const all = [], current = [];
+  searchState.results.forEach((r, i) => {
+    if (!visible.has(r.page) || !r.start.node.isConnected || !host.contains(r.start.node)) return;
+    const range = document.createRange();
+    try { range.setStart(r.start.node, r.start.offset); range.setEnd(r.end.node, r.end.offset); } catch (_) { return; }
+    (i === searchState.current ? current : all).push(range);
+  });
+  if (all.length) CSS.highlights.set('freader-search', new Highlight(...all));
+  if (current.length) CSS.highlights.set('freader-search-current', new Highlight(...current));
+}
 window.freaderDocx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
+  search, showSearchResult, clearSearch,
   getState: () => ({ ready, page, count: pages.length, received, spread: options.spread, awaitingPassword, unavailableImages, imageCacheBytes, cachedImages: imageCache.size, visibleImages: activeImagePaths.size, maxBytes: MAX_BYTES, format: detectedFormat }) };
 window.addEventListener('pagehide', destroy, { once: true });
