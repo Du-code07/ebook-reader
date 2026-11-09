@@ -434,15 +434,22 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
                 try {
                     val bg = (call.argument<Number>("background") ?: 0xFF000000L).toLong().toInt()
-                    val bmp = Bitmap.createBitmap(webView.width, webView.height, Bitmap.Config.ARGB_8888)
+                    val scale = ((call.argument<Number>("scale") ?: 1.0).toFloat()).coerceIn(0.25f, 1f)
+                    val bw = maxOf(1, (webView.width * scale).toInt())
+                    val bh = maxOf(1, (webView.height * scale).toInt())
+                    val bmp = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
                     val canvas = Canvas(bmp)
                     canvas.drawColor(bg)
+                    canvas.scale(bw.toFloat() / webView.width, bh.toFloat() / webView.height)
                     canvas.translate(-webView.scrollX.toFloat(), -webView.scrollY.toFloat())
                     webView.draw(canvas)
+                    val transparent = (bg ushr 24) == 0
                     Thread {
                         try {
                             val out = java.io.ByteArrayOutputStream()
-                            bmp.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                            // 배경이 투명(종이 질감 위)이면 투명도를 살리는 PNG로
+                            if (transparent) bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                            else bmp.compress(Bitmap.CompressFormat.JPEG, 88, out)
                             bmp.recycle()
                             val bytes = out.toByteArray()
                             runOnUiThread { result.success(bytes) }
