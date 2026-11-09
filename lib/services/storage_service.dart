@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -117,16 +117,44 @@ class StorageService {
     return prefs.getBool('dark_mode') ?? false;
   }
 
-  // 6. 앱 언어 설정 ('ko': 한국어, 'en': 영어, 'zh': 중국어, 'ja': 일본어)
-  static Future<void> setAppLanguage(String langCode) async {
-    appLangNotifier.value = langCode;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('app_language_code', langCode);
+  // 6. 앱 언어 설정 ('system': 기본 시스템, 'ko': 한국어, 'en': 영어, 'zh': 중국어, 'ja': 일본어)
+  // 저장값은 'system'일 수 있고, 실제 화면 문구에 쓰는 언어(appLangNotifier)는 항상 ko/en/zh/ja 중 하나다.
+  static const List<String> supportedAppLanguages = ['ko', 'en', 'zh', 'ja'];
+
+  /// 사용자가 고른 언어 설정값 ('system' 포함). 아직 고른 적 없으면 null.
+  static String? appLangSetting;
+
+  /// 휴대폰(시스템) 언어 → 앱이 지원하는 언어. 지원하지 않는 언어면 영어.
+  static String resolveSystemLanguage() {
+    for (final locale in WidgetsBinding.instance.platformDispatcher.locales) {
+      final code = locale.languageCode.toLowerCase();
+      if (supportedAppLanguages.contains(code)) return code;
+    }
+    return 'en';
   }
 
+  /// 설정값('system' 포함) → 실제로 쓸 언어 코드
+  static String resolveAppLanguage(String setting) => setting == 'system' ? resolveSystemLanguage() : setting;
+
+  static Future<void> setAppLanguage(String setting) async {
+    appLangSetting = setting;
+    appLangNotifier.value = resolveAppLanguage(setting);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('app_language_code', setting);
+  }
+
+  /// 아직 언어를 고른 적이 없는지 (앱 처음 시작 시 언어 선택 화면 표시용)
+  static Future<bool> needsLanguageSelection() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('app_language_code') == null;
+  }
+
+  /// 실제로 쓸 언어 코드 (ko/en/zh/ja). 고른 적이 없으면 시스템 언어를 따른다.
   static Future<String> getAppLanguage() async {
     final prefs = await SharedPreferences.getInstance();
-    final code = prefs.getString('app_language_code') ?? 'ko';
+    final setting = prefs.getString('app_language_code') ?? 'system';
+    appLangSetting = prefs.getString('app_language_code');
+    final code = resolveAppLanguage(setting);
     appLangNotifier.value = code;
     return code;
   }

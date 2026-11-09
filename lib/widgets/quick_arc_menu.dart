@@ -29,10 +29,13 @@ class QuickArcMenuItem {
 /// 이 위젯은 화면 아래 모서리에 Positioned(right 또는 left, bottom)로 배치하는 것을 전제로 한다.
 /// [leftSide]가 true면 왼쪽 아래에 두는 것으로 보고 호를 좌우 반전해서 그린다.
 class QuickArcMenu extends StatefulWidget {
-  const QuickArcMenu({super.key, required this.items, this.leftSide = false});
+  const QuickArcMenu({super.key, required this.items, this.leftSide = false, this.initialFirstIndex = 0});
 
   final List<QuickArcMenuItem> items;
   final bool leftSide;
+
+  /// 메뉴를 열 때 호의 시작(아래쪽)에 먼저 보일 항목 번호. 앞 항목들은 호를 밀면 나타난다.
+  final int initialFirstIndex;
 
   /// 메뉴 상자 높이 (열렸을 때 호가 차지하는 높이). 다른 UI가 이 영역을 비켜 가도록 할 때 사용.
   static double get boxHeight => _QuickArcMenuState._boxH;
@@ -105,9 +108,16 @@ class _QuickArcMenuState extends State<QuickArcMenu>
     return math.max(0.0, needed);
   }
 
+  /// 열 때 먼저 보일 위치로 스크롤 각도를 맞춘다
+  void _resetScroll() {
+    _snapCtrl.stop();
+    _scrollDeg = (widget.initialFirstIndex * _stepDeg).clamp(0.0, _maxScrollDeg).toDouble();
+  }
+
   @override
   void initState() {
     super.initState();
+    _resetScroll();
     _snapCtrl.addListener(() {
       final t = Curves.easeOut.transform(_snapCtrl.value);
       setState(() => _scrollDeg = _snapFrom + (_snapTo - _snapFrom) * t);
@@ -122,7 +132,10 @@ class _QuickArcMenuState extends State<QuickArcMenu>
   }
 
   void _toggle() {
-    setState(() => _open = !_open);
+    setState(() {
+      _open = !_open;
+      if (_open) _resetScroll(); // 열 때마다 정해진 항목부터 보이게
+    });
     if (_open) {
       _openCtrl.forward();
     } else {

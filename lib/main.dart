@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'screens/pdf_and_image_viewer.dart';
 import 'screens/reader_screen.dart';
+import 'screens/language_select_screen.dart';
 import 'services/storage_service.dart';
 
 void main() async {
@@ -16,25 +17,30 @@ void main() async {
   PaintingBinding.instance.imageCache.maximumSizeBytes = 300 << 20;
   final initialDark = await StorageService.getDarkMode();
   final initialLang = await StorageService.getAppLanguage();
-  runApp(MyEbookApp(initialDark: initialDark, initialLang: initialLang));
+  // 앱 처음 시작 시(언어를 고른 적 없을 때) 언어 선택 화면부터 보여 준다
+  final needsLanguage = await StorageService.needsLanguageSelection();
+  runApp(MyEbookApp(initialDark: initialDark, initialLang: initialLang, needsLanguage: needsLanguage));
 }
 
 class MyEbookApp extends StatefulWidget {
   final bool initialDark;
   final String initialLang;
+  final bool needsLanguage;
   const MyEbookApp({
     super.key,
     required this.initialDark,
     required this.initialLang,
+    this.needsLanguage = false,
   });
 
   @override
   State<MyEbookApp> createState() => _MyEbookAppState();
 }
 
-class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateMixin {
+class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late bool _isDarkMode;
   late String _appLang;
+  late bool _needsLanguage;
   late final AnimationController _rotationAnimController;
   late final Animation<double> _rotationFadeAnim;
   late final Animation<double> _rotationScaleAnim;
@@ -43,6 +49,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     super.initState();
     _isDarkMode = widget.initialDark;
     _appLang = widget.initialLang;
+    _needsLanguage = widget.needsLanguage;
+    WidgetsBinding.instance.addObserver(this);
     _rotationAnimController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 240),
@@ -66,6 +74,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   @override
   void dispose() {
     StorageService.desiredLandscapeNotifier.removeListener(_onDesiredOrientationChanged);
+    WidgetsBinding.instance.removeObserver(this);
     _rotationAnimController.dispose();
     super.dispose();
   }
@@ -76,9 +85,20 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     await StorageService.setDarkMode(nextVal);
   }
 
-  void _changeAppLanguage(String newLang) async {
-    setState(() => _appLang = newLang);
-    await StorageService.setAppLanguage(newLang);
+  /// [setting]: 'system'(기본 시스템) 또는 'ko'/'en'/'zh'/'ja'
+  void _changeAppLanguage(String setting) async {
+    setState(() => _appLang = StorageService.resolveAppLanguage(setting));
+    await StorageService.setAppLanguage(setting);
+  }
+
+  // '기본 시스템'일 때 휴대폰 언어를 바꾸면 앱 문구도 따라 바뀐다
+  @override
+  void didChangeLocales(List<Locale>? locales) {
+    final setting = StorageService.appLangSetting ?? 'system';
+    if (setting != 'system') return;
+    final code = StorageService.resolveSystemLanguage();
+    StorageService.appLangNotifier.value = code;
+    if (mounted && code != _appLang) setState(() => _appLang = code);
   }
 
   @override
@@ -106,12 +126,19 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
           ),
         );
       },
-      home: BookshelfScreen(
-        isDarkMode: _isDarkMode,
-        appLang: _appLang,
-        onToggleDarkMode: _toggleDarkMode,
-        onChangeLanguage: _changeAppLanguage,
-      ),
+      home: _needsLanguage
+          ? LanguageSelectScreen(
+              onConfirmed: (setting) {
+                _changeAppLanguage(setting);
+                setState(() => _needsLanguage = false);
+              },
+            )
+          : BookshelfScreen(
+              isDarkMode: _isDarkMode,
+              appLang: _appLang,
+              onToggleDarkMode: _toggleDarkMode,
+              onChangeLanguage: _changeAppLanguage,
+            ),
     );
   }
 }
@@ -1958,6 +1985,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
   /// - 선택된 언어에 따라 다이얼로그 및 앱 전체 문구 실시간 번역 (#1)
   Future<void> _showGlobalSettingsDialog() async {
     String currentLang = widget.appLang;
+    String currentLangSetting = StorageService.appLangSetting ?? 'system';
     bool hideExt = _hideFileExtension;
     String viewMode = _bookshelfViewMode;
 
@@ -1996,6 +2024,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                     spacing: 8,
                     runSpacing: 6,
                     children: [
+                      // '기본 시스템'(휴대폰 언어 따라가기)은 휴대폰 언어로 표시
+                      {'code': 'system', 'label': languageOptionLabel('system')},
                       {'code': 'ko', 'label': '한국어'},
                       {'code': 'en', 'label': 'English'},
                       {'code': 'zh', 'label': '中文'},
@@ -2004,9 +2034,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
                       final code = item['code']!;
                       return ChoiceChip(
                         label: Text(item['label']!),
-                        selected: currentLang == code,
+                        selected: currentLangSetting == code,
                         onSelected: (_) {
-                          setModalState(() => currentLang = code);
+                          setModalState(() {
+                            currentLangSetting = code;
+                            currentLang = StorageService.resolveAppLanguage(code);
+                          });
                           widget.onChangeLanguage(code);
                         },
                       );

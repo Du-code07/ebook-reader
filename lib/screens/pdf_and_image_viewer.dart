@@ -11,6 +11,7 @@ import '../services/storage_service.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
 import '../widgets/sheet_pull_to_close.dart';
+import '../services/pdf_export_service.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/vertical_page_swipe.dart';
 import 'reader_screen.dart';
@@ -966,6 +967,59 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   /// 5. 위 상황에서 진행바가 메모 도구모음 쪽에서 비켜 주는 폭 (메모 도구모음 폭 48 + 간격 8)
   static const double _memoBarSideInset = 54.0;
+
+  /// 파일 내보내기: 모든 페이지 + 직접 쓴 필기·텍스트 메모를 PDF 한 파일로 저장 (다운로드/FReader 폴더)
+  Future<void> _exportToPdf() async {
+    if (_imagePages.isEmpty) return;
+    final Size view = MediaQuery.sizeOf(context);
+    final progress = showExportProgress(context, _tr);
+    progress.update(_tr('페이지 준비 중…', 'Preparing pages…', '正在准备页面…', 'ページを準備中…'), null);
+    try {
+      final pages = <Map<String, Object?>>[];
+      for (int i = 0; i < _imagePages.length; i++) {
+        final strokes = _memoStrokesByPage[i] ?? const <MemoStroke>[];
+        // 필기 굵기는 화면에 그린 폭 기준이므로, 그때의 페이지 표시 폭을 함께 넘긴다
+        double refWidth = 0;
+        if (strokes.isNotEmpty) {
+          final Size img = _pageImageSizes[i] ?? await _getImageDimension(_imagePages[i]);
+          if (img.width > 0 && img.height > 0) {
+            refWidth = applyBoxFit(BoxFit.contain, img, view).destination.width;
+          }
+        }
+        pages.add({
+          'image': _imagePages[i].path,
+          'strokes': strokes.map(PdfExportService.strokeToMap).toList(),
+          'refWidth': refWidth,
+          'note': _memoNotesByPage[i] ?? '',
+        });
+      }
+      final saved = await PdfExportService.buildPdf(
+        pages: pages,
+        fileName: PdfExportService.exportFileName(widget.title, _tr),
+        onProgress: (cur, total) => progress.update('$cur / $total', total > 0 ? cur / total : null),
+      );
+      progress.close();
+      _showExportResult(saved, null);
+    } catch (e) {
+      progress.close();
+      _showExportResult(null, e);
+    }
+  }
+
+  void _showExportResult(String? savedPath, Object? error) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 5),
+        content: Text(
+          error == null
+              ? _tr('PDF로 내보냈습니다: $savedPath', 'Exported to PDF: $savedPath', '已导出为 PDF：$savedPath', 'PDFに書き出しました: $savedPath')
+              : _tr('PDF 내보내기 실패: $error', 'PDF export failed: $error', 'PDF 导出失败：$error', 'PDF書き出し失敗: $error'),
+        ),
+      ),
+    );
+  }
 
   Future<void> _openPenSettings() {
     return showPenSettingsPanel(
@@ -2346,6 +2400,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             visualDensity: VisualDensity.compact,
                             padding: btnPadding,
                             constraints: btnConstraints,
+                            icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 20),
+                            tooltip: _tr('파일 내보내기', 'Export File', '导出文件', 'ファイルを書き出す'),
+                            onPressed: _exportToPdf,
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: btnPadding,
+                            constraints: btnConstraints,
                             icon: const Icon(Icons.tune, color: Colors.white, size: 20),
                             tooltip: _tr('뷰어 표시 설정', 'Viewer Settings', '阅读器显示设置', 'ビューア表示設定'),
                             onPressed: _showViewerSettingsSheet,
@@ -2401,6 +2463,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               child: QuickArcMenu(
                 key: ValueKey('quick_menu_$_quickMenuSide'),
                 leftSide: _quickMenuSide == 'left',
+                // 열면 '화면 회전'(4번째)부터 '북마크'까지 먼저 보이고, 호를 밀면 화면 잠금·다음/이전 파일
+                initialFirstIndex: 3,
                 items: _buildQuickMenuItems(),
               ),
             ),
