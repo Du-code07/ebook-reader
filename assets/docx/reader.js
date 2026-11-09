@@ -270,7 +270,17 @@ async function preparePages(html, current) {
     if (inner.classList.contains('docx-layout')) settleDocxPageBreaks(inner, columnStride);
     const columns = Math.max(1, Math.ceil((inner.scrollWidth + columnGap - 1) / columnStride));
     if (result.length + columns > 10000) throw new Error('표시할 Word 문서 페이지 수가 너무 많습니다.');
-    for (let column = 0; column < columns; column++) result.push({ source, column, width, height, bodyWidth, columnStride, sectionPageCount: columns });
+    // FReader: 쪽마다 들어 있는 그림 목록 (다음·이전 쪽 그림을 미리 불러오는 데 사용)
+    const columnImages = Array.from({ length: columns }, () => new Set());
+    const innerLeft = inner.getBoundingClientRect().left;
+    for (const img of inner.querySelectorAll('img[data-resource]')) {
+      for (const r of img.getClientRects()) {
+        if (!(r.width > 0 && r.height > 0)) continue;
+        const first = Math.floor((r.left - innerLeft + 0.5) / columnStride), last = Math.floor((r.right - innerLeft - 0.5) / columnStride);
+        for (let c = Math.max(0, first); c <= Math.min(columns - 1, last); c++) columnImages[c].add(img.dataset.resource);
+      }
+    }
+    for (let column = 0; column < columns; column++) result.push({ source, column, width, height, bodyWidth, columnStride, sectionPageCount: columns, images: [...columnImages[column]] });
   }
   pages = result;
 }
@@ -368,6 +378,30 @@ async function render() {
   await Promise.all([worker(), worker()]);
   if (disposed || serial !== renderSerial) return;
   if (serial === renderSerial) trimImages();
+  prefetchNearby(serial);
+}
+// FReader: 지금 쪽을 다 그린 뒤 다음 쪽(두 쪽 보기면 두 쪽)과 이전 쪽의 그림을 미리 준비해 둔다.
+// 그림 변환(벡터 그림 등)은 오래 걸리므로 넘기는 순간 빈 칸으로 보이지 않게 한다.
+async function prefetchNearby(serial) {
+  const span = options.spread ? 2 : 1;
+  const order = [page + span, page + span + 1, page - 1, page + 2 * span, page - span - 1];
+  const wanted = [];
+  for (const index of order) {
+    if (index < 0 || index >= pages.length || index === page) continue;
+    for (const path of pages[index].images || []) if (!wanted.includes(path)) wanted.push(path);
+  }
+  for (const path of wanted.slice(0, 16)) {
+    if (disposed || serial !== renderSerial) return;
+    if (imageCache.has(path) || brokenImages.has(path)) continue;
+    try {
+      const item = await imageFor(path);
+      // 사진은 미리 풀어 두면 넘길 때 바로 보인다 (크기가 큰 것은 메모리를 아끼기 위해 건너뜀)
+      if (item.size < 6 * 1024 * 1024 && serial === renderSerial) {
+        const probe = new Image(); probe.src = item.url; await probe.decode().catch(() => {});
+      }
+    } catch (_) {}
+    if (imageCacheBytes > IMAGE_CACHE_BYTES * 0.9) break;
+  }
 }
 // FReader: 이 쪽에 보이는 각주 번호의 본문을 쪽 아래에 표시 (Word처럼 본문 아래, 자리가 없으면 아래 여백)
 function renderNoteAreas() {

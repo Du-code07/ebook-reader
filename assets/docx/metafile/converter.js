@@ -13872,6 +13872,21 @@ function gdiDevicePixelY(r) {
 function activateGdiMappingMode(r) {
   r.useMappingMode = true;
 }
+// FReader: GDI ignores window/viewport extents unless the map mode is MM_ISOTROPIC/MM_ANISOTROPIC.
+// Keep the extents a record declares and use them only in those modes (default MM_TEXT is 1:1).
+function freaderSyncExtents(r) {
+  if (!r.freaderExt) return;
+  const scaled = r.freaderMapMode === 7 || r.freaderMapMode === 8;
+  r.windowExt = scaled ? { ...r.freaderExt.window } : { cx: 1, cy: 1 };
+  r.viewportExt = scaled ? { ...r.freaderExt.viewport } : { cx: 1, cy: 1 };
+}
+function freaderExt(r) {
+  if (!r.freaderExt) {
+    r.freaderExt = { window: { ...r.windowExt }, viewport: { ...r.viewportExt } };
+    if (r.freaderMapMode == null) r.freaderMapMode = 1;
+  }
+  return r.freaderExt;
+}
 function hasWorldRotation(r) {
   const wt = r.state.worldTransform;
   return wt[1] !== 0 || wt[2] !== 0;
@@ -14120,7 +14135,8 @@ function fmt(n) {
   return Object.is(r, -0) ? "0" : String(r);
 }
 function matrixAttr(m) {
-  return `matrix(${m.map(fmt).join(" ")})`;
+  // FReader: keep small scale factors precise (e.g. EMU→pixel 1/1524 became 0.001 and drew shapes 1.5× too big)
+  return `matrix(${m.map((v, i) => i < 4 && Number.isFinite(v) && v !== 0 && Math.abs(v) < 1 ? String(Number(v.toPrecision(6))) : fmt(v)).join(" ")})`;
 }
 function hex2(n) {
   return Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
@@ -23617,8 +23633,10 @@ function handleCoordinateRecord(rCtx, recType, dataOff, recSize) {
   switch (recType) {
     case EMR_SETWINDOWEXTEX: {
       if (recSize >= 16) {
-        rCtx.windowExt.cx = view.getInt32(dataOff, true);
-        rCtx.windowExt.cy = view.getInt32(dataOff + 4, true);
+        const e = freaderExt(rCtx).window;
+        e.cx = view.getInt32(dataOff, true);
+        e.cy = view.getInt32(dataOff + 4, true);
+        freaderSyncExtents(rCtx);
         activateGdiMappingMode(rCtx);
       }
       return true;
@@ -23627,14 +23645,17 @@ function handleCoordinateRecord(rCtx, recType, dataOff, recSize) {
       if (recSize >= 16) {
         rCtx.windowOrg.x = view.getInt32(dataOff, true);
         rCtx.windowOrg.y = view.getInt32(dataOff + 4, true);
+        freaderExt(rCtx); freaderSyncExtents(rCtx);
         activateGdiMappingMode(rCtx);
       }
       return true;
     }
     case EMR_SETVIEWPORTEXTEX: {
       if (recSize >= 16) {
-        rCtx.viewportExt.cx = view.getInt32(dataOff, true);
-        rCtx.viewportExt.cy = view.getInt32(dataOff + 4, true);
+        const e = freaderExt(rCtx).viewport;
+        e.cx = view.getInt32(dataOff, true);
+        e.cy = view.getInt32(dataOff + 4, true);
+        freaderSyncExtents(rCtx);
         activateGdiMappingMode(rCtx);
       }
       return true;
@@ -23643,6 +23664,7 @@ function handleCoordinateRecord(rCtx, recType, dataOff, recSize) {
       if (recSize >= 16) {
         rCtx.viewportOrg.x = view.getInt32(dataOff, true);
         rCtx.viewportOrg.y = view.getInt32(dataOff + 4, true);
+        freaderExt(rCtx); freaderSyncExtents(rCtx);
         activateGdiMappingMode(rCtx);
       }
       return true;
@@ -23650,6 +23672,7 @@ function handleCoordinateRecord(rCtx, recType, dataOff, recSize) {
     case EMR_SETMAPMODE: {
       if (recSize >= 12) {
         const mode = view.getUint32(dataOff, true);
+        freaderExt(rCtx); rCtx.freaderMapMode = mode; freaderSyncExtents(rCtx);
         if (mode === 8 || mode === 7) {
           activateGdiMappingMode(rCtx);
         }
@@ -23662,12 +23685,14 @@ function handleCoordinateRecord(rCtx, recType, dataOff, recSize) {
         const xDenom = view.getInt32(dataOff + 4, true);
         const yNum = view.getInt32(dataOff + 8, true);
         const yDenom = view.getInt32(dataOff + 12, true);
+        const e = freaderExt(rCtx).viewport;
         if (xDenom !== 0) {
-          rCtx.viewportExt.cx = Math.round(rCtx.viewportExt.cx * xNum / xDenom);
+          e.cx = Math.round(e.cx * xNum / xDenom);
         }
         if (yDenom !== 0) {
-          rCtx.viewportExt.cy = Math.round(rCtx.viewportExt.cy * yNum / yDenom);
+          e.cy = Math.round(e.cy * yNum / yDenom);
         }
+        freaderSyncExtents(rCtx);
         activateGdiMappingMode(rCtx);
       }
       return true;
@@ -23678,12 +23703,14 @@ function handleCoordinateRecord(rCtx, recType, dataOff, recSize) {
         const xDenom = view.getInt32(dataOff + 4, true);
         const yNum = view.getInt32(dataOff + 8, true);
         const yDenom = view.getInt32(dataOff + 12, true);
+        const e = freaderExt(rCtx).window;
         if (xDenom !== 0) {
-          rCtx.windowExt.cx = Math.round(rCtx.windowExt.cx * xNum / xDenom);
+          e.cx = Math.round(e.cx * xNum / xDenom);
         }
         if (yDenom !== 0) {
-          rCtx.windowExt.cy = Math.round(rCtx.windowExt.cy * yNum / yDenom);
+          e.cy = Math.round(e.cy * yNum / yDenom);
         }
+        freaderSyncExtents(rCtx);
         activateGdiMappingMode(rCtx);
       }
       return true;

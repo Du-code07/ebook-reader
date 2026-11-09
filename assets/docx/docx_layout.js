@@ -264,7 +264,68 @@ function insertNoteRefs(p, notes) {
     if (!placed) p.appendChild(sup);
   }
 }
+// FReader: 사진 위에 그린 네모·동그라미 같은 Word 도형. 문단 기준 위치에 겹쳐 그린다.
+// 가로 위치는 본문(단/여백) 기준이므로, 문단 들여쓰기만큼은 fitDocxContent에서 빼 준다.
+function insertDocxShapes(p, hint, layout) {
+  const emu = v => (Number(v) || 0) / 9525;
+  let pageLeft = 0;
+  const section = (layout.sections || []).find(sec => sec.end >= hint.index);
+  const pgMar = section?.props?.pgMar;
+  if (pgMar) pageLeft = (Number(pgMar.left) || 0) / 15;
+  for (const shape of hint.shapes) {
+    const h = shape.horizontal || {}, v = shape.vertical || {};
+    if (h.offset == null || v.offset == null) continue;
+    if (!['column', 'margin', 'page', 'character'].includes(h.relativeFrom)) continue;
+    if (!['paragraph', 'line'].includes(v.relativeFrom)) continue;
+    const box = p.ownerDocument.createElement('div');
+    box.className = 'docx-shape';
+    const width = emu(shape.width), height = emu(shape.height), line = Math.max(0.5, emu(shape.strokeWidth));
+    let left = emu(h.offset);
+    if (h.relativeFrom === 'page') left -= pageLeft;
+    box.dataset.docxShapeLeft = String(left);
+    Object.assign(box.style, {
+      position: 'absolute', left: `${left}px`, top: `${emu(v.offset)}px`, width: `${width}px`, height: `${height}px`,
+      boxSizing: 'border-box', pointerEvents: 'none', zIndex: shape.behind ? '0' : '2',
+      border: shape.stroke && shape.stroke !== 'none' ? `${line}px solid ${shape.stroke}` : 'none',
+      background: shape.fill && shape.fill !== 'none' ? shape.fill : 'transparent',
+      borderRadius: shape.geom === 'ellipse' ? '50%' : shape.geom === 'roundRect' ? `${Math.min(width, height) / 6}px` : '0',
+    });
+    if (!p.style.position) p.style.position = 'relative';
+    p.appendChild(box);
+  }
+}
 // FReader: 사진 상자(크기가 정해진 div) 안에서 원본을 키우고 옮겨, Word에서 자른 부분만 보이게 한다.
+// FReader: Word에서 돌리거나 뒤집은 사진. 사진 상자 안에 원래(돌리기 전) 크기의 상자를 만들어 돌린다.
+// 90°/270°는 Word처럼 자리를 돌린 모양(가로·세로 바뀜)으로 차지한다. 크기는 %로 잡아 이후 축소에도 따라간다.
+function rotateDocxImage(img, d) {
+  const frame = img.parentElement;
+  if (!frame || frame.localName !== 'div' || !frame.style.width || !frame.style.height) return;
+  const W = parseFloat(frame.style.width), H = parseFloat(frame.style.height);
+  if (!(W > 0 && H > 0)) return;
+  const rot = ((+d.rotation || 0) % 360 + 360) % 360;
+  const quarter = Math.abs(rot - 90) < 0.5 || Math.abs(rot - 270) < 0.5;
+  const unit = frame.style.width.replace(/^[\d.]+/, '') || 'px';
+  const inner = frame.ownerDocument.createElement('div');
+  inner.dataset.docxRotate = 'true';
+  if (quarter) {
+    frame.style.width = `${H}${unit}`; frame.style.height = `${W}${unit}`;
+    Object.assign(inner.style, { position: 'absolute', width: `${W / H * 100}%`, height: `${H / W * 100}%`,
+      left: `${(H - W) / 2 / H * 100}%`, top: `${(W - H) / 2 / W * 100}%` });
+  } else {
+    Object.assign(inner.style, { position: 'absolute', left: '0', top: '0', width: '100%', height: '100%' });
+    if (rot) frame.style.overflow = 'visible';
+  }
+  const turns = [];
+  if (rot) turns.push(`rotate(${rot}deg)`);
+  if (d.flipH) turns.push('scaleX(-1)');
+  if (d.flipV) turns.push('scaleY(-1)');
+  inner.style.transform = turns.join(' ');
+  inner.style.transformOrigin = '50% 50%';
+  inner.style.overflow = 'hidden';
+  if (!frame.style.position || frame.style.position === 'static') frame.style.position = 'relative';
+  img.replaceWith(inner); inner.appendChild(img);
+  if (!d.crop) Object.assign(img.style, { position: 'absolute', left: '0', top: '0', width: '100%', height: '100%', maxWidth: 'none', maxHeight: 'none' });
+}
 function cropDocxImage(img, crop) {
   const l = (+crop.l || 0) / 1e5, t = (+crop.t || 0) / 1e5, r = (+crop.r || 0) / 1e5, b = (+crop.b || 0) / 1e5;
   const w = 1 - l - r, h = 1 - t - b;
@@ -300,8 +361,12 @@ export function applyDocxLayout(root, layout) {
     const pictures = (hint.drawings || []).filter(d => d.picture);
     const cropPairs = images.length === pictures.length ? pictures.map((d, i) => [images[i], d])
       : images.length === hint.drawingCount ? (hint.drawings || []).map(d => [images[d.index], d]) : [];
-    for (const [img, d] of cropPairs) if (img && d.crop) cropDocxImage(img, d.crop);
+    for (const [img, d] of cropPairs) {
+      if (img && (d.rotation || d.flipH || d.flipV)) rotateDocxImage(img, d);
+      if (img && d.crop) cropDocxImage(img, d.crop);
+    }
     if (hint.notes) insertNoteRefs(p, hint.notes);
+    if (hint.shapes) insertDocxShapes(p, hint, layout);
     if (images.length === hint.drawingCount) for (const drawing of hint.drawings || []) {
       const img = images[drawing.index], frame = img?.parentElement;
       if (drawing.chartXml && img) replaceDocxChart(img, drawing, layout.themeColors || {});
@@ -324,7 +389,8 @@ export function applyDocxLayout(root, layout) {
       for (const br of [...(hint.drawingBreaks || [])].reverse()) {
         const img = images[br.index], paragraph = img?.closest('x-p');
         if (!paragraph || paragraph.closest('td,th')) continue;
-        const frame = img.parentElement?.localName === 'div' ? img.parentElement : img;
+        const holder = img.parentElement?.dataset?.docxRotate ? img.parentElement.parentElement : img.parentElement;
+        const frame = holder?.localName === 'div' ? holder : img;
         const range = paragraph.ownerDocument.createRange();
         range.setStart(paragraph, 0); range.setEndBefore(frame);
         const before = range.cloneContents();
@@ -350,6 +416,18 @@ export function applyDocxLayout(root, layout) {
 // CSS columns that overflow used to appear over text on the following page.
 export function fitDocxContent(inner, bodyWidth, bodyHeight) {
   inner.style.width = `${bodyWidth}px`;
+  // 도형의 가로 위치: 본문 왼쪽 기준 → 문단(또는 표 칸) 안쪽 기준으로 바꾼다
+  for (const box of inner.querySelectorAll('.docx-shape[data-docx-shape-left]')) {
+    let inset = 0;
+    for (let el = box.parentElement; el && el !== inner; el = el.parentElement) {
+      const css = getComputedStyle(el);
+      inset += (parseFloat(css.marginLeft) || 0) + (parseFloat(css.paddingLeft) || 0) + (parseFloat(css.borderLeftWidth) || 0);
+      if (el.localName === 'td' || el.localName === 'th') break;
+    }
+    // 절대 위치의 기준은 문단의 안쪽(테두리 안) 가장자리이므로 문단 자신의 안쪽 여백은 빼지 않는다
+    inset -= parseFloat(getComputedStyle(box.parentElement).paddingLeft) || 0;
+    box.style.left = `${Number(box.dataset.docxShapeLeft) - inset}px`;
+  }
   const anchors = [];
   for (const frame of inner.querySelectorAll('[data-docx-anchor]')) {
     const h = JSON.parse(frame.dataset.docxAnchor), p = frame.closest('x-p');
@@ -384,7 +462,8 @@ export function fitDocxContent(inner, bodyWidth, bodyHeight) {
     table.classList.add('docx-fitted-table');
   }
   for (const img of inner.querySelectorAll('img')) {
-    const frame = img.parentElement;
+    // 돌린 사진은 바깥 사진 상자 기준으로 맞춘다
+    const frame = img.parentElement?.dataset?.docxRotate ? img.parentElement.parentElement : img.parentElement;
     if (frame?.localName !== 'div' || !frame.style.width || !frame.style.height) continue;
     const rect = frame.getBoundingClientRect();
     if (!(rect.width > 0 && rect.height > 0)) continue;

@@ -26,7 +26,11 @@ async function perform({ action, bytes, password, path, session: requestedSessio
     const result = picture ? { bytes: picture.bytes.slice(), mimeType: picture.mimeType } : document.read(path);
     if (/image\/(?:x-)?(?:emf|wmf)/i.test(result.mimeType)) {
       const { convertMetafileToSvg } = await import('./metafile/converter.js');
-      let svg = await convertMetafileToSvg(result.bytes.buffer.slice(result.bytes.byteOffset, result.bytes.byteOffset + result.bytes.byteLength));
+      const buffer = result.bytes.buffer.slice(result.bytes.byteOffset, result.bytes.byteOffset + result.bytes.byteLength);
+      // FReader: 정밀 래스터 연산(그림자 캔버스)은 매우 느리다(사진 표 한 장에 30초 이상).
+      // 마스크 연산이 실제로 쓰이는 그림에서만 켠다 (Office의 EMF+ 그림은 사진을 EMF+로 그리므로 필요 없음).
+      const { needsExactRasterOps } = await import('./emf_fix.js').catch(() => ({ needsExactRasterOps: () => true }));
+      let svg = await convertMetafileToSvg(buffer, needsExactRasterOps(buffer) ? undefined : { exactRasterOps: false });
       if (!svg) throw new Error('이 벡터 그림을 변환하지 못했습니다.');
       // FReader: 표 칸마다 넣은 사진이 앞 칸의 잘라내기 영역과 잘못 겹쳐 사라지는 문제 보정
       try { const { fixDisjointClipChains } = await import('./emf_fix.js'); svg = fixDisjointClipChains(svg); } catch (_) {}
