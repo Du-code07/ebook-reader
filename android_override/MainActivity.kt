@@ -5,7 +5,20 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
+import android.text.TextUtils
+import android.content.ContentValues
+import android.os.Environment
+import android.provider.MediaStore
+import android.view.ViewGroup
+import android.webkit.WebView
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.hardware.Sensor
@@ -393,6 +406,49 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         runOnUiThread { result.success(pagePaths) }
                     } catch (e: Exception) {
                         runOnUiThread { result.error("PDF_ERR", e.message, null) }
+                    }
+                }.start()
+            } else if (call.method == "captureWebView") {
+                // EPUB 본문(WebView) 화면을 그림 파일로 저장 (PDF 내보내기용)
+                val outPath = call.argument<String>("path")
+                val webView = findLargestWebView(window.decorView)
+                if (outPath == null || webView == null || webView.width <= 0 || webView.height <= 0) {
+                    result.error("NO_WEBVIEW", "WebView not found", null)
+                    return@setMethodCallHandler
+                }
+                try {
+                    val bmp = Bitmap.createBitmap(webView.width, webView.height, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    canvas.translate(-webView.scrollX.toFloat(), -webView.scrollY.toFloat())
+                    webView.draw(canvas)
+                    Thread {
+                        try {
+                            FileOutputStream(File(outPath)).use { out -> bmp.compress(Bitmap.CompressFormat.PNG, 100, out) }
+                            bmp.recycle()
+                            runOnUiThread { result.success(outPath) }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.error("CAPTURE_ERR", e.message, null) }
+                        }
+                    }.start()
+                } catch (e: Exception) {
+                    result.error("CAPTURE_ERR", e.message, null)
+                }
+            } else if (call.method == "exportPdfWithMemos") {
+                // 페이지 그림 + 필기(+텍스트 메모)를 합쳐 PDF로 만들고 다운로드 폴더에 저장
+                @Suppress("UNCHECKED_CAST")
+                val pages = call.argument<List<Map<String, Any?>>>("pages")
+                val fileName = call.argument<String>("fileName") ?: "FReader_export.pdf"
+                val fallbackDir = call.argument<String>("fallbackDir")
+                if (pages == null || pages.isEmpty()) {
+                    result.error("INVALID_ARGS", "No pages", null)
+                    return@setMethodCallHandler
+                }
+                Thread {
+                    try {
+                        val saved = exportPdfWithMemos(pages, fileName, fallbackDir)
+                        runOnUiThread { result.success(saved) }
+                    } catch (e: Exception) {
+                        runOnUiThread { result.error("EXPORT_ERR", e.message, null) }
                     }
                 }.start()
             } else if (call.method == "mergePdfs") {
@@ -887,5 +943,168 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
 
         return super.dispatchKeyEvent(event)
+    }
+
+    // ── PDF 내보내기 ──────────────────────────────────────────────────────────
+
+    /** 화면에 보이는 WebView 중 가장 큰 것 (EPUB 본문) */
+    private fun findLargestWebView(root: View): WebView? {
+        var best: WebView? = null
+        fun walk(v: View) {
+            if (v is WebView && v.isShown) {
+                val b = best
+                if (b == null || v.width * v.height > b.width * b.height) best = v
+            }
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) walk(v.getChildAt(i))
+            }
+        }
+        walk(root)
+        return best
+    }
+
+    /** 너무 큰 그림은 메모리를 넘지 않게 줄여서 읽는다 (긴 변 최대 약 3200px) */
+    private fun decodePageBitmap(path: String): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 3200) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        return BitmapFactory.decodeFile(path, opts)
+    }
+
+    private fun exportPdfWithMemos(pages: List<Map<String, Any?>>, fileName: String, fallbackDir: String?): String {
+        val doc = PdfDocument()
+        val tmp = File(cacheDir, "export_${System.currentTimeMillis()}.pdf")
+        try {
+            val total = pages.size
+            for ((idx, page) in pages.withIndex()) {
+                val imagePath = page["image"] as? String ?: continue
+                val bmp = decodePageBitmap(imagePath) ?: continue
+                val w = bmp.width
+                val h = bmp.height
+                val info = PdfDocument.PageInfo.Builder(w, h, idx + 1).create()
+                val pdfPage = doc.startPage(info)
+                val canvas = pdfPage.canvas
+                canvas.drawColor(Color.WHITE)
+                canvas.drawBitmap(bmp, 0f, 0f, null)
+                bmp.recycle()
+
+                // 화면에서 그린 필기 굵기를 이 그림 크기에 맞게 키운다
+                val refWidth = (page["refWidth"] as? Number)?.toFloat() ?: 0f
+                val scale = if (refWidth > 1f) w / refWidth else 1f
+
+                @Suppress("UNCHECKED_CAST")
+                val strokes = page["strokes"] as? List<Map<String, Any?>> ?: emptyList()
+                for (st in strokes) {
+                    @Suppress("UNCHECKED_CAST")
+                    val xs = (st["x"] as? List<Number>) ?: continue
+                    @Suppress("UNCHECKED_CAST")
+                    val ys = (st["y"] as? List<Number>) ?: continue
+                    if (xs.isEmpty() || xs.size != ys.size) continue
+                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        style = Paint.Style.STROKE
+                        strokeCap = Paint.Cap.ROUND
+                        strokeJoin = Paint.Join.ROUND
+                        color = ((st["c"] as? Number)?.toLong() ?: 0xFFFFC107L).toInt()
+                        strokeWidth = ((st["w"] as? Number)?.toFloat() ?: 2f) * scale
+                    }
+                    val path = Path()
+                    path.moveTo(xs[0].toFloat() * w, ys[0].toFloat() * h)
+                    if (xs.size == 1) {
+                        path.lineTo(xs[0].toFloat() * w + 0.01f, ys[0].toFloat() * h)
+                    } else {
+                        for (i in 1 until xs.size) path.lineTo(xs[i].toFloat() * w, ys[i].toFloat() * h)
+                    }
+                    canvas.drawPath(path, paint)
+                }
+
+                // 텍스트 메모: 화면과 같은 노란 메모지 (왼쪽 위)
+                val note = (page["note"] as? String)?.trim().orEmpty()
+                if (note.isNotEmpty()) drawNoteBox(canvas, note, scale)
+
+                doc.finishPage(pdfPage)
+                val cur = idx + 1
+                mainHandler.post {
+                    try {
+                        pdfMethodChannel?.invokeMethod("onPdfExportProgress", mapOf("current" to cur, "total" to total))
+                    } catch (_: Exception) {}
+                }
+            }
+            FileOutputStream(tmp).use { doc.writeTo(it) }
+        } finally {
+            doc.close()
+        }
+        try {
+            return savePdfToDownloads(tmp, fileName, fallbackDir)
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun drawNoteBox(canvas: Canvas, note: String, scale: Float) {
+        val pad = 12f * scale
+        val maxW = 220f * scale
+        val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xDD000000.toInt()
+            textSize = 12f * scale
+        }
+        val innerMax = (maxW - 20f * scale).toInt().coerceAtLeast(10)
+        val textW = minOf(innerMax.toFloat(), tp.measureText(note.replace('\n', ' '))).toInt().coerceAtLeast(10)
+        val layout = StaticLayout.Builder.obtain(note, 0, note.length, tp, textW)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setMaxLines(3)
+            .setEllipsize(TextUtils.TruncateAt.END)
+            .build()
+        val boxW = layout.width + 20f * scale
+        val boxH = layout.height + 12f * scale
+        val box = RectF(pad, pad, pad + boxW, pad + boxH)
+        val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xF2FFE082.toInt() }
+        val r = 8f * scale
+        canvas.drawRoundRect(box, r, r, bg)
+        canvas.save()
+        canvas.translate(pad + 10f * scale, pad + 6f * scale)
+        layout.draw(canvas)
+        canvas.restore()
+    }
+
+    /** 다운로드/FReader 폴더에 저장. 안드로이드 10 미만이면 앱 서재 폴더에 저장. 저장 위치를 돌려준다. */
+    private fun savePdfToDownloads(src: File, fileName: String, fallbackDir: String?): String {
+        val safeName = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FReader")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val resolver = contentResolver
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw IllegalStateException("Cannot create file in Downloads")
+            resolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out) } }
+                ?: throw IllegalStateException("Cannot write file in Downloads")
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            // 같은 이름이 있으면 시스템이 이름 뒤에 (1) 등을 붙이므로 실제 이름을 다시 읽는다
+            var finalName = safeName
+            try {
+                resolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) finalName = c.getString(0) ?: safeName
+                }
+            } catch (_: Exception) {}
+            return Environment.DIRECTORY_DOWNLOADS + "/FReader/" + finalName
+        }
+        val dir = File(fallbackDir ?: filesDir.absolutePath)
+        dir.mkdirs()
+        var out = File(dir, safeName)
+        var n = 1
+        while (out.exists()) {
+            out = File(dir, safeName.removeSuffix(".pdf") + " ($n).pdf")
+            n++
+        }
+        src.copyTo(out)
+        return out.absolutePath
     }
 }

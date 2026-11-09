@@ -56,16 +56,35 @@ class ExportProgressController {
   final ValueNotifier<double?> ratio = ValueNotifier<double?>(null);
   bool cancelled = false;
   BuildContext? _dialogContext;
+  bool _closeRequested = false;
+  bool _popScheduled = false;
 
   void update(String text, double? value) {
     status.value = text;
     ratio.value = value;
   }
 
+  /// 창 닫기. 작업이 아주 빨리 끝나 창이 아직 화면에 안 그려졌으면, 그려지자마자 닫는다.
   void close() {
+    _closeRequested = true;
     final ctx = _dialogContext;
     _dialogContext = null;
-    if (ctx != null && ctx.mounted) Navigator.of(ctx).pop();
+    if (ctx != null && ctx.mounted && !_popScheduled) {
+      _popScheduled = true;
+      Navigator.of(ctx).pop();
+    }
+  }
+
+  void _onDialogBuilt(BuildContext ctx) {
+    if (_closeRequested) {
+      if (_popScheduled) return;
+      _popScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (ctx.mounted) Navigator.of(ctx).pop();
+      });
+    } else {
+      _dialogContext = ctx;
+    }
   }
 }
 
@@ -76,14 +95,14 @@ ExportProgressController showExportProgress(BuildContext context, ExportTr tr, {
     context: context,
     barrierDismissible: false,
     builder: (ctx) {
-      ctrl._dialogContext = ctx;
+      ctrl._onDialogBuilt(ctx);
       return PopScope(
         canPop: false,
         child: StatefulBuilder(
           builder: (ctx, setLocal) => AlertDialog(
             title: Row(
               children: [
-                const Icon(Icons.picture_as_pdf_outlined, size: 22),
+                ExportFileIcon(size: 24, color: Theme.of(ctx).colorScheme.primary),
                 const SizedBox(width: 8),
                 Expanded(child: Text(tr('PDF로 내보내는 중', 'Exporting to PDF', '正在导出为 PDF', 'PDFに書き出し中'))),
               ],
@@ -121,4 +140,88 @@ ExportProgressController showExportProgress(BuildContext context, ExportTr tr, {
     },
   );
   return ctrl;
+}
+
+/// 내보내기 실패 이유를 알기 쉬운 문구로
+String exportErrorText(Object error, ExportTr tr) {
+  if (error is MissingPluginException) {
+    return tr(
+      '이 설치본에는 PDF 내보내기 기능(안드로이드 부분)이 없어요. 앱을 최신 버전으로 다시 빌드·설치해 주세요.',
+      'This build does not include the PDF export feature (Android part). Please rebuild and reinstall the latest version.',
+      '此安装包不含 PDF 导出功能（安卓部分）。请重新构建并安装最新版本。',
+      'このビルドにはPDF書き出し機能（Android部分）がありません。最新版を再ビルドしてインストールしてください。',
+    );
+  }
+  if (error is PlatformException) return error.message ?? error.code;
+  return error.toString();
+}
+
+/// '파일 내보내기' 아이콘: 귀퉁이가 접힌 문서 + 오른쪽 화살표 (두 가지 톤)
+/// 문서 몸통은 [color]를 옅게, 접힌 귀퉁이와 화살표는 [color] 그대로.
+class ExportFileIcon extends StatelessWidget {
+  const ExportFileIcon({super.key, this.size = 20, this.color = Colors.white});
+
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(size: Size.square(size), painter: _ExportFileIconPainter(color));
+  }
+}
+
+class _ExportFileIconPainter extends CustomPainter {
+  const _ExportFileIconPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double k = size.width / 24.0; // 24칸 기준 좌표
+    Offset p(double x, double y) => Offset(x * k, y * k);
+    const double l = 3.0, t = 3.0, r = 18.3, b = 21.3, rad = 2.6, foldX = 12.1, foldY = 9.2;
+
+    // 문서 몸통 (오른쪽 위 귀퉁이가 비스듬히 잘린 둥근 사각형)
+    final body = Path()
+      ..moveTo(l * k + rad * k, t * k)
+      ..lineTo(foldX * k, t * k)
+      ..lineTo(r * k, foldY * k)
+      ..lineTo(r * k, (b - rad) * k)
+      ..arcToPoint(p(r - rad, b), radius: Radius.circular(rad * k))
+      ..lineTo((l + rad) * k, b * k)
+      ..arcToPoint(p(l, b - rad), radius: Radius.circular(rad * k))
+      ..lineTo(l * k, (t + rad) * k)
+      ..arcToPoint(p(l + rad, t), radius: Radius.circular(rad * k))
+      ..close();
+    canvas.drawPath(body, Paint()..color = color.withValues(alpha: 0.38)..isAntiAlias = true);
+
+    // 접힌 귀퉁이
+    final fold = Path()
+      ..moveTo(foldX * k, t * k)
+      ..lineTo(r * k, foldY * k)
+      ..lineTo((foldX + 3.1) * k, foldY * k)
+      ..arcToPoint(p(foldX, foldY - 3.1), radius: Radius.circular(3.1 * k))
+      ..close();
+    canvas.drawPath(fold, Paint()..color = color..isAntiAlias = true);
+
+    // 오른쪽 화살표
+    final arrow = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2 * k
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
+    canvas.drawLine(p(12.6, 16.2), p(22.2, 16.2), arrow);
+    canvas.drawPath(
+      Path()
+        ..moveTo(19.2 * k, 13.2 * k)
+        ..lineTo(22.2 * k, 16.2 * k)
+        ..lineTo(19.2 * k, 19.2 * k),
+      arrow,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ExportFileIconPainter old) => old.color != color;
 }

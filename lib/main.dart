@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import 'screens/pdf_and_image_viewer.dart';
 import 'screens/reader_screen.dart';
 import 'screens/language_select_screen.dart';
+import 'screens/app_settings_screen.dart';
+import 'widgets/sheet_pull_to_close.dart';
 import 'services/storage_service.dart';
 
 void main() async {
@@ -525,7 +527,7 @@ class BookshelfScreen extends StatefulWidget {
   State<BookshelfScreen> createState() => _BookshelfScreenState();
 }
 
-class _BookshelfScreenState extends State<BookshelfScreen> {
+class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderStateMixin {
   static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
 
   List<File> _allBooks = [];
@@ -1978,163 +1980,44 @@ class _BookshelfScreenState extends State<BookshelfScreen> {
     );
   }
 
-  /// 1, 2, 6, 11, 15. 우측 상단 톱니바퀴 '앱 설정' 다이얼로그:
-  /// - 문구: '프로그램 설정' -> '앱 설정'으로 변경 (#11)
-  /// - 화면 잠금 방식 설정 제거 (뷰어 표시 설정에서만 제공) (#2)
-  /// - '각 아이콘 위치 및 기능 설명 가이드 열람' -> '사용 설명서'로 변경 (#6)
-  /// - 선택된 언어에 따라 다이얼로그 및 앱 전체 문구 실시간 번역 (#1)
+  /// 우측 상단 톱니바퀴 '앱 설정' 화면 (항목을 누르면 아래에서 고르기 창이 올라옴)
+  /// 화면 전체 높이의 창으로 띄워서, 맨 위에서 아래로 끌면 내려가며 닫힌다.
   Future<void> _showGlobalSettingsDialog() async {
-    String currentLang = widget.appLang;
-    String currentLangSetting = StorageService.appLangSetting ?? 'system';
-    bool hideExt = _hideFileExtension;
-    String viewMode = _bookshelfViewMode;
-
     if (!mounted) return;
-    await showDialog(
+    final sheetCtrl = BottomSheet.createAnimationController(this);
+    await showModalBottomSheet(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) {
-          String tDialog(String ko, String en, String zh, String ja) =>
-              AppI18n.t(currentLang, ko: ko, en: en, zh: zh, ja: ja);
-
-          return AlertDialog(
-            title: Row(
-              children: [
-                const Icon(Icons.settings, size: 22),
-                const SizedBox(width: 8),
-                Text(tDialog('앱 설정', 'App Settings', '应用设置', 'アプリ設定')),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    tDialog(
-                      '1. 언어 설정',
-                      '1. Language',
-                      '1. 语言设置',
-                      '1. 言語設定',
-                    ),
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      // '기본 시스템'(휴대폰 언어 따라가기)은 휴대폰 언어로 표시
-                      {'code': 'system', 'label': languageOptionLabel('system')},
-                      {'code': 'ko', 'label': '한국어'},
-                      {'code': 'en', 'label': 'English'},
-                      {'code': 'zh', 'label': '中文'},
-                      {'code': 'ja', 'label': '日本語'},
-                    ].map((item) {
-                      final code = item['code']!;
-                      return ChoiceChip(
-                        label: Text(item['label']!),
-                        selected: currentLangSetting == code,
-                        onSelected: (_) {
-                          setModalState(() {
-                            currentLangSetting = code;
-                            currentLang = StorageService.resolveAppLanguage(code);
-                          });
-                          widget.onChangeLanguage(code);
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const Divider(height: 24),
-                  Text(
-                    tDialog('2. 파일 보여주는 형식', '2. Bookshelf View Mode', '2. 文件显示样式', '2. ファイル表示形式'),
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      ChoiceChip(
-                        avatar: Icon(
-                          Icons.grid_view_rounded,
-                          size: 16,
-                          color: viewMode == 'grid' ? Colors.amber : null,
-                        ),
-                        label: Text(tDialog('표지형 (썸네일)', 'Cover View (Thumbnail)', '封面视图 (缩略图)', '表紙表示 (サムネイル)')),
-                        selected: viewMode == 'grid',
-                        onSelected: (_) async {
-                          await StorageService.setBookshelfViewMode('grid');
-                          setModalState(() => viewMode = 'grid');
-                          setState(() => _bookshelfViewMode = 'grid');
-                        },
-                      ),
-                      ChoiceChip(
-                        avatar: Icon(
-                          Icons.view_list_rounded,
-                          size: 16,
-                          color: viewMode == 'list' ? Colors.amber : null,
-                        ),
-                        label: Text(tDialog('목록형 (리스트)', 'List View', '列表视图', 'リスト表示')),
-                        selected: viewMode == 'list',
-                        onSelected: (_) async {
-                          await StorageService.setBookshelfViewMode('list');
-                          setModalState(() => viewMode = 'list');
-                          setState(() => _bookshelfViewMode = 'list');
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: Text(
-                      tDialog(
-                        '파일 이름 뒤에 형식(.pdf, .epub 등) 숨기기',
-                        'Hide file extension (.pdf, .epub)',
-                        '隐藏文件扩展名 (.pdf, .epub)',
-                        'ファイル名の後ろの形式(.pdf等)を隠す',
-                      ),
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    value: hideExt,
-                    onChanged: (val) async {
-                      await StorageService.setHideFileExtension(val);
-                      setModalState(() => hideExt = val);
-                      setState(() => _hideFileExtension = val);
-                    },
-                  ),
-                  const Divider(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.menu_book_outlined, size: 18),
-                      label: Text(tDialog('사용 설명서', 'User Manual', '使用说明书', '取扱説明書')),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => UserManualScreen(appLang: currentLang),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: Text(tDialog('닫기', 'Close', '关闭', '閉じる')),
-              ),
-            ],
-          );
-        },
+      isScrollControlled: true,
+      useSafeArea: true,
+      enableDrag: false,
+      clipBehavior: Clip.antiAlias,
+      transitionAnimationController: sheetCtrl,
+      builder: (sheetCtx) => SheetPullToClose(
+        controller: sheetCtrl,
+        builder: (ctx, scroll, physics) => AppSettingsScreen(
+          asSheet: true,
+          scrollController: scroll,
+          scrollPhysics: physics,
+          appLang: widget.appLang,
+          viewMode: _bookshelfViewMode,
+          hideExtension: _hideFileExtension,
+          onChangeLanguage: widget.onChangeLanguage,
+          onChangeViewMode: (mode) async {
+            await StorageService.setBookshelfViewMode(mode);
+            if (mounted) setState(() => _bookshelfViewMode = mode);
+          },
+          onChangeHideExtension: (hide) async {
+            await StorageService.setHideFileExtension(hide);
+            if (mounted) setState(() => _hideFileExtension = hide);
+          },
+          onOpenManual: (lang) => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => UserManualScreen(appLang: lang)),
+          ),
+        ),
       ),
     );
+    disposeSheetControllerWhenDone(sheetCtrl);
   }
 
   /// 1, 3, 10, 11, 13. 표지형(썸네일) 그리드 카드:

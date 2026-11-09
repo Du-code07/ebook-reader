@@ -1015,7 +1015,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         content: Text(
           error == null
               ? _tr('PDF로 내보냈습니다: $savedPath', 'Exported to PDF: $savedPath', '已导出为 PDF：$savedPath', 'PDFに書き出しました: $savedPath')
-              : _tr('PDF 내보내기 실패: $error', 'PDF export failed: $error', 'PDF 导出失败：$error', 'PDF書き出し失敗: $error'),
+              : _tr('PDF 내보내기 실패: ', 'PDF export failed: ', 'PDF 导出失败：', 'PDF書き出し失敗: ') + exportErrorText(error, _tr),
         ),
       ),
     );
@@ -2400,7 +2400,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             visualDensity: VisualDensity.compact,
                             padding: btnPadding,
                             constraints: btnConstraints,
-                            icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 20),
+                            icon: const ExportFileIcon(size: 21),
                             tooltip: _tr('파일 내보내기', 'Export File', '导出文件', 'ファイルを書き出す'),
                             onPressed: _exportToPdf,
                           ),

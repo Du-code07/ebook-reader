@@ -160,7 +160,7 @@ class StorageService {
   }
 
   // 15. 파일 이름 뒤에 형식(.pdf, .epub 등) 숨기기 설정
-  // 3. 파일 보여주는 형식 기본값을 목록형('list')으로 변경
+  // 3. 파일 표시 방식 기본값을 목록형('list')으로 변경
   static Future<void> setBookshelfViewMode(String mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('bookshelf_view_mode_v27', mode);
