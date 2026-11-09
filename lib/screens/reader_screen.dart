@@ -97,6 +97,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   final TxtPageController _txtController = TxtPageController(); // TXT (종이 쪽 단위)
   final GlobalKey _txtCaptureKey = GlobalKey(); // TXT 화면 캡처(PDF 내보내기)용
   bool get _isTxt => widget.filePath.toLowerCase().endsWith('.txt');
+  bool get _isEpub => !_isOfflineDocument;
+  bool get _isPaperTheme => _isEpub && _epubBgTheme == 'sepia';
   bool get _isOfflineDocument => RegExp(r'\.(hwp|hwpx|docx|doc|txt)$', caseSensitive: false).hasMatch(widget.filePath);
   String get _documentPositionPrefix {
     final lower = widget.filePath.toLowerCase();
@@ -247,7 +249,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _useShakeLock = false;
   bool _useVolumeComboLock = true;
   bool _useSwipeTurn = true;
-  bool _useSwipeUpTurn = true;
+  bool _useSwipeUpTurn = false; // 기본값: 꺼짐
   bool _useVolumeTurn = true;
   bool _useQuickNavTurn = false;
   bool _useSpenTurn = false;
@@ -368,7 +370,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<void> _toggleScreenOrientation() async {
-    final Size currentSize = MediaQuery.of(context).size;
+    final Size currentSize = MediaQuery.sizeOf(context);
     final bool currentlyLandscape = currentSize.width > currentSize.height;
     final bool nextLandscape = !currentlyLandscape;
     StorageService.desiredLandscapeNotifier.value = nextLandscape;
@@ -526,7 +528,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final savedProg = await StorageService.getProgress(widget.filePath);
     final twoPage = await StorageService.getTwoPageLandscape();
     final isRtl = await StorageService.getBookReadingDirectionRtl(widget.filePath);
-    final isDark = await StorageService.getDarkMode();
     final savedBg = await StorageService.getEpubBgTheme();
     final footerMode = await StorageService.getFooterInfoMode();
     final barPos = await StorageService.getProgressBarPosition();
@@ -559,7 +560,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _currentPageLocationKey = initLocKey;
       _enableTwoPageInLandscape = twoPage;
       _isMangaRtlMode = isRtl;
-      _epubBgTheme = savedBg.isNotEmpty ? savedBg : (isDark ? 'dark' : 'white');
+      // 기본값은 라이트. 종이색은 EPUB에서만 쓰므로 다른 문서에서는 라이트로 보여 준다.
+      _epubBgTheme = savedBg.isEmpty || (savedBg == 'sepia' && !_isEpub) ? 'white' : savedBg;
       _footerInfoMode = footerMode;
       _progressBarPos = barPos;
       _memoToolbarPos = memoBarPos;
@@ -900,7 +902,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 메모 도구모음 배치: 하단(기본) / 상단 / 왼쪽 / 오른쪽
   Widget _buildMemoToolbar(double bottomInset) {
     final List<Widget> items = _memoToolItems();
-    final double topInset = MediaQuery.of(context).padding.top;
+    final double topInset = MediaQuery.paddingOf(context).top;
     final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
     final double bottomBarSpace = (((_showControls && _progressBarPos == 'bottom') || _useQuickNavTurn) ? 46.0 : 0.0);
     final double topOffset = topInset + (_showControls ? 64.0 : 16.0);
@@ -1369,18 +1371,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   runSpacing: 6,
                   children: [
                     ChoiceChip(
-                      label: Text(_tr('흰색', 'White', '白色', '白')),
+                      label: Text(_tr('라이트', 'Light', '浅色', 'ライト')),
                       selected: _epubBgTheme == 'white',
                       onSelected: (_) async {
                         await _setEpubThemeMode('white');
-                        setModalState(() {});
-                      },
-                    ),
-                    ChoiceChip(
-                      label: Text(_tr('종이색', 'Sepia', '羊皮纸色', 'セピア')),
-                      selected: _epubBgTheme == 'sepia',
-                      onSelected: (_) async {
-                        await _setEpubThemeMode('sepia');
                         setModalState(() {});
                       },
                     ),
@@ -1392,6 +1386,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         setModalState(() {});
                       },
                     ),
+                    // 종이색(종이 질감)은 EPUB에서만
+                    if (_isEpub)
+                      ChoiceChip(
+                        label: Text(_tr('종이색', 'Paper', '纸张色', '紙色')),
+                        selected: _epubBgTheme == 'sepia',
+                        onSelected: (_) async {
+                          await _setEpubThemeMode('sepia');
+                          setModalState(() {});
+                        },
+                      ),
                   ],
                 ),
                 const Divider(height: 16),
@@ -1429,6 +1433,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   runSpacing: 6,
                   children: [
                     FilterChip(
+                      label: Text(_tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン')),
+                      selected: _useVolumeTurn,
+                      onSelected: (val) async {
+                        await StorageService.setUseVolumeTurn(val);
+                        setState(() => _useVolumeTurn = val);
+                        setModalState(() {});
+                      },
+                    ),
+                    FilterChip(
                       label: Text(_tr('옆으로 밀기', 'Swipe to Turn', '横向滑动翻页', '横にスワイプ')),
                       selected: _useSwipeTurn,
                       onSelected: (val) async {
@@ -1443,15 +1456,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       onSelected: (val) async {
                         await StorageService.setUseSwipeUpTurn(val);
                         setState(() => _useSwipeUpTurn = val);
-                        setModalState(() {});
-                      },
-                    ),
-                    FilterChip(
-                      label: Text(_tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン')),
-                      selected: _useVolumeTurn,
-                      onSelected: (val) async {
-                        await StorageService.setUseVolumeTurn(val);
-                        setState(() => _useVolumeTurn = val);
                         setModalState(() {});
                       },
                     ),
@@ -1719,27 +1723,41 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       !_hasTextSelection &&
       !(_isMemoMode && isStylusPointer(e));
 
-  bool _canTurnEpub(int dir) {
-    // 워드·한글·TXT는 쪽 수를 알고 있으므로 처음/끝에서는 넘기지 않는다 (EPUB은 알 수 없어 항상 시도)
-    if (_isOfflineDocument && _docPageCount > 0) {
-      return dir > 0 ? _docPage < _docPageCount - 1 : _docPage > 0;
-    }
-    return true;
-  }
-
   // ── 위/아래로 밀 때 다음(이전) 장 미리 보기 ──
-  // 밀기 시작하면 지금 화면을 그림으로 붙잡아 두고(이 그림이 손가락을 따라 움직임),
-  // 그 사이 실제 화면은 다음(이전) 장으로 넘겨 그림 바로 뒤에 따라 보이게 한다.
-  // 손을 떼어 넘기면 이미 넘어가 있으므로 그대로, 취소하면 원래 장으로 되돌린다.
+  // 손가락이 닿는 순간 지금 화면을 그림으로 붙잡아 두고(밀기 중에 붙잡으면 화면이 버벅임),
+  // 세로 밀기로 정해지면 그 그림이 손가락을 따라 움직이는 동안 실제 화면은 다음(이전) 장으로 넘겨
+  // 그림 바로 뒤에 따라 보이게 한다. 손을 떼어 넘기면 이미 넘어가 있으므로 그대로, 취소하면 원래 장으로.
   ui.Image? _vSnap; // 붙잡아 둔 지금 화면
   List<MemoStroke> _vSnapStrokes = const [];
+  Future<ui.Image?>? _vPreSnap; // 손가락이 닿을 때 미리 찍어 둔 화면
   int _vTurned = 0; // 실제 화면을 미리 넘겨 둔 방향 (0: 안 넘김)
   bool _vPeekReady = false; // 넘긴 화면이 다 그려져 보여도 되는지
   int _vPeekWanted = 0;
+  bool _vPeekActive = false; // 미리 보기 작업이 끝나지 않음 (손을 뗀 뒤 정리까지)
+  int _vBasePage = 0; // 밀기 시작할 때의 쪽 (문서)
+  String? _vBasePos; // 밀기 시작할 때의 위치
   Future<void> _vPeekChain = Future<void>.value();
 
   void _vPeekQueue(Future<void> Function() job) {
     _vPeekChain = _vPeekChain.then((_) => job()).catchError((_) {});
+  }
+
+  /// 넘길 수 있는지: 미리 넘겨 둔 동안에도 밀기 시작한 쪽을 기준으로 판단한다
+  bool _canTurnSwipe(int dir) {
+    if (_isOfflineDocument && _docPageCount > 0) {
+      final int page = _vPeekActive ? _vBasePage : _docPage;
+      return dir > 0 ? page < _docPageCount - 1 : page > 0;
+    }
+    return true;
+  }
+
+  /// 손가락이 닿았을 때: 세로 밀기가 될 수 있으면 지금 화면을 미리 찍어 둔다
+  void _vPeekOnDown(PointerDownEvent event) {
+    if (_vPeekActive || _vPageSwipe.isAnimating || !_vSwipeEnabled(event)) return;
+    if (_vPreSnap != null) return;
+    _vBasePage = _docPage;
+    _vBasePos = _currentCfi;
+    _vPreSnap = _vCaptureCurrent();
   }
 
   /// 세로 밀기 중 방향이 정해지거나 바뀌었을 때
@@ -1748,23 +1766,69 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final double off = _vPageSwipe.offset;
     if (off.abs() < 1.0) return;
     final int dir = off < 0 ? 1 : -1;
-    if (dir == _vPeekWanted || !_canTurnEpub(dir)) return;
+    if (dir == _vPeekWanted) return;
+    if (!_vPeekActive) {
+      if (_vPreSnap == null) {
+        _vBasePage = _docPage;
+        _vBasePos = _currentCfi;
+      }
+      _vPeekActive = true;
+    }
+    if (!_canTurnSwipe(dir)) return;
     _vPeekWanted = dir;
     _vPeekQueue(() => _vPeekPrepare(dir));
   }
 
-  Future<bool> _vTurnAndWait(int dir) async {
-    final waiter = Completer<void>();
-    _relocateWaiter = waiter;
-    if (dir > 0) {
-      _readerNext();
-    } else {
-      _readerPrevious();
+  /// 쪽 위치 알림을 기다린다. 문서는 쪽 번호가 [until]을 만족할 때까지(다른 알림은 건너뜀).
+  Future<bool> _vWaitRelocate(void Function() action, bool Function() until) async {
+    final deadline = DateTime.now().add(const Duration(milliseconds: 1500));
+    action();
+    while (true) {
+      if (_isOfflineDocument && until()) return true;
+      final left = deadline.difference(DateTime.now());
+      if (left <= Duration.zero) return _isOfflineDocument && until();
+      final waiter = Completer<void>();
+      _relocateWaiter = waiter;
+      bool got = true;
+      await waiter.future.timeout(left, onTimeout: () => got = false);
+      if (identical(_relocateWaiter, waiter)) _relocateWaiter = null;
+      if (!_isOfflineDocument) return got;
+      if (!got) return until();
     }
-    bool moved = true;
-    await waiter.future.timeout(const Duration(milliseconds: 900), onTimeout: () => moved = false);
-    if (identical(_relocateWaiter, waiter)) _relocateWaiter = null;
-    return moved;
+  }
+
+  Future<bool> _vTurnAndWait(int dir) {
+    final int before = _docPage;
+    return _vWaitRelocate(dir > 0 ? _readerNext : _readerPrevious, () => _docPage != before);
+  }
+
+  /// 실제 화면을 밀기 시작한 쪽으로 되돌린다
+  Future<void> _vRestoreBase() async {
+    if (_isOfflineDocument) {
+      if (_docPage == _vBasePage) return;
+      final pos = _vBasePos;
+      await _vWaitRelocate(() {
+        if (pos != null) {
+          _readerDisplay(pos);
+        } else {
+          (_docPage > _vBasePage ? _readerPrevious : _readerNext)();
+        }
+      }, () => _docPage == _vBasePage);
+    } else if (_vTurned != 0) {
+      final pos = _vBasePos;
+      if (pos != null) {
+        await _vWaitRelocate(() => _readerDisplay(pos), () => true);
+      } else {
+        await _vTurnAndWait(-_vTurned);
+      }
+    }
+    _vTurned = 0;
+  }
+
+  /// 실제 화면이 밀기 시작한 쪽에서 어느 방향으로 넘어가 있는지
+  int _vActualTurn() {
+    if (_isOfflineDocument) return (_docPage - _vBasePage).sign;
+    return _vTurned;
   }
 
   Future<ui.Image?> _vCaptureCurrent() async {
@@ -1772,9 +1836,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (_isTxt) {
         final boundary = _txtCaptureKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
         if (boundary == null) return null;
-        return await boundary.toImage(pixelRatio: MediaQuery.of(context).devicePixelRatio);
+        return await boundary.toImage(pixelRatio: MediaQuery.devicePixelRatioOf(context) * 0.75);
       }
-      final bytes = await _pdfChannel.invokeMethod<Uint8List>('snapshotWebView', {'background': _getBgColor().toARGB32()});
+      final bytes = await _pdfChannel.invokeMethod<Uint8List>(
+        'snapshotWebView',
+        {'background': _isPaperTheme ? 0 : _getBgColor().toARGB32(), 'scale': 0.75},
+      );
       if (bytes == null) return null;
       final codec = await ui.instantiateImageCodec(bytes);
       return (await codec.getNextFrame()).image;
@@ -1784,10 +1851,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<void> _vPeekPrepare(int dir) async {
-    if (!mounted || _vPeekWanted != dir || !_vPageSwipe.isVerticalGesture) return;
+    if (!mounted || _vPeekWanted != dir || !_vPeekActive) return;
     if (_vSnap == null) {
-      final image = await _vCaptureCurrent();
-      if (image == null || !mounted || !_vPageSwipe.isVerticalGesture) {
+      final pre = _vPreSnap;
+      _vPreSnap = null;
+      final image = await (pre ?? _vCaptureCurrent());
+      if (image == null || !mounted || !_vPeekActive) {
         image?.dispose();
         return;
       }
@@ -1798,19 +1867,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       });
       await WidgetsBinding.instance.endOfFrame;
     }
-    if (_vTurned == dir) return;
+    if (!mounted || _vPeekWanted != dir) return;
+    if (_vActualTurn() == dir && _vTurned == dir) return;
     setState(() => _vPeekReady = false);
-    if (_vTurned != 0) {
+    if (_vActualTurn() != 0 || _vTurned != 0) {
       // 반대 방향으로 바꿔 민 경우: 먼저 원래 장으로
-      final back = await _vTurnAndWait(-_vTurned);
-      if (back) _vTurned = 0;
-      if (_vTurned != 0) return;
+      await _vRestoreBase();
+      if (_vActualTurn() != 0) return;
     }
     if (!mounted || _vPeekWanted != dir) return;
     if (await _vTurnAndWait(dir)) {
       _vTurned = dir;
       await Future<void>.delayed(const Duration(milliseconds: 60)); // 새 장이 그려질 시간
-      if (mounted && _vTurned == dir) setState(() => _vPeekReady = true);
+      if (mounted && _vTurned == dir && _vSnap != null) setState(() => _vPeekReady = true);
     }
   }
 
@@ -1818,14 +1887,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   Future<void> _vPeekCommit(int dir) async {
     final done = Completer<void>();
     _vPeekQueue(() async {
-      if (_vSnap != null && _vTurned != dir) {
-        // 미리 넘기지 못했거나 반대쪽으로 넘겨 둔 경우
-        if (_vTurned != 0 && await _vTurnAndWait(-_vTurned)) _vTurned = 0;
-        if (_vTurned == 0 && await _vTurnAndWait(dir)) _vTurned = dir;
-      } else if (_vSnap == null && _vTurned == 0) {
-        await _turnEpubInstant(dir);
+      try {
+        final int actual = _vActualTurn();
+        if (actual == dir) {
+          // 이미 넘어가 있음
+        } else {
+          if (actual != 0 || _vTurned != 0) await _vRestoreBase();
+          if (_vSnap == null) {
+            await _turnEpubInstant(dir);
+          } else {
+            await _vTurnAndWait(dir);
+          }
+        }
+      } finally {
+        done.complete();
       }
-      done.complete();
     });
     await done.future;
     _hasTextSelection = false;
@@ -1835,24 +1911,27 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 손을 뗀 뒤 정리: 취소된 경우 미리 넘겨 둔 장을 원래대로
   void _vPeekFinish() {
     _vPeekQueue(() async {
-      if (_vTurned != 0) {
+      if (_vPeekActive && (_vActualTurn() != 0 || _vTurned != 0)) {
         if (mounted) setState(() => _vPeekReady = false);
-        if (await _vTurnAndWait(-_vTurned)) _vTurned = 0;
+        await _vRestoreBase();
         await Future<void>.delayed(const Duration(milliseconds: 60));
       }
-      if (_vSnap != null || _vTurned != 0) _vPeekClear();
-      _vPeekWanted = 0;
+      if (_vSnap != null || _vPeekActive) _vPeekClear();
+      final pre = _vPreSnap;
+      _vPreSnap = null;
+      if (pre != null) unawaited(pre.then((img) => img?.dispose()));
     });
   }
 
   void _vPeekClear() {
     final old = _vSnap;
     _vPeekWanted = 0;
+    _vPeekActive = false;
+    _vTurned = 0;
     if (mounted) {
       setState(() {
         _vSnap = null;
         _vSnapStrokes = const [];
-        _vTurned = 0;
         _vPeekReady = false;
       });
     }
@@ -1864,6 +1943,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final double off = _vPageSwipe.offset;
     if (_vSnap == null) return off;
     if (_vTurned == 0 || !_vPeekReady) return screenHeight * 3; // 준비될 때까지 화면 밖에
+    if (_vPageSwipe.offset * _vTurned > 0) return screenHeight * 3; // 반대쪽으로 되돌려 미는 중
     return off + _vTurned * screenHeight;
   }
 
@@ -2066,17 +2146,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   EpubTheme _buildTheme() {
+    // 종이색: 화면 뒤에 종이 질감 그림을 깔고 책 바탕은 투명하게
     final String cssBg = _epubBgTheme == 'dark'
         ? '#1E1E1E'
-        : (_epubBgTheme == 'sepia' ? '#FBF0D9' : '#FFFFFF');
+        : (_epubBgTheme == 'sepia' ? 'transparent' : '#FFFFFF');
     final String cssFg = _epubBgTheme == 'dark'
         ? '#D4D4D4'
         : (_epubBgTheme == 'sepia' ? '#3B2F2F' : '#000000');
 
     return EpubTheme.custom(
-      backgroundDecoration: BoxDecoration(
-        color: _getBgColor(),
-      ),
+      backgroundDecoration: _isPaperTheme ? null : BoxDecoration(color: _getBgColor()),
       foregroundColor: _getFgColor(),
       customCss: {
         ':root, html, body': {
@@ -2298,7 +2377,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       );
     }
 
-    final double topInset = MediaQuery.of(context).padding.top;
+    final double topInset = MediaQuery.paddingOf(context).top;
     final bool memoBarVisible = _isMemoMode && !_isTouchLocked;
     // 메모 도구모음이 상단/하단에 있으면 세로 진행바가 그만큼 비켜 준다
     final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
@@ -2565,9 +2644,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final mediaQuery = MediaQuery.of(context);
-    final screenSize = mediaQuery.size;
-    final bottomPadding = mediaQuery.viewPadding.bottom;
+    // 키보드(페이지 이동 창 등)가 올라올 때 화면 전체가 매 프레임 다시 그려지지 않도록 필요한 값만 구독
+    final screenSize = MediaQuery.sizeOf(context);
+    final bottomPadding = MediaQuery.viewPaddingOf(context).bottom;
     final bool isLandscape = screenSize.width > screenSize.height;
     final EpubSpread spreadSetting =
         (isLandscape && _enableTwoPageInLandscape) ? EpubSpread.always : EpubSpread.none;
@@ -2589,6 +2668,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         }
       },
       child: Scaffold(
+      // 페이지 이동 창의 키보드가 올라와도 뒤의 책 화면은 줄이지 않는다 (줄어드는 동안 버벅임)
+      resizeToAvoidBottomInset: false,
       key: _scaffoldKey,
       backgroundColor: bgColor,
       drawer: Drawer(
@@ -2625,6 +2706,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           key: _epubBodyKey,
           fit: StackFit.expand,
           children: [
+            // 종이색: 화면 전체에 종이 질감
+            if (_isPaperTheme)
+              const Positioned.fill(
+                child: IgnorePointer(
+                  child: Image(image: AssetImage('assets/textures/paper.jpg'), fit: BoxFit.cover, gaplessPlayback: true),
+                ),
+              ),
             // 1. EPUB 뷰어 본문 (Listener를 EpubViewer에만 감싸서 우측 하단 페이지 이동 버튼 클릭 시 상단/하단 UI가 뜨지 않도록 완벽 분리!)
             Positioned.fill(
               child: Padding(
@@ -2639,11 +2727,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     behavior: HitTestBehavior.translucent,
                     onPointerDown: (event) {
                       _vPageSwipe.down(event);
+                      _vPeekOnDown(event);
                       _swipeTrackDown(event);
                       _handlePointerDown(event);
                     },
                     onPointerMove: (event) {
-                      _vPageSwipe.move(event, enabled: _vSwipeEnabled(event), canTurn: _canTurnEpub);
+                      _vPageSwipe.move(event, enabled: _vSwipeEnabled(event), canTurn: _canTurnSwipe);
                       _vPeekOnMove();
                       _swipeTrackMove(event);
                     },
@@ -2652,7 +2741,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       _vPageSwipe.up(
                         event,
                         height: screenSize.height,
-                        canTurn: _canTurnEpub,
+                        canTurn: _canTurnSwipe,
                         turnPage: _vPeekCommit,
                         seamless: true,
                       ).then((_) => _vPeekFinish());
@@ -2662,7 +2751,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       _vPageSwipe.up(
                         event,
                         height: screenSize.height,
-                        canTurn: _canTurnEpub,
+                        canTurn: _canTurnSwipe,
                         turnPage: _vPeekCommit,
                         seamless: true,
                         cancelled: true,

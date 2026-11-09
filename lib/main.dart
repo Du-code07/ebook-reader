@@ -449,7 +449,7 @@ class UserManualScreen extends StatelessWidget {
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.tune, color: Colors.white, size: 22),
               title: _tr('뷰어 표시 설정', 'Viewer Display Settings', '阅读器显示设置', '뷰어表示設定'),
-              desc: _tr('글자 크기·배경색(완전 흰색/종이색/다크), 화면 잠금 방식(흔들기 / 음량 버튼 동시 입력), 페이지 전환 버튼(음량 / 페이지 이동 / S펜), 진행도 UI 위치를 설정합니다.', 'Configure font size, background (pure white/sepia/dark), screen lock (shake / dual volume), page turn buttons, and progress bar position.', '设置字号、背景色、屏幕锁定方式（摇晃/双音量键）、翻页按钮及进度条位置。', '文字サイズ・背景色(純白/セピア/ダーク)、画面ロック方式(振る/音量同時押し)、ページ 전환、進行度バー位置を設定します。'),
+              desc: _tr('글자 크기·배경색(라이트/다크/종이색 — 종이색은 EPUB만), 화면 잠금 방식(흔들기 / 음량 버튼 동시 입력), 페이지 전환 버튼(음량 / 페이지 이동 / S펜), 진행도 UI 위치를 설정합니다.', 'Configure font size, background (light/dark/paper — paper for EPUB only), screen lock (shake / dual volume), page turn buttons, and progress bar position.', '设置字号、背景色（浅色/深色/纸张色）、屏幕锁定方式（摇晃/双音量键）、翻页按钮及进度条位置。', '文字サイズ・背景色(ライト/ダーク/紙色)、画面ロック方式(振る/音量同時押し)、ページ 전환、進行度バー位置を設定します。'),
             ),
 
             const Divider(height: 36),

@@ -13,6 +13,50 @@ class DocxLayoutHints {
   static const _c = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
   static const _r = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
+  /// 글상자가 아닌 단순 도형(네모·둥근 네모·동그라미)만: 위치·크기·선·채우기
+  static Map<String, Object>? _shape(XmlElement alternate) {
+    final choice = alternate.children.whereType<XmlElement>().where((e) => e.name.local == 'Choice').firstOrNull;
+    final drawing = choice?.findAllElements('drawing', namespace: _w).firstOrNull;
+    final anchor = drawing?.findAllElements('anchor', namespace: _wp).firstOrNull;
+    final wsp = anchor?.descendants.whereType<XmlElement>().where((e) => e.name.local == 'wsp').firstOrNull;
+    if (anchor == null || wsp == null) return null;
+    if (wsp.descendants.whereType<XmlElement>().any((e) => e.name.local == 'txbx')) return null;
+    final spPr = wsp.children.whereType<XmlElement>().where((e) => e.name.local == 'spPr').firstOrNull;
+    final geom = spPr?.getElement('prstGeom', namespace: _a)?.getAttribute('prst') ?? '';
+    if (!const {'rect', 'roundRect', 'ellipse'}.contains(geom)) return null;
+    String? color(XmlElement? holder) {
+      final c = holder?.getElement('solidFill', namespace: _a)?.getElement('srgbClr', namespace: _a)?.getAttribute('val');
+      return c == null ? null : '#$c';
+    }
+    final ln = spPr?.getElement('ln', namespace: _a);
+    final style = wsp.children.whereType<XmlElement>().where((e) => e.name.local == 'style').firstOrNull;
+    final String stroke = ln?.getElement('noFill', namespace: _a) != null
+        ? 'none'
+        : color(ln) ?? (style?.getElement('lnRef', namespace: _a) != null ? '#2F528F' : 'none');
+    final String fill = spPr?.getElement('noFill', namespace: _a) != null
+        ? 'none'
+        : color(spPr) ?? (style?.getElement('fillRef', namespace: _a) != null ? '#4472C4' : 'none');
+    Map<String, Object> axis(String name) {
+      final p = anchor.getElement(name, namespace: _wp);
+      return {
+        if (p?.getAttribute('relativeFrom') != null) 'relativeFrom': p!.getAttribute('relativeFrom')!,
+        if (p?.getElement('posOffset', namespace: _wp) != null) 'offset': p!.getElement('posOffset', namespace: _wp)!.innerText,
+      };
+    }
+    final extent = anchor.getElement('extent', namespace: _wp);
+    return {
+      'geom': geom,
+      'stroke': stroke,
+      'strokeWidth': int.tryParse(ln?.getAttribute('w') ?? '') ?? 12700,
+      'fill': fill,
+      'behind': anchor.getAttribute('behindDoc') == '1',
+      'horizontal': axis('positionH'),
+      'vertical': axis('positionV'),
+      'width': extent?.getAttribute('cx') ?? '0',
+      'height': extent?.getAttribute('cy') ?? '0',
+    };
+  }
+
   static Map<String, Object> _drawing(XmlElement node, int index) {
     final anchor = node.findAllElements('anchor', namespace: _wp).firstOrNull;
     final inline = node.findAllElements('inline', namespace: _wp).firstOrNull;
@@ -37,8 +81,16 @@ class DocxLayoutHints {
     final srcRect = blip?.parentElement?.getElement('srcRect', namespace: _a);
     int? crop(String n) => int.tryParse(srcRect?.getAttribute(n) ?? '');
     final bool cropped = srcRect != null && [crop('l'), crop('t'), crop('r'), crop('b')].any((v) => v != null && v != 0);
+    // 사진을 돌리거나 뒤집은 경우 (a:xfrm rot는 1/60000도)
+    final xfrm = picture ? node.findAllElements('xfrm', namespace: _a).firstOrNull : null;
+    final double rotation = ((int.tryParse(xfrm?.getAttribute('rot') ?? '') ?? 0) / 60000.0) % 360;
+    final bool flipH = xfrm?.getAttribute('flipH') == '1' || xfrm?.getAttribute('flipH') == 'true';
+    final bool flipV = xfrm?.getAttribute('flipV') == '1' || xfrm?.getAttribute('flipV') == 'true';
     return {
       'picture': picture,
+      if (rotation.abs() > 0.01) 'rotation': rotation,
+      if (flipH) 'flipH': true,
+      if (flipV) 'flipV': true,
       if (cropped)
         'crop': {'l': crop('l') ?? 0, 't': crop('t') ?? 0, 'r': crop('r') ?? 0, 'b': crop('b') ?? 0},
       'index': index,
@@ -300,6 +352,7 @@ class DocxLayoutHints {
         final drawingBreaks = <Map<String, Object>>[];
         final drawings = <Map<String, Object>>[];
         final noteRefs = <Map<String, Object>>[];
+        final shapes = <Map<String, Object>>[];
         var drawingCount = 0;
         bool? pendingDrawingBreak;
         for (final run in p.findAllElements('r', namespace: _w)) {
@@ -314,6 +367,12 @@ class DocxLayoutHints {
             continue;
           final start = text.length;
           for (final n in run.children.whereType<XmlElement>()) {
+            // 사진 위에 그린 네모·동그라미 같은 도형 (Word는 mc:AlternateContent 안에 넣는다)
+            if (n.name.local == 'AlternateContent') {
+              final shape = _shape(n);
+              if (shape != null) shapes.add(shape);
+              continue;
+            }
             if (n.name.namespaceUri != _w) continue;
             switch (n.name.local) {
               case 't':
@@ -383,6 +442,7 @@ class DocxLayoutHints {
           'drawingCount': drawingCount,
           'drawings': drawings,
           'drawingBreaks': drawingBreaks,
+          if (shapes.isNotEmpty) 'shapes': shapes,
           if (noteRefs.isNotEmpty) 'notes': noteRefs,
         });
       }

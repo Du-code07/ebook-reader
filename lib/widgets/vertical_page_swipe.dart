@@ -32,7 +32,7 @@ class VerticalPageSwipe extends ChangeNotifier {
   int _pointers = 0;
   bool _multi = false;
   Offset? _start;
-  DateTime? _startTime;
+  Duration? _startTs;
   bool? _locked; // null: 아직 판단 전, true: 세로 밀기로 확정, false: 세로 밀기 아님
   double _velocity = 0.0; // px/s (아래쪽이 +)
   Offset? _lastPos;
@@ -59,7 +59,7 @@ class VerticalPageSwipe extends ChangeNotifier {
     }
     _multi = false;
     _start = e.position;
-    _startTime = DateTime.now();
+    _startTs = e.timeStamp;
     _locked = null;
     _velocity = 0.0;
     _lastPos = e.position;
@@ -74,7 +74,8 @@ class VerticalPageSwipe extends ChangeNotifier {
     final Offset d = e.position - start;
 
     if (_locked == null && d.distance > 14.0) {
-      final int holdMs = DateTime.now().difference(_startTime ?? DateTime.now()).inMilliseconds;
+      // 실제 터치 시각으로 잰다 (화면이 잠깐 바빠 처리가 늦어도 길게 누른 것으로 오인하지 않도록)
+      final int holdMs = (e.timeStamp - (_startTs ?? e.timeStamp)).inMilliseconds;
       // 길게 누른 뒤 끄는 동작(문장 선택 등)은 제외
       _locked = enabled && holdMs <= 450 && d.dy.abs() > d.dx.abs() * 1.2;
     }

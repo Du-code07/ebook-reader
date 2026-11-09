@@ -204,7 +204,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _useVolumeComboLock = true;
 
   bool _useSwipeTurn = true;
-  bool _useSwipeUpTurn = true;
+  bool _useSwipeUpTurn = false; // 기본값: 꺼짐
 
   // 위/아래로 밀기: 손가락을 따라 페이지가 위·아래로 움직이며 넘어감
   late final VerticalPageSwipe _vPageSwipe = VerticalPageSwipe(vsync: this);
@@ -342,7 +342,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Future<void> _toggleScreenOrientation() async {
-    final Size currentSize = MediaQuery.of(context).size;
+    final Size currentSize = MediaQuery.sizeOf(context);
     final bool currentlyLandscape = currentSize.width > currentSize.height;
     final bool nextLandscape = !currentlyLandscape;
     StorageService.desiredLandscapeNotifier.value = nextLandscape;
@@ -652,7 +652,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   bool _isSpreadActive(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    final size = MediaQuery.sizeOf(context);
     final bool isLandscapeNow = size.width > size.height;
     return _enableTwoPageInLandscape && isLandscapeNow && _totalPages > 1;
   }
@@ -888,7 +888,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   /// 메모 도구모음 배치: 하단(기본) / 상단 / 왼쪽 / 오른쪽
   Widget _buildMemoToolbar(double bottomInset) {
     final List<Widget> items = _memoToolItems();
-    final double topInset = MediaQuery.of(context).padding.top;
+    final double topInset = MediaQuery.paddingOf(context).top;
     final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
     final double bottomBarSpace = (((_showControls && _progressBarPos == 'bottom') || _useQuickNavTurn) ? 46.0 : 0.0);
     final double topOffset = topInset + (_showControls ? 64.0 : 16.0);
@@ -1286,6 +1286,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   runSpacing: 6,
                   children: [
                     FilterChip(
+                      label: Text(_tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン')),
+                      selected: _useVolumeTurn,
+                      onSelected: (val) async {
+                        await StorageService.setUseVolumeTurn(val);
+                        setState(() => _useVolumeTurn = val);
+                        setModalState(() {});
+                      },
+                    ),
+                    FilterChip(
                       label: Text(_tr('옆으로 밀기', 'Swipe to Turn', '横向滑动翻页', '横にスワイプ')),
                       selected: _useSwipeTurn,
                       onSelected: (val) async {
@@ -1300,15 +1309,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       onSelected: (val) async {
                         await StorageService.setUseSwipeUpTurn(val);
                         setState(() => _useSwipeUpTurn = val);
-                        setModalState(() {});
-                      },
-                    ),
-                    FilterChip(
-                      label: Text(_tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン')),
-                      selected: _useVolumeTurn,
-                      onSelected: (val) async {
-                        await StorageService.setUseVolumeTurn(val);
-                        setState(() => _useVolumeTurn = val);
                         setModalState(() {});
                       },
                     ),
@@ -1511,7 +1511,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       final int dir = off < 0 ? 1 : -1;
       final int target = base + dir;
       if (target >= 0 && target < viewItemCount) {
-        final double h = MediaQuery.of(context).size.height;
+        final double h = MediaQuery.sizeOf(context).height;
         children.add(
           Transform.translate(
             offset: Offset(0, off + (dir > 0 ? h : -h)),
@@ -1957,7 +1957,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       );
     }
 
-    final double topInset = MediaQuery.of(context).padding.top;
+    final double topInset = MediaQuery.paddingOf(context).top;
     final bool memoBarVisible = _isMemoMode && !_isTouchLocked;
     // 메모 도구모음이 상단/하단에 있으면 세로 진행바가 그만큼 비켜 준다
     final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
@@ -2219,8 +2219,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       );
     }
 
-    final mediaQuery = MediaQuery.of(context);
-    final double bottomInset = mediaQuery.viewPadding.bottom;
+    // 키보드(페이지 이동 창 등)가 올라올 때 화면 전체가 매 프레임 다시 그려지지 않도록 필요한 값만 구독
+    final double bottomInset = MediaQuery.viewPaddingOf(context).bottom;
     final bool isSpread = _isSpreadActive(context);
 
     if (isSpread != _lastIsSpreadMode) {
@@ -2240,6 +2240,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         }
       },
       child: Scaffold(
+      // 페이지 이동 창의 키보드가 올라와도 뒤의 책 화면은 줄이지 않는다 (줄어드는 동안 버벅임)
+      resizeToAvoidBottomInset: false,
       backgroundColor: Colors.black,
       body: Stack(
         fit: StackFit.expand,
@@ -2276,7 +2278,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   }
                   _vPageSwipe.up(
                     event,
-                    height: MediaQuery.of(context).size.height,
+                    height: MediaQuery.sizeOf(context).height,
                     canTurn: _canStepPage,
                     turnPage: _stepPageInstant,
                     seamless: true,
@@ -2290,7 +2292,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 onPointerCancel: (event) {
                   _vPageSwipe.up(
                     event,
-                    height: MediaQuery.of(context).size.height,
+                    height: MediaQuery.sizeOf(context).height,
                     canTurn: _canStepPage,
                     turnPage: _stepPageInstant,
                     seamless: true,

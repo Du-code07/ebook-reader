@@ -323,7 +323,7 @@ class StorageService {
 
   static Future<bool> getUseSwipeUpTurn() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('use_swipe_up_turn') ?? true;
+    return prefs.getBool('use_swipe_up_turn') ?? false; // 위로 밀기는 기본값에서 뺌
   }
 
   // 메모 지우개 종류: 'area'(닿은 부분만) / 'stroke'(닿은 획 전체)

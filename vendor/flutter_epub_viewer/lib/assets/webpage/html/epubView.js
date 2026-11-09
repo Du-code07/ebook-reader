@@ -2516,9 +2516,17 @@ function getRectFromCfi(cfiRange) {
 }
 
 ///update theme
+// FReader: 색상만 다시 적용하는 호출(customCss 없음)이 앞서 받은 배경·글자색 규칙을 지워
+// 다크 모드에서 흰 바탕·검은 글자로 돌아가던 문제 → 마지막으로 받은 customCss를 기억해 함께 적용한다.
+var freaderLastCustomCss = null;
 function updateTheme(backgroundColor, foregroundColor, customCss) {
   var rules = {};
   var themeObj = {};
+  if (customCss && customCss !== "null" && typeof customCss === 'object') {
+    freaderLastCustomCss = customCss;
+  } else {
+    customCss = freaderLastCustomCss;
+  }
 
   // Build theme object with available colors
   // Only include properties that are provided and not empty
