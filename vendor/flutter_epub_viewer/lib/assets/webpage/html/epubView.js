@@ -2457,9 +2457,24 @@ function setManager(manager) {
   rendition.manager(manager);
 }
 
+var fontRealignTimer = null;
 function setFontSize(fontSize) {
+  // FReader: 글자 크기가 바뀌면 쪽(단) 경계가 달라져 화면이 두 쪽에 걸쳐 보일 수 있다
+  // → 보던 곳을 기억해 두었다가, 새 글자 크기로 다시 나뉜 쪽에 맞춰 다시 보여 준다
+  var cfi = null;
+  try {
+    var loc = rendition.currentLocation();
+    cfi = loc && loc.start && loc.start.cfi;
+  } catch (e) {}
   rendition.themes.fontSize(`${fontSize}px`);
-  rendition.reportLocation();
+  if (fontRealignTimer) clearTimeout(fontRealignTimer);
+  fontRealignTimer = setTimeout(function () {
+    fontRealignTimer = null;
+    var shown = cfi ? rendition.display(cfi) : null;
+    Promise.resolve(shown).catch(function () {}).then(function () {
+      try { rendition.reportLocation(); } catch (e) {}
+    });
+  }, 120);
 }
 
 // Extracts the text for a CFI range and resolves with {text, cfiRange, xpathRange}.
