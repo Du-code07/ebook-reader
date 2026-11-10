@@ -643,7 +643,7 @@ function applySearchHighlights() {
   if (all.length) CSS.highlights.set('freader-search', new Highlight(...all));
   if (current.length) CSS.highlights.set('freader-search-current', new Highlight(...current));
 }
-/** 문단(글 덩어리)마다 글, 쪽, 굵기, 표 안인지 */
+/** 문단(글 덩어리)마다 글, 쪽, 굵기(전체/비율), 가운데 정렬, 글자 크기, 표 안인지 */
 function outlineBlocks() {
   const pageOf = new Map(), blocks = [];
   pages.forEach((entry, index) => {
@@ -660,12 +660,14 @@ function outlineBlocks() {
     for (const block of textBlocksOf(inner)) {
       const text = block.text.replace(/\s+/g, ' ').trim();
       if (!text) continue;
-      let chars = 0, bold = 0, column = 0;
+      let chars = 0, bold = 0, column = 0, fs = 0;
       for (const { node } of block.nodes) {
         const n = node.data.trim().length;
         if (!n) continue;
         chars += n;
-        if ((parseInt(getComputedStyle(node.parentElement).fontWeight, 10) || 400) >= 600) bold += n;
+        const cs = getComputedStyle(node.parentElement);
+        fs = Math.max(fs, parseFloat(cs.fontSize) || 0);
+        if ((parseInt(cs.fontWeight, 10) || 400) >= 600) bold += n;
       }
       if (!chars) continue;
       const range = document.createRange();
@@ -674,7 +676,9 @@ function outlineBlocks() {
       if (rect && stride > 0) column = Math.max(0, Math.floor((rect.left - innerRect.left + 0.5) / stride));
       const page = columns[Math.min(column, columns.length - 1)] ?? columns.find(i => i != null);
       if (page == null) continue;
-      blocks.push({ text, page, chars, bold: bold >= chars * 0.9, cell: !!block.key.closest?.('td, th') });
+      let centered = false;
+      try { centered = block.key instanceof Element && getComputedStyle(block.key).textAlign === 'center'; } catch (_) {}
+      blocks.push({ text, page, chars, fs, bold: bold >= chars * 0.9, boldRatio: bold / chars, centered, cell: !!block.key.closest?.('td, th') });
     }
   }
   return blocks;
@@ -706,13 +710,14 @@ function pageText(from, to) {
   for (const b of outlineBlockCache) if (b.page >= from && b.page < end) out[b.page - from].push(b.text);
   return out.map(lines => lines.join('\n'));
 }
-// ── 목차 후보: 번호로 시작하는 문단 {title, page, bold} (표 안 제외) — 앱이 '번호 + 굵은 글씨' 규칙으로 고른다 ──
+// ── 목차 후보: 번호로 시작하거나 굵은 글씨가 있는 짧은 문단 {title, page, bold, boldRatio, centered, fs} (표 안 제외)
+// 앱이 '목차 쪽 → 번호 → 굵은 글씨(가운데 정렬 또는 전체 굵게)' 순서로 고른다 ──
 const NUMBERED_START = /^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]|[IVX]{1,5}\s*[.)]|\(\s*\d|\d)/;
 function headingCandidates() {
   if (!pages.length) return [];
   if (!outlineBlockCache) outlineBlockCache = outlineBlocks();
-  return outlineBlockCache.filter(b => !b.cell && b.text.length <= 100 && NUMBERED_START.test(b.text))
-    .slice(0, 2000).map(b => ({ title: b.text, page: b.page, bold: b.bold }));
+  return outlineBlockCache.filter(b => !b.cell && b.text.length <= 100 && (NUMBERED_START.test(b.text) || b.boldRatio >= 0.5))
+    .slice(0, 3000).map(b => ({ title: b.text, page: b.page, bold: b.bold, boldRatio: b.boldRatio, centered: b.centered, fs: b.fs }));
 }
 window.freaderDocx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes,

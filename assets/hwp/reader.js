@@ -398,31 +398,42 @@ async function pageText(from, to) {
   }
   return out;
 }
-// ── 목차 후보: 번호로 시작하는 문단 {title, page, bold} — 앱이 '번호 + 굵은 글씨' 규칙으로 고른다 ──
+// ── 목차 후보: 번호로 시작하거나 굵은 글씨가 있는 짧은 문단 {title, page, bold, boldRatio, centered, fs}
+// 앱이 '목차 쪽 → 번호 → 굵은 글씨(가운데 정렬 또는 전체 굵게)' 순서로 고른다. [from, to) 쪽만 (진행률 표시용) ──
 const NUMBERED_START = /^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]|[IVX]{1,5}\s*[.)]|\(\s*\d|\d)/;
-async function headingCandidates() {
+async function headingCandidates(from = 0, to = 1e9) {
   if (!doc) return [];
-  const out = [], current = doc;
-  for (let i = 0; i < count; i++) {
+  const out = [], current = doc, end = Math.min(count, to);
+  for (let i = Math.max(0, from); i < end; i++) {
+    const runs = pageRuns(i);
+    // 쪽의 글 영역 (가운데 정렬 가늠용)
+    let L = Infinity, R = -Infinity;
+    for (const run of runs) { L = Math.min(L, run.x); R = Math.max(R, run.x + (run.w || 0)); }
     const paras = new Map();
-    for (const run of pageRuns(i)) {
+    for (const run of runs) {
       if (run.secIdx == null || run.paraIdx == null) continue; // 표 안 글자 등
       const key = `${run.secIdx}:${run.paraIdx}`;
       let b = paras.get(key);
-      if (!b) { b = { text: '', bold: 0, chars: 0 }; paras.set(key, b); }
+      if (!b) { b = { text: '', bold: 0, chars: 0, fs: 0, x0: Infinity, x1: -Infinity }; paras.set(key, b); }
       b.text += run.text;
       const n = run.text.trim().length;
       b.chars += n; if (run.bold) b.bold += n;
+      b.fs = Math.max(b.fs, run.fontSize || 0);
+      if (n) { b.x0 = Math.min(b.x0, run.x); b.x1 = Math.max(b.x1, run.x + (run.w || 0)); }
     }
+    const width = R - L;
     for (const b of paras.values()) {
       const text = b.text.replace(/\s+/g, ' ').trim();
-      if (!text || !b.chars || text.length > 100 || !NUMBERED_START.test(text)) continue;
-      out.push({ title: text, page: i, bold: b.bold >= b.chars * 0.9 });
+      if (!text || !b.chars || text.length > 100) continue;
+      const boldRatio = b.bold / b.chars;
+      if (!NUMBERED_START.test(text) && boldRatio < 0.5) continue;
+      const centered = width > 0 && b.x1 - b.x0 < width * 0.85 && Math.abs((b.x0 - L) - (R - b.x1)) < width * 0.06 + 2;
+      out.push({ title: text, page: i, bold: boldRatio >= 0.9, boldRatio, centered, fs: b.fs });
     }
     if (i % 10 === 9) await new Promise(resolve => setTimeout(resolve, 0));
     if (doc !== current) return [];
   }
-  return out.slice(0, 2000);
+  return out.slice(0, 3000);
 }
 window.freaderHwp = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes,

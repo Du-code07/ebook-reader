@@ -408,13 +408,14 @@ async function slideLines(index) {
     if (!text) continue;
     const key = `${run.shapeId ?? '?'}|${Math.round(run.inShapeY ?? 0)}`;
     let line = lines.get(key);
-    if (!line) { line = { t: '', chars: 0, bold: 0, y: (run.shapeY ?? 0) + (run.inShapeY ?? 0) }; lines.set(key, line); }
+    if (!line) { line = { t: '', chars: 0, bold: 0, fs: 0, y: (run.shapeY ?? 0) + (run.inShapeY ?? 0) }; lines.set(key, line); }
     line.t += text;
     const n = text.trim().length;
     line.chars += n;
+    line.fs = Math.max(line.fs, Number(run.fontSize) || 0);
     if (/\b(bold|bolder|[6-9]00)\b/.test(String(run.font || ''))) line.bold += n;
   }
-  const out = [...lines.values()].map(l => ({ t: l.t.replace(/\s+/g, ' ').trim(), bold: l.chars > 0 && l.bold >= l.chars * 0.9, y: l.y }))
+  const out = [...lines.values()].map(l => ({ t: l.t.replace(/\s+/g, ' ').trim(), bold: l.chars > 0 && l.bold >= l.chars * 0.9, y: l.y, fs: l.fs }))
     .filter(l => l.t).sort((a, b) => a.y - b.y);
   slideLineCache.set(index, out);
   return out;
@@ -430,18 +431,17 @@ async function pageText(from, to) {
   }
   return out;
 }
-/** 번호로 시작하는 줄들 {title, page, bold} */
-async function headingCandidates() {
+/** [from, to) 슬라이드의 줄들 [[{t, y, fs, bold}…]…] — 앱이 제목(가장 큰 글자)과 부제목을 고른다 */
+async function slideLineData(from, to) {
   if (!presentation) return [];
-  const out = [], current = generation;
-  for (let i = 0; i < presentation.slideCount; i++) {
-    for (const l of await slideLines(i)) if (l.t.length <= 100 && NUMBERED_START.test(l.t)) out.push({ title: l.t, page: i, bold: l.bold });
+  const out = [], current = generation, end = Math.min(presentation.slideCount, Math.max(0, to | 0));
+  for (let i = Math.max(0, from | 0); i < end; i++) {
+    out.push((await slideLines(i)).slice(0, 60).map(l => ({ t: l.t.slice(0, 120), y: l.y, fs: l.fs, bold: l.bold })));
     if (current !== generation || disposed) return [];
     if (i % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
   }
-  return out.slice(0, 2000);
+  return out;
 }
-const NUMBERED_START = /^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]|[IVX]{1,5}\s*[.)]|\(\s*\d|\d)/;
 function destroy() {
   disposed = true; generation++; paintRevision++; clearInterval(bridgeTimer); observer.disconnect();
   closePresentation(); wipe(incoming); incoming = null; received = 0; events = [];
@@ -452,7 +452,7 @@ const observer = new ResizeObserver(() => {
 observer.observe(host);
 host.addEventListener('click', event => { if (event.target.closest('a')) event.preventDefault(); });
 window.freaderPpt = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, thumbnail, destroy,
-  search, showSearchResult, clearSearch, pageText, headingCandidates, slideImage,
+  search, showSearchResult, clearSearch, pageText, slideLineData, slideImage,
   getState: () => ({ ready: !disposed, loaded, page, count: presentation?.slideCount || 0, step, stepCount, received, awaitingPassword, spread: options.spread, format: options.format, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 emit('ready', { version: '0.89.8' });
