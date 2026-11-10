@@ -298,9 +298,10 @@ Future<String?> showEraserTypeMenu(BuildContext buttonContext, String current, M
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 펜 설정 창 (펜 아이콘을 꾹 눌렀을 때): 선 굵기 + 색상
+/// 맨 앞(빨강)이 기본 펜 색
 const List<Color> kMemoPenColors = [
-  Colors.amber,
   Colors.redAccent,
+  Colors.amber,
   Colors.lightBlueAccent,
   Colors.greenAccent,
   Colors.white,

@@ -291,21 +291,22 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         runOnUiThread { result.error("SEARCH_ERR", e.message, null) }
                     }
                 }
-            } else if (call.method == "pdfPageTexts") {
-                // 목차용: 쪽마다의 글 [from, to) (지원하지 않는 기기에서는 빈 목록)
+            } else if (call.method == "pdfLines") {
+                // 목차용: 쪽마다의 줄 [from, to) {t, x0, x1, y, h, (sw)} (지원하지 않는 기기에서는 빈 목록)
                 val path = call.argument<String>("path") ?: ""
                 val from = call.argument<Int>("from") ?: 0
                 val to = call.argument<Int>("to") ?: 0
+                val withBold = call.argument<Boolean>("bold") ?: false
                 if (!pdfSearchSupported()) {
-                    result.success(emptyList<String>())
+                    result.success(emptyList<Any>())
                     return@setMethodCallHandler
                 }
                 thumbExecutor.execute {
                     try {
-                        val texts = pdfPageTexts(path, from, to)
-                        runOnUiThread { result.success(texts) }
+                        val lines = pdfLines(path, from, to, withBold)
+                        runOnUiThread { result.success(lines) }
                     } catch (e: Throwable) {
-                        runOnUiThread { result.success(emptyList<String>()) }
+                        runOnUiThread { result.success(emptyList<Any>()) }
                     }
                 }
             } else if (call.method == "renderPdfFirstPageThumbnail") {
@@ -377,10 +378,12 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         }
                         thumbFile.parentFile?.mkdirs()
                         ZipFile(srcFile).use { zip ->
+                            val isEpub = archivePath.lowercase().endsWith(".epub")
                             val entries = zip.entries()
-                            var bestEntry: ZipEntry? = null
+                            // EPUB: 책에 표지로 적혀 있는 그림만 쓴다 (없으면 표지 없이 EPUB 아이콘)
+                            var bestEntry: ZipEntry? = if (isEpub) findEpubCover(zip) else null
                             var bestName = ""
-                            while (entries.hasMoreElements()) {
+                            while (!isEpub && entries.hasMoreElements()) {
                                 val entry = entries.nextElement()
                                 if (entry.isDirectory) continue
                                 val lower = entry.name.lowercase()
@@ -572,7 +575,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     }
                 }.start()
             } else if (call.method == "ocrLines") {
-                // 그림 속 글자 읽기 (기기 안에서만 처리): 줄마다 {t, x, y, w, h (그림 크기 대비 0~1), sw (획 굵기 비율)}
+                // 그림 속 글자 읽기 (기기 안에서만 처리): 줄마다 {t, x, y, w, h} (그림 크기 대비 0~1)
                 val path = call.argument<String>("path") ?: ""
                 thumbExecutor.execute {
                     try {
@@ -1336,15 +1339,100 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             for (block in text.textBlocks) {
                 for (line in block.lines) {
                     val r = line.boundingBox ?: continue
-                    // sw: 글자 획 굵기 ÷ 줄 높이 (굵은 글씨 가늠용)
-                    val sw = try { strokeRatio(bmp, r) } catch (_: Throwable) { 0.0 }
-                    out.add(mapOf("t" to line.text, "x" to r.left / w, "y" to r.top / h, "w" to r.width() / w, "h" to r.height() / h, "sw" to sw))
+                    out.add(mapOf("t" to line.text, "x" to r.left / w, "y" to r.top / h, "w" to r.width() / w, "h" to r.height() / h))
                 }
             }
             return out
         } finally {
             bmp.recycle()
         }
+    }
+
+    /** EPUB 안의 표지 그림: container.xml → OPF → 표지(cover-image / meta cover / 이름에 cover) */
+    private fun findEpubCover(zip: ZipFile): ZipEntry? {
+        return try {
+            val container = zip.getEntry("META-INF/container.xml") ?: return null
+            val cxml = zip.getInputStream(container).use { it.readBytes().toString(Charsets.UTF_8) }
+            val opfPath = Regex("full-path\\s*=\\s*[\"']([^\"']+)[\"']").find(cxml)?.groupValues?.get(1) ?: return null
+            val opfEntry = zip.getEntry(opfPath) ?: return null
+            val opf = zip.getInputStream(opfEntry).use { it.readBytes().toString(Charsets.UTF_8) }
+            val base = opfPath.substringBeforeLast('/', "")
+            fun attr(tag: String, name: String): String? =
+                Regex("\\b$name\\s*=\\s*[\"']([^\"']*)[\"']", RegexOption.IGNORE_CASE).find(tag)?.groupValues?.get(1)
+            val items = Regex("<(?:\\w+:)?item\\b[^>]*>", RegexOption.IGNORE_CASE).findAll(opf).map { it.value }.toList()
+            fun isImage(tag: String) = (attr(tag, "media-type") ?: "").startsWith("image/")
+            var href: String? = items.firstOrNull { isImage(it) && (attr(it, "properties") ?: "").split(' ').contains("cover-image") }?.let { attr(it, "href") }
+            if (href == null) {
+                val meta = Regex("<(?:\\w+:)?meta\\b[^>]*>", RegexOption.IGNORE_CASE).findAll(opf).map { it.value }
+                    .firstOrNull { (attr(it, "name") ?: "").equals("cover", true) }
+                val id = meta?.let { attr(it, "content") }
+                if (id != null) href = items.firstOrNull { attr(it, "id") == id && isImage(it) }?.let { attr(it, "href") }
+            }
+            if (href == null) {
+                href = items.firstOrNull { isImage(it) && ((attr(it, "id") ?: "").contains("cover", true) || (attr(it, "href") ?: "").contains("cover", true)) }
+                    ?.let { attr(it, "href") }
+            }
+            if (href == null) return null
+            val decoded = java.net.URLDecoder.decode(href.replace("+", "%2B"), "UTF-8")
+            val parts = ArrayList<String>()
+            for (seg in ((if (base.isEmpty()) "" else "$base/") + decoded).split('/')) {
+                when (seg) {
+                    "", "." -> {}
+                    ".." -> if (parts.isNotEmpty()) parts.removeAt(parts.size - 1)
+                    else -> parts.add(seg)
+                }
+            }
+            zip.getEntry(parts.joinToString("/"))
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    @android.annotation.SuppressLint("NewApi")
+    private fun pdfTextBoxes(path: String): List<List<Map<String, Any>>> {
+        val out = ArrayList<List<Map<String, Any>>>()
+        val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+        fun collect(pw: Float, ph: Float, contents: List<android.graphics.pdf.content.PdfPageTextContent>) {
+            val boxes = ArrayList<Map<String, Any>>()
+            if (pw > 0f && ph > 0f) {
+                for (c in contents) {
+                    val text = c.text ?: continue
+                    val rects = c.bounds
+                    if (rects.isEmpty() || text.isBlank()) continue
+                    val lines = text.split('\n')
+                    if (lines.size == rects.size) {
+                        for (k in rects.indices) {
+                            val r = rects[k]
+                            if (lines[k].isBlank()) continue
+                            boxes.add(mapOf("t" to lines[k], "x" to r.left / pw, "y" to r.top / ph, "w" to r.width() / pw, "h" to r.height() / ph))
+                        }
+                    } else {
+                        val u = android.graphics.RectF(rects[0])
+                        for (r in rects) u.union(r)
+                        boxes.add(mapOf("t" to text.replace('\n', ' '), "x" to u.left / pw, "y" to u.top / ph, "w" to u.width() / pw, "h" to (u.height() / rects.size) / ph))
+                    }
+                }
+            }
+            out.add(boxes)
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 35) {
+                PdfRenderer(pfd).use { renderer ->
+                    for (i in 0 until renderer.pageCount) {
+                        renderer.openPage(i).use { page -> collect(page.width.toFloat(), page.height.toFloat(), page.textContents) }
+                    }
+                }
+            } else {
+                android.graphics.pdf.PdfRendererPreV(pfd).use { renderer ->
+                    for (i in 0 until renderer.pageCount) {
+                        renderer.openPage(i).use { page -> collect(page.width.toFloat(), page.height.toFloat(), page.textContents) }
+                    }
+                }
+            }
+        } finally {
+            try { pfd.close() } catch (_: Exception) {}
+        }
+        return out
     }
 
     /** 줄 상자 안 글자의 획 굵기 ÷ 줄 높이: 글자 부분을 가려낸 뒤(오츠 방법) 넓이 × 2 ÷ 테두리 길이 = 획 굵기 */
@@ -1410,68 +1498,75 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
+    /**
+     * PDF 목차용: 쪽마다 줄들 {t, x0, x1, y, h} (쪽 크기 대비 0~1).
+     * [withBold]이면 쪽을 그림으로 그려 줄마다 글자 획 굵기 비율 sw도 넣는다 (굵은 글씨 가늠용, 60자 이하 줄만)
+     */
     @android.annotation.SuppressLint("NewApi")
-    private fun pdfTextBoxes(path: String): List<List<Map<String, Any>>> {
+    private fun pdfLines(path: String, from: Int, to: Int, withBold: Boolean): List<List<Map<String, Any>>> {
         val out = ArrayList<List<Map<String, Any>>>()
         val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
-        fun collect(pw: Float, ph: Float, contents: List<android.graphics.pdf.content.PdfPageTextContent>) {
-            val boxes = ArrayList<Map<String, Any>>()
+        fun collect(pw: Float, ph: Float, contents: List<android.graphics.pdf.content.PdfPageTextContent>, draw: ((Bitmap) -> Unit)?) {
+            val lines = ArrayList<Pair<String, android.graphics.RectF>>()
             if (pw > 0f && ph > 0f) {
                 for (c in contents) {
                     val text = c.text ?: continue
                     val rects = c.bounds
                     if (rects.isEmpty() || text.isBlank()) continue
-                    val lines = text.split('\n')
-                    if (lines.size == rects.size) {
-                        for (k in rects.indices) {
-                            val r = rects[k]
-                            if (lines[k].isBlank()) continue
-                            boxes.add(mapOf("t" to lines[k], "x" to r.left / pw, "y" to r.top / ph, "w" to r.width() / pw, "h" to r.height() / ph))
-                        }
+                    val parts = text.split('\n')
+                    if (parts.size == rects.size) {
+                        for (k in rects.indices) if (parts[k].isNotBlank()) lines.add(parts[k] to rects[k])
                     } else {
                         val u = android.graphics.RectF(rects[0])
                         for (r in rects) u.union(r)
-                        boxes.add(mapOf("t" to text.replace('\n', ' '), "x" to u.left / pw, "y" to u.top / ph, "w" to u.width() / pw, "h" to (u.height() / rects.size) / ph))
+                        lines.add(text.replace('\n', ' ') to u)
                     }
                 }
             }
-            out.add(boxes)
+            var bmp: Bitmap? = null
+            var scale = 1f
+            if (draw != null && lines.any { it.first.trim().length <= 60 } && pw > 0f) {
+                scale = 1100f / pw
+                try {
+                    bmp = Bitmap.createBitmap(1100, maxOf(1, (ph * scale).toInt()), Bitmap.Config.ARGB_8888)
+                    bmp.eraseColor(android.graphics.Color.WHITE)
+                    draw(bmp)
+                } catch (_: Throwable) {
+                    bmp?.recycle(); bmp = null
+                }
+            }
+            val page = ArrayList<Map<String, Any>>()
+            for ((t, r) in lines) {
+                val m = HashMap<String, Any>()
+                m["t"] = t; m["x0"] = r.left / pw; m["x1"] = r.right / pw; m["y"] = r.top / ph; m["h"] = r.height() / ph
+                val b = bmp
+                if (b != null && t.trim().length <= 60) {
+                    val rr = android.graphics.Rect((r.left * scale).toInt(), (r.top * scale).toInt(), (r.right * scale).toInt() + 1, (r.bottom * scale).toInt() + 1)
+                    m["sw"] = try { strokeRatio(b, rr) } catch (_: Throwable) { 0.0 }
+                }
+                page.add(m)
+            }
+            bmp?.recycle()
+            out.add(page)
         }
         try {
             if (Build.VERSION.SDK_INT >= 35) {
                 PdfRenderer(pfd).use { renderer ->
-                    for (i in 0 until renderer.pageCount) {
-                        renderer.openPage(i).use { page -> collect(page.width.toFloat(), page.height.toFloat(), page.textContents) }
-                    }
-                }
-            } else {
-                android.graphics.pdf.PdfRendererPreV(pfd).use { renderer ->
-                    for (i in 0 until renderer.pageCount) {
-                        renderer.openPage(i).use { page -> collect(page.width.toFloat(), page.height.toFloat(), page.textContents) }
-                    }
-                }
-            }
-        } finally {
-            try { pfd.close() } catch (_: Exception) {}
-        }
-        return out
-    }
-
-    @android.annotation.SuppressLint("NewApi")
-    private fun pdfPageTexts(path: String, from: Int, to: Int): List<String> {
-        val out = ArrayList<String>()
-        val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
-        try {
-            if (Build.VERSION.SDK_INT >= 35) {
-                PdfRenderer(pfd).use { renderer ->
                     for (i in maxOf(0, from) until minOf(renderer.pageCount, to)) {
-                        renderer.openPage(i).use { page -> out.add(page.textContents.joinToString("\n") { it.text }) }
+                        renderer.openPage(i).use { pg ->
+                            collect(pg.width.toFloat(), pg.height.toFloat(), pg.textContents,
+                                if (withBold) { b -> pg.render(b, null, android.graphics.Matrix().apply { setScale(b.width / pg.width.toFloat(), b.width / pg.width.toFloat()) }, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) } else null)
+                        }
                     }
                 }
             } else {
                 android.graphics.pdf.PdfRendererPreV(pfd).use { renderer ->
                     for (i in maxOf(0, from) until minOf(renderer.pageCount, to)) {
-                        renderer.openPage(i).use { page -> out.add(page.textContents.joinToString("\n") { it.text }) }
+                        renderer.openPage(i).use { pg ->
+                            collect(pg.width.toFloat(), pg.height.toFloat(), pg.textContents,
+                                if (withBold) { b -> pg.render(b, null, android.graphics.Matrix().apply { setScale(b.width / pg.width.toFloat(), b.width / pg.width.toFloat()) },
+                                    android.graphics.pdf.RenderParams.Builder(android.graphics.pdf.RenderParams.RENDER_MODE_FOR_DISPLAY).build()) } else null)
+                        }
                     }
                 }
             }

@@ -30,6 +30,17 @@ Future<T?> showChoiceSheet<T>({
 
 /// 하나 고르기 + 아래에 켜기/끄기 스위치 한 줄이 함께 있는 창.
 /// '확인'을 누르면 (고른 값, 스위치 값)을 돌려준다. 그냥 닫으면 null.
+/// 고르기 창 아래에 붙는 스위치 하나 (켜고 끌 때마다 [onChanged]가 바로 불림)
+class SheetToggle {
+  const SheetToggle({required this.label, this.subtitle, this.icon, required this.value, required this.onChanged});
+
+  final String label;
+  final String? subtitle;
+  final IconData? icon;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+}
+
 Future<(T, bool)?> showChoiceSheetWithToggle<T>({
   required BuildContext context,
   required String title,
@@ -42,6 +53,8 @@ Future<(T, bool)?> showChoiceSheetWithToggle<T>({
   String confirmLabel = '',
   /// 고르거나 스위치를 바꿀 때마다 바로 불림 (확인 버튼 없이 바로 적용)
   ValueChanged<(T, bool)>? onChanged,
+  /// 첫 스위치 아래에 더 붙일 스위치들
+  List<SheetToggle> moreToggles = const [],
 }) {
   return showModalBottomSheet<(T, bool)>(
     context: context,
@@ -57,6 +70,7 @@ Future<(T, bool)?> showChoiceSheetWithToggle<T>({
       toggleIcon: toggleIcon,
       toggleValue: toggleValue,
       onChanged: onChanged,
+      moreToggles: moreToggles,
     ),
   );
 }
@@ -72,6 +86,7 @@ class _ChoiceSheet<T> extends StatefulWidget {
     this.toggleIcon,
     this.toggleValue = false,
     this.onChanged,
+    this.moreToggles = const [],
   });
 
   final String title;
@@ -83,6 +98,7 @@ class _ChoiceSheet<T> extends StatefulWidget {
   final IconData? toggleIcon;
   final bool toggleValue;
   final ValueChanged<(T, bool)>? onChanged;
+  final List<SheetToggle> moreToggles;
 
   @override
   State<_ChoiceSheet<T>> createState() => _ChoiceSheetState<T>();
@@ -91,6 +107,34 @@ class _ChoiceSheet<T> extends StatefulWidget {
 class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
   late T _selected = widget.current;
   late bool _toggle = widget.toggleValue;
+  late final List<bool> _more = [for (final t in widget.moreToggles) t.value];
+
+  Widget _toggleRow(ColorScheme cs, {IconData? icon, required String label, String? subtitle, required bool value, required ValueChanged<bool> onChanged}) {
+    return InkWell(
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 16, 8),
+        child: Row(
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 22, color: cs.onSurfaceVariant),
+              const SizedBox(width: 14),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  if (subtitle != null) Text(subtitle, style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                ],
+              ),
+            ),
+            Switch(value: value, onChanged: onChanged),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -150,40 +194,29 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                     ),
                   if (widget.toggleLabel != null) ...[
                     const Divider(height: 16, indent: 24, endIndent: 24),
-                    InkWell(
-                      onTap: () {
-                        setState(() => _toggle = !_toggle);
+                    _toggleRow(
+                      cs,
+                      icon: widget.toggleIcon,
+                      label: widget.toggleLabel!,
+                      subtitle: widget.toggleSubtitle,
+                      value: _toggle,
+                      onChanged: (v) {
+                        setState(() => _toggle = v);
                         widget.onChanged?.call((_selected, _toggle));
                       },
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 8, 16, 8),
-                        child: Row(
-                          children: [
-                            if (widget.toggleIcon != null) ...[
-                              Icon(widget.toggleIcon, size: 22, color: cs.onSurfaceVariant),
-                              const SizedBox(width: 14),
-                            ],
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(widget.toggleLabel!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                                  if (widget.toggleSubtitle != null)
-                                    Text(widget.toggleSubtitle!, style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-                                ],
-                              ),
-                            ),
-                            Switch(
-                              value: _toggle,
-                              onChanged: (v) {
-                                setState(() => _toggle = v);
-                                widget.onChanged?.call((_selected, _toggle));
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
                     ),
+                    for (int i = 0; i < widget.moreToggles.length; i++)
+                      _toggleRow(
+                        cs,
+                        icon: widget.moreToggles[i].icon,
+                        label: widget.moreToggles[i].label,
+                        subtitle: widget.moreToggles[i].subtitle,
+                        value: _more[i],
+                        onChanged: (v) {
+                          setState(() => _more[i] = v);
+                          widget.moreToggles[i].onChanged(v);
+                        },
+                      ),
                   ],
                 ],
               ),

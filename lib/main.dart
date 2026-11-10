@@ -623,7 +623,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
-  late final AnimationController _searchAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
+  late final AnimationController _searchAnim =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 300), reverseDuration: const Duration(milliseconds: 210));
+  // 펼칠 때는 빠르게 나가다 천천히 멈추고, 돌아올 때도 빠르게 출발해 제자리에 부드럽게 내려앉음
+  late final CurvedAnimation _searchCurve = CurvedAnimation(parent: _searchAnim, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
 
   void _openSearch() {
     if (_searchOpen) return;
@@ -652,20 +655,33 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     _searchAnim.reverse();
   }
 
-  /// 돋보기가 왼쪽으로 가면서 그 뒤로 검색어 밑줄이 길게 그어지고, 닫으면 다시 오른쪽 돋보기로 말려 들어감
+  static const TextStyle _searchTextStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.w600);
+
+  /// 돋보기가 왼쪽으로 조금 가면서 그 뒤로 짧은 밑줄이 그어지고, 글자를 칠수록 밑줄이 왼쪽으로 늘어남
+  /// ("MY" 글자 가까이 오면 더 늘지 않음). 닫으면 다시 오른쪽 돋보기로 말려 들어감
   Widget _buildSearchArea() {
     final Color lineColor = Theme.of(context).colorScheme.onSurface;
-    return AnimatedBuilder(
-      animation: _searchAnim,
-      builder: (context, _) {
-        final double t = Curves.easeOutCubic.transform(_searchAnim.value);
-        if (t <= 0.001) return const SizedBox(height: 40);
-        return LayoutBuilder(
-          builder: (context, c) {
-            final double w = c.maxWidth;
-            const double iconSize = 24;
-            // 돋보기 위치: 오른쪽(원래 돋보기 자리) → 왼쪽 끝
-            final double iconLeft = (w + 28) * (1 - t);
+    return LayoutBuilder(
+      builder: (context, c) {
+        final double w = c.maxWidth;
+        const double iconSize = 24;
+        final double home = w + 28; // 닫혀 있을 때 돋보기 자리 (PDF 합치기 아이콘 왼쪽)
+        // 밑줄 길이 = 친 글자 폭 + 여유 (처음에는 짧게), 돋보기가 왼쪽 끝(MY 옆)에 닿으면 멈춤
+        final tp = TextPainter(text: TextSpan(text: _searchQuery, style: _searchTextStyle), textDirection: TextDirection.ltr, maxLines: 1)
+          ..layout();
+        final double lineLen = (tp.width + 64).clamp(110.0, home).toDouble();
+        final double target = home - lineLen;
+        return TweenAnimationBuilder<double>(
+          tween: Tween<double>(end: target),
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          builder: (context, openLeft, _) => AnimatedBuilder(
+          animation: _searchCurve,
+          builder: (context, _) {
+            final double t = _searchCurve.value;
+            if (t <= 0.001) return const SizedBox(height: 40);
+            // 돋보기 위치: 오른쪽(원래 돋보기 자리) → 글자 길이에 맞는 자리
+            final double iconLeft = home + (openLeft - home) * t;
             final double textOpacity = ((t - 0.55) / 0.45).clamp(0.0, 1.0).toDouble();
             return SizedBox(
               height: 40,
@@ -681,7 +697,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   ),
                   Positioned(left: iconLeft, top: 8, child: Icon(Icons.search, size: iconSize, color: lineColor)),
                   Positioned(
-                    left: iconSize + 8,
+                    left: iconLeft + iconSize + 8,
                     right: -56,
                     top: 0,
                     bottom: 10,
@@ -691,7 +707,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         controller: _searchCtrl,
                         focusNode: _searchFocus,
                         textInputAction: TextInputAction.search,
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                        style: _searchTextStyle,
                         // 깜빡이는 세로 막대가 밑줄에 닿지 않게 짧게
                         cursorHeight: 17,
                         decoration: const InputDecoration(border: InputBorder.none, isCollapsed: true, contentPadding: EdgeInsets.only(top: 6)),
@@ -706,6 +722,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               ),
             );
           },
+          ),
         );
       },
     );
@@ -716,10 +733,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Map<String, String> _bookPageLabelMap = {}; // 마지막으로 읽은 쪽 '지금/전체'
   Set<String> _favoritePaths = {};
   bool _hideFileExtension = false;
+  bool _hideGroupName = false; // 파일 아래 [그룹 이름] 숨기기
   String _bookshelfViewMode = 'list'; // 기본값: 'list' (목록형)
   static final Map<String, ImageProvider> _globalThumbMemoryCache = {};
   final Map<String, ValueNotifier<ImageProvider?>> _thumbNotifiers = {};
   final Set<String> _thumbnailGeneratingPaths = {};
+  final Set<String> _noCoverPaths = {}; // 표지 그림이 없는 EPUB·CBZ (이번 실행 동안 다시 찾지 않음)
 
   bool _isSelectionMode = false;
   final Set<String> _selectedFilePaths = {};
@@ -860,6 +879,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   @override
   void dispose() {
+    _searchCurve.dispose();
     _searchAnim.dispose();
     _searchCtrl.dispose();
     _searchFocus.dispose();
@@ -933,6 +953,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
     final favs = await StorageService.getFavoriteBooks();
     final hideExt = await StorageService.getHideFileExtension();
+    final hideGroup = await StorageService.getHideGroupName();
     final viewMode = await StorageService.getBookshelfViewMode();
 
     files.sort((a, b) {
@@ -965,6 +986,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final Map<String, String> existingThumbBySafeKey = {};
     final Map<String, String> existingDocThumbBySafeKey = {}; // 한글·워드 표지 (흐린 옛 표지와 구분)
     final Map<String, String> existingSlideThumbBySafeKey = {}; // 슬라이드 표지 (흰 화면으로 찍힌 옛 표지와 구분)
+    final Map<String, String> existingEpubThumbBySafeKey = {}; // EPUB 표지 (책에 적힌 표지만, 옛 '첫 그림' 표지와 구분)
     for (final entity in <FileSystemEntity>[for (final p in listed.thumbs) File(p)]) {
       if (entity is File) {
         final name = entity.path.split(Platform.pathSeparator).last;
@@ -977,6 +999,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         } else if (name.startsWith('thumb_s3_') && name.endsWith('.jpg')) {
           final k = name.substring('thumb_s3_'.length, name.length - 4);
           existingSlideThumbBySafeKey[k] = entity.path;
+        } else if (name.startsWith('thumb_e1_') && name.endsWith('.jpg')) {
+          final k = name.substring('thumb_e1_'.length, name.length - 4);
+          existingEpubThumbBySafeKey[k] = entity.path;
         } else if (name.startsWith('thumb_hq26_') && name.endsWith('.jpg')) {
           final parts = name.split('_');
           if (parts.length >= 3) {
@@ -1000,7 +1025,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       final safeKey = path.hashCode.toUnsigned(32).toString();
       final existingThumbPath = (ext == 'pptx' || ext == 'ppt')
           ? existingSlideThumbBySafeKey[safeKey]
-          : DocThumbnailService.supportedExts.contains(ext)
+          : ext == 'epub'
+              ? existingEpubThumbBySafeKey[safeKey]
+              : DocThumbnailService.supportedExts.contains(ext)
               ? existingDocThumbBySafeKey[safeKey]
               : existingThumbBySafeKey[safeKey];
       if (existingThumbPath != null) {
@@ -1016,6 +1043,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         _groups = groups;
         _favoritePaths = favs;
         _hideFileExtension = hideExt;
+        _hideGroupName = hideGroup;
         _bookshelfViewMode = viewMode;
         if (!_groups.contains(_selectedGroup)) {
           _selectedGroup = '전체';
@@ -1076,7 +1104,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           ? '$thumbDirPath/thumb_s3_$safeKey.jpg'
           : isDocType
               ? '$thumbDirPath/thumb_d2_$safeKey.jpg'
-              : '$thumbDirPath/thumb_v36_$safeKey.jpg';
+              : ext == 'epub'
+                  ? '$thumbDirPath/thumb_e1_$safeKey.jpg'
+                  : '$thumbDirPath/thumb_v36_$safeKey.jpg';
       final thumbFile = File(thumbPath);
 
       if (thumbFile.existsSync() && thumbFile.lengthSync() > 64) {
@@ -1126,6 +1156,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         }
         if (allowRender) _docThumbFailed.add(path);
       } else if (ext == 'cbz' || ext == 'epub') {
+        if (_noCoverPaths.contains(path)) return;
+        if (ext == 'epub') {
+          // 예전에 '첫 그림'으로 만든 표지는 지움 (표지가 아닐 수 있음)
+          final old = File('$thumbDirPath/thumb_v36_$safeKey.jpg');
+          if (old.existsSync()) {
+            try {
+              old.deleteSync();
+            } catch (_) {}
+          }
+        }
         final rendered = await _pdfChannel.invokeMethod<String>(
           'extractArchiveFirstImageThumbnail',
           {
@@ -1138,6 +1178,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           _cacheThumbnailFromFileSync(path, rendered);
           return;
         }
+        _noCoverPaths.add(path); // 표지 없음: 파일 아이콘으로 보여 주고 다시 찾지 않음
       }
     } catch (_) {
     } finally {
@@ -2482,6 +2523,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           onChangeThemeMode: widget.onChangeThemeMode,
           viewMode: _bookshelfViewMode,
           hideExtension: _hideFileExtension,
+          hideGroupName: _hideGroupName,
+          onChangeHideGroupName: (hide) async {
+            await StorageService.setHideGroupName(hide);
+            if (mounted) setState(() => _hideGroupName = hide);
+          },
           onChangeLanguage: widget.onChangeLanguage,
           onChangeViewMode: (mode) async {
             await StorageService.setBookshelfViewMode(mode);
@@ -2557,8 +2603,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     return after.indexWhere((f) => f.path == path) != before;
   }
 
-  Widget _favPop(String path, Widget child) =>
-      _FavoritePop(shrinking: _favShrinking.contains(path), growAt: _favGrowAt[path], child: child);
+  Widget _favPop(String path, Widget child, {bool slide = false}) =>
+      _FavoritePop(shrinking: _favShrinking.contains(path), growAt: _favGrowAt[path], slide: slide, child: child);
 
   /// 파일 목록에 보여 줄 마지막으로 읽은 쪽 (예: (6/983)), 연 적 없으면 빈 문자열
   String _pageLabelText(String path) {
@@ -2578,7 +2624,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final displayFileName = _formatDisplayFileName(rawFileName);
     final grp = _bookGroupMap[file.path] ?? '미분류';
     final grpDisplay = _localizeGroupName(grp);
-    final bool showGroupLabel = _selectedGroup == '전체';
+    final bool showGroupLabel = _selectedGroup == '전체' && !_hideGroupName;
     final isSelected = _selectedFilePaths.contains(file.path);
     final isFavorite = _favoritePaths.contains(file.path);
     final lowerExt = rawFileName.split('.').last.toLowerCase();
@@ -3149,7 +3195,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                 final pageText = _pageLabelText(file.path);
                                 // 10. [전체]에서만 그룹 이름 표시, 특정 그룹 선택 시 그룹 이름 표시 제거
                                 // 그룹 이름 오른쪽: 마지막으로 읽은 쪽 (예: (6/983))
-                                final subText = _selectedGroup == '전체'
+                                final subText = _selectedGroup == '전체' && !_hideGroupName
                                     ? (pageText.isEmpty ? '[$grpDisplay]' : '[$grpDisplay]  •  $pageText')
                                     : pageText;
                                 return Text(
@@ -3218,7 +3264,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             ],
                           ),
                           ),
-                        ));
+                        ), slide: true);
                       },
                     ),
                           ),
@@ -3540,11 +3586,13 @@ class _FileMergeSelectDialogState extends State<_FileMergeSelectDialog> {
 }
 
 
-/// 즐겨찾기로 자리가 바뀌는 파일: 가운데로 작아지며 사라지고([shrinking]), 새 자리에서 가운데부터 커지며 나타남([growAt] 직후)
+/// 즐겨찾기로 자리가 바뀌는 파일: 사라졌다가([shrinking]) 새 자리에서 나타남([growAt] 직후).
+/// 표지형은 가운데로 작아졌다 커지고, 목록형([slide])은 오른쪽으로 밀려 나갔다가 오른쪽에서 밀려 들어옴
 class _FavoritePop extends StatefulWidget {
-  const _FavoritePop({required this.shrinking, required this.growAt, required this.child});
+  const _FavoritePop({required this.shrinking, required this.growAt, required this.child, this.slide = false});
 
   final bool shrinking;
+  final bool slide;
   final DateTime? growAt;
   final Widget child;
 
@@ -3566,7 +3614,7 @@ class _FavoritePopState extends State<_FavoritePop> with SingleTickerProviderSta
 
   void _grow() {
     _c.value = 0;
-    _c.animateTo(1, duration: const Duration(milliseconds: 220), curve: Curves.easeOutBack);
+    _c.animateTo(1, duration: Duration(milliseconds: widget.slide ? 260 : 220), curve: widget.slide ? Curves.easeOutCubic : Curves.easeOutBack);
   }
 
   @override
@@ -3588,5 +3636,12 @@ class _FavoritePopState extends State<_FavoritePop> with SingleTickerProviderSta
   }
 
   @override
-  Widget build(BuildContext context) => ScaleTransition(scale: _c, child: widget.child);
+  Widget build(BuildContext context) {
+    if (!widget.slide) return ScaleTransition(scale: _c, child: widget.child);
+    return AnimatedBuilder(
+      animation: _c,
+      child: widget.child,
+      builder: (context, child) => FractionalTranslation(translation: Offset(1 - _c.value, 0), child: child),
+    );
+  }
 }

@@ -54,14 +54,36 @@ class HwpReaderController {
     return [for (final t in result) (t ?? '').toString()];
   }
 
-  /// 목차 후보: 번호로 시작하는 줄들 {title, page(0부터), bold}
-  Future<List<Map<String, Object?>>> headingCandidates() async {
-    final result = await _query?.call('headingCandidates', []);
+  /// 목차 후보: 번호로 시작하거나 굵은 글씨가 있는 짧은 문단들 {title, page(0부터), bold, boldRatio, centered, fs}.
+  /// 한글은 [from, to) 쪽만 (워드는 한 번에 전부)
+  Future<List<Map<String, Object?>>> headingCandidates(int from, int to) async {
+    final result = await _query?.call('headingCandidates', [from, to]);
     if (result is! List) return const [];
     return [
       for (final item in result)
         if (item is Map && item['page'] is num)
-          {'title': (item['title'] ?? '').toString(), 'page': (item['page'] as num).toInt(), 'bold': item['bold'] == true},
+          {
+            'title': (item['title'] ?? '').toString(),
+            'page': (item['page'] as num).toInt(),
+            'bold': item['bold'] == true,
+            'boldRatio': (item['boldRatio'] as num?)?.toDouble() ?? 0,
+            'centered': item['centered'] == true,
+            'fs': (item['fs'] as num?)?.toDouble() ?? 0,
+          },
+    ];
+  }
+
+  /// PPT: [from, to) 슬라이드마다 줄들 {t, y, fs, bold}
+  Future<List<List<Map<String, Object?>>>> slideLineData(int from, int to) async {
+    final result = await _query?.call('slideLineData', [from, to]);
+    if (result is! List) return const [];
+    return [
+      for (final slide in result)
+        [
+          if (slide is List)
+            for (final l in slide)
+              if (l is Map) {'t': (l['t'] ?? '').toString(), 'y': (l['y'] as num?)?.toDouble() ?? 0, 'fs': (l['fs'] as num?)?.toDouble() ?? 0, 'bold': l['bold'] == true},
+        ],
     ];
   }
 }

@@ -29,6 +29,8 @@ class FileTypeIcon extends StatelessWidget {
       case 'hwp':
       case 'hwpx':
         return ('ㅎ', const Color(0xFF29B6F6)); // 한글: 하늘색
+      case 'cbz':
+        return ('C', const Color(0xFFFBC02D)); // 만화(CBZ): 노랑
     }
     return null;
   }
@@ -46,8 +48,6 @@ class FileTypeIcon extends StatelessWidget {
         case 'txt':
           // 다른 형식처럼 끝이 접힌 종이 + 안에 줄 2개, 검은색 (어두운 화면에서는 밝게)
           return _TxtIcon(size: size, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.black87);
-        case 'cbz':
-          return Icon(Icons.auto_stories, size: size, color: fallbackColor);
       }
       // 이미지: 테두리와 안의 산 모양을 초록색으로
       return Icon(Icons.image_outlined, size: size, color: imageGreen);

@@ -203,6 +203,17 @@ class StorageService {
     return prefs.getBool('hide_file_extension') ?? false;
   }
 
+  /// 파일 목록에서 [그룹 이름] 숨기기
+  static Future<void> setHideGroupName(bool hide) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('hide_group_name', hide);
+  }
+
+  static Future<bool> getHideGroupName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('hide_group_name') ?? false;
+  }
+
   // 2. 즐겨찾기(별표) 도서 관리
   static Future<Set<String>> getFavoriteBooks() async {
     final prefs = await SharedPreferences.getInstance();

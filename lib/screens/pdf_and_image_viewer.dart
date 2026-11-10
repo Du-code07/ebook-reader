@@ -10,6 +10,9 @@ import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
 import '../services/pdf_outline_service.dart';
 import '../services/toc_page_parser.dart';
+import '../services/heading_rules.dart';
+import '../services/outline_cache.dart';
+import '../widgets/outline_progress.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
 import '../widgets/sheet_pull_to_close.dart';
@@ -253,7 +256,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   final Map<int, List<MemoStroke>> _memoStrokesByPage = {};
   final Map<int, String> _memoNotesByPage = {};
   final List<Offset> _activeStrokePoints = [];
-  Color _penColor = Colors.amber;
+  Color _penColor = kMemoPenColors.first; // 기본: 빨강
   double _penWidth = 2.0;
 
   // 메모: 되돌리기/다시 실행 기록, 지우개 종류, 지우개 드래그 시작 시점의 필기
@@ -708,24 +711,103 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   List<Map<String, Object>> _pdfToc = const [];
 
   /// 1) 파일 속 목차(책갈피) → 2) '목차'라고 적힌 쪽의 항목들 (기기가 PDF 글 읽기를 지원할 때) → 없으면 쪽 목록
+  /// 목차를 만드는 중이면 진행률(0~1) — 목차 칸에 '목차 만드는 중… n%'
+  double? _pdfTocProgress;
+
+  void _setPdfTocProgress(double? p) {
+    if (!mounted) return;
+    if (p != null && _pdfTocProgress != null && (p - _pdfTocProgress!).abs() < 0.01) return;
+    setState(() => _pdfTocProgress = p);
+  }
+
+  /// PDF 목차 (한글·워드와 같은 규칙): 1) 파일의 책갈피(목차) → 2) '목차' 쪽 → 3) Ⅰ. / 1. 로 시작하는 줄
+  /// → 4) 굵은 글씨 줄(가운데 정렬이거나 줄 전체가 굵은 경우) → 없으면 쪽 목록. 만든 목차는 저장해 두어 다음에는 바로 보여 준다
   Future<void> _loadPdfOutline() async {
     if (!mounted || _totalPages <= 0) return;
     final path = widget.files.first.path;
+    final int pages = _totalPages;
     var items = await PdfOutlineService.read(path);
+    if (!mounted) return;
     if (items.isEmpty) {
-      final head = await _pdfPageTexts(path, 0, math.min(_totalPages, TocPageParser.searchPages));
-      if (TocPageParser.parse(head, _totalPages) != null) {
-        final all = await _pdfPageTexts(path, 0, math.min(_totalPages, 400));
-        items = TocPageParser.parse(all.isEmpty ? head : all, _totalPages) ?? const [];
+      final cached = (await OutlineCache.read(path))[pages];
+      if (!mounted) return;
+      if (cached != null) {
+        if (cached.isNotEmpty) setState(() => _pdfToc = [for (final e in cached) e.cast<String, Object>()]);
+        return;
+      }
+      _setPdfTocProgress(0);
+      try {
+        final int scan = math.min(pages, 400); // 아주 긴 문서는 앞 400쪽까지만
+        Future<List<List<Map<String, Object?>>>?> readLines(bool bold, double p0, double p1) async {
+          final out = <List<Map<String, Object?>>>[];
+          final int step = bold ? 10 : 20;
+          for (int from = 0; from < scan; from += step) {
+            out.addAll(await _pdfLines(path, from, math.min(scan, from + step), bold));
+            if (!mounted) return null;
+            _setPdfTocProgress(p0 + (p1 - p0) * math.min(1, (from + step) / scan));
+          }
+          return out;
+        }
+
+        final lines = await readLines(false, 0, 0.6);
+        if (lines == null) return;
+        final texts = [for (final page in lines) page.map((l) => l['t']).join('\n')];
+        List<Map<String, Object?>> found = TocPageParser.parse(texts, pages) ??
+            HeadingRules.build([
+              for (int p = 0; p < lines.length; p++)
+                for (final l in lines[p]) {'title': l['t'], 'page': p, 'fs': l['h']},
+            ]);
+        if (found.isEmpty && lines.any((page) => page.isNotEmpty)) {
+          // 번호 줄이 없으면: 쪽을 그려 글자 굵기를 가늠해 굵은 글씨 줄을 찾음
+          final bolds = await readLines(true, 0.6, 0.97);
+          if (bolds == null) return;
+          final ratios = <double>[
+            for (final page in bolds)
+              for (final l in page)
+                if (((l['sw'] as num?) ?? 0) > 0) (l['sw'] as num).toDouble(),
+          ]..sort();
+          final double median = ratios.isEmpty ? 0 : ratios[ratios.length ~/ 2];
+          final cands = <Map<String, Object?>>[];
+          for (int p = 0; p < bolds.length; p++) {
+            final page = bolds[p];
+            if (page.isEmpty) continue;
+            double left = 1, right = 0;
+            for (final l in page) {
+              left = math.min(left, (l['x0'] as num).toDouble());
+              right = math.max(right, (l['x1'] as num).toDouble());
+            }
+            final double width = right - left;
+            for (final l in page) {
+              final double sw = (l['sw'] as num?)?.toDouble() ?? 0;
+              final bool bold = median > 0 && sw >= median * 1.22;
+              final double x0 = (l['x0'] as num).toDouble(), x1 = (l['x1'] as num).toDouble();
+              final bool centered = width > 0 && x1 - x0 < width * 0.85 && ((x0 - left) - (right - x1)).abs() < width * 0.06 + 0.005;
+              cands.add({'title': l['t'], 'page': p, 'bold': bold, 'boldRatio': bold ? 1.0 : 0.0, 'centered': centered, 'fs': l['h']});
+            }
+          }
+          found = HeadingRules.build(cands);
+        }
+        items = [for (final e in found) e.cast<String, Object>()];
+        await OutlineCache.write(path, pages, found);
+      } finally {
+        _setPdfTocProgress(null);
       }
     }
     if (mounted && items.isNotEmpty) setState(() => _pdfToc = items);
   }
 
-  Future<List<String>> _pdfPageTexts(String path, int from, int to) async {
+  /// 쪽마다 줄들 {t, x0, x1, y, h, (sw: 글자 획 굵기 비율)} (지원하지 않는 기기에서는 빈 목록)
+  Future<List<List<Map<String, Object?>>>> _pdfLines(String path, int from, int to, bool bold) async {
     try {
-      final r = await _pdfChannel.invokeMethod<List<Object?>>('pdfPageTexts', {'path': path, 'from': from, 'to': to});
-      return [for (final t in r ?? const []) (t ?? '').toString()];
+      final r = await _pdfChannel.invokeMethod<List<Object?>>('pdfLines', {'path': path, 'from': from, 'to': to, 'bold': bold});
+      return [
+        for (final page in r ?? const [])
+          [
+            if (page is List)
+              for (final l in page)
+                if (l is Map && l['x0'] is num && l['x1'] is num) l.cast<String, Object?>(),
+          ],
+      ];
     } catch (_) {
       return const [];
     }
@@ -745,7 +827,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ),
             const Divider(height: 1),
             Expanded(
-              child: ListView.builder(
+              child: _pdfTocProgress != null
+                  ? OutlineProgressView(
+                      progress: _pdfTocProgress!,
+                      label: _tr('목차 만드는 중', 'Building contents', '正在生成目录', '目次を作成中'),
+                      hint: _tr('처음 한 번만 만들고, 다음부터는 바로 보여요', 'Only the first time — next time it opens instantly', '仅首次生成，下次直接显示', '初回のみ作成し、次回からはすぐ表示されます'),
+                    )
+                  : ListView.builder(
                 itemCount: outline ? _pdfToc.length : _totalPages,
                 itemBuilder: (context, index) {
                   final item = outline ? _pdfToc[index] : null;

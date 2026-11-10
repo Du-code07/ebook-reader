@@ -14,6 +14,7 @@ import '../services/txt_page_document.dart';
 import '../services/toc_page_parser.dart';
 import '../services/heading_rules.dart';
 import '../services/outline_cache.dart';
+import '../widgets/outline_progress.dart';
 import '../services/page_snapshot_service.dart';
 import '../services/epub_validation.dart';
 import '../widgets/hwp_viewer.dart';
@@ -110,6 +111,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool get _isPaperTheme => _isEpub && _epubBgTheme == 'sepia';
   bool get _isOfflineDocument => RegExp(r'\.(hwp|hwpx|docx|doc|txt|pptx|ppt)$', caseSensitive: false).hasMatch(widget.filePath);
   bool get _isPresentation => RegExp(r'\.pptx?$', caseSensitive: false).hasMatch(widget.filePath);
+  bool get _isHwpFile => RegExp(r'\.hwpx?$', caseSensitive: false).hasMatch(widget.filePath);
   String get _documentPositionPrefix {
     final lower = widget.filePath.toLowerCase();
     if (_isTxt) return 'txt';
@@ -250,7 +252,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   String _currentPageLocationKey = 'page_0';
   List<MemoStroke> _epubStrokes = [];
   final List<Offset> _activeStrokePoints = [];
-  Color _penColor = Colors.amber;
+  Color _penColor = kMemoPenColors.first; // 기본: 빨강
   double _penWidth = 2.0;
 
   // 메모: 되돌리기/다시 실행 기록(페이지 위치별), 지우개 종류, 지우개 드래그 시작 시점의 필기
@@ -636,6 +638,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _outlineCacheFuture = OutlineCache.read(widget.filePath).then((all) => _cachedOutlines = all);
   }
 
+  /// 목차를 만드는 중이면 진행률(0~1), 아니면 null — 목차 칸에 '목차 만드는 중… n%'로 보임
+  double? _outlineProgress;
+
+  void _setOutlineProgress(double? p) {
+    if (!mounted) return;
+    if (p != null && _outlineProgress != null && (p - _outlineProgress!).abs() < 0.01 && p < 1) return;
+    setState(() => _outlineProgress = p);
+  }
+
   Future<void> _loadDocumentOutline(int pageCount) async {
     if (!mounted || _isTxt) return;
     final cached = (await (_outlineCacheFuture ?? Future.value(const <int, List<Map<String, Object?>>>{})))[pageCount];
@@ -644,36 +655,60 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _applyDocumentOutline(cached, pageCount);
       return;
     }
+    _setOutlineProgress(0);
+    try {
+      final items = await _buildDocumentOutline(pageCount);
+      if (items == null || !mounted || _docPageCount != pageCount) return; // 중간에 닫힘: 다음에 이어서
+      final cleaned = [for (final e in items) {...e, 'title': (e['title'] ?? '').toString().replaceAll(RegExp(r'\s+'), ' ').trim()}];
+      await OutlineCache.write(widget.filePath, pageCount, cleaned);
+      (_cachedOutlines ??= {})[pageCount] = cleaned;
+      _setOutlineProgress(null);
+      _applyDocumentOutline(cleaned, pageCount);
+    } finally {
+      if (mounted && _outlineProgress != null) _setOutlineProgress(null);
+    }
+  }
+
+  /// 목차 만들기. 1) 파일 안 목차 쪽 → 2) 한글·워드: 번호 줄 → 굵은 글씨 줄 / PPT: 슬라이드 제목·부제목
+  Future<List<Map<String, Object?>>?> _buildDocumentOutline(int pageCount) async {
+    bool alive() => mounted && _docPageCount == pageCount;
     // 첫 화면을 그리는 데 방해되지 않도록 잠시 뒤에 분석
-    await Future<void>.delayed(const Duration(milliseconds: 800));
-    if (!mounted || _docPageCount != pageCount) return;
-    List<Map<String, Object?>> items = const [];
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (!alive()) return null;
+    final int scan = math.min(pageCount, 400); // 아주 긴 문서는 앞 400쪽까지만
     final head = await _hwpController.pageText(0, math.min(pageCount, TocPageParser.searchPages));
-    if (!mounted) return;
-    if (TocPageParser.parse(head, pageCount) != null) {
-      // 제목이 실제로 나오는 쪽을 찾으려고 뒤쪽 글까지 읽음 (아주 긴 문서는 앞 400쪽까지만)
-      final all = await _hwpController.pageText(0, math.min(pageCount, 400));
-      if (!mounted) return;
-      items = TocPageParser.parse(all.isEmpty ? head : all, pageCount) ?? const [];
-    }
-    if (items.isEmpty) {
-      items = HeadingRules.build(await _hwpController.headingCandidates());
-      if (!mounted) return;
-    }
-    // 글자가 거의 없는 PPT(슬라이드가 그림으로만 된 경우): 그림 속 글자를 읽음
-    if (items.isEmpty && _isPresentation && head.isNotEmpty) {
-      final letters = head.fold<int>(0, (n, t) => n + RegExp(r'[가-힣A-Za-z]').allMatches(t).length);
-      if (letters < head.length * 15) {
-        final ocr = await _ocrOutline(pageCount);
-        if (ocr == null || !mounted) return; // 중간에 닫힘: 다음에 이어서 읽음
-        items = ocr;
+    if (!alive()) return null;
+    _setOutlineProgress(0.05);
+    // 글을 [from, to) 조각으로 나눠 읽으며 진행률 표시
+    Future<List<T>> chunked<T>(Future<List<T>> Function(int from, int to) read, int total, double p0, double p1, {int step = 20}) async {
+      final out = <T>[];
+      for (int from = 0; from < total; from += step) {
+        out.addAll(await read(from, math.min(total, from + step)));
+        if (!alive()) return out;
+        _setOutlineProgress(p0 + (p1 - p0) * math.min(1, (from + step) / total));
       }
+      return out;
     }
-    if (!mounted || _docPageCount != pageCount) return;
-    items = [for (final e in items) {...e, 'title': (e['title'] ?? '').toString().replaceAll(RegExp(r'\s+'), ' ').trim()}];
-    await OutlineCache.write(widget.filePath, pageCount, items);
-    (_cachedOutlines ??= {})[pageCount] = items;
-    _applyDocumentOutline(items, pageCount);
+
+    // 1) 목차 쪽
+    if (TocPageParser.parse(head, pageCount) != null) {
+      final all = await chunked<String>((f, t) => _hwpController.pageText(f, t), scan, 0.05, 0.95);
+      if (!alive()) return null;
+      return TocPageParser.parse(all.length < head.length ? head : all, pageCount) ?? const [];
+    }
+    if (_isPresentation) {
+      final letters = head.fold<int>(0, (n, t) => n + RegExp(r'[가-힣A-Za-z]').allMatches(t).length);
+      // 글자가 거의 없는 PPT(슬라이드가 그림으로만 된 경우): 그림 속 글자를 읽음
+      if (head.isNotEmpty && letters < head.length * 15) return _ocrOutline(pageCount);
+      final lines = await chunked<List<Map<String, Object?>>>((f, t) => _hwpController.slideLineData(f, t), pageCount, 0.05, 0.95, step: 10);
+      if (!alive()) return null;
+      return HeadingRules.slides(lines);
+    }
+    final cands = _isHwpFile
+        ? await chunked<Map<String, Object?>>((f, t) => _hwpController.headingCandidates(f, t), scan, 0.05, 0.95)
+        : await _hwpController.headingCandidates(0, scan);
+    if (!alive()) return null;
+    return HeadingRules.build(cands);
   }
 
   /// 슬라이드 그림 속 글자를 읽어 목차를 만든다. 슬라이드마다 읽은 결과는 바로바로 저장 (중간에 닫으면 null)
@@ -700,7 +735,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             if (e is! Map) continue;
             final t = (e['t'] ?? '').toString().trim();
             if (t.isEmpty) continue;
-            lines.add({'t': t, 'y': e['y'], 'h': e['h'], 'sw': e['sw']});
+            lines.add({'t': t, 'y': e['y'], 'h': e['h']});
           }
         } catch (_) {
         } finally {
@@ -710,30 +745,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         }
       }
       slides[page] = lines;
+      _setOutlineProgress(0.05 + 0.9 * (page + 1) / pageCount);
       if (++fresh % 5 == 0) await OutlineCache.writeOcr(path, slides);
       // 읽는 화면이 버벅이지 않게 슬라이드 사이에 잠깐 쉼
       await Future<void>.delayed(const Duration(milliseconds: 120));
     }
     if (!mounted || _docPageCount != pageCount) return null;
     final texts = [for (int p = 0; p < pageCount; p++) [for (final l in slides[p] ?? const <Map<String, Object?>>[]) l['t']].join('\n')];
-    final toc = TocPageParser.parse(texts, pageCount);
-    List<Map<String, Object?>> items;
-    if (toc != null) {
-      items = toc;
-    } else {
-      // 굵은 글씨 가늠: 획 굵기 비율이 문서 전체 보통 글자보다 확실히 큰 줄
-      final ratios = <double>[
-        for (final lines in slides.values)
-          for (final l in lines)
-            if ((l['sw'] as num? ?? 0) > 0 && RegExp(r'[가-힣A-Za-z]').allMatches('${l['t']}').length >= 2) (l['sw'] as num).toDouble(),
-      ]..sort();
-      final double median = ratios.isEmpty ? 0 : ratios[ratios.length ~/ 2];
-      items = HeadingRules.build([
-        for (int p = 0; p < pageCount; p++)
-          for (final l in slides[p] ?? const <Map<String, Object?>>[])
-            {'title': l['t'], 'page': p, 'bold': median > 0 && (l['sw'] as num? ?? 0) >= median * 1.22},
-      ]);
-    }
+    // 목차 슬라이드가 있으면 그것만, 없으면 슬라이드마다 제목(가장 큰 글자)과 그 바로 아래 부제목
+    final List<Map<String, Object?>> items = TocPageParser.parse(texts, pageCount) ??
+        HeadingRules.slides([for (int p = 0; p < pageCount; p++) slides[p] ?? const <Map<String, Object?>>[]], ocr: true);
     await OutlineCache.clearOcr(path);
     return items;
   }
@@ -3176,7 +3197,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               ),
               const Divider(height: 1),
               Expanded(
-                child: ListView.builder(
+                child: _outlineProgress != null
+                    ? OutlineProgressView(
+                        progress: _outlineProgress!,
+                        label: _tr('목차 만드는 중', 'Building contents', '正在生成目录', '目次を作成中'),
+                        hint: _tr('처음 한 번만 만들고, 다음부터는 바로 보여요', 'Only the first time — next time it opens instantly', '仅首次生成，下次直接显示', '初回のみ作成し、次回からはすぐ表示されます'),
+                      )
+                    : ListView.builder(
                   itemCount: _chapters.length,
                   itemBuilder: (context, index) {
                     final chapter = _chapters[index];

@@ -13,6 +13,8 @@ class AppSettingsScreen extends StatefulWidget {
     required this.onChangeThemeMode,
     required this.viewMode,
     required this.hideExtension,
+    this.hideGroupName = false,
+    this.onChangeHideGroupName,
     required this.onChangeLanguage,
     required this.onChangeViewMode,
     required this.onChangeHideExtension,
@@ -28,6 +30,8 @@ class AppSettingsScreen extends StatefulWidget {
   final Future<void> Function(String mode) onChangeThemeMode;
   final String viewMode; // 'grid' | 'list'
   final bool hideExtension;
+  final bool hideGroupName;
+  final Future<void> Function(bool hide)? onChangeHideGroupName;
   final ValueChanged<String> onChangeLanguage; // 'system' | ko/en/zh/ja
   final Future<void> Function(String mode) onChangeViewMode;
   final Future<void> Function(bool hide) onChangeHideExtension;
@@ -50,6 +54,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   late String _themeMode = widget.themeMode;
   late String _viewMode = widget.viewMode;
   late bool _hideExt = widget.hideExtension;
+  late bool _hideGroup = widget.hideGroupName;
 
   String _t(String ko, String en, String zh, String ja) => AppI18n.t(_lang, ko: ko, en: en, zh: zh, ja: ja);
 
@@ -94,7 +99,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     });
   }
 
-  /// 파일 표시 방식(표지형/목록형) + 파일 이름 뒤 형식 숨기기 — 누르면 바로 적용
+  /// 파일 표시 방식(표지형/목록형) + 파일 이름 뒤 형식 숨기기 + 그룹 이름 숨기기 — 누르면 바로 적용
   Future<void> _pickViewMode() async {
     await showChoiceSheetWithToggle<String>(
       context: context,
@@ -119,6 +124,19 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         if (modeChanged) await widget.onChangeViewMode(mode);
         if (hideChanged) await widget.onChangeHideExtension(hide);
       },
+      moreToggles: [
+        SheetToggle(
+          icon: Icons.label_off_outlined,
+          label: _t('그룹 이름 숨기기', 'Hide group name', '隐藏分组名称', 'グループ名を隠す'),
+          subtitle: _t('파일 아래 [그룹 이름]', '[Group] under each file', '文件下方的 [分组]', 'ファイルの下の [グループ]'),
+          value: _hideGroup,
+          onChanged: (v) async {
+            if (!mounted) return;
+            setState(() => _hideGroup = v);
+            await widget.onChangeHideGroupName?.call(v);
+          },
+        ),
+      ],
     );
   }
 
@@ -209,9 +227,11 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               icon: _viewMode == 'grid' ? Icons.grid_view_rounded : Icons.view_list_rounded,
               title: _t('파일 표시 방식', 'Bookshelf View Mode', '文件显示样式', 'ファイル表示形式'),
               // 지금 방식 + 형식 숨김 여부
-              subtitle: _hideExt
-                  ? '${_viewModeLabel(_viewMode)} · ${_t('형식 숨김', 'extensions hidden', '隐藏扩展名', '形式を隠す')}'
-                  : _viewModeLabel(_viewMode),
+              subtitle: [
+                _viewModeLabel(_viewMode),
+                if (_hideExt) _t('형식 숨김', 'extensions hidden', '隐藏扩展名', '形式を隠す'),
+                if (_hideGroup) _t('그룹 숨김', 'groups hidden', '隐藏分组', 'グループを隠す'),
+              ].join(' · '),
               onTap: _pickViewMode,
             ),
             _section(_t('도움말', 'Help', '帮助', 'ヘルプ')),
