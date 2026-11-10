@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 /// 서재에서 파일 이름 앞에 보이는 형식 아이콘.
 /// 워드·엑셀·파워포인트·PDF·한글은 종이 모양 안에 글자(W·X·P·P·ㅎ)를 넣고 형식별 색으로 보여 준다.
 class FileTypeIcon extends StatelessWidget {
-  const FileTypeIcon({super.key, required this.ext, this.size = 24, this.fallbackColor = Colors.indigo});
+  const FileTypeIcon({super.key, required this.ext, this.size = 24, this.fallbackColor = Colors.indigo, this.epubColor});
 
   final String ext;
   final double size;
   final Color fallbackColor;
+
+  /// EPUB 책 색 (없으면 기본 갈색)
+  final Color? epubColor;
 
   /// 글자 아이콘을 쓰는 형식: (글자, 색)
   static (String, Color)? lettered(String ext) {
@@ -31,7 +34,7 @@ class FileTypeIcon extends StatelessWidget {
   }
 
   static const Color imageGreen = Color(0xFF2E9E4F);
-  static const Color epubTeal = Color(0xFF00897B);
+  static const Color epubBrown = Color(0xFF795548); // EPUB: 갈색
 
   @override
   Widget build(BuildContext context) {
@@ -39,9 +42,9 @@ class FileTypeIcon extends StatelessWidget {
     if (mark == null) {
       switch (ext.toLowerCase()) {
         case 'epub':
-          return _EpubIcon(size: size);
+          return _EpubIcon(size: size, color: epubColor ?? epubBrown);
         case 'txt':
-          // 다른 형식처럼 끝이 접힌 종이 + 안에 줄 3개, 검은색 (어두운 화면에서는 밝게)
+          // 다른 형식처럼 끝이 접힌 종이 + 안에 줄 2개, 검은색 (어두운 화면에서는 밝게)
           return _TxtIcon(size: size, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.black87);
         case 'cbz':
           return Icon(Icons.auto_stories, size: size, color: fallbackColor);
@@ -83,7 +86,7 @@ class FileTypeIcon extends StatelessWidget {
   }
 }
 
-/// TXT: 접힌 종이 안에 가로줄 3개
+/// TXT: 접힌 종이 안에 가로줄 2개
 class _TxtIcon extends StatelessWidget {
   const _TxtIcon({required this.size, required this.color});
 
@@ -102,16 +105,14 @@ class _TxtIcon extends StatelessWidget {
         children: [
           Icon(Icons.insert_drive_file_outlined, size: size, color: color),
           Positioned(
-            top: size * 0.44,
+            top: size * 0.48,
             left: size * 0.30,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 bar(0.40),
-                SizedBox(height: size * 0.075),
-                bar(0.40),
-                SizedBox(height: size * 0.075),
-                bar(0.28),
+                SizedBox(height: size * 0.09),
+                bar(0.30),
               ],
             ),
           ),
@@ -121,11 +122,12 @@ class _TxtIcon extends StatelessWidget {
   }
 }
 
-/// EPUB: 청록색 펼친 책 + 왼쪽 쪽에 노란 책갈피
+/// EPUB: 갈색 펼친 책 + 왼쪽 쪽에 노란 책갈피
 class _EpubIcon extends StatelessWidget {
-  const _EpubIcon({required this.size});
+  const _EpubIcon({required this.size, required this.color});
 
   final double size;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
@@ -135,7 +137,7 @@ class _EpubIcon extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Icon(Icons.menu_book, size: size, color: FileTypeIcon.epubTeal),
+          Icon(Icons.menu_book, size: size, color: color),
           Positioned(
             left: size * 0.25,
             top: size * 0.17,

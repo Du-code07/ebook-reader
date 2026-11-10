@@ -12,6 +12,7 @@ import 'screens/language_select_screen.dart';
 import 'screens/app_settings_screen.dart';
 import 'widgets/sheet_pull_to_close.dart';
 import 'widgets/file_type_icon.dart';
+import 'widgets/memo_tools.dart';
 import 'widgets/favorite_ribbon.dart';
 import 'widgets/group_stack_icon.dart';
 import 'widgets/group_jump_menu.dart';
@@ -131,6 +132,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'FReader',
+      // 테마를 바꿀 때 색을 서서히 섞는 동안 화면 전체를 매번 다시 그려 느려짐 → 바로 바꿈
+      themeAnimationDuration: Duration.zero,
       themeMode: _themeMode == 'dark'
           ? ThemeMode.dark
           : (_themeMode == 'light' ? ThemeMode.light : ThemeMode.system),
@@ -421,7 +424,7 @@ class UserManualScreen extends StatelessWidget {
                     const SizedBox(width: 12),
                     const Icon(Icons.screen_rotation, color: Colors.white, size: 19),
                     const SizedBox(width: 12),
-                    const Icon(Icons.draw_outlined, color: Colors.amber, size: 20),
+                    const QuillInkIcon(color: Colors.amber, size: 21),
                     const SizedBox(width: 12),
                     const Icon(Icons.menu_book, color: Colors.amber, size: 20),
                     const SizedBox(width: 12),
@@ -457,7 +460,7 @@ class UserManualScreen extends StatelessWidget {
               desc: _tr('서재로 나가지 않고 현재 파일과 같은 그룹에 있는 이전 파일 또는 다음 파일로 즉시 이동합니다.', 'Jumps directly to the previous or next file within the same group without leaving the viewer.', '无需返回书架，直接切换到同一分组中的上一个或下一个文件。', '書斎に戻らずに同じグループ内の前/次のファイルを直接開きます。'),
             ),
             _buildIconGuideRow(
-              iconWidget: const Icon(Icons.draw_outlined, color: Colors.amber, size: 22),
+              iconWidget: const QuillInkIcon(color: Colors.amber, size: 23),
               title: _tr('S펜 필기 모드 열기/닫기', 'S Pen Handwriting Mode', 'S Pen 手写模式', 'Sペン手書きモード'),
               desc: _tr('S펜 전용 필기 툴바를 엽니다. 필기 모드가 켜진 동안에는 S펜으로 화면을 움직여도 페이지가 흔들리거나 넘어가지 않으며, 손가락 스와이프로만 페이지가 이동합니다.', 'Opens the S Pen toolbar. While active, S Pen strokes never move or turn the page; finger swipes turn pages.', '打开 S Pen 工具栏。开启时 S Pen 书写不会移动页面，仅手指滑动可翻页。', 'Sペンツールバーを開きます。手書き中はSペンで画面が動かず、指のスワイプでのみページがめくれます。'),
             ),
@@ -631,27 +634,27 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           builder: (context, c) {
             final double w = c.maxWidth;
             const double iconSize = 24;
-            // 돋보기 위치: 오른쪽 끝(원래 돋보기 자리) → 왼쪽 끝
-            final double iconLeft = (w + 8) * (1 - t);
+            // 돋보기 위치: 오른쪽(원래 돋보기 자리) → 왼쪽 끝
+            final double iconLeft = (w + 28) * (1 - t);
             final double textOpacity = ((t - 0.55) / 0.45).clamp(0.0, 1.0).toDouble();
             return SizedBox(
               height: 40,
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  // 밑줄: 돋보기가 지나간 자리부터 오른쪽 끝까지
+                  // 밑줄: 돋보기가 지나간 자리부터 오른쪽 PDF 합치기 아이콘 바로 앞까지 (비워 둔 돋보기 자리까지 이어짐)
                   Positioned(
                     left: iconLeft + iconSize + 4,
-                    right: 0,
+                    right: -56,
                     bottom: 5,
                     child: Container(height: 2, decoration: BoxDecoration(color: lineColor, borderRadius: BorderRadius.circular(1))),
                   ),
                   Positioned(left: iconLeft, top: 8, child: Icon(Icons.search, size: iconSize, color: lineColor)),
                   Positioned(
                     left: iconSize + 8,
-                    right: 0,
+                    right: -56,
                     top: 0,
-                    bottom: 6,
+                    bottom: 10,
                     child: Opacity(
                       opacity: textOpacity,
                       child: TextField(
@@ -659,7 +662,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         focusNode: _searchFocus,
                         textInputAction: TextInputAction.search,
                         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                        decoration: const InputDecoration(border: InputBorder.none, isCollapsed: true, contentPadding: EdgeInsets.only(top: 8)),
+                        // 깜빡이는 세로 막대가 밑줄에 닿지 않게 짧게
+                        cursorHeight: 17,
+                        decoration: const InputDecoration(border: InputBorder.none, isCollapsed: true, contentPadding: EdgeInsets.only(top: 6)),
                         // 한 글자 칠 때마다 결과가 바뀜
                         onChanged: (v) => setState(() => _searchQuery = v),
                         // 자판의 확인(검색)을 눌러도 검색 화면은 그대로 (자판만 내림)
@@ -2474,6 +2479,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   }
 
   /// 즐겨찾기 켜기/끄기: 책갈피가 먼저 움직이고, 잠시 뒤 즐겨찾기 순서로 목록을 다시 정렬한다
+  // 즐겨찾기로 자리가 바뀔 때: 가운데로 작아지며 사라졌다가, 새 자리에서 가운데부터 커지며 나타남
+  final Set<String> _favShrinking = {};
+  final Map<String, DateTime> _favGrowAt = {};
+
   Future<void> _toggleFavorite(File file) async {
     final path = file.path;
     setState(() {
@@ -2481,9 +2490,22 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       if (!_favoritePaths.remove(path)) _favoritePaths.add(path);
     });
     await StorageService.toggleFavoriteBook(path);
-    await Future<void>.delayed(const Duration(milliseconds: 380));
-    if (mounted) await _loadLibrary();
+    // 책갈피가 움직이는 모습을 잠깐 보여 준 뒤
+    await Future<void>.delayed(const Duration(milliseconds: 160));
+    if (!mounted) return;
+    setState(() => _favShrinking.add(path));
+    await Future<void>.delayed(const Duration(milliseconds: 170));
+    if (!mounted) return;
+    await _loadLibrary();
+    if (!mounted) return;
+    setState(() {
+      _favShrinking.remove(path);
+      _favGrowAt[path] = DateTime.now();
+    });
   }
+
+  Widget _favPop(String path, Widget child) =>
+      _FavoritePop(shrinking: _favShrinking.contains(path), growAt: _favGrowAt[path], child: child);
 
   /// 파일 목록에 보여 줄 마지막으로 읽은 쪽 (예: (6/983)), 연 적 없으면 빈 문자열
   String _pageLabelText(String path) {
@@ -2869,7 +2891,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             ),
             const Divider(height: 1),
             Expanded(
-              child: filteredBooks.isEmpty && _searchOpen
+              // 검색 중 빈 곳(파일이 아닌 곳)을 누르면 검색을 닫음 (파일을 누르면 파일이 먼저 받음)
+              child: GestureDetector(
+                behavior: _searchOpen ? HitTestBehavior.opaque : HitTestBehavior.deferToChild,
+                onTap: _searchOpen ? _closeSearch : null,
+                child: filteredBooks.isEmpty && _searchOpen
                   // 검색 중: 검색어가 없으면 아무것도, 찾은 파일이 없으면 짧게 알림
                   ? (query.isEmpty
                       ? const SizedBox.shrink()
@@ -2969,7 +2995,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                     final bookFile = filteredBooks[index];
                                     return _KeepAliveBookItem(
                                       key: ValueKey(bookFile.path),
-                                      child: _buildGridBookCard(bookFile),
+                                      child: _favPop(bookFile.path, _buildGridBookCard(bookFile)),
                                     );
                                   },
                                 );
@@ -2992,7 +3018,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         final isFavorite = _favoritePaths.contains(file.path);
                         final lowerExt = rawFileName.split('.').last.toLowerCase();
 
-                        return Dismissible(
+                        return _favPop(file.path, Dismissible(
                           key: ValueKey(file.path),
                           // 오른쪽으로 밀기: 즐겨찾기 켜기/끄기 (파일은 제자리로 돌아옴) / 왼쪽으로 밀기: 휴지통
                           direction: _isSelectionMode ? DismissDirection.none : DismissDirection.horizontal,
@@ -3138,13 +3164,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             ],
                           ),
                           ),
-                        );
+                        ));
                       },
                     ),
                           ),
                         ),
                       ],
                     ),
+              ),
             ),
           ],
         ),
@@ -3456,4 +3483,56 @@ class _FileMergeSelectDialogState extends State<_FileMergeSelectDialog> {
       ],
     );
   }
+}
+
+
+/// 즐겨찾기로 자리가 바뀌는 파일: 가운데로 작아지며 사라지고([shrinking]), 새 자리에서 가운데부터 커지며 나타남([growAt] 직후)
+class _FavoritePop extends StatefulWidget {
+  const _FavoritePop({required this.shrinking, required this.growAt, required this.child});
+
+  final bool shrinking;
+  final DateTime? growAt;
+  final Widget child;
+
+  @override
+  State<_FavoritePop> createState() => _FavoritePopState();
+}
+
+class _FavoritePopState extends State<_FavoritePop> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, value: widget.shrinking ? 0 : 1);
+
+  bool _recent(DateTime? t) => t != null && DateTime.now().difference(t) < const Duration(milliseconds: 400);
+
+  @override
+  void initState() {
+    super.initState();
+    // 목록이 다시 정렬되며 새로 만들어진 경우
+    if (!widget.shrinking && _recent(widget.growAt)) _grow();
+  }
+
+  void _grow() {
+    _c.value = 0;
+    _c.animateTo(1, duration: const Duration(milliseconds: 220), curve: Curves.easeOutBack);
+  }
+
+  @override
+  void didUpdateWidget(_FavoritePop old) {
+    super.didUpdateWidget(old);
+    if (widget.shrinking && !old.shrinking) {
+      _c.animateTo(0, duration: const Duration(milliseconds: 160), curve: Curves.easeInCubic);
+    } else if (!widget.shrinking && widget.growAt != old.growAt && _recent(widget.growAt)) {
+      _grow();
+    } else if (!widget.shrinking && old.shrinking && _c.value < 1) {
+      _c.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ScaleTransition(scale: _c, child: widget.child);
 }

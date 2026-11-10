@@ -31,6 +31,22 @@ class HwpReaderController {
   Future<void> showSearchResult(int index) async => _query?.call('showSearchResult', [index]);
   Future<void> clearSearch() async => _query?.call('clearSearch', []);
 
+  /// PPT: 슬라이드 위쪽 그림(JPEG base64) — 글자가 그림으로만 된 슬라이드의 제목을 읽는 데 씀
+  Future<String?> slideImage(int index) async {
+    final result = await _query?.call('slideImage', [index]);
+    return result is String && result.isNotEmpty ? result : null;
+  }
+
+  /// 지금 화면에 보이는 글과 위치 [{t, x, y, w, h}] (화면 크기 대비 0~1) — 내보낸 PDF의 글자 층용
+  Future<List<Map<String, Object?>>> visibleTextBoxes() async {
+    final result = await _query?.call('visibleTextBoxes', []);
+    if (result is! List) return const [];
+    return [
+      for (final b in result)
+        if (b is Map) {'t': b['t'], 'x': b['x'], 'y': b['y'], 'w': b['w'], 'h': b['h']},
+    ];
+  }
+
   /// 쪽마다의 글 [from, to) — '목차' 쪽 찾기용 (지원하지 않으면 빈 목록)
   Future<List<String>> pageText(int from, int to) async {
     final result = await _query?.call('pageText', [from, to]);

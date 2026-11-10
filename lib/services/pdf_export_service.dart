@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'pdf_outline_service.dart';
 import 'storage_service.dart';
 
 typedef ExportTr = String Function(String ko, String en, String zh, String ja);
@@ -22,10 +23,13 @@ class PdfExportService {
   /// 페이지 그림 + 필기 + 텍스트 메모를 PDF로 만들어 다운로드/FReader 폴더에 저장.
   /// [pages] 각 항목: {'image': 그림 경로, 'strokes': [{x,y,c,w}], 'refWidth': 필기를 그린 화면 폭, 'note': 텍스트 메모}
   /// 돌려주는 값: 저장된 위치 (예: Download/FReader/xxx.pdf)
+  /// [outline]: 목차(책갈피)로 넣을 항목 {title, level, page(내보낸 PDF의 쪽, 0부터)} — 비어 있으면 넣지 않음.
+  /// 각 페이지에 'texts': [{t, x, y, w, h}] (그림 크기 대비 0~1)를 주면 보이지 않는 글자 층을 넣어 글 찾기가 된다.
   static Future<String> buildPdf({
     required List<Map<String, Object?>> pages,
     required String fileName,
     void Function(int current, int total)? onProgress,
+    List<Map<String, Object>> outline = const [],
   }) async {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'onPdfExportProgress' && onProgress != null) {
@@ -36,11 +40,24 @@ class PdfExportService {
     });
     try {
       final fallbackDir = (await getApplicationDocumentsDirectory()).path;
-      final saved = await _channel.invokeMethod<String>('exportPdfWithMemos', {
+      if (outline.isEmpty) {
+        final saved = await _channel.invokeMethod<String>('exportPdfWithMemos', {
+          'pages': pages,
+          'fileName': fileName,
+          'fallbackDir': fallbackDir,
+        });
+        return saved ?? fileName;
+      }
+      // 목차를 넣을 때: 임시 파일로 만든 뒤 → 목차(책갈피) 덧붙이기 → 다운로드 폴더에 저장
+      final tmp = await _channel.invokeMethod<String>('exportPdfWithMemos', {
         'pages': pages,
         'fileName': fileName,
         'fallbackDir': fallbackDir,
+        'keepTemp': true,
       });
+      if (tmp == null) return fileName;
+      await PdfOutlineService.appendOutline(tmp, outline);
+      final saved = await _channel.invokeMethod<String>('savePdfFile', {'path': tmp, 'fileName': fileName, 'fallbackDir': fallbackDir});
       return saved ?? fileName;
     } finally {
       _channel.setMethodCallHandler(null);

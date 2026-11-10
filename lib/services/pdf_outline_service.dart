@@ -17,6 +17,26 @@ class PdfOutlineService {
     }
   }
 
+  /// [path] PDF 끝에 목차(책갈피)를 덧붙인다 (기존 내용은 그대로 두는 '덧붙여 고치기' 방식).
+  /// [items]: {title, level(1~), page(0부터)}. 실패하면 false (파일은 그대로)
+  static Future<bool> appendOutline(String path, List<Map<String, Object>> items) async {
+    if (items.isEmpty) return false;
+    try {
+      final bytes = await File(path).readAsBytes();
+      final tail = await Isolate.run(() => _PdfOutlineReader(bytes).buildOutlineUpdate(items));
+      if (tail == null) return false;
+      final raf = await File(path).open(mode: FileMode.append);
+      try {
+        await raf.writeFrom(tail);
+      } finally {
+        await raf.close();
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 테스트용: 같은 일을 지금 스레드에서
   static List<Map<String, Object>> readBytes(Uint8List bytes) {
     try {
@@ -234,6 +254,8 @@ class _PdfOutlineReader {
   final Map<int, Object?> _cache = {};
   final Map<int, List<Object?>> _objStreams = {};
   Map<String, Object?> _trailer = {};
+  int _size = 0;
+  int _startXref = -1;
 
   List<Map<String, Object>> outline() {
     _readXref();
@@ -251,6 +273,130 @@ class _PdfOutlineReader {
     return out;
   }
 
+  // ── 목차 덧붙이기 ──
+  Uint8List? buildOutlineUpdate(List<Map<String, Object>> items) {
+    _readXref();
+    if (_trailer['Encrypt'] != null || _startXref < 0) return null;
+    final rootRef = _trailer['Root'];
+    if (rootRef is! _Ref) return null;
+    final catalog = _dict(rootRef);
+    if (catalog == null) return null;
+    final pages = <int>[];
+    _collectPages(catalog['Pages'], pages, <int>{}, 0);
+    if (pages.isEmpty) return null;
+    final pageGen = <int, int>{};
+    // 쪽 개체의 세대 번호 (보통 0)
+    int nextNum = _size;
+    for (final n in [..._offsets.keys, ..._inStream.keys]) {
+      if (n + 1 > nextNum) nextNum = n + 1;
+    }
+
+    // 단계로 나무 모양 만들기
+    final root = _OutlineNode('', 0, 0);
+    final stack = <_OutlineNode>[];
+    for (final it in items) {
+      final title = (it['title'] ?? '').toString().trim();
+      final level = (it['level'] as int?) ?? 1;
+      final page = ((it['page'] as int?) ?? 0).clamp(0, pages.length - 1);
+      if (title.isEmpty) continue;
+      final node = _OutlineNode(title, level, page);
+      while (stack.isNotEmpty && stack.last.level >= level) {
+        stack.removeLast();
+      }
+      (stack.isEmpty ? root : stack.last).children.add(node);
+      stack.add(node);
+    }
+    if (root.children.isEmpty) return null;
+    root.num = nextNum++;
+    void number(_OutlineNode n) {
+      for (final c in n.children) {
+        c.num = nextNum++;
+        number(c);
+      }
+    }
+    number(root);
+    int total(_OutlineNode n) => n.children.fold(0, (sum, c) => sum + 1 + total(c));
+
+    final base = b.length;
+    final out = BytesBuilder();
+    final offsets = <int, int>{};
+    void write(String text) => out.add(latin1.encode(text));
+    void obj(int num, Map<String, Object?> dict) {
+      offsets[num] = base + out.length;
+      write('$num 0 obj\n${_ser(dict)}\nendobj\n');
+    }
+
+    write('\n');
+    obj(root.num, {'Type': const _Name('Outlines'), 'First': _Ref(root.children.first.num, 0), 'Last': _Ref(root.children.last.num, 0), 'Count': total(root)});
+    void emit(_OutlineNode parent) {
+      for (int i = 0; i < parent.children.length; i++) {
+        final c = parent.children[i];
+        obj(c.num, {
+          'Title': _Str(_utf16be(c.title)),
+          'Parent': _Ref(parent.num, 0),
+          if (i > 0) 'Prev': _Ref(parent.children[i - 1].num, 0),
+          if (i + 1 < parent.children.length) 'Next': _Ref(parent.children[i + 1].num, 0),
+          if (c.children.isNotEmpty) 'First': _Ref(c.children.first.num, 0),
+          if (c.children.isNotEmpty) 'Last': _Ref(c.children.last.num, 0),
+          if (c.children.isNotEmpty) 'Count': total(c),
+          'Dest': [_Ref(pages[c.page], pageGen[pages[c.page]] ?? 0), const _Name('XYZ'), null, null, null],
+        });
+        emit(c);
+      }
+    }
+    emit(root);
+    // 문서 목록(Catalog)을 새로 써서 목차를 연결 (같은 번호로 덮어씀)
+    obj(rootRef.num, {...catalog, 'Outlines': _Ref(root.num, 0)});
+    final xrefAt = base + out.length;
+    final nums = offsets.keys.toList()..sort();
+    final sb = StringBuffer('xref\n');
+    int i = 0;
+    while (i < nums.length) {
+      int j = i;
+      while (j + 1 < nums.length && nums[j + 1] == nums[j] + 1) {
+        j++;
+      }
+      sb.write('${nums[i]} ${j - i + 1}\n');
+      for (int k = i; k <= j; k++) {
+        sb.write('${offsets[nums[k]]!.toString().padLeft(10, '0')} ${(nums[k] == rootRef.num ? rootRef.gen : 0).toString().padLeft(5, '0')} n \n');
+      }
+      i = j + 1;
+    }
+    write(sb.toString());
+    final trailer = <String, Object?>{'Size': nextNum, 'Root': rootRef, if (_trailer['Info'] != null) 'Info': _trailer['Info'], 'Prev': _startXref};
+    write('trailer\n${_ser(trailer)}\nstartxref\n$xrefAt\n%%EOF\n');
+    return out.toBytes();
+  }
+
+  static List<int> _utf16be(String s) {
+    final out = <int>[0xFE, 0xFF];
+    for (final u in s.codeUnits) {
+      out..add(u >> 8)..add(u & 0xFF);
+    }
+    return out;
+  }
+
+  static String _ser(Object? v) {
+    if (v == null) return 'null';
+    if (v is bool) return v ? 'true' : 'false';
+    if (v is int) return '$v';
+    if (v is double) return v.toStringAsFixed(4).replaceFirst(RegExp(r'\.?0+$'), '');
+    if (v is _Name) {
+      final sb = StringBuffer('/');
+      for (final c in latin1.encode(v.value)) {
+        final ok = c > 0x20 && c < 0x7F && !'()<>[]{}/%#'.codeUnits.contains(c);
+        sb.write(ok ? String.fromCharCode(c) : '#${c.toRadixString(16).padLeft(2, '0')}');
+      }
+      return sb.toString();
+    }
+    if (v is _Ref) return '${v.num} ${v.gen} R';
+    if (v is _Str) return '<${v.bytes.map((c) => c.toRadixString(16).padLeft(2, '0')).join()}>';
+    if (v is List) return '[${v.map(_ser).join(' ')}]';
+    if (v is Map) return '<<${v.entries.map((e) => '${_ser(_Name(e.key as String))} ${_ser(e.value)}').join(' ')}>>';
+    if (v is _Stream) return _ser(v.dict);
+    return 'null';
+  }
+
   // ── 상호 참조표(xref) ──
   void _readXref() {
     final tail = b.length > 2048 ? b.length - 2048 : 0;
@@ -260,6 +406,7 @@ class _PdfOutlineReader {
     if (at >= 0) {
       final m = RegExp(r'startxref\s+(\d+)').firstMatch(tailText.substring(at));
       int? offset = m == null ? null : int.tryParse(m[1]!);
+      _startXref = offset ?? -1;
       while (offset != null && offset >= 0 && offset < b.length && visited.add(offset)) {
         offset = _readXrefSection(offset);
       }
@@ -339,6 +486,8 @@ class _PdfOutlineReader {
   }
 
   void _mergeTrailer(Map<String, Object?> t) {
+    final size = t['Size'];
+    if (size is int && size > _size) _size = size;
     for (final k in ['Root', 'Encrypt', 'Info']) {
       if (_trailer[k] == null && t[k] != null) _trailer[k] = t[k];
     }
@@ -616,4 +765,13 @@ class _PdfOutlineReader {
     }
     return null;
   }
+}
+
+class _OutlineNode {
+  _OutlineNode(this.title, this.level, this.page);
+  final String title;
+  final int level;
+  final int page;
+  int num = 0;
+  final List<_OutlineNode> children = [];
 }

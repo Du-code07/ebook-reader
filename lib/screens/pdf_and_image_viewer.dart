@@ -955,8 +955,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   List<Widget> _memoToolItems() {
     return [
       MemoToolButton(
-        // 손 아이콘은 칸 안에서 아래로 치우쳐 보여 펜 아이콘과 높이를 맞춤
-        iconBuilder: (c) => Transform.translate(offset: const Offset(0, -1.5), child: Icon(Icons.touch_app, color: c, size: 18)),
+        // 손가락 끝에서 선이 그어지는 모양 (펜 아이콘과 같은 높이)
+        iconBuilder: (c) => FingerDrawIcon(color: c, size: 22),
         label: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
         active: _allowFingerDrawing,
         onTap: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
@@ -1123,6 +1123,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     progress.update(_tr('페이지 준비 중…', 'Preparing pages…', '正在准备页面…', 'ページを準備中…'), null);
     try {
       final pages = <Map<String, Object?>>[];
+      // PDF: 원래 파일의 글과 위치를 읽어 내보낸 PDF에도 보이지 않는 글자 층으로 넣음 (지원 기기만)
+      List<Object?> textPages = const [];
+      if (_isPdfFile) {
+        try {
+          textPages = await _pdfChannel.invokeMethod<List<Object?>>('pdfTextBoxes', {'path': widget.files.first.path}) ?? const [];
+        } catch (_) {}
+      }
       for (int i = 0; i < _imagePages.length; i++) {
         final strokes = _memoStrokesByPage[i] ?? const <MemoStroke>[];
         // 필기 굵기는 화면에 그린 폭 기준이므로, 그때의 페이지 표시 폭을 함께 넘긴다
@@ -1138,10 +1145,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           'strokes': strokes.map(PdfExportService.strokeToMap).toList(),
           'refWidth': refWidth,
           'note': _memoNotesByPage[i] ?? '',
+          if (i < textPages.length && textPages[i] is List) 'texts': textPages[i],
         });
       }
       final saved = await PdfExportService.buildPdf(
         pages: pages,
+        // 목차(책갈피)도 그대로 넣음
+        outline: _isPdfFile ? _pdfToc : const [],
         fileName: PdfExportService.exportFileName(widget.title, _tr),
         onProgress: (cur, total) => progress.update('$cur / $total', total > 0 ? cur / total : null),
       );
@@ -2334,7 +2344,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         },
       ),
       QuickArcMenuItem(
-        icon: Icon(Icons.draw_outlined, color: _isMemoMode ? Colors.amber : Colors.white, size: 20),
+        icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
           setState(() {

@@ -673,20 +673,20 @@ class _EraserIconPainter extends CustomPainter {
   bool shouldRepaint(covariant _EraserIconPainter old) => old.color != color;
 }
 
-/// 펜 도구 아이콘: 깃털 펜 + 잉크병 (잉크병 안 색 = 지금 펜 색)
-/// 잉크병은 왼쪽 위, 깃털 펜은 왼쪽 아래(펜촉)에서 오른쪽 위로 비스듬히.
+/// 깃펜 아이콘 (테두리 깃털 + 결 + 아래 잉크 자국)
+/// 펜 도구에서는 잉크 자국 색 = 지금 펜 색, 메모 아이콘에서는 테두리와 같은 색.
 class QuillInkIcon extends StatelessWidget {
-  const QuillInkIcon({super.key, required this.color, required this.ink, this.size = 24});
+  const QuillInkIcon({super.key, required this.color, this.ink, this.size = 24});
 
-  /// 펜·병 테두리 색 (선택되면 노랑)
+  /// 테두리 색 (선택되면 노랑)
   final Color color;
 
-  /// 잉크(펜) 색
-  final Color ink;
+  /// 잉크 자국 색 (없으면 테두리 색)
+  final Color? ink;
   final double size;
 
   @override
-  Widget build(BuildContext context) => SizedBox.square(dimension: size, child: CustomPaint(painter: _QuillInkPainter(color, ink)));
+  Widget build(BuildContext context) => SizedBox.square(dimension: size, child: CustomPaint(painter: _QuillInkPainter(color, ink ?? color)));
 }
 
 class _QuillInkPainter extends CustomPainter {
@@ -700,44 +700,114 @@ class _QuillInkPainter extends CustomPainter {
     final double u = size.width / 24.0;
     canvas.save();
     canvas.scale(u);
-    // ── 깃털 펜: 펜촉(왼쪽 아래) → 깃 끝(오른쪽 위). 잉크병과 살짝 띄우려고 오른쪽 아래로 조금 옮김
-    canvas.save();
-    canvas.translate(1.2, 0.8);
+    final line = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    // 깃털: 오른쪽 위 끝에서 왼쪽 아래 깃대로, 가장자리에 갈라진 홈 두 곳
     final feather = Path()
-      ..moveTo(9.0, 17.5)
-      ..cubicTo(9.5, 11.5, 14.5, 5.0, 22.0, 2.6)
-      ..cubicTo(21.0, 9.5, 16.5, 15.5, 10.4, 18.6)
+      ..moveTo(22.6, 1.4)
+      ..cubicTo(17.0, 2.0, 12.6, 4.6, 10.4, 8.0) // 위쪽 가장자리
+      ..lineTo(11.6, 8.6)
+      ..cubicTo(9.6, 10.2, 8.2, 12.4, 7.4, 14.6)
+      ..lineTo(8.8, 14.6)
+      ..cubicTo(7.6, 16.0, 6.6, 17.4, 5.8, 18.6) // 아래 끝(깃대 쪽)
+      ..cubicTo(9.0, 18.4, 12.0, 17.0, 13.8, 14.8) // 아래쪽 가장자리
+      ..lineTo(12.4, 14.4)
+      ..cubicTo(15.0, 13.0, 16.8, 11.0, 17.8, 8.8)
+      ..lineTo(16.4, 8.8)
+      ..cubicTo(19.6, 6.8, 21.6, 4.2, 22.6, 1.4)
       ..close();
-    canvas.drawPath(feather, Paint()..color = color);
-    // 깃털 가운데 줄기(살짝 어둡게)와 갈라진 결
-    final shaft = Paint()
-      ..color = Colors.black.withValues(alpha: 0.45)
+    canvas.drawPath(feather, Paint()..color = color.withValues(alpha: 0.16));
+    canvas.drawPath(feather, line);
+    // 가운데 줄기 → 깃대 → 펜촉
+    canvas.drawLine(const Offset(20.4, 3.6), const Offset(3.2, 20.6), line);
+    // 잉크 자국 (펜 색): 물결 두 줄 + 짧은 줄들
+    final ink = Paint()
+      ..color = this.ink
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.9
+      ..strokeWidth = 1.9
       ..strokeCap = StrokeCap.round;
-    canvas.drawLine(const Offset(9.8, 18.0), const Offset(19.6, 5.4), shaft);
-    canvas.drawLine(const Offset(15.4, 12.6), const Offset(17.6, 12.4), shaft);
-    canvas.drawLine(const Offset(13.2, 10.6), const Offset(14.0, 8.4), shaft);
-    // 깃대와 펜촉
-    final quill = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.7
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(const Offset(5.2, 22.0), const Offset(10.0, 17.6), quill);
-    canvas.restore();
-    // ── 잉크병 (왼쪽 위): 병목 + 둥근 몸통, 몸통 안은 잉크 색
-    final body = RRect.fromRectAndRadius(const Rect.fromLTWH(0.6, 4.8, 8.8, 7.0), const Radius.circular(2.2));
-    canvas.drawRRect(body, Paint()..color = ink);
-    final outline = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.4;
-    canvas.drawRRect(body, outline);
-    canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(3.0, 1.6, 4.0, 3.2), const Radius.circular(0.9)), Paint()..color = color);
+    canvas.drawPath(
+      Path()
+        ..moveTo(2.6, 22.4)
+        ..cubicTo(5.2, 20.6, 7.2, 23.6, 9.8, 22.4)
+        ..cubicTo(12.2, 21.4, 13.6, 23.2, 16.2, 22.4),
+      ink,
+    );
+    canvas.drawLine(const Offset(18.4, 22.4), const Offset(21.8, 22.4), ink);
+    canvas.drawPath(
+      Path()
+        ..moveTo(13.0, 19.4)
+        ..cubicTo(14.8, 18.4, 16.2, 20.2, 18.0, 19.4)
+        ..cubicTo(19.2, 18.9, 20.2, 19.6, 21.6, 19.2),
+      ink,
+    );
+    canvas.drawLine(const Offset(17.6, 16.4), const Offset(21.6, 16.4), ink);
     canvas.restore();
   }
 
   @override
   bool shouldRepaint(_QuillInkPainter old) => old.color != color || old.ink != ink;
+}
+
+/// 손으로 글씨 쓰기 아이콘: 손가락 끝에서 선이 그어지는 모양
+class FingerDrawIcon extends StatelessWidget {
+  const FingerDrawIcon({super.key, required this.color, this.size = 22});
+
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: size,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // 손가락으로 그은 선 (손가락 끝에서 왼쪽 아래로 물결)
+          Positioned.fill(child: CustomPaint(painter: _FingerLinePainter(color))),
+          // 검지를 세운 손 (오른쪽 아래)
+          Positioned(
+            right: -size * 0.06,
+            bottom: -size * 0.06,
+            child: Icon(Icons.pan_tool_alt, size: size * 0.78, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FingerLinePainter extends CustomPainter {
+  _FingerLinePainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double u = size.width / 24.0;
+    canvas.save();
+    canvas.scale(u);
+    final path = Path()
+      ..moveTo(14.4, 7.6) // 손가락 끝
+      ..cubicTo(12.0, 3.0, 7.2, 2.4, 5.8, 5.8)
+      ..cubicTo(4.6, 9.0, 8.8, 10.2, 7.6, 13.4)
+      ..cubicTo(6.8, 15.6, 3.8, 15.8, 1.6, 14.6);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.8
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_FingerLinePainter old) => old.color != color;
 }

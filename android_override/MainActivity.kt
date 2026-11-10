@@ -530,18 +530,62 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 val pages = call.argument<List<Map<String, Any?>>>("pages")
                 val fileName = call.argument<String>("fileName") ?: "FReader_export.pdf"
                 val fallbackDir = call.argument<String>("fallbackDir")
+                // true: 다운로드 폴더에 저장하지 않고 임시 파일 경로를 돌려줌 (앱이 목차를 넣은 뒤 savePdfFile로 저장)
+                val keepTemp = call.argument<Boolean>("keepTemp") ?: false
                 if (pages == null || pages.isEmpty()) {
                     result.error("INVALID_ARGS", "No pages", null)
                     return@setMethodCallHandler
                 }
                 Thread {
                     try {
-                        val saved = exportPdfWithMemos(pages, fileName, fallbackDir)
+                        val saved = exportPdfWithMemos(pages, fileName, fallbackDir, keepTemp)
                         runOnUiThread { result.success(saved) }
                     } catch (e: Exception) {
                         runOnUiThread { result.error("EXPORT_ERR", e.message, null) }
                     }
                 }.start()
+            } else if (call.method == "savePdfFile") {
+                // 임시 PDF를 다운로드/FReader 폴더에 저장하고 임시 파일은 지움
+                val path = call.argument<String>("path") ?: ""
+                val fileName = call.argument<String>("fileName") ?: "FReader_export.pdf"
+                val fallbackDir = call.argument<String>("fallbackDir")
+                Thread {
+                    val src = File(path)
+                    try {
+                        val saved = savePdfToDownloads(src, fileName, fallbackDir)
+                        runOnUiThread { result.success(saved) }
+                    } catch (e: Exception) {
+                        runOnUiThread { result.error("EXPORT_ERR", e.message, null) }
+                    } finally {
+                        src.delete()
+                    }
+                }.start()
+            } else if (call.method == "ocrLines") {
+                // 그림 속 글자 읽기 (기기 안에서만 처리): 줄마다 {t, x, y, w, h} (그림 크기 대비 0~1)
+                val path = call.argument<String>("path") ?: ""
+                thumbExecutor.execute {
+                    try {
+                        val lines = ocrLines(path)
+                        runOnUiThread { result.success(lines) }
+                    } catch (e: Throwable) {
+                        runOnUiThread { result.success(emptyList<Any>()) }
+                    }
+                }
+            } else if (call.method == "pdfTextBoxes") {
+                // 내보내기용: 쪽마다 글과 위치(쪽 크기 대비 0~1). 지원하지 않는 기기에서는 빈 목록
+                val path = call.argument<String>("path") ?: ""
+                if (!pdfSearchSupported()) {
+                    result.success(emptyList<Any>())
+                    return@setMethodCallHandler
+                }
+                thumbExecutor.execute {
+                    try {
+                        val boxes = pdfTextBoxes(path)
+                        runOnUiThread { result.success(boxes) }
+                    } catch (e: Exception) {
+                        runOnUiThread { result.success(emptyList<Any>()) }
+                    }
+                }
             } else if (call.method == "mergePdfs") {
                 val inputPaths = call.argument<List<String>>("inputPaths")
                 val outputPath = call.argument<String>("outputPath")
@@ -1066,7 +1110,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         return BitmapFactory.decodeFile(path, opts)
     }
 
-    private fun exportPdfWithMemos(pages: List<Map<String, Any?>>, fileName: String, fallbackDir: String?): String {
+    private fun exportPdfWithMemos(pages: List<Map<String, Any?>>, fileName: String, fallbackDir: String?, keepTemp: Boolean = false): String {
         val doc = PdfDocument()
         val tmp = File(cacheDir, "export_${System.currentTimeMillis()}.pdf")
         try {
@@ -1082,6 +1126,30 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 canvas.drawColor(Color.WHITE)
                 canvas.drawBitmap(bmp, 0f, 0f, null)
                 bmp.recycle()
+
+                // 보이지 않는 글자 층: 그림 위 같은 자리에 글을 (거의) 투명하게 넣어 PDF에서 글 찾기·복사가 되게 함
+                @Suppress("UNCHECKED_CAST")
+                val texts = page["texts"] as? List<Map<String, Any?>> ?: emptyList()
+                if (texts.isNotEmpty()) {
+                    val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0x01FFFFFF // 완전 투명이면 PDF에 글이 남지 않아 아주 조금만 남김
+                        typeface = android.graphics.Typeface.DEFAULT
+                    }
+                    for (tb in texts) {
+                        val t = (tb["t"] as? String) ?: continue
+                        if (t.isBlank()) continue
+                        val bx = ((tb["x"] as? Number)?.toFloat() ?: continue) * w
+                        val by = ((tb["y"] as? Number)?.toFloat() ?: continue) * h
+                        val bw = ((tb["w"] as? Number)?.toFloat() ?: continue) * w
+                        val bh = ((tb["h"] as? Number)?.toFloat() ?: continue) * h
+                        if (bw <= 0.5f || bh <= 0.5f || bx > w || by > h) continue
+                        tp.textScaleX = 1f
+                        tp.textSize = bh * 0.82f
+                        val m = tp.measureText(t)
+                        if (m > 0f) tp.textScaleX = (bw / m).coerceIn(0.15f, 6f)
+                        canvas.drawText(t, bx, by + bh * 0.8f, tp)
+                    }
+                }
 
                 // 화면에서 그린 필기 굵기를 이 그림 크기에 맞게 키운다
                 val refWidth = (page["refWidth"] as? Number)?.toFloat() ?: 0f
@@ -1128,6 +1196,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         } finally {
             doc.close()
         }
+        if (keepTemp) return tmp.absolutePath
         try {
             return savePdfToDownloads(tmp, fileName, fallbackDir)
         } finally {
@@ -1231,6 +1300,78 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         renderer.openPage(i).use { page ->
                             addPdfMatches(out, i, page.width.toFloat(), page.height.toFloat(), page.searchText(query))
                         }
+                    }
+                }
+            }
+        } finally {
+            try { pfd.close() } catch (_: Exception) {}
+        }
+        return out
+    }
+
+    private var koreanRecognizer: com.google.mlkit.vision.text.TextRecognizer? = null
+
+    private fun ocrLines(path: String): List<Map<String, Any>> {
+        val bmp = BitmapFactory.decodeFile(path) ?: return emptyList()
+        try {
+            val recognizer = koreanRecognizer ?: com.google.mlkit.vision.text.TextRecognition.getClient(
+                com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions.Builder().build()
+            ).also { koreanRecognizer = it }
+            val image = com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)
+            val text = com.google.android.gms.tasks.Tasks.await(recognizer.process(image), 20, java.util.concurrent.TimeUnit.SECONDS)
+            val w = bmp.width.toFloat().coerceAtLeast(1f)
+            val h = bmp.height.toFloat().coerceAtLeast(1f)
+            val out = ArrayList<Map<String, Any>>()
+            for (block in text.textBlocks) {
+                for (line in block.lines) {
+                    val r = line.boundingBox ?: continue
+                    out.add(mapOf("t" to line.text, "x" to r.left / w, "y" to r.top / h, "w" to r.width() / w, "h" to r.height() / h))
+                }
+            }
+            return out
+        } finally {
+            bmp.recycle()
+        }
+    }
+
+    @android.annotation.SuppressLint("NewApi")
+    private fun pdfTextBoxes(path: String): List<List<Map<String, Any>>> {
+        val out = ArrayList<List<Map<String, Any>>>()
+        val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+        fun collect(pw: Float, ph: Float, contents: List<android.graphics.pdf.content.PdfPageTextContent>) {
+            val boxes = ArrayList<Map<String, Any>>()
+            if (pw > 0f && ph > 0f) {
+                for (c in contents) {
+                    val text = c.text ?: continue
+                    val rects = c.bounds
+                    if (rects.isEmpty() || text.isBlank()) continue
+                    val lines = text.split('\n')
+                    if (lines.size == rects.size) {
+                        for (k in rects.indices) {
+                            val r = rects[k]
+                            if (lines[k].isBlank()) continue
+                            boxes.add(mapOf("t" to lines[k], "x" to r.left / pw, "y" to r.top / ph, "w" to r.width() / pw, "h" to r.height() / ph))
+                        }
+                    } else {
+                        val u = android.graphics.RectF(rects[0])
+                        for (r in rects) u.union(r)
+                        boxes.add(mapOf("t" to text.replace('\n', ' '), "x" to u.left / pw, "y" to u.top / ph, "w" to u.width() / pw, "h" to (u.height() / rects.size) / ph))
+                    }
+                }
+            }
+            out.add(boxes)
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 35) {
+                PdfRenderer(pfd).use { renderer ->
+                    for (i in 0 until renderer.pageCount) {
+                        renderer.openPage(i).use { page -> collect(page.width.toFloat(), page.height.toFloat(), page.textContents) }
+                    }
+                }
+            } else {
+                android.graphics.pdf.PdfRendererPreV(pfd).use { renderer ->
+                    for (i in 0 until renderer.pageCount) {
+                        renderer.openPage(i).use { page -> collect(page.width.toFloat(), page.height.toFloat(), page.textContents) }
                     }
                 }
             }

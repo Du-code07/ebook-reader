@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -8,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/storage_service.dart';
 import '../services/txt_page_document.dart';
 import '../services/toc_page_parser.dart';
@@ -618,6 +620,104 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
   }
 
+  /// 그림으로만 된 슬라이드들의 제목을 글자 읽기(OCR)로 찾아 목차를 만든다.
+  /// 제목(가장 큰 글자)은 1단계, 그 바로 아래 번호 붙은 부제목은 2단계. 같은 제목이 이어지면 한 번만.
+  /// 결과는 파일별로 저장해 두어 다음에 열 때는 바로 나온다.
+  Future<List<Map<String, Object?>>> _ocrSlideTitles(List<Map<String, Object?>> items, int pageCount) async {
+    final file = File(widget.filePath);
+    String cacheKey = 'pptocr_v1_${widget.filePath}';
+    try {
+      final st = await file.stat();
+      cacheKey += '_${st.size}_${st.modified.millisecondsSinceEpoch}';
+    } catch (_) {}
+    final prefs = await SharedPreferences.getInstance();
+    final perSlide = <int, (String, String)>{}; // 슬라이드 → (제목, 부제목)
+    final cached = prefs.getString(cacheKey);
+    if (cached != null) {
+      try {
+        final m = jsonDecode(cached) as Map<String, dynamic>;
+        m.forEach((k, v) => perSlide[int.parse(k)] = ((v as List)[0] as String, v[1] as String));
+      } catch (_) {}
+    }
+    List<Map<String, Object?>> build() {
+      final out = <Map<String, Object?>>[];
+      String lastTitle = '', lastSub = '';
+      for (final item in items) {
+        final int page = item['page'] as int;
+        final String own = (item['title'] as String).trim();
+        if (own.isNotEmpty || !perSlide.containsKey(page)) {
+          out.add(item);
+          continue;
+        }
+        final (title, sub) = perSlide[page]!;
+        if (title.isEmpty && sub.isEmpty) {
+          out.add(item);
+          continue;
+        }
+        if (title.isNotEmpty && title != lastTitle) {
+          out.add({'title': title, 'level': 1, 'page': page, 'slide': true, 'ocr': true});
+          lastTitle = title;
+          lastSub = '';
+        }
+        if (sub.isNotEmpty && sub != lastSub) {
+          out.add({'title': sub, 'level': 2, 'page': page, 'slide': true, 'ocr': true});
+          lastSub = sub;
+        }
+      }
+      return out;
+    }
+
+    final todo = [for (final item in items) if ((item['title'] as String).trim().isEmpty && !perSlide.containsKey(item['page'] as int)) item['page'] as int];
+    if (todo.isNotEmpty) {
+      final tmp = Directory('${(await getTemporaryDirectory()).path}/ppt_ocr');
+      await tmp.create(recursive: true);
+      for (int n = 0; n < todo.length; n++) {
+        if (!mounted || _docPageCount != pageCount) return build();
+        final int page = todo[n];
+        perSlide[page] = ('', '');
+        final b64 = await _hwpController.slideImage(page);
+        if (b64 == null) continue;
+        final img = File('${tmp.path}/slide_$page.jpg');
+        try {
+          await img.writeAsBytes(base64Decode(b64), flush: true);
+          final raw = await _pdfChannel.invokeMethod<List<Object?>>('ocrLines', {'path': img.path}) ?? const [];
+          perSlide[page] = _pickSlideTitle(raw);
+        } catch (_) {
+        } finally {
+          try {
+            await img.delete();
+          } catch (_) {}
+        }
+        // 몇 장마다 목차를 새로 보여 줌 (전부 끝날 때까지 기다리지 않게)
+        if (n % 6 == 5 && mounted) _applyDocumentOutline(build(), pageCount);
+      }
+      try {
+        await prefs.setString(cacheKey, jsonEncode({for (final e in perSlide.entries) '${e.key}': [e.value.$1, e.value.$2]}));
+      } catch (_) {}
+    }
+    return build();
+  }
+
+  /// 읽은 줄들 중 가장 큰 글자 줄 = 제목, 그 아래 번호로 시작하는 줄 = 부제목
+  (String, String) _pickSlideTitle(List<Object?> raw) {
+    final lines = <({String t, double y, double h})>[];
+    for (final e in raw) {
+      if (e is! Map) continue;
+      final t = (e['t'] ?? '').toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+      final y = (e['y'] as num?)?.toDouble() ?? 0, h = (e['h'] as num?)?.toDouble() ?? 0;
+      // 글자가 2개 이상, '9page' 같은 쪽 번호는 뺌
+      if (RegExp(r'[가-힣A-Za-z]').allMatches(t).length < 2 || RegExp(r'^\d+\s*(page|p|쪽)$', caseSensitive: false).hasMatch(t)) continue;
+      lines.add((t: t, y: y, h: h));
+    }
+    if (lines.isEmpty) return ('', '');
+    final title = lines.reduce((a, b) => b.h > a.h ? b : a);
+    String sub = '';
+    final below = lines.where((l) => l.y > title.y + title.h * 0.6 && l.h < title.h * 0.8 && RegExp(r'^\(?\d+([-.]\d+)*[.)]?\s').hasMatch(l.t)).toList()
+      ..sort((a, b) => a.y.compareTo(b.y));
+    if (below.isNotEmpty) sub = below.first.t;
+    return (title.t.length > 80 ? title.t.substring(0, 80) : title.t, sub.length > 80 ? sub.substring(0, 80) : sub);
+  }
+
   Future<void> _loadDocumentOutline(int pageCount) async {
     if (!mounted || _isTxt) return;
     // 1) 파일 안에 '목차'라고 적힌 쪽이 있으면 그 항목들만 쓴다 (워드·한글)
@@ -637,13 +737,25 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
     // 2) 없으면 제목 스타일(개요) → 3) 글자 크기·굵기로 찾은 제목 (PPT는 슬라이드 제목)
     if (items.isEmpty) items = await _hwpController.outline();
+    // 4) PPT 중 글자가 그림으로만 된 슬라이드: 그림 속 글자를 읽어(기기 안에서) 제목을 찾음
+    if (_isPresentation && items.any((e) => (e['title'] as String).trim().isEmpty)) {
+      _applyDocumentOutline(items, pageCount); // 우선 지금 찾은 것으로
+      items = await _ocrSlideTitles(items, pageCount);
+      if (!mounted) return;
+    }
+    _applyDocumentOutline(items, pageCount);
+  }
+
+  void _applyDocumentOutline(List<Map<String, Object?>> items, int pageCount) {
     if (!mounted || items.isEmpty || _docPageCount != pageCount) return;
     final chapters = <EpubChapter>[];
     final levels = <int>[];
     for (final item in items) {
       final int page = (item['page'] as int).clamp(0, math.max(0, pageCount - 1)).toInt();
       String title = (item['title'] as String).trim();
-      if (item['slide'] == true) {
+      if (item['ocr'] == true) {
+        // 그림 속 글자로 찾은 제목 (그대로)
+      } else if (item['slide'] == true) {
         // PPT: 슬라이드 번호 + 제목 (제목이 없으면 번호만)
         title = title.isEmpty
             ? _tr('${page + 1}쪽', 'Slide ${page + 1}', '第${page + 1}页', '${page + 1}枚目')
@@ -980,8 +1092,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   List<Widget> _memoToolItems() {
     return [
       MemoToolButton(
-        // 손 아이콘은 칸 안에서 아래로 치우쳐 보여 펜 아이콘과 높이를 맞춤
-        iconBuilder: (c) => Transform.translate(offset: const Offset(0, -1.5), child: Icon(Icons.touch_app, color: c, size: 18)),
+        // 손가락 끝에서 선이 그어지는 모양 (펜 아이콘과 같은 높이)
+        iconBuilder: (c) => FingerDrawIcon(color: c, size: 22),
         label: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
         active: _allowFingerDrawing,
         onTap: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
@@ -1232,6 +1344,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       await _runAndWaitRelocate(() => _readerProgress(0.0), const Duration(milliseconds: 2500));
 
       final pages = <Map<String, Object?>>[];
+      final exportDocPages = <int>[]; // 내보낸 각 쪽이 문서의 몇 쪽인지 (목차 연결용)
       String? lastCfi;
       for (int i = 0; i < 5000; i++) {
         if (progress.cancelled || !mounted) break;
@@ -1262,7 +1375,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         try {
           await File(shotPath).delete();
         } catch (_) {}
-        pages.add({'image': pagePath});
+        // 보이지 않는 글자 층 (내보낸 PDF에서도 글 찾기가 되게)
+        final texts = await _hwpController.visibleTextBoxes();
+        exportDocPages.add(_docPage);
+        pages.add({'image': pagePath, 'texts': texts});
         progress.update(
           _tr('페이지 담는 중… ${i + 1}쪽 (${(_progress * 100).toStringAsFixed(0)}%)', 'Capturing pages… ${i + 1} (${(_progress * 100).toStringAsFixed(0)}%)',
               '正在截取页面… 第${i + 1}页 (${(_progress * 100).toStringAsFixed(0)}%)', 'ページ取得中… ${i + 1}ページ (${(_progress * 100).toStringAsFixed(0)}%)'),
@@ -1273,8 +1389,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
       if (!progress.cancelled && pages.isNotEmpty) {
         progress.update(_tr('PDF 만드는 중…', 'Building PDF…', '正在生成 PDF…', 'PDF作成中…'), null);
+        // 목차(책갈피): 지금 목차 항목의 쪽 → 내보낸 PDF의 쪽
+        final outline = <Map<String, Object>>[];
+        if (_chapterLevels.isNotEmpty && exportDocPages.isNotEmpty) {
+          for (int k = 0; k < _chapters.length; k++) {
+            final int docPage = int.tryParse(_chapters[k].href.split(':').last) ?? 0;
+            int at = 0;
+            for (int e = 0; e < exportDocPages.length; e++) {
+              if (exportDocPages[e] <= docPage) at = e;
+            }
+            outline.add({'title': _chapters[k].title.trim(), 'level': k < _chapterLevels.length ? _chapterLevels[k] : 1, 'page': at});
+          }
+        }
         saved = await PdfExportService.buildPdf(
           pages: pages,
+          outline: outline,
           fileName: PdfExportService.exportFileName(widget.bookTitle, _tr),
           onProgress: (cur, total) => progress.update(
             _tr('PDF 만드는 중… $cur / $total', 'Building PDF… $cur / $total', '正在生成 PDF… $cur / $total', 'PDF作成中… $cur / $total'),
@@ -2977,7 +3106,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         },
       ),
       QuickArcMenuItem(
-        icon: Icon(Icons.draw_outlined, color: _isMemoMode ? Colors.amber : Colors.white, size: 20),
+        icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
           setState(() {
