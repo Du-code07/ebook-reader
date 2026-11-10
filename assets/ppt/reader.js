@@ -58,6 +58,7 @@ function closePresentation() {
   animationSteps?.close(); animationSteps = null;
   presentation?.destroy(); presentation = null;
   clearFrames(); loaded = false; paintedPage = -1; paintedStep = -1; step = 0; stepCount = 0;
+  slideTextCache.clear(); searchState = { query: '', results: [], current: -1 };
 }
 function beginDocument(length, config = {}) {
   if (disposed) throw new Error('뷰어가 종료되었습니다.');
@@ -202,6 +203,7 @@ async function paint() {
     clearFrames(); host.appendChild(fragment); paintedRevision = revision; paintedPage = requestedPage;
     step = actualStep; stepCount = totalSteps; paintedStep = actualStep;
     reportLocation();
+    if (searchState.query) applySearchHighlights();
     emit('pageReady', { page: requestedPage });
   }
 }
@@ -291,6 +293,86 @@ function highlightSelection() {
   }
   selection.removeAllRanges();
 }
+// ── 파일 내 단어 검색: 슬라이드 글자를 모아 찾고, 보이는 슬라이드의 글자 층 위에 노란 형광펜을 그린다 ──
+let searchState = { query: '', results: [], current: -1 };
+const slideTextCache = new Map();
+function searchNorm(text) { return String(text || '').replace(/\u00a0/g, ' ').toLowerCase(); }
+async function slideText(index) {
+  if (slideTextCache.has(index)) return slideTextCache.get(index);
+  let text = '';
+  try {
+    const runs = await presentation.collectSlideRuns(index, 480);
+    text = runs.map(run => (typeof run?.text === 'string' ? run.text : '')).join('');
+  } catch (_) {}
+  slideTextCache.set(index, text);
+  return text;
+}
+function countMatches(hay, q) {
+  let n = 0;
+  for (let at = hay.indexOf(q); at >= 0; at = hay.indexOf(q, at + q.length)) n++;
+  return n;
+}
+async function search(query) {
+  const q = searchNorm(String(query || '').trim());
+  searchState = { query: q, results: [], current: -1 };
+  if (!q || !presentation) { applySearchHighlights(); return { count: 0, pages: [] }; }
+  const results = [], current = generation;
+  for (let i = 0; i < presentation.slideCount; i++) {
+    const n = countMatches(searchNorm(await slideText(i)), q);
+    for (let k = 0; k < n; k++) results.push({ page: i, k });
+    if (searchState.query !== q || current !== generation || disposed) return { count: 0, pages: [] }; // 그 사이 다른 검색이 시작됨
+    if (i % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0)); // 긴 문서에서도 화면이 멈추지 않게
+  }
+  searchState.results = results;
+  applySearchHighlights();
+  return { count: results.length, pages: results.map(r => r.page) };
+}
+async function showSearchResult(index) {
+  const r = searchState.results[index]; if (!r) return;
+  searchState.current = index;
+  const shown = [...host.children].some(frame => Number(frame.dataset.page) === r.page);
+  if (shown) { applySearchHighlights(); return; }
+  await display(`${options.format === 'ppt' ? 'ppt' : 'pptx'}:${r.page}`);
+}
+function clearSearch() { searchState = { query: '', results: [], current: -1 }; applySearchHighlights(); }
+/** 글자 층 안에서 찾은 곳들: 찾은 곳마다 화면 사각형 목록 */
+function domMatches(layer, q) {
+  const nodes = [], walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
+  let text = '';
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) { nodes.push([node, text.length]); text += node.data; }
+  const hay = searchNorm(text), found = [];
+  const locate = offset => {
+    for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i][1] <= offset) return [nodes[i][0], offset - nodes[i][1]];
+    return null;
+  };
+  for (let at = hay.indexOf(q); at >= 0; at = hay.indexOf(q, at + q.length)) {
+    const start = locate(at), end = locate(at + q.length - 1);
+    if (!start || !end) continue;
+    const range = document.createRange();
+    try { range.setStart(start[0], start[1]); range.setEnd(end[0], end[1] + 1); } catch (_) { continue; }
+    found.push([...range.getClientRects()].filter(rect => rect.width >= 0.5 && rect.height >= 0.5));
+  }
+  return found;
+}
+function applySearchHighlights() {
+  for (const old of host.querySelectorAll('.freader-search-mark')) old.remove();
+  if (!searchState.query || !searchState.results.length) return;
+  const current = searchState.results[searchState.current];
+  for (const frame of host.children) {
+    const index = Number(frame.dataset.page), layer = frame.querySelector('.slide-text');
+    if (!layer || !searchState.results.some(r => r.page === index)) continue;
+    const bounds = frame.getBoundingClientRect();
+    domMatches(layer, searchState.query).forEach((rects, k) => {
+      const isCurrent = current && current.page === index && current.k === k;
+      for (const rect of rects) {
+        const mark = document.createElement('span');
+        mark.className = 'freader-search-mark';
+        Object.assign(mark.style, { position: 'absolute', pointerEvents: 'none', background: isCurrent ? '#ffb300' : '#ffeb3b', opacity: isCurrent ? '.6' : '.45', mixBlendMode: 'multiply', left: `${rect.left - bounds.left}px`, top: `${rect.top - bounds.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+        frame.appendChild(mark);
+      }
+    });
+  }
+}
 function destroy() {
   disposed = true; generation++; paintRevision++; clearInterval(bridgeTimer); observer.disconnect();
   closePresentation(); wipe(incoming); incoming = null; received = 0; events = [];
@@ -301,6 +383,7 @@ const observer = new ResizeObserver(() => {
 observer.observe(host);
 host.addEventListener('click', event => { if (event.target.closest('a')) event.preventDefault(); });
 window.freaderPpt = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, thumbnail, destroy,
+  search, showSearchResult, clearSearch,
   getState: () => ({ ready: !disposed, loaded, page, count: presentation?.slideCount || 0, step, stepCount, received, awaitingPassword, spread: options.spread, format: options.format, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 emit('ready', { version: '0.89.8' });
