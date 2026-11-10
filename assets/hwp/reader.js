@@ -385,6 +385,23 @@ function guessOutline(blocks) {
   const sizes = [...new Set(kept.map(c => sizeKey(c.fs)))].sort((a, b) => b - a);
   return kept.slice(0, 400).map(c => ({ title: c.text, level: Math.min(3, sizes.indexOf(sizeKey(c.fs)) + 1), page: c.page }));
 }
+/** 쪽마다의 글 (문단마다 줄바꿈) — 앱이 '목차' 쪽을 찾는 데 씀 */
+async function pageText(from, to) {
+  if (!doc) return [];
+  const out = [], current = doc, end = Math.min(count, Math.max(0, to | 0));
+  for (let i = Math.max(0, from | 0); i < end; i++) {
+    let text = '', key = null;
+    for (const run of pageRuns(i)) {
+      const k = run.paraIdx == null ? `c${run.y ?? ''}` : `${run.secIdx}:${run.paraIdx}`;
+      if (key !== null && k !== key) text += '\n';
+      text += run.text; key = k;
+    }
+    out.push(text);
+    if (i % 20 === 19) await new Promise(resolve => setTimeout(resolve, 0));
+    if (doc !== current) return [];
+  }
+  return out;
+}
 async function outline() {
   if (!doc) return [];
   try {
@@ -422,7 +439,7 @@ async function outline() {
   return guessOutline(blocks);
 }
 window.freaderHwp = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
-  search, showSearchResult, clearSearch, outline,
+  search, showSearchResult, clearSearch, outline, pageText,
   getState: () => ({ ready: readyReported, page, count, cachedPages: cache.size, cachedBytes, received, spread: options.spread, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 

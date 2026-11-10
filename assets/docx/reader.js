@@ -4,6 +4,7 @@ const host = document.getElementById('pages');
 const measure = document.getElementById('measure');
 const MAX_BYTES = 256 * 1024 * 1024;
 let incoming, received = 0, page = 0, pages = [], disposed = false;
+let outlineBlockCache = null; // 목차용 문단 목록 (쪽을 다시 나누면 비움)
 const IMAGE_CACHE_BYTES = 32 * 1024 * 1024;
 const imageCache = new Map(), imageJobs = new Map(), brokenImages = new Set();
 let resourceIndex = new Map(), originalSources = new Set(), resourceSession = 0;
@@ -292,7 +293,7 @@ async function preparePages(html, current) {
     }
     for (let column = 0; column < columns; column++) result.push({ source, column, width, height, bodyWidth, columnStride, sectionPageCount: columns, images: [...columnImages[column]] });
   }
-  pages = result;
+  pages = result; outlineBlockCache = null;
 }
 function clampPage(value) { return Math.max(0, Math.min(pages.length - 1, Number.isFinite(value) ? Math.trunc(value) : 0)); }
 function reportLocation() { emit('location', { page, pageCount: pages.length, position: `${options.format === 'doc' ? 'doc' : 'docx'}:${page}`, progress: pages.length > 1 ? page / (pages.length - 1) : 1 }); }
@@ -698,6 +699,16 @@ function outlineBlocks() {
   }
   return blocks;
 }
+/** 쪽마다의 글 (문단마다 줄바꿈) — 앱이 '목차' 쪽을 찾는 데 씀 */
+function pageText(from, to) {
+  if (!pages.length) return [];
+  if (!outlineBlockCache) outlineBlockCache = outlineBlocks();
+  const end = Math.min(pages.length, Math.max(0, to | 0));
+  const out = [];
+  for (let i = Math.max(0, from | 0); i < end; i++) out.push([]);
+  for (const b of outlineBlockCache) if (b.page >= from && b.page < end) out[b.page - from].push(b.text);
+  return out.map(lines => lines.join('\n'));
+}
 async function outline() {
   if (!pages.length) return [];
   const blocks = outlineBlocks();
@@ -724,6 +735,6 @@ async function outline() {
   return guessOutline(blocks);
 }
 window.freaderDocx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
-  search, showSearchResult, clearSearch, outline,
+  search, showSearchResult, clearSearch, outline, pageText,
   getState: () => ({ ready, page, count: pages.length, received, spread: options.spread, awaitingPassword, unavailableImages, imageCacheBytes, cachedImages: imageCache.size, visibleImages: activeImagePaths.size, maxBytes: MAX_BYTES, format: detectedFormat }) };
 window.addEventListener('pagehide', destroy, { once: true });
