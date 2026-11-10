@@ -658,8 +658,11 @@ function outlineBlocks() {
     const scale = inner.offsetWidth ? innerRect.width / inner.offsetWidth : 1;
     const stride = (entry.columnStride || entry.bodyWidth || inner.offsetWidth) * (scale || 1);
     for (const block of textBlocksOf(inner)) {
-      const text = block.text.replace(/\s+/g, ' ').trim();
+      let text = block.text.replace(/\s+/g, ' ').trim();
       if (!text) continue;
+      // 자동 번호(1. 2. …)는 글이 아니라 따로 붙은 표시라서 앞에 붙여 줌 (목차의 '번호로 시작하는 줄' 판단용)
+      const marker = block.key instanceof Element ? block.key.querySelector(':scope > .odr-list-marker')?.textContent?.trim() : '';
+      if (marker && !text.startsWith(marker)) text = `${marker} ${text}`;
       let chars = 0, bold = 0, column = 0, fs = 0;
       for (const { node } of block.nodes) {
         const n = node.data.trim().length;
@@ -716,8 +719,13 @@ const NUMBERED_START = /^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]|[IVX]{1,5}
 function headingCandidates() {
   if (!pages.length) return [];
   if (!outlineBlockCache) outlineBlockCache = outlineBlocks();
+  // 본문 글자 크기 = 문서 전체에서 가장 많이 쓴 크기 (글자 수 기준)
+  const sizeChars = new Map();
+  for (const b of outlineBlockCache) if (b.fs > 0) sizeChars.set(b.fs, (sizeChars.get(b.fs) || 0) + b.chars);
+  let body = 0, most = -1;
+  for (const [k, n] of sizeChars) if (n > most) { most = n; body = k; }
   return outlineBlockCache.filter(b => !b.cell && b.text.length <= 100 && (NUMBERED_START.test(b.text) || b.boldRatio >= 0.5))
-    .slice(0, 3000).map(b => ({ title: b.text, page: b.page, bold: b.bold, boldRatio: b.boldRatio, centered: b.centered, fs: b.fs }));
+    .slice(0, 3000).map(b => ({ title: b.text, page: b.page, bold: b.bold, boldRatio: b.boldRatio, centered: b.centered, fs: b.fs, body }));
 }
 window.freaderDocx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes,

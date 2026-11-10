@@ -69,6 +69,7 @@ class HwpReaderController {
             'boldRatio': (item['boldRatio'] as num?)?.toDouble() ?? 0,
             'centered': item['centered'] == true,
             'fs': (item['fs'] as num?)?.toDouble() ?? 0,
+            'body': (item['body'] as num?)?.toDouble() ?? 0,
           },
     ];
   }

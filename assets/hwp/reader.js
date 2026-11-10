@@ -404,8 +404,13 @@ const NUMBERED_START = /^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]|[IVX]{1,5}
 async function headingCandidates(from = 0, to = 1e9) {
   if (!doc) return [];
   const out = [], current = doc, end = Math.min(count, to);
+  const sizeChars = new Map(); // 본문 글자 크기 = 이 쪽들에서 가장 많이 쓴 크기
   for (let i = Math.max(0, from); i < end; i++) {
     const runs = pageRuns(i);
+    for (const run of runs) {
+      const k = Math.round((run.fontSize || 0) * 10) / 10;
+      if (k > 0) sizeChars.set(k, (sizeChars.get(k) || 0) + run.text.trim().length);
+    }
     // 쪽의 글 영역 (가운데 정렬 가늠용)
     let L = Infinity, R = -Infinity;
     for (const run of runs) { L = Math.min(L, run.x); R = Math.max(R, run.x + (run.w || 0)); }
@@ -433,7 +438,9 @@ async function headingCandidates(from = 0, to = 1e9) {
     if (i % 10 === 9) await new Promise(resolve => setTimeout(resolve, 0));
     if (doc !== current) return [];
   }
-  return out.slice(0, 3000);
+  let body = 0, most = -1;
+  for (const [k, n] of sizeChars) if (n > most) { most = n; body = k; }
+  return out.slice(0, 3000).map(c => ({ ...c, body }));
 }
 window.freaderHwp = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes,

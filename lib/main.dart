@@ -2585,6 +2585,29 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     });
   }
 
+  /// 목록형에서 오른쪽으로 밀어 즐겨찾기: 밀려 나간 줄은 바로 빠지고(같은 화면에서),
+  /// 즐겨찾기 순서대로 다시 줄 세운 새 자리에 오른쪽에서 밀려 들어옴
+  void _favoriteBySwipe(File file) {
+    final path = file.path;
+    final favs = Set<String>.of(_favoritePaths);
+    if (!favs.remove(path)) favs.add(path);
+    String nameOf(File f) => f.path.split(Platform.pathSeparator).last;
+    setState(() {
+      _favoritePaths = favs;
+      _allBooks = List<File>.of(_allBooks)
+        ..sort((a, b) {
+          final aFav = favs.contains(a.path), bFav = favs.contains(b.path);
+          if (aFav != bFav) return aFav ? -1 : 1;
+          return _naturalCompare(nameOf(a), nameOf(b));
+        });
+      _favGrowAt[path] = DateTime.now();
+    });
+    unawaited(() async {
+      await StorageService.toggleFavoriteBook(path);
+      if (mounted) await _loadLibrary();
+    }());
+  }
+
   /// 즐겨찾기를 바꾼 뒤 지금 보이는 목록(그룹)에서 이 파일의 자리가 바뀌는가 (즐겨찾기 먼저, 그다음 이름 순)
   bool _favoriteMovesFile(String path) {
     if (_searchOpen) return false; // 검색 결과는 이름 순서라 자리가 바뀌지 않음
@@ -2999,10 +3022,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   ? (query.isEmpty
                       // 가로 폭 전체를 차지해야 빈 곳을 눌렀을 때 검색이 닫힘 (크기 0이면 눌림을 못 받음)
                       ? const SizedBox.expand()
-                      : Center(
-                          child: Text(
-                            _tr('찾은 파일이 없습니다', 'No matching files', '没有找到文件', '該当するファイルがありません'),
-                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      // 자판이 올라오고 내려가도 문구가 움직이지 않게: 위에서부터 같은 자리에 둠
+                      : Align(
+                          alignment: Alignment.topCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 96),
+                            child: Text(
+                              _tr('찾은 파일이 없습니다', 'No matching files', '没有找到文件', '該当するファイルがありません'),
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            ),
                           ),
                         ))
                   : filteredBooks.isEmpty
@@ -3119,16 +3147,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         final lowerExt = rawFileName.split('.').last.toLowerCase();
 
                         return _favPop(file.path, Dismissible(
-                          key: ValueKey(file.path),
-                          // 오른쪽으로 밀기: 즐겨찾기 켜기/끄기 (파일은 제자리로 돌아옴) / 왼쪽으로 밀기: 휴지통
+                          // 즐겨찾기가 바뀌면 다른 열쇠가 되어, 밀려 나간 줄은 사라지고 새 자리에 새 줄이 들어옴
+                          key: ValueKey('${file.path}|$isFavorite'),
+                          // 오른쪽으로 밀기: 즐겨찾기 켜기/끄기 (그대로 오른쪽으로 사라졌다가 새 자리에서 오른쪽부터 들어옴)
+                          // 왼쪽으로 밀기: 휴지통
                           direction: _isSelectionMode ? DismissDirection.none : DismissDirection.horizontal,
-                          confirmDismiss: (direction) async {
-                            if (direction == DismissDirection.startToEnd) {
-                              unawaited(_toggleFavorite(file));
-                              return false;
-                            }
-                            return true;
-                          },
+                          resizeDuration: const Duration(milliseconds: 220),
                           background: Container(
                             color: Colors.amber.shade600,
                             alignment: Alignment.centerLeft,
@@ -3159,7 +3183,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                               ],
                             ),
                           ),
-                          onDismissed: (_) => _moveFileToTrash(file),
+                          onDismissed: (direction) {
+                            if (direction == DismissDirection.startToEnd) {
+                              _favoriteBySwipe(file);
+                            } else {
+                              _moveFileToTrash(file);
+                            }
+                          },
                           child: Container(
                             key: rowKey,
                             child: Stack(

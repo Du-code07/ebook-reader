@@ -1499,12 +1499,12 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     }
 
     /**
-     * PDF 목차용: 쪽마다 줄들 {t, x0, x1, y, h} (쪽 크기 대비 0~1).
+     * PDF 목차용: 쪽마다 {aspect: 가로÷세로, lines: 줄들 {t, x0, x1, y, h} (쪽 크기 대비 0~1)}.
      * [withBold]이면 쪽을 그림으로 그려 줄마다 글자 획 굵기 비율 sw도 넣는다 (굵은 글씨 가늠용, 60자 이하 줄만)
      */
     @android.annotation.SuppressLint("NewApi")
-    private fun pdfLines(path: String, from: Int, to: Int, withBold: Boolean): List<List<Map<String, Any>>> {
-        val out = ArrayList<List<Map<String, Any>>>()
+    private fun pdfLines(path: String, from: Int, to: Int, withBold: Boolean): List<Map<String, Any>> {
+        val out = ArrayList<Map<String, Any>>()
         val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
         fun collect(pw: Float, ph: Float, contents: List<android.graphics.pdf.content.PdfPageTextContent>, draw: ((Bitmap) -> Unit)?) {
             val lines = ArrayList<Pair<String, android.graphics.RectF>>()
@@ -1547,7 +1547,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 page.add(m)
             }
             bmp?.recycle()
-            out.add(page)
+            out.add(mapOf("aspect" to (if (ph > 0f) (pw / ph).toDouble() else 1.0), "lines" to page))
         }
         try {
             if (Build.VERSION.SDK_INT >= 35) {

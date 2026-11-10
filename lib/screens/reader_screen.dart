@@ -704,9 +704,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (!alive()) return null;
       return HeadingRules.slides(lines);
     }
+    // 번호·굵은 글씨 줄은 문서 끝까지 찾음 (약전처럼 아주 긴 문서도 뒤쪽 항목까지)
+    final int all = math.min(pageCount, 5000);
     final cands = _isHwpFile
-        ? await chunked<Map<String, Object?>>((f, t) => _hwpController.headingCandidates(f, t), scan, 0.05, 0.95)
-        : await _hwpController.headingCandidates(0, scan);
+        ? await chunked<Map<String, Object?>>((f, t) => _hwpController.headingCandidates(f, t), all, 0.05, 0.95)
+        : await _hwpController.headingCandidates(0, all);
     if (!alive()) return null;
     return HeadingRules.build(cands);
   }
@@ -1387,7 +1389,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           await File(shotPath).delete();
         } catch (_) {}
         // 보이지 않는 글자 층 (내보낸 PDF에서도 글 찾기가 되게)
-        final texts = await _hwpController.visibleTextBoxes();
+        // 글 위치는 문서 화면(WebView) 기준이라, 내보낸 쪽 그림(본문 전체 영역) 기준으로 바꿔야 형광펜 자리가 맞음
+        final texts = [
+          for (final t in await _hwpController.visibleTextBoxes())
+            {
+              ...t,
+              'x': (viewRect.left + ((t['x'] as num?) ?? 0) * viewRect.width) / bodySize.width,
+              'y': (viewRect.top + ((t['y'] as num?) ?? 0) * viewRect.height) / bodySize.height,
+              'w': ((t['w'] as num?) ?? 0) * viewRect.width / bodySize.width,
+              'h': ((t['h'] as num?) ?? 0) * viewRect.height / bodySize.height,
+            },
+        ];
         exportDocPages.add(_docPage);
         pages.add({'image': pagePath, 'texts': texts});
         progress.update(

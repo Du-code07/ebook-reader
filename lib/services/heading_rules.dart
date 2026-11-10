@@ -47,55 +47,85 @@ class HeadingRules {
     return false;
   }
 
-  /// [candidates]: {title, page, bold(줄 전체 굵게), boldRatio, centered, fs} — 앞에서부터 차례로.
+  /// [candidates]: {title, page, bold(줄 전체 굵게), boldRatio, centered, fs, body(본문 글자 크기)} — 앞에서부터 차례로.
   /// 결과: {title, level, page}. 해당하는 줄이 없으면 빈 목록
   static List<Map<String, Object?>> build(List<Map<String, Object?>> candidates) {
-    // 1) 번호로 시작하는 줄
+    double nv(Object? v) => (v as num?)?.toDouble() ?? 0;
+    // 본문 글자 크기: 알려 준 값(쪽 묶음마다)의 중간값, 없으면 후보들 중 가장 많은 크기
+    final bodies = [for (final c in candidates) if (nv(c['body']) > 0) nv(c['body'])]..sort();
+    double body = bodies.isEmpty ? 0 : bodies[bodies.length ~/ 2];
+    if (body <= 0) {
+      final count = <double, int>{};
+      for (final c in candidates) {
+        final f = nv(c['fs']);
+        if (f > 0) count[f] = (count[f] ?? 0) + 1;
+      }
+      if (count.isNotEmpty) body = count.entries.reduce((a, b) => b.value > a.value ? b : a).key;
+    }
+    // 눈에 띄는 줄 = 굵거나, 가운데 정렬이거나, 본문보다 큰 글자 (글자 크기를 모르면 따지지 않음)
+    bool prominent(Map<String, Object?> c) {
+      final f = nv(c['fs']);
+      if (f <= 0 || body <= 0) return true;
+      return c['bold'] == true || c['centered'] == true || f >= body * 1.05;
+    }
+
+    // 1) 번호(Ⅰ. / 1.)로 시작하는 줄 — 본문 속 번호 목록(본문과 같은 모양의 문장)은 빼고
     final seen = <String>{};
     final order = <String>[];
     final numbered = <Map<String, Object?>>[];
-    final picked = <(Map<String, Object?>, String, double)>[];
     for (final c in candidates) {
       final title = _clean(c['title']);
-      if (title.length > 40 || _sentence(title) || _listItem(title)) continue;
+      if (title.length > 40 || _sentence(title) || _listItem(title) || !prominent(c)) continue;
       final kind = kindOf(title);
       if (kind == null || !seen.add(norm(title))) continue;
-      picked.add(({'title': title, 'page': c['page']}, kind, (c['fs'] as num?)?.toDouble() ?? 0));
-      if (picked.length >= 500) break;
-    }
-    // 글자 크기를 아는 경우: 제목처럼 본문보다 큰 번호 줄이 여럿 있으면, 본문 크기의 번호 줄(목록 항목)은 뺀다
-    // (본문 크기 = 후보 전체에서 가장 많이 나온 글자 크기 — 긴 목록 항목들이 대부분 본문 크기)
-    final allSizes = [for (final c in candidates) if (((c['fs'] as num?)?.toDouble() ?? 0) > 0) (c['fs'] as num).toDouble()];
-    if (allSizes.length >= 4) {
-      final count = <double, int>{};
-      for (final v in allSizes) {
-        count[v] = (count[v] ?? 0) + 1;
-      }
-      final double body = count.entries.reduce((a, b) => b.value > a.value ? b : a).key;
-      if (picked.where((p) => p.$3 >= body * 1.1).length >= 3) picked.removeWhere((p) => p.$3 > 0 && p.$3 < body * 1.05);
-    }
-    for (final p in picked) {
-      if (!order.contains(p.$2)) order.add(p.$2);
-      numbered.add({...p.$1, 'level': (order.indexOf(p.$2) + 1).clamp(1, 4)});
+      if (!order.contains(kind)) order.add(kind);
+      numbered.add({'title': title, 'page': c['page'], 'level': (order.indexOf(kind) + 1).clamp(1, 4)});
+      if (numbered.length >= 1000) break;
     }
     if (numbered.isNotEmpty) return numbered;
 
-    // 2) 굵은 글씨 (가운데 정렬이거나 줄 전체가 굵은 경우). 단계는 글자 크기 순서
+    // 2) 굵은 글씨 (가운데 정렬이거나 줄 전체가 굵은 경우)
+    final bolds = <({String title, Object? page, double fs})>[];
     seen.clear();
-    final bolds = <(Map<String, Object?>, double)>[];
+    Map<String, Object?>? prevPicked;
     for (final c in candidates) {
       final title = _clean(c['title']);
       final double ratio = (c['boldRatio'] as num?)?.toDouble() ?? (c['bold'] == true ? 1 : 0);
       final bool ok = c['bold'] == true || (c['centered'] == true && ratio >= 0.5);
       if (!ok || title.length > 60 || _letter.allMatches(title).length < 2 || _sentence(title)) continue;
+      // 한글 제목 바로 다음 줄의 같은 모양 영어 이름(예: 가벡세이트메실산염 / Gabexate Mesilate)은 한 항목으로 봄
+      final prev = prevPicked;
+      prevPicked = c;
+      if (prev != null &&
+          prev['page'] == c['page'] &&
+          (nv(prev['fs']) - nv(c['fs'])).abs() < 0.2 &&
+          RegExp(r'[가-힣]').hasMatch(_clean(prev['title'])) &&
+          !RegExp(r'[가-힣]').hasMatch(title)) {
+        continue;
+      }
       if (!seen.add(norm(title))) continue;
-      bolds.add(({'title': title, 'page': c['page']}, ((c['fs'] as num?)?.toDouble() ?? 0)));
-      if (bolds.length >= 500) break;
+      bolds.add((title: title, page: c['page'], fs: nv(c['fs'])));
+      if (bolds.length >= 3000) break;
     }
-    final sizes = {for (final b in bolds) (b.$2 * 2).round() / 2}.toList()..sort((a, b) => b.compareTo(a));
+    // 본문보다 큰 굵은 제목들이 있으면, 본문 크기의 굵은 줄(예: '조작조건' 같은 작은 머리말)은 뺌
+    if (body > 0 && bolds.where((b) => b.fs >= body * 1.05).length >= 3) bolds.removeWhere((b) => b.fs > 0 && b.fs < body * 1.05);
+    // 단계: 글자 크기 순서. 한두 번만 나오는 큰 크기(표지 제목 등)는 따로 단계를 만들지 않고 1단계
+    final freq = <double, int>{};
+    for (final b in bolds) {
+      final k = (b.fs * 2).round() / 2;
+      freq[k] = (freq[k] ?? 0) + 1;
+    }
+    final sizes = [for (final e in freq.entries) if (e.value >= 3) e.key]..sort((a, b) => b.compareTo(a));
     return [
       for (final b in bolds)
-        {...b.$1, 'level': (sizes.indexOf((b.$2 * 2).round() / 2) + 1).clamp(1, 3)},
+        {
+          'title': b.title,
+          'page': b.page,
+          'level': () {
+            final i = sizes.indexWhere((v) => (b.fs * 2).round() / 2 >= v);
+            return ((i < 0 ? sizes.length - 1 : i) + 1).clamp(1, 3);
+          }(),
+        },
     ];
   }
 

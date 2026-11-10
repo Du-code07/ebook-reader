@@ -720,8 +720,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     setState(() => _pdfTocProgress = p);
   }
 
-  /// PDF 목차 (한글·워드와 같은 규칙): 1) 파일의 책갈피(목차) → 2) '목차' 쪽 → 3) Ⅰ. / 1. 로 시작하는 줄
-  /// → 4) 굵은 글씨 줄(가운데 정렬이거나 줄 전체가 굵은 경우) → 없으면 쪽 목록. 만든 목차는 저장해 두어 다음에는 바로 보여 준다
+  /// PDF 목차 (한글·워드와 같은 규칙): 1) 파일의 책갈피(목차) → 2) '목차' 쪽 → 3) Ⅰ. / 1. 로 시작하는 눈에 띄는 줄
+  /// → 4) 굵은 글씨 줄(가운데 정렬이거나 줄 전체가 굵은 경우) → 없으면 쪽 목록.
+  /// 발표 자료를 PDF로 만든 파일(가로로 긴 쪽)은 PPT처럼 슬라이드마다 제목·부제목.
+  /// 만든 목차는 저장해 두어 다음에는 바로 보여 준다
   Future<void> _loadPdfOutline() async {
     if (!mounted || _totalPages <= 0) return;
     final path = widget.files.first.path;
@@ -737,9 +739,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       }
       _setPdfTocProgress(0);
       try {
-        final int scan = math.min(pages, 400); // 아주 긴 문서는 앞 400쪽까지만
-        Future<List<List<Map<String, Object?>>>?> readLines(bool bold, double p0, double p1) async {
-          final out = <List<Map<String, Object?>>>[];
+        final int scan = math.min(pages, 3000);
+        Future<List<_PdfPageLines>?> readLines(bool bold, double p0, double p1) async {
+          final out = <_PdfPageLines>[];
           final int step = bold ? 10 : 20;
           for (int from = 0; from < scan; from += step) {
             out.addAll(await _pdfLines(path, from, math.min(scan, from + step), bold));
@@ -749,27 +751,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           return out;
         }
 
-        final lines = await readLines(false, 0, 0.6);
-        if (lines == null) return;
-        final texts = [for (final page in lines) page.map((l) => l['t']).join('\n')];
-        List<Map<String, Object?>> found = TocPageParser.parse(texts, pages) ??
-            HeadingRules.build([
-              for (int p = 0; p < lines.length; p++)
-                for (final l in lines[p]) {'title': l['t'], 'page': p, 'fs': l['h']},
-            ]);
-        if (found.isEmpty && lines.any((page) => page.isNotEmpty)) {
-          // 번호 줄이 없으면: 쪽을 그려 글자 굵기를 가늠해 굵은 글씨 줄을 찾음
-          final bolds = await readLines(true, 0.6, 0.97);
-          if (bolds == null) return;
-          final ratios = <double>[
-            for (final page in bolds)
-              for (final l in page)
-                if (((l['sw'] as num?) ?? 0) > 0) (l['sw'] as num).toDouble(),
-          ]..sort();
-          final double median = ratios.isEmpty ? 0 : ratios[ratios.length ~/ 2];
+        // 줄마다 목차 후보 정보 (가운데 정렬, 글자 높이, 굵기)
+        List<Map<String, Object?>> candidates(List<_PdfPageLines> all, {double median = 0}) {
           final cands = <Map<String, Object?>>[];
-          for (int p = 0; p < bolds.length; p++) {
-            final page = bolds[p];
+          for (int p = 0; p < all.length; p++) {
+            final page = all[p].lines;
             if (page.isEmpty) continue;
             double left = 1, right = 0;
             for (final l in page) {
@@ -785,7 +771,29 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               cands.add({'title': l['t'], 'page': p, 'bold': bold, 'boldRatio': bold ? 1.0 : 0.0, 'centered': centered, 'fs': l['h']});
             }
           }
-          found = HeadingRules.build(cands);
+          return cands;
+        }
+
+        final lines = await readLines(false, 0, 0.6);
+        if (lines == null) return;
+        final texts = [for (final page in lines) page.lines.map((l) => l['t']).join('\n')];
+        List<Map<String, Object?>>? found = TocPageParser.parse(texts, pages);
+        // 발표 자료로 만든 PDF: 쪽 대부분이 가로로 긴 모양
+        final bool slides = lines.isNotEmpty && lines.where((p) => p.aspect > 1.15).length >= lines.length * 0.7;
+        if (found == null && slides) {
+          found = HeadingRules.slides([for (final p in lines) p.lines], ocr: true);
+        }
+        found ??= HeadingRules.build(candidates(lines));
+        if (found.isEmpty && lines.any((page) => page.lines.isNotEmpty)) {
+          // 번호 줄이 없으면: 쪽을 그려 글자 굵기를 가늠해 굵은 글씨 줄을 찾음
+          final bolds = await readLines(true, 0.6, 0.97);
+          if (bolds == null) return;
+          final ratios = <double>[
+            for (final page in bolds)
+              for (final l in page.lines)
+                if (((l['sw'] as num?) ?? 0) > 0) (l['sw'] as num).toDouble(),
+          ]..sort();
+          found = HeadingRules.build(candidates(bolds, median: ratios.isEmpty ? 0 : ratios[ratios.length ~/ 2]));
         }
         items = [for (final e in found) e.cast<String, Object>()];
         await OutlineCache.write(path, pages, found);
@@ -796,17 +804,21 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     if (mounted && items.isNotEmpty) setState(() => _pdfToc = items);
   }
 
-  /// 쪽마다 줄들 {t, x0, x1, y, h, (sw: 글자 획 굵기 비율)} (지원하지 않는 기기에서는 빈 목록)
-  Future<List<List<Map<String, Object?>>>> _pdfLines(String path, int from, int to, bool bold) async {
+  /// 쪽마다 {aspect, 줄들 {t, x0, x1, y, h, (sw: 글자 획 굵기 비율)}} (지원하지 않는 기기에서는 빈 목록)
+  Future<List<_PdfPageLines>> _pdfLines(String path, int from, int to, bool bold) async {
     try {
       final r = await _pdfChannel.invokeMethod<List<Object?>>('pdfLines', {'path': path, 'from': from, 'to': to, 'bold': bold});
       return [
         for (final page in r ?? const [])
-          [
-            if (page is List)
-              for (final l in page)
-                if (l is Map && l['x0'] is num && l['x1'] is num) l.cast<String, Object?>(),
-          ],
+          if (page is Map)
+            _PdfPageLines(
+              (page['aspect'] as num?)?.toDouble() ?? 1,
+              [
+                if (page['lines'] is List)
+                  for (final l in page['lines'] as List)
+                    if (l is Map && l['x0'] is num && l['x1'] is num) l.cast<String, Object?>(),
+              ],
+            ),
       ];
     } catch (_) {
       return const [];
@@ -2811,4 +2823,11 @@ class _FindMarkPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_FindMarkPainter old) => old.all != all || old.current != current;
+}
+
+/// PDF 한 쪽의 모양(가로÷세로)과 줄들
+class _PdfPageLines {
+  const _PdfPageLines(this.aspect, this.lines);
+  final double aspect;
+  final List<Map<String, Object?>> lines;
 }
