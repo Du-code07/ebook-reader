@@ -96,7 +96,7 @@ class MemoToolButton extends StatelessWidget {
   final bool active;
   final bool enabled;
 
-  /// 아이콘 아래 작은 점 (현재 펜 색상 표시)
+  /// 아이콘 왼쪽 작은 점 (현재 펜 색상 표시)
   final Color? dotColor;
 
   /// 기본(흰색) 대신 쓸 아이콘 색 (예: 필기 전체 지우기 = 빨강)
@@ -126,9 +126,10 @@ class MemoToolButton extends StatelessWidget {
             alignment: Alignment.center,
             children: [
               iconBuilder != null ? iconBuilder!(color) : Icon(icon, color: color, size: 18),
+              // 펜 색: 펜 몸통 왼쪽에 살짝 띄워서
               if (dotColor != null)
                 Positioned(
-                  bottom: 5,
+                  left: 3,
                   child: Container(
                     width: 6,
                     height: 6,

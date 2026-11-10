@@ -133,6 +133,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _isMangaRtlMode = false;
   int _fontSize = 18;
   List<EpubChapter> _chapters = [];
+  List<int> _chapterLevels = const []; // 워드·한글·PPT 목차 항목의 단계 (들여쓰기용, 비어 있으면 단계 없음)
 
   // ── 본문 로딩 감시: 책이 끝내 그려지지 않아 흰 화면만 남는 상황을 복구 ──
   Timer? _epubLoadWatchdog;
@@ -616,10 +617,47 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
   }
 
-  /// 문서를 다 읽어 들였을 때: 쪽 수를 알게 되므로 목차를 '쪽' 목록으로 만든다
+  Future<void> _loadDocumentOutline(int pageCount) async {
+    if (!mounted || _isTxt) return;
+    final items = await _hwpController.outline();
+    if (!mounted || items.isEmpty || _docPageCount != pageCount) return;
+    final chapters = <EpubChapter>[];
+    final levels = <int>[];
+    for (final item in items) {
+      final int page = (item['page'] as int).clamp(0, math.max(0, pageCount - 1)).toInt();
+      String title = (item['title'] as String).trim();
+      if (item['slide'] == true) {
+        // PPT: 슬라이드 번호 + 제목 (제목이 없으면 번호만)
+        title = title.isEmpty
+            ? _tr('${page + 1}쪽', 'Slide ${page + 1}', '第${page + 1}页', '${page + 1}枚目')
+            : '${page + 1}. $title';
+      }
+      if (title.isEmpty) continue;
+      chapters.add(EpubChapter(
+        title: title,
+        href: '$_documentPositionPrefix:$page',
+        id: '$_documentPositionPrefix:$page#${chapters.length}',
+        subitems: const [],
+      ));
+      levels.add((item['level'] as int).clamp(1, 6).toInt());
+    }
+    if (chapters.isEmpty) return;
+    setState(() {
+      _chapters = chapters;
+      _chapterLevels = levels;
+    });
+  }
+
+  /// 문서를 다 읽어 들였을 때: 쪽 수를 알게 되므로 우선 목차를 '쪽' 목록으로 만들고,
+  /// 워드·한글·PPT는 파일의 목차(제목 스타일·개요)나 글자 크기·굵기로 찾은 제목으로 바꾼다
   void _onDocumentLoaded(int pageCount) {
     if (!mounted) return;
+    if (!_isTxt) {
+      // 첫 화면을 그리는 데 방해되지 않도록 잠시 뒤에 분석
+      Future<void>.delayed(const Duration(milliseconds: 800), () => _loadDocumentOutline(pageCount));
+    }
     setState(() {
+      _chapterLevels = const [];
       _docPageCount = pageCount;
       _chapters = List.generate(
         pageCount,
@@ -1036,10 +1074,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
   }
 
-  /// EPUB·TXT 본문이 시작하는 높이: 상단바(위 여백 + 버튼 줄 48) 아래로 살짝 띄움.
-  /// 상태표시줄을 잠깐 내릴 때 바뀌는 여백은 쓰지 않는다 (글이 다시 나뉘며 쪽이 바뀌지 않게)
+  /// EPUB·TXT 본문이 시작하는 높이: 상단바(위 여백 + 버튼 줄 48) 아래로 살짝 띄움
   double get _readerTextTop {
-    final double barBottom = MediaQueryData.fromView(View.of(context)).padding.top + 48.0;
+    final double barBottom = MediaQuery.paddingOf(context).top + 48.0;
     // TXT는 화면 안쪽에 자체 여백(32)이 있어 그만큼 덜 내린다
     return _isTxt ? math.max(12.0, barBottom + 10.0 - TxtPageDocument.margin) : barBottom + 10.0;
   }
@@ -2595,7 +2632,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 6. 진행도 UI의 화살표를 맨 처음(0.0)과 맨 마지막(1.0)으로 즉시 이동하는 용도로 변경!
   /// + 하단 배치 시 우측 하단 페이지 이동 버튼과 절대 겹치지 않도록 슬림/컴팩트 사이즈로 축소 및 여백 확보!
   Widget _buildEpubProgressBar(double bottomInset) {
-    if (!_showControls || _isTouchLocked || _progressBarPos == 'hidden' || (_chapters.length <= 1 && _progress <= 0.0)) {
+    if (!_showControls || _isTouchLocked || _progressBarPos == 'hidden' || (!_isOfflineDocument && _chapters.length <= 1 && _progress <= 0.0)) {
       return const Positioned(
         key: ValueKey('epub_progress_bar_hidden'),
         left: 0,
@@ -3006,8 +3043,26 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   itemCount: _chapters.length,
                   itemBuilder: (context, index) {
                     final chapter = _chapters[index];
+                    final int level = index < _chapterLevels.length ? _chapterLevels[index] : 1;
                     return ListTile(
-                      title: Text(chapter.title.trim()),
+                      // 제목 단계만큼 들여쓰기, 큰 제목은 굵게
+                      contentPadding: EdgeInsets.only(left: 16.0 + (level - 1).clamp(0, 4) * 18.0, right: 16),
+                      title: Text(
+                        chapter.title.trim(),
+                        style: _chapterLevels.isEmpty
+                            ? null
+                            : TextStyle(
+                                fontSize: level <= 1 ? 15.5 : 14,
+                                fontWeight: level <= 1 ? FontWeight.w700 : FontWeight.w400,
+                              ),
+                      ),
+                      // 목차 항목이 있는 쪽 번호
+                      trailing: _chapterLevels.isEmpty
+                          ? null
+                          : Text(
+                              '${(int.tryParse(chapter.href.split(':').last) ?? 0) + 1}',
+                              style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            ),
                       onTap: () {
                         Navigator.pop(context);
                         _readerDisplay(chapter.href);

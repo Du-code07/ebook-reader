@@ -495,8 +495,44 @@ class DocxLayoutHints {
           'props': _props(s),
         });
       }
+      // 목차: 제목 스타일(개요 수준)이 있는 문단 (워드의 목차도 이것으로 만들어진다)
+      final levelCache = <String, int?>{};
+      int? styleLevel(String? id, [int depth = 0]) {
+        if (id == null || depth > 20) return null;
+        if (levelCache.containsKey(id)) return levelCache[id];
+        final s = styleMap[id];
+        int? level;
+        if (s != null) {
+          level = int.tryParse(_val(_child(s, 'pPr'), 'outlineLvl') ?? '');
+          if (level == null) {
+            final name = (_val(s, 'name') ?? '').toLowerCase().trim();
+            final m = RegExp(r'^(heading|제목)\s*([1-9])$').firstMatch(name);
+            if (m != null) {
+              level = int.parse(m.group(2)!) - 1;
+            } else if (name == 'title' || name == '제목') {
+              level = 0;
+            } else {
+              level = styleLevel(_val(s, 'basedOn'), depth + 1);
+            }
+          }
+        }
+        levelCache[id] = level;
+        return level;
+      }
+      final headings = <Map<String, Object>>[];
+      for (final p in doc.findAllElements('p', namespace: _w)) {
+        if (headings.length >= 500) break;
+        if (p.ancestors.whereType<XmlElement>().any((a) => a.localName == 'txbxContent')) continue;
+        final pPr = _child(p, 'pPr');
+        final level = int.tryParse(_val(pPr, 'outlineLvl') ?? '') ?? styleLevel(_val(pPr, 'pStyle'));
+        if (level == null || level < 0 || level > 8) continue;
+        final text = p.findAllElements('t', namespace: _w).map((t) => t.innerText).join().replaceAll(RegExp(r'\s+'), ' ').trim();
+        if (text.isEmpty) continue;
+        headings.add({'text': text, 'level': level + 1});
+      }
       return {
         'version': 1,
+        if (headings.isNotEmpty) 'headings': headings,
         'paragraphs': paragraphs,
         if (notes.isNotEmpty) 'notes': notes,
         'tables': tables,

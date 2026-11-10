@@ -62,14 +62,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var isVolumeInterceptEnabled = false
     private var eventSink: EventChannel.EventSink? = null
     private var pdfMethodChannel: MethodChannel? = null
-    private var systemUiChannel: MethodChannel? = null
-    private var lastReportedStatusBarTop = -1
-    private var lastReportedStatusBarStable = -1
-
-    private fun statusBarDimen(): Int {
-        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
-        return if (id > 0) resources.getDimensionPixelSize(id) else 0
-    }
 
     private var isVolUpPressed = false
     private var isVolDownPressed = false
@@ -198,21 +190,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             if (statusBarVisible && isActivityResumed) {
                 scheduleStatusBarReHide()
             }
-            // 상태표시줄이 실제로 보이는 동안의 높이 (안드로이드 11 이상만. 10 이하는 숨겨도 값이 남아 있어 쓰지 않음)
-            val barTop = if (statusBarVisible && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
-            } else 0
-            // 상태표시줄 본래 높이: 손가락으로 잠깐 내렸을 때(앱에는 알려 주지 않음) 상단바를 이만큼 내린다
-            val stable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
-            } else statusBarDimen()
-            if (barTop != lastReportedStatusBarTop || stable != lastReportedStatusBarStable) {
-                lastReportedStatusBarTop = barTop
-                lastReportedStatusBarStable = stable
-                try {
-                    systemUiChannel?.invokeMethod("statusBar", mapOf("visible" to (barTop > 0), "top" to barTop, "stable" to stable))
-                } catch (_: Exception) {}
-            }
             v.onApplyWindowInsets(insets)
         }
     }
@@ -238,19 +215,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        systemUiChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ebook_reader/system_ui").also { ch ->
-            // 앱(Dart)이 준비된 뒤 현재 상태표시줄 높이를 물어봄 (그 전에 보낸 알림은 받지 못했을 수 있음)
-            ch.setMethodCallHandler { call, result ->
-                if (call.method == "query") {
-                    val stable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        window.decorView.rootWindowInsets?.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars())?.top ?: statusBarDimen()
-                    } else statusBarDimen()
-                    result.success(mapOf("visible" to (lastReportedStatusBarTop > 0), "top" to maxOf(0, lastReportedStatusBarTop), "stable" to stable))
-                } else {
-                    result.notImplemented()
-                }
-            }
-        }
         hideSystemStatusBar()
         mainHandler.postDelayed({ hideSystemStatusBar() }, 200L)
         mainHandler.postDelayed({ hideSystemStatusBar() }, 600L)
@@ -267,6 +231,10 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     }
                     updateMediaSessionState(enabled)
                     result.success(null)
+                } else if (call.method == "statusBarHeight") {
+                    // 상태표시줄 본래 높이(px) — 태블릿에서 상단바를 이만큼 항상 내려 둔다
+                    val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+                    result.success(if (id > 0) resources.getDimensionPixelSize(id) else 0)
                 } else if (call.method == "setShakeListening") {
                     setShakeListening(call.argument<Boolean>("enabled") ?: false)
                     result.success(null)

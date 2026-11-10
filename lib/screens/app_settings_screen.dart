@@ -156,14 +156,22 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: !widget.asSheet,
+        // 창으로 띄울 때: 위 손잡이 줄과 겹치지 않게 제목·화살표를 살짝 내림
+        toolbarHeight: widget.asSheet ? kToolbarHeight + 8 : null,
         leading: widget.asSheet
-            ? IconButton(
-                icon: const Icon(Icons.keyboard_arrow_down),
-                tooltip: _t('닫기', 'Close', '关闭', '閉じる'),
-                onPressed: () => Navigator.maybePop(context),
+            ? Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: IconButton(
+                  icon: const Icon(Icons.keyboard_arrow_down),
+                  tooltip: _t('닫기', 'Close', '关闭', '閉じる'),
+                  onPressed: () => Navigator.maybePop(context),
+                ),
               )
             : null,
-        title: Text(_t('앱 설정', 'App Settings', '应用设置', 'アプリ設定')),
+        title: Padding(
+          padding: EdgeInsets.only(top: widget.asSheet ? 8 : 0),
+          child: Text(_t('앱 설정', 'App Settings', '应用设置', 'アプリ設定')),
+        ),
         // 위에서 아래로 끌어 닫을 수 있다는 손잡이 줄
         flexibleSpace: widget.asSheet
             ? Align(

@@ -30,6 +30,22 @@ class HwpReaderController {
 
   Future<void> showSearchResult(int index) async => _query?.call('showSearchResult', [index]);
   Future<void> clearSearch() async => _query?.call('clearSearch', []);
+
+  /// 목차: 파일의 제목(개요)들. 각 항목 {title, level, page(0부터), slide?}. 못 찾으면 빈 목록
+  Future<List<Map<String, Object?>>> outline() async {
+    final result = await _query?.call('outline', []);
+    if (result is! List) return const [];
+    return [
+      for (final item in result)
+        if (item is Map && item['page'] is num)
+          {
+            'title': (item['title'] ?? '').toString(),
+            'level': (item['level'] as num?)?.toInt() ?? 1,
+            'page': (item['page'] as num).toInt(),
+            'slide': item['slide'] == true,
+          },
+    ];
+  }
 }
 
 class HwpViewer extends StatefulWidget {

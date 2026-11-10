@@ -14,13 +14,22 @@ import 'widgets/sheet_pull_to_close.dart';
 import 'widgets/file_type_icon.dart';
 import 'widgets/favorite_ribbon.dart';
 import 'widgets/group_stack_icon.dart';
+import 'widgets/group_jump_menu.dart';
 import 'services/storage_service.dart';
 import 'services/doc_thumbnail_service.dart';
-import 'services/system_ui_service.dart';
+
+/// 상태표시줄 본래 높이(논리 픽셀). 태블릿에서 상단바를 이만큼 항상 내려 둔다
+double statusBarHeightDp = 0;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemUiService.init();
+  // 상태표시줄 본래 높이 (태블릿에서 상단바를 이만큼 항상 내려 둠)
+  try {
+    final px = await const MethodChannel('ebook_reader/volume_control').invokeMethod<int>('statusBarHeight');
+    final views = WidgetsBinding.instance.platformDispatcher.views;
+    final dpr = views.isNotEmpty ? views.first.devicePixelRatio : 1.0;
+    if (px != null && px > 0 && dpr > 0) statusBarHeightDp = px / dpr;
+  } catch (_) {}
   PaintingBinding.instance.imageCache.maximumSize = 3000;
   PaintingBinding.instance.imageCache.maximumSizeBytes = 300 << 20;
   final initialThemeMode = await StorageService.getAppThemeMode();
@@ -138,37 +147,23 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       builder: (context, child) {
         // 상태표시줄을 내려 화면 위에 보이는 동안에는 그 높이만큼 위쪽 여백을 늘려
         // 상단바(SafeArea를 쓰는 곳 모두)가 함께 내려와 겹치지 않게 한다
-        // 위 끝에서 밀어 상태표시줄을 내리면 상단바를 그 높이만큼 부드럽게 내리고, 올라가면 다시 올린다.
-        // (트리 모양이 바뀌면 열려 있는 화면이 처음부터 다시 만들어지므로 MediaQuery는 항상 둔다)
-        final content = Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: SystemUiService.onPointerDown,
-          onPointerMove: SystemUiService.onPointerMove,
-          onPointerUp: SystemUiService.onPointerEnd,
-          onPointerCancel: SystemUiService.onPointerEnd,
-          child: ValueListenableBuilder<double>(
-            valueListenable: SystemUiService.statusBarTop,
-            child: child ?? const SizedBox.shrink(),
-            builder: (context, barTop, child) => TweenAnimationBuilder<double>(
-              tween: Tween<double>(end: barTop),
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              child: child,
-              builder: (context, top, child) {
-                final mq = MediaQuery.of(context);
-                final bool shift = top > mq.padding.top + 0.5;
-                return MediaQuery(
-                  data: shift
-                      ? mq.copyWith(
-                          padding: mq.padding.copyWith(top: top),
-                          viewPadding: mq.viewPadding.copyWith(top: math.max(mq.viewPadding.top, top)),
-                        )
-                      : mq,
-                  child: child!,
-                );
-              },
-            ),
-          ),
+        // 태블릿: 상태표시줄을 내려도 상단바 아이콘을 가리지 않도록 상단바를 상태표시줄 높이만큼 항상 내려 둔다
+        // (앱 시작 화면·파일 열람 화면 모두. 휴대폰은 그대로)
+        final content = Builder(
+          builder: (context) {
+            final mq = MediaQuery.of(context);
+            final bool tablet = mq.size.shortestSide >= 600;
+            if (!tablet || statusBarHeightDp <= mq.padding.top + 0.5) {
+              return MediaQuery(data: mq, child: child ?? const SizedBox.shrink());
+            }
+            return MediaQuery(
+              data: mq.copyWith(
+                padding: mq.padding.copyWith(top: statusBarHeightDp),
+                viewPadding: mq.viewPadding.copyWith(top: math.max(mq.viewPadding.top, statusBarHeightDp)),
+              ),
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
         );
         return FadeTransition(
           opacity: _rotationFadeAnim,
@@ -588,6 +583,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   List<File> _trashedBooks = [];
   List<String> _groups = ['전체', 'PDF/문서'];
   bool _groupEditMode = false; // 그룹을 꾹 눌러 순서 바꾸기·삭제하는 중
+  bool _groupMenuOpen = false; // [전체]에서 그룹 목록을 펼친 중 (아이콘 엇갈림)
   final GlobalKey _allGroupChipKey = GlobalKey();
   String _selectedGroup = '전체';
   Map<String, String> _bookGroupMap = {};
@@ -1859,6 +1855,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         key: _allGroupChipKey,
         avatar: GroupStackIcon(
           size: 17,
+          spread: _groupMenuOpen,
           color: allSelected ? Theme.of(context).colorScheme.onSecondaryContainer : Theme.of(context).colorScheme.onSurfaceVariant,
         ),
         showCheckmark: false,
@@ -1977,27 +1974,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final groups = _groups.where((g) => g != '전체').toList();
     if (groups.isEmpty) return;
     final box = _allGroupChipKey.currentContext?.findRenderObject() as RenderBox?;
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (box == null || overlay == null) return;
-    final Offset topLeft = box.localToGlobal(Offset(0, box.size.height), ancestor: overlay);
-    final picked = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(topLeft.dx, topLeft.dy + 4, overlay.size.width - topLeft.dx, 0),
-      constraints: const BoxConstraints(minWidth: 150, maxWidth: 260),
-      items: [
-        for (final g in groups)
-          PopupMenuItem<String>(
-            value: g,
-            child: Row(
-              children: [
-                const Icon(Icons.folder_outlined, size: 18),
-                const SizedBox(width: 10),
-                Flexible(child: Text(_localizeGroupName(g), overflow: TextOverflow.ellipsis)),
-              ],
-            ),
-          ),
-      ],
+    if (box == null || !box.hasSize) return;
+    final Offset topLeft = box.localToGlobal(Offset.zero);
+    setState(() => _groupMenuOpen = true);
+    final picked = await Navigator.of(context).push<String>(
+      GroupJumpMenuRoute<String>(
+        anchor: topLeft & box.size,
+        barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+        items: [for (final g in groups) (g, _localizeGroupName(g))],
+      ),
     );
+    if (mounted) setState(() => _groupMenuOpen = false);
     if (picked != null && mounted) setState(() => _selectedGroup = picked);
   }
 
@@ -2327,6 +2314,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       useSafeArea: true,
       enableDrag: false,
       clipBehavior: Clip.antiAlias,
+      // 화면의 2/3까지만 가림
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 2 / 3),
       transitionAnimationController: sheetCtrl,
       builder: (sheetCtx) => SheetPullToClose(
         controller: sheetCtrl,
