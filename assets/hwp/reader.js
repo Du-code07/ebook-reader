@@ -385,6 +385,21 @@ function guessOutline(blocks) {
   const sizes = [...new Set(kept.map(c => sizeKey(c.fs)))].sort((a, b) => b - a);
   return kept.slice(0, 400).map(c => ({ title: c.text, level: Math.min(3, sizes.indexOf(sizeKey(c.fs)) + 1), page: c.page }));
 }
+/** 지금 화면에 보이는 글과 그 위치 (화면 크기 대비 0~1) — 내보낸 PDF에 보이지 않는 글자 층을 넣는 데 씀 */
+function visibleTextBoxes() {
+  const W = innerWidth || 1, H = innerHeight || 1, out = [];
+  for (const frame of host.children) {
+    const index = Number(frame.dataset.page), svg = frame.firstElementChild;
+    if (!svg || !Number.isFinite(index)) continue;
+    const r = svg.getBoundingClientRect(), vw = Number(frame.dataset.width) || r.width;
+    const s = vw > 0 ? r.width / vw : 1;
+    for (const run of pageRuns(index)) {
+      if (!run.text || !run.text.trim() || !(run.w > 0 && run.h > 0)) continue;
+      out.push({ t: run.text, x: (r.left + run.x * s) / W, y: (r.top + run.y * s) / H, w: run.w * s / W, h: run.h * s / H });
+    }
+  }
+  return out;
+}
 /** 쪽마다의 글 (문단마다 줄바꿈) — 앱이 '목차' 쪽을 찾는 데 씀 */
 async function pageText(from, to) {
   if (!doc) return [];
@@ -439,7 +454,7 @@ async function outline() {
   return guessOutline(blocks);
 }
 window.freaderHwp = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
-  search, showSearchResult, clearSearch, outline, pageText,
+  search, showSearchResult, clearSearch, outline, pageText, visibleTextBoxes,
   getState: () => ({ ready: readyReported, page, count, cachedPages: cache.size, cachedBytes, received, spread: options.spread, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 

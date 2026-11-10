@@ -373,6 +373,28 @@ function applySearchHighlights() {
     });
   }
 }
+/** 글자 읽기(OCR)용: 슬라이드 그림의 위쪽 [topFraction]만 JPEG(base64)로. 글자가 그림으로만 된 슬라이드의 제목 찾기에 씀 */
+async function slideImage(index, width = 1100, topFraction = 0.45) {
+  if (!presentation || index < 0 || index >= presentation.slideCount) return null;
+  const canvas = document.createElement('canvas');
+  try {
+    await presentation.renderSlide(canvas, index, { width, dpr: 1, skipMediaControls: true,
+      imageResources: { decodedByteBudget: 64 * 1024 * 1024, strategy: 'adaptive', resolution: 'display' } });
+    const h = Math.max(1, Math.round(canvas.height * Math.min(1, Math.max(0.1, topFraction))));
+    const out = document.createElement('canvas');
+    out.width = canvas.width; out.height = h;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, h);
+    ctx.drawImage(canvas, 0, 0);
+    const data = out.toDataURL('image/jpeg', 0.92).split(',')[1] || null;
+    out.width = 0; out.height = 0;
+    return data;
+  } catch (_) {
+    return null;
+  } finally {
+    canvas.width = 0; canvas.height = 0;
+  }
+}
 // ── 목차: 슬라이드마다 가장 큰 글자(같으면 가장 위)의 글 상자를 제목으로 본다 ──
 async function outline() {
   if (!presentation) return [];
@@ -411,7 +433,7 @@ const observer = new ResizeObserver(() => {
 observer.observe(host);
 host.addEventListener('click', event => { if (event.target.closest('a')) event.preventDefault(); });
 window.freaderPpt = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, thumbnail, destroy,
-  search, showSearchResult, clearSearch, outline,
+  search, showSearchResult, clearSearch, outline, slideImage,
   getState: () => ({ ready: !disposed, loaded, page, count: presentation?.slideCount || 0, step, stepCount, received, awaitingPassword, spread: options.spread, format: options.format, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 emit('ready', { version: '0.89.8' });

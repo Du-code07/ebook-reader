@@ -699,6 +699,23 @@ function outlineBlocks() {
   }
   return blocks;
 }
+/** 지금 화면에 보이는 글(낱말)과 그 위치 (화면 크기 대비 0~1) — 내보낸 PDF에 보이지 않는 글자 층을 넣는 데 씀 */
+function visibleTextBoxes() {
+  const W = innerWidth || 1, H = innerHeight || 1, out = [];
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT), range = document.createRange();
+  for (let node = walker.nextNode(); node && out.length < 20000; node = walker.nextNode()) {
+    const data = node.data;
+    if (!data.trim() || !node.parentElement) continue;
+    const word = /\S+/g;
+    for (let m = word.exec(data); m; m = word.exec(data)) {
+      try { range.setStart(node, m.index); range.setEnd(node, m.index + m[0].length); } catch (_) { continue; }
+      const r = [...range.getClientRects()].find(rect => rect.width >= 0.5 && rect.height >= 0.5);
+      if (!r || r.right <= 0 || r.bottom <= 0 || r.left >= W || r.top >= H) continue;
+      out.push({ t: m[0], x: r.left / W, y: r.top / H, w: r.width / W, h: r.height / H });
+    }
+  }
+  return out;
+}
 /** 쪽마다의 글 (문단마다 줄바꿈) — 앱이 '목차' 쪽을 찾는 데 씀 */
 function pageText(from, to) {
   if (!pages.length) return [];
@@ -735,6 +752,6 @@ async function outline() {
   return guessOutline(blocks);
 }
 window.freaderDocx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
-  search, showSearchResult, clearSearch, outline, pageText,
+  search, showSearchResult, clearSearch, outline, pageText, visibleTextBoxes,
   getState: () => ({ ready, page, count: pages.length, received, spread: options.spread, awaitingPassword, unavailableImages, imageCacheBytes, cachedImages: imageCache.size, visibleImages: activeImagePaths.size, maxBytes: MAX_BYTES, format: detectedFormat }) };
 window.addEventListener('pagehide', destroy, { once: true });
