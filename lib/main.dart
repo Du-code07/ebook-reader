@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math' as math;
 import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
@@ -19,18 +20,20 @@ import 'widgets/group_jump_menu.dart';
 import 'services/storage_service.dart';
 import 'services/doc_thumbnail_service.dart';
 
-/// 상태표시줄 본래 높이(논리 픽셀). 태블릿에서 상단바를 이만큼 항상 내려 둔다
-double statusBarHeightDp = 0;
+/// 상태표시줄 본래 높이(기기 픽셀). 태블릿에서 상단바를 이 높이에 맞춰 항상 내려 둔다
+final ValueNotifier<int> statusBarHeightPx = ValueNotifier<int>(0);
+
+Future<void> _readStatusBarHeight() async {
+  try {
+    final px = await const MethodChannel('ebook_reader/volume_control').invokeMethod<int>('statusBarHeight');
+    if (px != null && px > 0) statusBarHeightPx.value = px;
+  } catch (_) {}
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 상태표시줄 본래 높이 (태블릿에서 상단바를 이만큼 항상 내려 둠)
-  try {
-    final px = await const MethodChannel('ebook_reader/volume_control').invokeMethod<int>('statusBarHeight');
-    final views = WidgetsBinding.instance.platformDispatcher.views;
-    final dpr = views.isNotEmpty ? views.first.devicePixelRatio : 1.0;
-    if (px != null && px > 0 && dpr > 0) statusBarHeightDp = px / dpr;
-  } catch (_) {}
+  await _readStatusBarHeight();
   PaintingBinding.instance.imageCache.maximumSize = 3000;
   PaintingBinding.instance.imageCache.maximumSizeBytes = 300 << 20;
   final initialThemeMode = await StorageService.getAppThemeMode();
@@ -38,6 +41,26 @@ void main() async {
   // 앱 처음 시작 시(언어를 고른 적 없을 때) 언어 선택 화면부터 보여 준다
   final needsLanguage = await StorageService.needsLanguageSelection();
   runApp(MyEbookApp(initialThemeMode: initialThemeMode, initialLang: initialLang, needsLanguage: needsLanguage));
+}
+
+/// 문서 폴더·휴지통·표지 폴더의 파일 경로들 (다른 isolate에서 읽음)
+Future<({List<String> files, List<String> trash, List<String> thumbs})> _listLibraryFolders(String docs, String trash, String thumbs) {
+  return Isolate.run(() {
+    List<String> filesIn(String path, {bool create = false}) {
+      final d = Directory(path);
+      try {
+        if (!d.existsSync()) {
+          if (create) d.createSync(recursive: true);
+          return const [];
+        }
+        return [for (final e in d.listSync()) if (e is File) e.path];
+      } catch (_) {
+        return const [];
+      }
+    }
+
+    return (files: filesIn(docs), trash: filesIn(trash), thumbs: filesIn(thumbs, create: true));
+  });
 }
 
 class MyEbookApp extends StatefulWidget {
@@ -82,6 +105,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       CurvedAnimation(parent: _rotationAnimController, curve: Curves.easeOutCubic),
     );
     StorageService.desiredLandscapeNotifier.addListener(_onDesiredOrientationChanged);
+    // 화면이 다 붙은 뒤에 실제 상태표시줄 높이를 한 번 더 읽음 (시작 직후에는 못 읽는 기기가 있음)
+    WidgetsBinding.instance.addPostFrameCallback((_) => _readStatusBarHeight());
   }
 
   void _onDesiredOrientationChanged() {
@@ -152,17 +177,22 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         // 상단바(SafeArea를 쓰는 곳 모두)가 함께 내려와 겹치지 않게 한다
         // 태블릿: 상태표시줄을 내려도 상단바 아이콘을 가리지 않도록 상단바를 상태표시줄 높이만큼 항상 내려 둔다
         // (앱 시작 화면·파일 열람 화면 모두. 휴대폰은 그대로)
-        final content = Builder(
-          builder: (context) {
+        // 상단바 아이콘 위에는 원래 16dp 빈칸이 있으므로, 상태표시줄 높이보다 10dp 덜 내려
+        // 상태표시줄 바로 아래(약 6dp 여유)에 아이콘이 오게 한다
+        final content = ValueListenableBuilder<int>(
+          valueListenable: statusBarHeightPx,
+          builder: (context, px, _) {
             final mq = MediaQuery.of(context);
             final bool tablet = mq.size.shortestSide >= 600;
-            if (!tablet || statusBarHeightDp <= mq.padding.top + 0.5) {
+            final double dpr = mq.devicePixelRatio > 0 ? mq.devicePixelRatio : 1.0;
+            final double top = px / dpr - 10;
+            if (!tablet || top <= mq.padding.top + 0.5) {
               return MediaQuery(data: mq, child: child ?? const SizedBox.shrink());
             }
             return MediaQuery(
               data: mq.copyWith(
-                padding: mq.padding.copyWith(top: statusBarHeightDp),
-                viewPadding: mq.viewPadding.copyWith(top: math.max(mq.viewPadding.top, statusBarHeightDp)),
+                padding: mq.padding.copyWith(top: top),
+                viewPadding: mq.viewPadding.copyWith(top: math.max(mq.viewPadding.top, top)),
               ),
               child: child ?? const SizedBox.shrink(),
             );
@@ -874,8 +904,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Future<void> _loadLibrary() async {
     final dir = await getApplicationDocumentsDirectory();
     final trashDir = await _getTrashDirectory();
+    // 폴더 목록 읽기는 따로(백그라운드)에서: 파일·표지가 많아도 화면 전환이 버벅이지 않게
+    final listed = await _listLibraryFolders(dir.path, trashDir.path, '${dir.path}/.thumbnails');
 
-    final entities = dir.listSync();
+    final entities = <FileSystemEntity>[for (final p in listed.files) File(p)];
     final files = <File>[];
 
     for (final e in entities) {
@@ -891,7 +923,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       }
     }
 
-    final trashEntities = trashDir.listSync();
+    final trashEntities = <FileSystemEntity>[for (final p in listed.trash) File(p)];
     final trashed = <File>[];
     for (final e in trashEntities) {
       if (e is File) {
@@ -930,13 +962,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
     // 디스크에 이미 생성되어 있는 썸네일 바이트(MemoryImage)를 setState 전에 동기식으로 즉시 메모리에 고정하여 스크롤 시 재로딩 원천 차단
     final thumbDir = Directory('${dir.path}/.thumbnails');
-    if (!thumbDir.existsSync()) {
-      thumbDir.createSync(recursive: true);
-    }
     final Map<String, String> existingThumbBySafeKey = {};
     final Map<String, String> existingDocThumbBySafeKey = {}; // 한글·워드 표지 (흐린 옛 표지와 구분)
     final Map<String, String> existingSlideThumbBySafeKey = {}; // 슬라이드 표지 (흰 화면으로 찍힌 옛 표지와 구분)
-    for (final entity in thumbDir.listSync()) {
+    for (final entity in <FileSystemEntity>[for (final p in listed.thumbs) File(p)]) {
       if (entity is File) {
         final name = entity.path.split(Platform.pathSeparator).last;
         if (name.startsWith('thumb_v36_') && name.endsWith('.jpg')) {
@@ -2490,6 +2519,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       if (!_favoritePaths.remove(path)) _favoritePaths.add(path);
     });
     await StorageService.toggleFavoriteBook(path);
+    // 지금 보이는 목록에서 자리가 그대로면 (예: 맨 위 파일을 즐겨찾기) 줄어들었다 커지는 움직임 없이 책갈피만 바꿈
+    if (!_favoriteMovesFile(path)) {
+      if (!mounted) return;
+      await _loadLibrary();
+      return;
+    }
     // 책갈피가 움직이는 모습을 잠깐 보여 준 뒤
     await Future<void>.delayed(const Duration(milliseconds: 160));
     if (!mounted) return;
@@ -2502,6 +2537,24 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       _favShrinking.remove(path);
       _favGrowAt[path] = DateTime.now();
     });
+  }
+
+  /// 즐겨찾기를 바꾼 뒤 지금 보이는 목록(그룹)에서 이 파일의 자리가 바뀌는가 (즐겨찾기 먼저, 그다음 이름 순)
+  bool _favoriteMovesFile(String path) {
+    if (_searchOpen) return false; // 검색 결과는 이름 순서라 자리가 바뀌지 않음
+    final visible = _selectedGroup == '전체'
+        ? List<File>.of(_allBooks)
+        : _allBooks.where((f) => (_bookGroupMap[f.path] ?? '미분류') == _selectedGroup).toList();
+    final before = visible.indexWhere((f) => f.path == path);
+    if (before < 0) return false;
+    String nameOf(File f) => f.path.split(Platform.pathSeparator).last;
+    final after = List<File>.of(visible)
+      ..sort((a, b) {
+        final aFav = _favoritePaths.contains(a.path), bFav = _favoritePaths.contains(b.path);
+        if (aFav != bFav) return aFav ? -1 : 1;
+        return _naturalCompare(nameOf(a), nameOf(b));
+      });
+    return after.indexWhere((f) => f.path == path) != before;
   }
 
   Widget _favPop(String path, Widget child) =>
@@ -2898,7 +2951,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                 child: filteredBooks.isEmpty && _searchOpen
                   // 검색 중: 검색어가 없으면 아무것도, 찾은 파일이 없으면 짧게 알림
                   ? (query.isEmpty
-                      ? const SizedBox.shrink()
+                      // 가로 폭 전체를 차지해야 빈 곳을 눌렀을 때 검색이 닫힘 (크기 0이면 눌림을 못 받음)
+                      ? const SizedBox.expand()
                       : Center(
                           child: Text(
                             _tr('찾은 파일이 없습니다', 'No matching files', '没有找到文件', '該当するファイルがありません'),

@@ -122,7 +122,7 @@ class _TxtIcon extends StatelessWidget {
   }
 }
 
-/// EPUB: 갈색 펼친 책 + 왼쪽 쪽에 노란 책갈피
+/// EPUB: 갈색 직사각형(책) 안에 줄 3개 + 오른쪽 끝에 노란 책갈피
 class _EpubIcon extends StatelessWidget {
   const _EpubIcon({required this.size, required this.color});
 
@@ -130,23 +130,46 @@ class _EpubIcon extends StatelessWidget {
   final Color color;
 
   @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Icon(Icons.menu_book, size: size, color: color),
-          Positioned(
-            left: size * 0.25,
-            top: size * 0.17,
-            child: CustomPaint(size: Size(size * 0.15, size * 0.40), painter: _BookmarkPainter()),
-          ),
-        ],
-      ),
+  Widget build(BuildContext context) => SizedBox.square(dimension: size, child: CustomPaint(painter: _EpubIconPainter(color)));
+}
+
+class _EpubIconPainter extends CustomPainter {
+  _EpubIconPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double u = size.width / 24.0;
+    canvas.save();
+    canvas.scale(u);
+    // 직사각형 (다른 파일 아이콘의 종이와 같은 크기)
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(const Rect.fromLTRB(5.0, 3.0, 19.0, 21.0), const Radius.circular(1.6)),
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0,
     );
+    // 안의 줄 3개 (첫 줄은 책갈피 왼쪽까지만)
+    final bar = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.7
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(8.2, 9.2), const Offset(11.6, 9.2), bar);
+    canvas.drawLine(const Offset(8.2, 13.4), const Offset(15.8, 13.4), bar);
+    canvas.drawLine(const Offset(8.2, 17.4), const Offset(15.8, 17.4), bar);
+    canvas.restore();
+    // 오른쪽 끝 노란 책갈피 (윗변에 걸려 아래로)
+    canvas.save();
+    canvas.translate(13.6 * u, 3.0 * u);
+    _BookmarkPainter().paint(canvas, Size(3.6 * u, 8.0 * u));
+    canvas.restore();
   }
+
+  @override
+  bool shouldRepaint(_EpubIconPainter old) => old.color != color;
 }
 
 class _BookmarkPainter extends CustomPainter {

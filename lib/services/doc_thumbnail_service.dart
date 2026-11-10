@@ -297,6 +297,10 @@ class DocThumbnailService {
       onReceivedError: (controller, request, error) {
         if (request.isForMainFrame == true && !result.isCompleted) result.complete(false);
       },
+      // 큰 문서로 표지를 만들다 화면 그리는 프로세스가 죽어도 앱이 꺼지지 않게 (표지만 포기)
+      onRenderProcessGone: (controller, detail) async {
+        if (!result.isCompleted) result.complete(false);
+      },
     );
 
     try {

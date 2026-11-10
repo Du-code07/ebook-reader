@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -54,37 +55,45 @@ class PageSnapshotService {
   }) =>
       'p${page}_${width}x${height}_${spread ? 's' : '1'}${rtl ? 'r' : 'l'}_$theme.jpg';
 
+  /// 오래 안 연 문서의 저장 화면부터 지움. 파일이 많을 수 있어 따로(백그라운드 isolate)에서 한다
   static Future<void> _prune(String keepPath) async {
     try {
-      final root = await _rootDir();
-      final entries = <({Directory dir, DateTime used, int bytes})>[];
-      var total = 0;
-      for (final entity in root.listSync()) {
-        if (entity is! Directory) continue;
-        var bytes = 0;
-        DateTime used = entity.statSync().modified;
-        for (final f in entity.listSync()) {
-          if (f is! File) continue;
-          final st = f.statSync();
-          if (f.path.endsWith('/.used')) {
-            used = st.modified;
-          } else {
-            bytes += st.size;
-          }
-        }
-        total += bytes;
-        entries.add((dir: entity, used: used, bytes: bytes));
-      }
-      if (total <= _maxBytes) return;
-      entries.sort((a, b) => a.used.compareTo(b.used));
-      for (final e in entries) {
-        if (total <= _maxBytes * 0.8) break;
-        if (e.dir.path == keepPath) continue;
-        try {
-          e.dir.deleteSync(recursive: true);
-          total -= e.bytes;
-        } catch (_) {}
-      }
+      final rootPath = (await _rootDir()).path;
+      await Isolate.run(() => _pruneSync(rootPath, keepPath, _maxBytes));
     } catch (_) {}
   }
+}
+
+void _pruneSync(String rootPath, String keepPath, int maxBytes) {
+  try {
+    final root = Directory(rootPath);
+    final entries = <({Directory dir, DateTime used, int bytes})>[];
+    var total = 0;
+    for (final entity in root.listSync()) {
+      if (entity is! Directory) continue;
+      var bytes = 0;
+      DateTime used = entity.statSync().modified;
+      for (final f in entity.listSync()) {
+        if (f is! File) continue;
+        final st = f.statSync();
+        if (f.path.endsWith('/.used')) {
+          used = st.modified;
+        } else {
+          bytes += st.size;
+        }
+      }
+      total += bytes;
+      entries.add((dir: entity, used: used, bytes: bytes));
+    }
+    if (total <= maxBytes) return;
+    entries.sort((a, b) => a.used.compareTo(b.used));
+    for (final e in entries) {
+      if (total <= maxBytes * 0.8) break;
+      if (e.dir.path == keepPath) continue;
+      try {
+        e.dir.deleteSync(recursive: true);
+        total -= e.bytes;
+      } catch (_) {}
+    }
+  } catch (_) {}
 }

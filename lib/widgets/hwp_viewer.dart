@@ -31,7 +31,7 @@ class HwpReaderController {
   Future<void> showSearchResult(int index) async => _query?.call('showSearchResult', [index]);
   Future<void> clearSearch() async => _query?.call('clearSearch', []);
 
-  /// PPT: 슬라이드 위쪽 그림(JPEG base64) — 글자가 그림으로만 된 슬라이드의 제목을 읽는 데 씀
+  /// PPT: 슬라이드 전체 그림(JPEG base64) — 글자가 그림으로만 된 슬라이드의 글자를 읽는 데 씀
   Future<String?> slideImage(int index) async {
     final result = await _query?.call('slideImage', [index]);
     return result is String && result.isNotEmpty ? result : null;
@@ -54,19 +54,14 @@ class HwpReaderController {
     return [for (final t in result) (t ?? '').toString()];
   }
 
-  /// 목차: 파일의 제목(개요)들. 각 항목 {title, level, page(0부터), slide?}. 못 찾으면 빈 목록
-  Future<List<Map<String, Object?>>> outline() async {
-    final result = await _query?.call('outline', []);
+  /// 목차 후보: 번호로 시작하는 줄들 {title, page(0부터), bold}
+  Future<List<Map<String, Object?>>> headingCandidates() async {
+    final result = await _query?.call('headingCandidates', []);
     if (result is! List) return const [];
     return [
       for (final item in result)
         if (item is Map && item['page'] is num)
-          {
-            'title': (item['title'] ?? '').toString(),
-            'level': (item['level'] as num?)?.toInt() ?? 1,
-            'page': (item['page'] as num).toInt(),
-            'slide': item['slide'] == true,
-          },
+          {'title': (item['title'] ?? '').toString(), 'page': (item['page'] as num).toInt(), 'bold': item['bold'] == true},
     ];
   }
 }

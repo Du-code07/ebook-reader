@@ -2,9 +2,11 @@
 ///
 /// 항목 한 줄은 "제목 ……… 쪽번호" 꼴이다. 쪽번호는 인쇄된 번호라 실제 쪽과 다를 수 있으므로,
 /// 목차 쪽 뒤에서 같은 제목이 처음 나오는 쪽을 찾아 붙이고, 못 찾으면 찾은 항목들의 차이(인쇄 번호↔실제 쪽)로 맞춘다.
+/// 쪽번호 없이 "01. 제목", "2-1. 제목"처럼 번호만 붙은 목차(발표 자료 등)도 읽는다: 이때는 제목이 나오는 쪽을 찾아 붙인다.
+/// 그림 속 글자를 읽은(OCR) 글은 조금씩 틀릴 수 있어, 똑같지 않아도 거의 같은 줄이면 찾은 것으로 본다.
 class TocPageParser {
   /// 목차 제목으로 보는 글 (띄어쓰기 없이, 소문자)
-  static const _headings = {'목차', '차례', '목록', 'contents', 'tableofcontents', '목차contents', 'contents목차'};
+  static const _headings = {'목차', '차례', '목록', 'contents', 'tableofcontents', '목차contents', 'contents목차', 'index', 'agenda', 'outline'};
 
   /// 목차 쪽을 찾을 범위 (앞쪽 몇 쪽)
   static const int searchPages = 15;
@@ -36,8 +38,8 @@ class TocPageParser {
     if (RegExp(r'^제\s*\d+\s*장').hasMatch(t)) return 'chapter';
     if (RegExp(r'^제\s*\d+\s*절').hasMatch(t)) return 'section';
     if (RegExp(r'^([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+|[IVX]+\.)').hasMatch(t)) return 'roman';
-    if (RegExp(r'^\d+\.\d+\.\d+').hasMatch(t)) return 'dec3';
-    if (RegExp(r'^\d+\.\d+').hasMatch(t)) return 'dec2';
+    if (RegExp(r'^\d+[.\-]\d+[.\-]\d+').hasMatch(t)) return 'dec3';
+    if (RegExp(r'^\d+[.\-]\d+').hasMatch(t)) return 'dec2';
     if (RegExp(r'^\d+\.').hasMatch(t)) return 'dec1';
     if (RegExp(r'^[가-하]\.').hasMatch(t)) return 'hangul';
     if (RegExp(r'^\(\d+\)').hasMatch(t)) return 'paren';
@@ -62,8 +64,90 @@ class TocPageParser {
 
   /// 번호를 뗀 제목 (찾기용)
   static String _core(String title) => title
-      .replaceFirst(RegExp(r'^(제\s*\d+\s*[장절편부]|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.?|[IVX]+\.|\d+(\.\d+)*\.?|\(\d+\)|\d+\)|[가-하][.)])\s*'), '')
+      .replaceFirst(RegExp(r'^(제\s*\d+\s*[장절편부]|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.?|[IVX]+\.|\d+([.\-]\d+)*\.?|\(\d+\)|\d+\)|[가-하][.)])\s*'), '')
       .trim();
+
+  /// 목차 제목 줄인가 ("Contents", "목차", "목차 Contents" …)
+  static bool _isHeading(String line) {
+    final n = _norm(line);
+    if (_headings.contains(n)) return true;
+    return n.length <= 14 && _headings.any((h) => h.length >= 4 && n.startsWith(h));
+  }
+
+  /// 번호 붙은 목차 항목 ("01. 제목", "2-1. 제목", "Ⅱ. 제목" …). 한 줄에 여러 항목이 나란히 있으면 나눈다
+  static final RegExp _numStart = RegExp(r'^(?:\d{1,3}(?:[.\-]\d{1,3})*[.)]?|\(\d{1,3}\)|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.?|[IVX]{1,5}[.)])\s*(?=[가-힣A-Za-z(\[])');
+  static final RegExp _splitBefore = RegExp(r'\s+(?=(?:\d{1,3}(?:[.\-]\d{1,3})*[.)]|\(\d{1,3}\)|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.)\s*[가-힣A-Za-z])');
+  static List<String> _numberedEntries(String raw) {
+    final line = raw.replaceAll('\t', ' ').trim();
+    if (line.isEmpty || line.length > 160) return const [];
+    final out = <String>[];
+    for (final part in line.split(_splitBefore)) {
+      final t = part.trim();
+      final m = _numStart.firstMatch(t);
+      if (m == null || _kind(t) == null) continue;
+      final rest = t.substring(m.end).trim();
+      if (RegExp(r'[가-힣A-Za-z]').allMatches(rest).length < 2 || t.length > 90) continue;
+      out.add(t);
+    }
+    return out;
+  }
+
+  /// 번호 → 숫자 묶음 ("02." → [2], "2-1." → [2, 1]). 숫자 번호가 아니면 null
+  static List<int>? _numbers(String title) {
+    final m = RegExp(r'^\(?(\d{1,3}(?:[.\-]\d{1,3})*)').firstMatch(title.trim());
+    if (m == null) return null;
+    return [for (final p in m.group(1)!.split(RegExp(r'[.\-]'))) int.parse(p)];
+  }
+
+  /// 두 글이 얼마나 같은가 (두 글자씩 묶어 겹치는 비율, 0~1)
+  static double _similar(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return 0;
+    if (a == b) return 1;
+    if (a.length < 2 || b.length < 2) return 0;
+    final pa = <String, int>{};
+    for (int i = 0; i < a.length - 1; i++) {
+      final k = a.substring(i, i + 2);
+      pa[k] = (pa[k] ?? 0) + 1;
+    }
+    int same = 0;
+    for (int i = 0; i < b.length - 1; i++) {
+      final k = b.substring(i, i + 2);
+      final n = pa[k] ?? 0;
+      if (n > 0) {
+        same++;
+        pa[k] = n - 1;
+      }
+    }
+    return 2 * same / (a.length - 1 + b.length - 1);
+  }
+
+  /// 한 줄이 목차 제목과 얼마나 같은가 (0이면 다름, 같은 번호까지 붙어 있으면 1을 더함).
+  /// 본문 문장 속에 낱말만 들어 있는 것은 같다고 보지 않는다
+  static double _lineScore(String line, String title) {
+    final core = _norm(_core(title)), lc = _norm(_core(line));
+    if (core.length < 2 || lc.isEmpty) return 0;
+    final sim = _similar(lc, core);
+    final double text = lc == core
+        ? 1
+        : (lc.contains(core) && lc.length <= core.length * 1.6 + 2)
+            ? 0.9
+            : (sim >= 0.7 ? sim : 0);
+    // 같은 번호(2-1처럼 이어진 번호)로 시작하면 글자가 조금 틀려도 같은 항목이고, 더 확실하다
+    final nums = _numbers(title);
+    if (nums != null && nums.length >= 2 && (text > 0 || sim >= 0.45)) {
+      final ln = _numbers(line);
+      if (ln != null && ln.join('.') == nums.join('.')) return 1 + (text > 0.75 ? text : 0.75);
+    }
+    return text;
+  }
+
+  /// 쪽 [lines] 안에 제목이 있는가 (그대로, 번호 뗀 제목, 거의 같은 줄)
+  static bool _pageHas(String normPage, List<String> lines, String title) {
+    final full = _norm(title), core = _norm(_core(title));
+    if (normPage.contains(full) || (core.length >= 3 && normPage.contains(core))) return true;
+    return lines.any((l) => _lineScore(l, title) > 0);
+  }
+
 
   /// [pageTexts]: 앞에서부터 쪽마다의 글 (줄은 \n). 전체 쪽 수보다 짧아도 된다.
   /// 목차 쪽이 없으면 null.
@@ -72,14 +156,24 @@ class TocPageParser {
     int tocStart = -1;
     for (int i = 0; i < pageTexts.length && i < searchPages; i++) {
       final lines = pageTexts[i].split('\n');
-      final hasHeading = lines.any((l) => _headings.contains(_norm(l)));
+      final hasHeading = lines.any(_isHeading);
       if (!hasHeading) continue;
       if (lines.where((l) => _parseEntry(l) != null).length >= 3) {
         tocStart = i;
         break;
       }
+      if (lines.expand(_numberedEntries).length >= 3) return _parseNumbered(pageTexts, totalPages, i);
     }
-    if (tocStart < 0) return null;
+    if (tocStart < 0) {
+      // '목차' 글자를 못 읽었어도(그림 속 글자 등) 앞 3쪽 중 번호 항목이 5개 이상이고
+      // 그 대부분이 뒤쪽에 다시 나오면 목차 쪽으로 본다
+      for (int i = 0; i < pageTexts.length && i < 3; i++) {
+        if (pageTexts[i].split('\n').expand(_numberedEntries).length < 5) continue;
+        final r = _parseNumbered(pageTexts, totalPages, i, minFound: 0.6);
+        if (r != null) return r;
+      }
+      return null;
+    }
 
     // 목차가 여러 쪽에 이어질 수 있음 (항목이 대부분인 쪽까지)
     final entries = <(String, int)>[];
@@ -120,6 +214,22 @@ class TocPageParser {
     final diffs = <int>[for (int i = 0; i < ordered.length; i++) if (found[i] != null) found[i]! - (ordered[i].$2 - 1)]..sort();
     final int offset = diffs.isEmpty ? 0 : diffs[diffs.length ~/ 2];
     final levels = _levels([for (final e in ordered) e.$1]);
+    final pageLines = [for (final t in pageTexts) t.split('\n')];
+    // 그대로는 못 찾은 항목: 거의 같은 줄이 있는 쪽 (앞 항목을 찾은 쪽부터)
+    int fuzzyFrom = tocEnd + 1;
+    for (int i = 0; i < ordered.length; i++) {
+      if (found[i] != null) {
+        fuzzyFrom = found[i]!;
+        continue;
+      }
+      for (int p = fuzzyFrom; p < pageTexts.length; p++) {
+        if (_pageHas(normPages[p], pageLines[p], ordered[i].$1)) {
+          found[i] = p;
+          fuzzyFrom = p;
+          break;
+        }
+      }
+    }
     return [
       for (int i = 0; i < ordered.length; i++)
         {
@@ -128,5 +238,101 @@ class TocPageParser {
           'page': (found[i] ?? (ordered[i].$2 - 1 + offset)).clamp(0, totalPages - 1),
         },
     ];
+  }
+
+  /// [cands][i]: i번째 항목이 있을 수 있는 (쪽, 맞는 정도)들. 쪽이 거꾸로 가지 않으면서
+  /// 맞는 정도의 합이 가장 큰 쪽들 (못 맞추면 null)
+  static List<int?> _bestChain(List<List<(int, double)>> cands) {
+    final n = cands.length;
+    // best[i][k]: i번째 항목을 cands[i][k] 쪽에 두었을 때 i까지의 합, prev: 바로 앞에 맞춘 (항목, 후보)
+    final best = [for (final c in cands) List<double>.filled(c.length, 0)];
+    final prev = [for (final c in cands) List<(int, int)?>.filled(c.length, null)];
+    for (int i = 0; i < n; i++) {
+      for (int k = 0; k < cands[i].length; k++) {
+        final (q, w) = cands[i][k];
+        double b = w;
+        (int, int)? from;
+        for (int j = 0; j < i; j++) {
+          for (int m = 0; m < cands[j].length; m++) {
+            if (cands[j][m].$1 <= q && best[j][m] + w > b + 1e-9) {
+              b = best[j][m] + w;
+              from = (j, m);
+            }
+          }
+        }
+        best[i][k] = b;
+        prev[i][k] = from;
+      }
+    }
+    (int, int)? at;
+    double top = 0;
+    for (int i = 0; i < n; i++) {
+      for (int k = 0; k < cands[i].length; k++) {
+        if (best[i][k] > top) {
+          top = best[i][k];
+          at = (i, k);
+        }
+      }
+    }
+    final out = List<int?>.filled(n, null);
+    while (at != null) {
+      out[at.$1] = cands[at.$1][at.$2].$1;
+      at = prev[at.$1][at.$2];
+    }
+    return out;
+  }
+
+  /// 쪽번호 없이 번호만 붙은 목차 (예: 발표 자료의 Contents 슬라이드)
+  static List<Map<String, Object>>? _parseNumbered(List<String> pageTexts, int totalPages, int tocPage, {double minFound = 0}) {
+    var entries = pageTexts[tocPage].split('\n').expand(_numberedEntries).toList();
+    // 칸이 나뉜 목차는 읽는 순서가 섞일 수 있어, 모두 숫자 번호면 번호 순서대로 다시 줄 세운다
+    final nums = [for (final e in entries) _numbers(e)];
+    if (nums.every((n) => n != null) && nums.map((n) => n!.join('.')).toSet().length == nums.length) {
+      final idx = List.generate(entries.length, (i) => i)
+        ..sort((a, b) {
+          final x = nums[a]!, y = nums[b]!;
+          for (int k = 0; k < x.length && k < y.length; k++) {
+            if (x[k] != y[k]) return x[k].compareTo(y[k]);
+          }
+          return x.length.compareTo(y.length);
+        });
+      entries = [for (final i in idx) entries[i]];
+    }
+    final seen = <String>{};
+    entries = [for (final e in entries) if (seen.add(_norm(e))) e];
+    if (entries.length < 3) return null;
+    // 항목마다 제목 줄이 있는 쪽들(앞에서 8곳까지), 그중 쪽 순서가 거꾸로 가지 않으면서 가장 많이 맞는 짝을 고른다
+    final pageLines = [for (final t in pageTexts) t.split('\n')];
+    final cands = <List<(int, double)>>[];
+    for (final title in entries) {
+      final c = <(int, double)>[];
+      for (int p = tocPage + 1; p < pageTexts.length && c.length < 8; p++) {
+        double best = 0;
+        for (final l in pageLines[p]) {
+          final sc = _lineScore(l, title);
+          if (sc > best) best = sc;
+        }
+        if (best > 0) c.add((p, best));
+      }
+      cands.add(c);
+    }
+    final found = _bestChain(cands);
+    if (found.every((f) => f == null)) return null;
+    if (found.where((f) => f != null).length < entries.length * minFound) return null;
+    // 못 찾은 항목: 바로 아래 항목을 찾았으면 그 쪽, 아니면 앞 항목의 쪽
+    final allNumbers = [for (final e in entries) _numbers(e)];
+    final levels = allNumbers.every((n) => n != null)
+        ? [for (final n in allNumbers) n!.length.clamp(1, 4)]
+        : _levels(entries);
+    final out = <Map<String, Object>>[];
+    int last = tocPage;
+    for (int i = 0; i < entries.length; i++) {
+      int? page = found[i];
+      if (page == null && i + 1 < entries.length && levels[i + 1] > levels[i]) page = found[i + 1];
+      page ??= last;
+      last = page;
+      out.add({'title': entries[i], 'level': levels[i], 'page': page.clamp(0, totalPages - 1)});
+    }
+    return out;
   }
 }
