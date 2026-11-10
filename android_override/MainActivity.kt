@@ -233,8 +233,19 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     result.success(null)
                 } else if (call.method == "statusBarHeight") {
                     // 상태표시줄 본래 높이(px) — 태블릿에서 상단바를 이만큼 항상 내려 둔다
-                    val id = resources.getIdentifier("status_bar_height", "dimen", "android")
-                    result.success(if (id > 0) resources.getDimensionPixelSize(id) else 0)
+                    // 실제 화면의 상태표시줄 높이(숨겨져 있어도) — 없으면 시스템 값
+                    var px = 0
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        try {
+                            px = window.decorView.rootWindowInsets
+                                ?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.statusBars())?.top ?: 0
+                        } catch (_: Throwable) {}
+                    }
+                    if (px <= 0) {
+                        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+                        if (id > 0) px = resources.getDimensionPixelSize(id)
+                    }
+                    result.success(px)
                 } else if (call.method == "setShakeListening") {
                     setShakeListening(call.argument<Boolean>("enabled") ?: false)
                     result.success(null)
@@ -276,7 +287,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     try {
                         val found = searchPdfText(path, query)
                         runOnUiThread { result.success(found) }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         runOnUiThread { result.error("SEARCH_ERR", e.message, null) }
                     }
                 }
@@ -293,7 +304,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     try {
                         val texts = pdfPageTexts(path, from, to)
                         runOnUiThread { result.success(texts) }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         runOnUiThread { result.success(emptyList<String>()) }
                     }
                 }
@@ -340,7 +351,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         runOnUiThread {
                             result.success(if (thumbFile.exists()) thumbFile.absolutePath else null)
                         }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         runOnUiThread { result.success(null) }
                     }
                 }
@@ -403,7 +414,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         runOnUiThread {
                             result.success(if (thumbFile.exists() && thumbFile.length() > 64L) thumbFile.absolutePath else null)
                         }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         runOnUiThread { result.success(null) }
                     }
                 }
@@ -443,7 +454,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         renderer.close()
                         pfd.close()
                         runOnUiThread { result.success(pagePaths) }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         runOnUiThread { result.error("PDF_ERR", e.message, null) }
                     }
                 }.start()
@@ -492,11 +503,11 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             bmp.recycle()
                             val bytes = out.toByteArray()
                             runOnUiThread { result.success(bytes) }
-                        } catch (e: Exception) {
+                        } catch (e: Throwable) {
                             runOnUiThread { result.error("CAPTURE_ERR", e.message, null) }
                         }
                     }.start()
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     result.error("CAPTURE_ERR", e.message, null)
                 }
             } else if (call.method == "captureWebView") {
@@ -517,11 +528,11 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             FileOutputStream(File(outPath)).use { out -> bmp.compress(Bitmap.CompressFormat.PNG, 100, out) }
                             bmp.recycle()
                             runOnUiThread { result.success(outPath) }
-                        } catch (e: Exception) {
+                        } catch (e: Throwable) {
                             runOnUiThread { result.error("CAPTURE_ERR", e.message, null) }
                         }
                     }.start()
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     result.error("CAPTURE_ERR", e.message, null)
                 }
             } else if (call.method == "exportPdfWithMemos") {
@@ -540,7 +551,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     try {
                         val saved = exportPdfWithMemos(pages, fileName, fallbackDir, keepTemp)
                         runOnUiThread { result.success(saved) }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         runOnUiThread { result.error("EXPORT_ERR", e.message, null) }
                     }
                 }.start()
@@ -554,14 +565,14 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     try {
                         val saved = savePdfToDownloads(src, fileName, fallbackDir)
                         runOnUiThread { result.success(saved) }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         runOnUiThread { result.error("EXPORT_ERR", e.message, null) }
                     } finally {
                         src.delete()
                     }
                 }.start()
             } else if (call.method == "ocrLines") {
-                // 그림 속 글자 읽기 (기기 안에서만 처리): 줄마다 {t, x, y, w, h} (그림 크기 대비 0~1)
+                // 그림 속 글자 읽기 (기기 안에서만 처리): 줄마다 {t, x, y, w, h (그림 크기 대비 0~1), sw (획 굵기 비율)}
                 val path = call.argument<String>("path") ?: ""
                 thumbExecutor.execute {
                     try {
@@ -582,7 +593,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     try {
                         val boxes = pdfTextBoxes(path)
                         runOnUiThread { result.success(boxes) }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         runOnUiThread { result.success(emptyList<Any>()) }
                     }
                 }
@@ -643,7 +654,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         }
                         outPdf.close()
                         runOnUiThread { result.success(outFile.absolutePath) }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         try { outPdf.close() } catch (_: Exception) {}
                         runOnUiThread { result.error("MERGE_PDF_ERR", e.message, null) }
                     }
@@ -1325,12 +1336,77 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             for (block in text.textBlocks) {
                 for (line in block.lines) {
                     val r = line.boundingBox ?: continue
-                    out.add(mapOf("t" to line.text, "x" to r.left / w, "y" to r.top / h, "w" to r.width() / w, "h" to r.height() / h))
+                    // sw: 글자 획 굵기 ÷ 줄 높이 (굵은 글씨 가늠용)
+                    val sw = try { strokeRatio(bmp, r) } catch (_: Throwable) { 0.0 }
+                    out.add(mapOf("t" to line.text, "x" to r.left / w, "y" to r.top / h, "w" to r.width() / w, "h" to r.height() / h, "sw" to sw))
                 }
             }
             return out
         } finally {
             bmp.recycle()
+        }
+    }
+
+    /** 줄 상자 안 글자의 획 굵기 ÷ 줄 높이: 글자 부분을 가려낸 뒤(오츠 방법) 넓이 × 2 ÷ 테두리 길이 = 획 굵기 */
+    private fun strokeRatio(src: Bitmap, r: android.graphics.Rect): Double {
+        val left = r.left.coerceIn(0, src.width - 1)
+        val top = r.top.coerceIn(0, src.height - 1)
+        val right = r.right.coerceIn(left + 1, src.width)
+        val bottom = r.bottom.coerceIn(top + 1, src.height)
+        val bw = right - left
+        val bh = bottom - top
+        if (bw < 2 || bh < 4) return 0.0
+        val k = maxOf(1, Math.round(48f / bh))
+        val crop = Bitmap.createBitmap(src, left, top, bw, bh)
+        val img = if (k > 1) Bitmap.createScaledBitmap(crop, bw * k, bh * k, true) else crop
+        try {
+            val W = img.width
+            val H = img.height
+            val px = IntArray(W * H)
+            img.getPixels(px, 0, W, 0, 0, W, H)
+            val lum = IntArray(W * H)
+            val hist = IntArray(256)
+            for (i in px.indices) {
+                val c = px[i]
+                val v = (((c shr 16) and 0xFF) * 299 + ((c shr 8) and 0xFF) * 587 + (c and 0xFF) * 114) / 1000
+                lum[i] = v
+                hist[v]++
+            }
+            val total = W * H
+            var sumAll = 0.0
+            for (t in 0 until 256) sumAll += t.toDouble() * hist[t]
+            var wb = 0.0
+            var sb = 0.0
+            var bestVar = -1.0
+            var th = 127
+            for (t in 0 until 256) {
+                wb += hist[t]
+                if (wb == 0.0) continue
+                val wf = total - wb
+                if (wf == 0.0) break
+                sb += t.toDouble() * hist[t]
+                val mb = sb / wb
+                val mf = (sumAll - sb) / wf
+                val v = wb * wf * (mb - mf) * (mb - mf)
+                if (v > bestVar) { bestVar = v; th = t }
+            }
+            val ink = BooleanArray(total)
+            var dark = 0
+            for (i in 0 until total) if (lum[i] <= th) { ink[i] = true; dark++ }
+            if (dark > total / 2) for (i in 0 until total) ink[i] = !ink[i]
+            var area = 0
+            var edge = 0
+            for (y in 0 until H) for (x in 0 until W) {
+                val i = y * W + x
+                if (!ink[i]) continue
+                area++
+                if (x == 0 || y == 0 || x == W - 1 || y == H - 1 || !ink[i - 1] || !ink[i + 1] || !ink[i - W] || !ink[i + W]) edge++
+            }
+            if (area == 0 || edge == 0) return 0.0
+            return (2.0 * area / edge) / H
+        } finally {
+            if (img !== crop) img.recycle()
+            if (crop !== src) crop.recycle()
         }
     }
 
