@@ -14,9 +14,11 @@ import 'widgets/sheet_pull_to_close.dart';
 import 'widgets/file_type_icon.dart';
 import 'services/storage_service.dart';
 import 'services/doc_thumbnail_service.dart';
+import 'services/system_ui_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemUiService.init();
   PaintingBinding.instance.imageCache.maximumSize = 3000;
   PaintingBinding.instance.imageCache.maximumSizeBytes = 300 << 20;
   final initialThemeMode = await StorageService.getAppThemeMode();
@@ -132,11 +134,28 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         colorSchemeSeed: Colors.indigo,
       ),
       builder: (context, child) {
+        // 상태표시줄을 내려 화면 위에 보이는 동안에는 그 높이만큼 위쪽 여백을 늘려
+        // 상단바(SafeArea를 쓰는 곳 모두)가 함께 내려와 겹치지 않게 한다
+        final content = ValueListenableBuilder<double>(
+          valueListenable: SystemUiService.statusBarTop,
+          child: child ?? const SizedBox.shrink(),
+          builder: (context, barTop, child) {
+            final mq = MediaQuery.of(context);
+            if (barTop <= mq.padding.top + 0.5) return child!;
+            return MediaQuery(
+              data: mq.copyWith(
+                padding: mq.padding.copyWith(top: barTop),
+                viewPadding: mq.viewPadding.copyWith(top: math.max(mq.viewPadding.top, barTop)),
+              ),
+              child: child!,
+            );
+          },
+        );
         return FadeTransition(
           opacity: _rotationFadeAnim,
           child: ScaleTransition(
             scale: _rotationScaleAnim,
-            child: child ?? const SizedBox.shrink(),
+            child: content,
           ),
         );
       },
@@ -798,6 +817,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }
     final Map<String, String> existingThumbBySafeKey = {};
     final Map<String, String> existingDocThumbBySafeKey = {}; // 한글·워드 표지 (흐린 옛 표지와 구분)
+    final Map<String, String> existingSlideThumbBySafeKey = {}; // 슬라이드 표지 (흰 화면으로 찍힌 옛 표지와 구분)
     for (final entity in thumbDir.listSync()) {
       if (entity is File) {
         final name = entity.path.split(Platform.pathSeparator).last;
@@ -807,6 +827,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         } else if (name.startsWith('thumb_d2_') && name.endsWith('.jpg')) {
           final k = name.substring('thumb_d2_'.length, name.length - 4);
           existingDocThumbBySafeKey[k] = entity.path;
+        } else if (name.startsWith('thumb_s3_') && name.endsWith('.jpg')) {
+          final k = name.substring('thumb_s3_'.length, name.length - 4);
+          existingSlideThumbBySafeKey[k] = entity.path;
         } else if (name.startsWith('thumb_hq26_') && name.endsWith('.jpg')) {
           final parts = name.split('_');
           if (parts.length >= 3) {
@@ -828,9 +851,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         continue;
       }
       final safeKey = path.hashCode.toUnsigned(32).toString();
-      final existingThumbPath = DocThumbnailService.supportedExts.contains(ext)
-          ? existingDocThumbBySafeKey[safeKey]
-          : existingThumbBySafeKey[safeKey];
+      final existingThumbPath = (ext == 'pptx' || ext == 'ppt')
+          ? existingSlideThumbBySafeKey[safeKey]
+          : DocThumbnailService.supportedExts.contains(ext)
+              ? existingDocThumbBySafeKey[safeKey]
+              : existingThumbBySafeKey[safeKey];
       if (existingThumbPath != null) {
         _cacheThumbnailFromFileSync(path, existingThumbPath);
         if (DocThumbnailService.supportedExts.contains(ext)) _noteDocThumbQuality(path, existingThumbPath);
@@ -898,7 +923,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           '${(await getApplicationDocumentsDirectory()).path}/.thumbnails';
       final safeKey = path.hashCode.toUnsigned(32).toString();
       final bool isDocType = DocThumbnailService.supportedExts.contains(ext);
-      final thumbPath = isDocType ? '$thumbDirPath/thumb_d2_$safeKey.jpg' : '$thumbDirPath/thumb_v36_$safeKey.jpg';
+      final bool isSlideType = ext == 'pptx' || ext == 'ppt';
+      // 슬라이드 표지는 예전에 흰 화면으로 찍힌 것이 남아 있을 수 있어 새 이름(s3)으로 다시 만든다
+      final thumbPath = isSlideType
+          ? '$thumbDirPath/thumb_s3_$safeKey.jpg'
+          : isDocType
+              ? '$thumbDirPath/thumb_d2_$safeKey.jpg'
+              : '$thumbDirPath/thumb_v36_$safeKey.jpg';
       final thumbFile = File(thumbPath);
 
       if (thumbFile.existsSync() && thumbFile.lengthSync() > 64) {
@@ -909,11 +940,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       }
       if (isDocType) {
         // 예전 버전이 만든 (흐릴 수 있는) 표지는 지운다
-        final old = File('$thumbDirPath/thumb_v36_$safeKey.jpg');
-        if (old.existsSync()) {
-          try {
-            old.deleteSync();
-          } catch (_) {}
+        for (final old in [
+          File('$thumbDirPath/thumb_v36_$safeKey.jpg'),
+          if (isSlideType) File('$thumbDirPath/thumb_d2_$safeKey.jpg'),
+          if (isSlideType) File('$thumbDirPath/thumb_d2_$safeKey.jpg.low'),
+        ]) {
+          if (old.existsSync()) {
+            try {
+              old.deleteSync();
+            } catch (_) {}
+          }
         }
       }
 
@@ -962,8 +998,66 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }
   }
 
+  /// 파일 고르기: 고른 파일을 앱으로 가져오는 동안(파일이 많으면 오래 걸림) 안내 창을 띄운다
+  Future<FilePickerResult?> _pickFilesWithNotice({
+    FileType type = FileType.any,
+    bool allowMultiple = false,
+    List<String>? allowedExtensions,
+  }) async {
+    bool shown = false;
+    void hide() {
+      if (!shown || !mounted) return;
+      shown = false;
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+
+    try {
+      return await FilePicker.platform.pickFiles(
+        type: type,
+        allowMultiple: allowMultiple,
+        allowedExtensions: allowedExtensions,
+        onFileLoading: (status) {
+          if (status == FilePickerStatus.picking && !shown && mounted) {
+            shown = true;
+            showDialog<void>(
+              context: context,
+              barrierDismissible: false,
+              useRootNavigator: true,
+              builder: (ctx) => PopScope(
+                canPop: false,
+                child: AlertDialog(
+                  content: Row(
+                    children: [
+                      const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
+                      const SizedBox(width: 18),
+                      Expanded(
+                        child: Text(
+                          _tr(
+                            '선택한 파일을 불러오는 중입니다…\n파일이 많으면 시간이 조금 걸릴 수 있어요.',
+                            'Loading the selected files…\nThis may take a while for many files.',
+                            '正在读取所选文件…\n文件较多时可能需要一些时间。',
+                            '選択したファイルを読み込み中…\nファイルが多いと時間がかかることがあります。',
+                          ),
+                          style: const TextStyle(fontSize: 14, height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          } else if (status == FilePickerStatus.done) {
+            hide();
+          }
+        },
+      );
+    } finally {
+      hide();
+    }
+  }
+
   Future<void> _pickAndImportFiles() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await _pickFilesWithNotice(
       type: FileType.any,
       allowMultiple: true,
     );
@@ -1283,7 +1377,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }).toList();
 
     if (existingImages.isEmpty) {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await _pickFilesWithNotice(
         type: FileType.image,
         allowMultiple: true,
       );
@@ -1310,7 +1404,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     );
 
     if (result == 'browse') {
-      final picked = await FilePicker.platform.pickFiles(
+      final picked = await _pickFilesWithNotice(
         type: FileType.image,
         allowMultiple: true,
       );
@@ -1424,8 +1518,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
     int currentStep = 0;
     final int totalSteps = orderedPdfs.length;
-    final String firstFileName = orderedPdfs.first.path.split(Platform.pathSeparator).last;
-    String progressStatus = firstFileName;
+    String progressStatus = _tr('PDF 합칠 준비 중...', 'Preparing PDFs...', '正在准备 PDF...', 'PDFを準備中...');
     StateSetter? progressSetState;
 
     _pdfChannel.setMethodCallHandler((call) async {
@@ -1528,7 +1621,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }).toList();
 
     if (existingPdfs.isEmpty) {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await _pickFilesWithNotice(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
         allowMultiple: true,
@@ -1556,7 +1649,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     );
 
     if (result == 'browse') {
-      final picked = await FilePicker.platform.pickFiles(
+      final picked = await _pickFilesWithNotice(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
         allowMultiple: true,

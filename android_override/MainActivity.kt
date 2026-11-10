@@ -62,6 +62,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var isVolumeInterceptEnabled = false
     private var eventSink: EventChannel.EventSink? = null
     private var pdfMethodChannel: MethodChannel? = null
+    private var systemUiChannel: MethodChannel? = null
+    private var lastReportedStatusBarTop = -1
 
     private var isVolUpPressed = false
     private var isVolDownPressed = false
@@ -190,6 +192,19 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             if (statusBarVisible && isActivityResumed) {
                 scheduleStatusBarReHide()
             }
+            // 상태표시줄이 화면 위에 겹쳐 보이는 동안 그 높이를 앱에 알려 상단바를 내리게 한다
+            val barTop = if (!statusBarVisible) 0 else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetTop
+            }
+            if (barTop != lastReportedStatusBarTop) {
+                lastReportedStatusBarTop = barTop
+                try {
+                    systemUiChannel?.invokeMethod("statusBar", mapOf("visible" to (barTop > 0), "top" to barTop))
+                } catch (_: Exception) {}
+            }
             v.onApplyWindowInsets(insets)
         }
     }
@@ -215,6 +230,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        systemUiChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ebook_reader/system_ui")
         hideSystemStatusBar()
         mainHandler.postDelayed({ hideSystemStatusBar() }, 200L)
         mainHandler.postDelayed({ hideSystemStatusBar() }, 600L)

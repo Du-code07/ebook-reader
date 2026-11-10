@@ -213,7 +213,22 @@ class DocThumbnailService {
       capturing = true;
       fallbackCapture?.cancel();
       // 글꼴·그림이 다 그려질 시간을 조금 준다
-      await Future<void>.delayed(Duration(milliseconds: isSlides ? 1400 : 700));
+      await Future<void>.delayed(Duration(milliseconds: isSlides ? 300 : 700));
+      if (isSlides) {
+        // 슬라이드는 캔버스에 그려지므로 화면 캡처 대신 캔버스 그림을 그대로 받는다 (캡처하면 흰 화면만 찍히는 기기가 있음)
+        try {
+          final r = await web?.callAsyncJavaScript(functionBody: 'return window.freaderPpt.thumbnail(800);');
+          final data = r?.value;
+          if (r?.error == null && data is String && data.isNotEmpty) {
+            final bytes = base64Decode(data);
+            if (bytes.length > 64) {
+              await File(outPath).writeAsBytes(bytes, flush: true);
+              if (!result.isCompleted) result.complete(true);
+              return;
+            }
+          }
+        } catch (_) {}
+      }
       try {
         final shot = await web?.takeScreenshot(
           screenshotConfiguration: ScreenshotConfiguration(compressFormat: CompressFormat.JPEG, quality: 85),
@@ -255,12 +270,8 @@ class DocThumbnailService {
                 unawaited(transfer());
                 break;
               case 'loaded':
-                // 워드·한글은 쪽 안 그림까지 다 그려졌다는 알림(pageReady)을 기다린다 (늦으면 그냥 찍음)
-                if (isSlides) {
-                  unawaited(capture());
-                } else {
-                  fallbackCapture ??= Timer(const Duration(seconds: 8), () => unawaited(capture()));
-                }
+                // 쪽(슬라이드) 안 그림까지 다 그려졌다는 알림(pageReady)을 기다린다 (늦으면 그냥 찍음)
+                fallbackCapture ??= Timer(Duration(seconds: isSlides ? 4 : 8), () => unawaited(capture()));
                 break;
               case 'pageReady':
                 fallbackCapture?.cancel();

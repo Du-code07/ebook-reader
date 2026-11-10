@@ -226,7 +226,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   Future<void> _stepPageInstant(int dir) async {
     _goToPage(_stepTarget(dir), smoothAnimation: false);
-    await Future<void>.delayed(const Duration(milliseconds: 16));
+    // 새 쪽이 실제로 그려진 뒤에 제자리로 돌려야 이전 쪽이 잠깐 비치지 않는다
+    await WidgetsBinding.instance.endOfFrame;
+    await WidgetsBinding.instance.endOfFrame;
   }
   bool _useVolumeTurn = true;
   bool _useQuickNavTurn = false;
@@ -255,7 +257,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   String _footerInfoMode = 'none';
   String _progressBarPosSetting = 'bottom';
   /// 실제 진행바 위치: 1쪽짜리 문서는 설정과 상관없이 숨김 (다른 버튼 배치도 숨김 기준으로)
-  String get _progressBarPos => (_totalPages == 1) ? 'hidden' : _progressBarPosSetting;
+  String get _progressBarPos => (_totalPages <= 1) ? 'hidden' : _progressBarPosSetting;
   String _memoToolbarPos = 'bottom'; // 메모 도구모음 위치
   String _quickMenuSide = 'right'; // 도구 모음(활 메뉴) 위치
   int _rotateTapCount = 0; // 화면 회전 아이콘 흔들림 애니메이션용

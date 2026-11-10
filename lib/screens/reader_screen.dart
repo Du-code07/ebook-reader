@@ -255,7 +255,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   String _footerInfoMode = 'none';
   String _progressBarPosSetting = 'bottom';
   /// 실제 진행바 위치: 1쪽짜리 문서는 설정과 상관없이 숨김 (다른 버튼 배치도 숨김 기준으로)
-  String get _progressBarPos => ((_isOfflineDocument && _docPageCount == 1) || _epubSinglePage) ? 'hidden' : _progressBarPosSetting;
+  // 쪽 수를 알기 전(문서는 다 읽기 전, EPUB은 첫 위치 알림 전)에도 숨겨 두어 1쪽짜리에서 잠깐 보였다 사라지지 않게
+  String get _progressBarPos => ((_isOfflineDocument && _docPageCount <= 1) || (!_isOfflineDocument && (!_epubLocated || _epubSinglePage)))
+      ? 'hidden'
+      : _progressBarPosSetting;
+  bool _epubLocated = false; // EPUB 첫 위치 알림을 받았는지
   bool _epubSinglePage = false; // EPUB 전체가 한 화면(장 1개, 화면 1쪽)
   String _memoToolbarPos = 'bottom'; // 메모 도구모음 위치
   String _quickMenuSide = 'right'; // 도구 모음(활 메뉴) 위치
@@ -1809,12 +1813,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   double _slideShowDragDx = 0;
 
   Future<void> _startSlideShow() async {
+    // 슬라이드 쇼는 항상 첫 슬라이드부터 시작한다
+    final first = '$_documentPositionPrefix:0';
     setState(() {
       _slideShow = true;
       _showControls = false;
       _isMemoMode = false;
-      _initialCfi = _currentCfi;
+      _initialCfi = first;
     });
+    _readerDisplay(first);
     _showSlideShowExit();
     try {
       await _pdfChannel.invokeMethod('setScreenOrientation', {'mode': 'landscape'});
@@ -1937,17 +1944,25 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   int _vBasePage = 0; // 밀기 시작할 때의 쪽 (문서)
   String? _vBasePos; // 밀기 시작할 때의 위치
   Future<void> _vPeekChain = Future<void>.value();
+  // 동작(손가락을 대고 뗄 때까지)마다 번호를 붙인다. 앞 동작의 넘김·정리가 끝나기 전에 다음 동작이
+  // 시작되면 앞 동작의 '시작 쪽'을 물려받아 이전 쪽으로 되돌리는 문제가 있어, 미리 보기는 한 동작만 맡는다.
+  int _vGestureSeq = 0;
+  int? _vPeekOwner; // 지금 미리 보기를 맡은 동작 번호
+  int? _vPreSnapOwner;
+  int _vPeekPending = 0; // 아직 끝나지 않은 미리 보기 작업 수
 
   void _vPeekQueue(Future<void> Function() job) {
-    _vPeekChain = _vPeekChain.then((_) => job()).catchError((_) {});
+    _vPeekPending++;
+    _vPeekChain = _vPeekChain.then((_) => job()).catchError((_) {}).whenComplete(() => _vPeekPending--);
   }
 
   /// 넘길 수 있는지: 미리 넘겨 둔 동안에도 밀기 시작한 쪽을 기준으로 판단한다
   bool _canTurnSwipe(int dir) {
     if (_isOfflineDocument && _docPageCount > 0) {
-      final int page = _vPeekActive ? _vBasePage : _docPage;
+      final bool mine = _vPeekActive && _vPeekOwner == _vGestureSeq; // 이 동작이 미리 보기를 맡은 경우만 시작 쪽 기준
+      final int page = mine ? _vBasePage : _docPage;
       // 파워포인트는 마지막 슬라이드에도 애니메이션 단계가 남아 있을 수 있다
-      if (_isPresentation) return dir > 0 || page > 0 || _posOrder(_vPeekActive ? _vBasePos : _currentCfi) % 100000 > 0;
+      if (_isPresentation) return dir > 0 || page > 0 || _posOrder(mine ? _vBasePos : _currentCfi) % 100000 > 0;
       return dir > 0 ? page < _docPageCount - 1 : page > 0;
     }
     return true;
@@ -1955,11 +1970,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// 손가락이 닿았을 때: 세로 밀기가 될 수 있으면 지금 화면을 미리 찍어 둔다
   void _vPeekOnDown(PointerDownEvent event) {
-    if (_vPeekActive || _vPageSwipe.isAnimating || !_vSwipeEnabled(event)) return;
+    _vGestureSeq++;
+    if (_vPeekActive || _vPeekPending > 0 || _vPageSwipe.isAnimating || !_vSwipeEnabled(event)) return;
     if (_vPreSnap != null) return;
     _vBasePage = _docPage;
     _vBasePos = _currentCfi;
     _vPreSnap = _vCaptureCurrent();
+    _vPreSnapOwner = _vGestureSeq;
   }
 
   /// 세로 밀기 중 방향이 정해지거나 바뀌었을 때
@@ -1968,13 +1985,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final double off = _vPageSwipe.offset;
     if (off.abs() < 1.0) return;
     final int dir = off < 0 ? 1 : -1;
+    if (_vPeekOwner != null && _vPeekOwner != _vGestureSeq) return; // 앞 동작이 아직 정리 중: 이번엔 미리 보기 없이
     if (dir == _vPeekWanted) return;
     if (!_vPeekActive) {
-      if (_vPreSnap == null) {
+      if (_vPeekPending > 0) return; // 앞 동작의 넘김이 아직 진행 중
+      if (_vPreSnap == null || _vPreSnapOwner != _vGestureSeq) {
         _vBasePage = _docPage;
         _vBasePos = _currentCfi;
       }
       _vPeekActive = true;
+      _vPeekOwner = _vGestureSeq;
     }
     if (!_canTurnSwipe(dir)) return;
     _vPeekWanted = dir;
@@ -2068,8 +2088,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   Future<void> _vPeekPrepare(int dir) async {
     if (!mounted || _vPeekWanted != dir || !_vPeekActive) return;
     if (_vSnap == null) {
-      final pre = _vPreSnap;
-      _vPreSnap = null;
+      // 이 동작에서 손가락이 닿을 때 찍어 둔 화면만 쓴다
+      final pre = _vPreSnapOwner == _vPeekOwner ? _vPreSnap : null;
+      if (pre != null) {
+        _vPreSnap = null;
+        _vPreSnapOwner = null;
+      }
       final image = await (pre ?? _vCaptureCurrent());
       if (image == null || !mounted || !_vPeekActive) {
         image?.dispose();
@@ -2099,8 +2123,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 넘기기로 정해졌을 때 (지금 화면 그림은 이미 화면 밖으로 밀려남)
-  Future<void> _vPeekCommit(int dir) async {
+  Future<void> _vPeekCommit(int dir, int gesture) async {
     final done = Completer<void>();
+    if (_vPeekOwner != gesture) {
+      // 이 동작은 미리 보기 없이 진행됨: 앞 작업이 끝난 뒤 그냥 한 장 넘긴다
+      _vPeekQueue(() async {
+        try {
+          await _turnEpubInstant(dir);
+        } finally {
+          done.complete();
+        }
+      });
+      await done.future;
+      _hasTextSelection = false;
+      return;
+    }
     _vPeekQueue(() async {
       try {
         final int actual = _vActualTurn();
@@ -2124,17 +2161,22 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 손을 뗀 뒤 정리: 취소된 경우 미리 넘겨 둔 장을 원래대로
-  void _vPeekFinish() {
+  void _vPeekFinish(int gesture) {
     _vPeekQueue(() async {
-      if (_vPeekActive && (_vActualTurn() != 0 || _vTurned != 0)) {
-        if (mounted) setState(() => _vPeekReady = false);
-        await _vRestoreBase();
-        await Future<void>.delayed(const Duration(milliseconds: 60));
+      if (_vPeekOwner == gesture) {
+        if (_vPeekActive && (_vActualTurn() != 0 || _vTurned != 0)) {
+          if (mounted) setState(() => _vPeekReady = false);
+          await _vRestoreBase();
+          await Future<void>.delayed(const Duration(milliseconds: 60));
+        }
+        if (_vSnap != null || _vPeekActive) _vPeekClear();
       }
-      if (_vSnap != null || _vPeekActive) _vPeekClear();
-      final pre = _vPreSnap;
-      _vPreSnap = null;
-      if (pre != null) unawaited(pre.then((img) => img?.dispose()));
+      if (_vPreSnapOwner == gesture) {
+        final pre = _vPreSnap;
+        _vPreSnap = null;
+        _vPreSnapOwner = null;
+        if (pre != null) unawaited(pre.then((img) => img?.dispose()));
+      }
     });
   }
 
@@ -2142,6 +2184,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final old = _vSnap;
     _vPeekWanted = 0;
     _vPeekActive = false;
+    _vPeekOwner = null;
     _vTurned = 0;
     if (mounted) {
       setState(() {
@@ -2972,24 +3015,26 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     },
                     onPointerUp: (event) {
                       _swipeTrackUp(event);
+                      final gesture = _vGestureSeq;
                       _vPageSwipe.up(
                         event,
                         height: screenSize.height,
                         canTurn: _canTurnSwipe,
-                        turnPage: _vPeekCommit,
+                        turnPage: (dir) => _vPeekCommit(dir, gesture),
                         seamless: true,
-                      ).then((_) => _vPeekFinish());
+                      ).then((_) => _vPeekFinish(gesture));
                       _handlePointerUp(event, screenSize);
                     },
                     onPointerCancel: (event) {
+                      final gesture = _vGestureSeq;
                       _vPageSwipe.up(
                         event,
                         height: screenSize.height,
                         canTurn: _canTurnSwipe,
-                        turnPage: _vPeekCommit,
+                        turnPage: (dir) => _vPeekCommit(dir, gesture),
                         seamless: true,
                         cancelled: true,
-                      ).then((_) => _vPeekFinish());
+                      ).then((_) => _vPeekFinish(gesture));
                       _swipeTrackUp(event, cancelled: true);
                       if (_isStylusDown) {
                         setState(() => _isStylusDown = false);
@@ -3118,6 +3163,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       if (mounted) {
                         setState(() {
                           _epubSinglePage = _chapters.length <= 1 && value.chapterTotalPages == 1;
+                          _epubLocated = true;
                           _progress = clampedProg;
                           _currentPageLocationKey = newLocKey;
                           _epubStrokes = pageStrokes;

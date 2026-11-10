@@ -45,8 +45,8 @@ class _ArrowPainter extends CustomPainter {
       );
     }
     // 위: 오른쪽을 가리킴 (오른쪽으로 치우침), 아래: 왼쪽을 가리킴 (왼쪽으로 치우침)
-    arrow(h * 0.34, w * 0.30, w * 0.88, rightToLeft ? idle : active);
-    arrow(h * 0.66, w * 0.70, w * 0.12, rightToLeft ? active : idle);
+    arrow(h * 0.31, w * 0.30, w * 0.88, rightToLeft ? idle : active);
+    arrow(h * 0.69, w * 0.70, w * 0.12, rightToLeft ? active : idle);
   }
 
   @override
