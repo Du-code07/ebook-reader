@@ -13,6 +13,7 @@ import 'screens/app_settings_screen.dart';
 import 'widgets/sheet_pull_to_close.dart';
 import 'widgets/file_type_icon.dart';
 import 'widgets/favorite_ribbon.dart';
+import 'widgets/group_stack_icon.dart';
 import 'services/storage_service.dart';
 import 'services/doc_thumbnail_service.dart';
 import 'services/system_ui_service.dart';
@@ -586,6 +587,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   List<File> _allBooks = [];
   List<File> _trashedBooks = [];
   List<String> _groups = ['전체', 'PDF/문서'];
+  bool _groupEditMode = false; // 그룹을 꾹 눌러 순서 바꾸기·삭제하는 중
+  final GlobalKey _allGroupChipKey = GlobalKey();
   String _selectedGroup = '전체';
   Map<String, String> _bookGroupMap = {};
   Map<String, String> _bookPageLabelMap = {}; // 마지막으로 읽은 쪽 '지금/전체'
@@ -1844,6 +1847,160 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     );
   }
 
+  /// 그룹 막대: [전체](고정) + 순서를 바꿀 수 있는 그룹들 + 새 그룹 추가
+  /// - 그룹을 꾹 누르면 편집 상태(우상단 빨간 - 버튼)가 되고, 그대로 끌어 순서를 바꿀 수 있다
+  /// - 편집 상태에서는 바로 끌어 순서를 바꾸고, - 를 누르면 그룹 삭제
+  Widget _buildGroupBar() {
+    final movable = _groups.where((g) => g != '전체').toList();
+    final allSelected = _selectedGroup == '전체';
+    final allChip = GestureDetector(
+      onLongPress: movable.isEmpty ? null : () => setState(() => _groupEditMode = true),
+      child: ChoiceChip(
+        key: _allGroupChipKey,
+        avatar: GroupStackIcon(
+          size: 17,
+          color: allSelected ? Theme.of(context).colorScheme.onSecondaryContainer : Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+        showCheckmark: false,
+        label: Text(_localizeGroupName('전체')),
+        selected: allSelected,
+        onSelected: (_) {
+          if (_groupEditMode) {
+            setState(() => _groupEditMode = false);
+            return;
+          }
+          // [전체]를 고른 상태에서 한 번 더 누르면 그룹 목록을 펼쳐 바로 이동
+          if (allSelected) {
+            _showGroupJumpMenu();
+          } else {
+            setState(() => _selectedGroup = '전체');
+          }
+        },
+      ),
+    );
+    return ReorderableListView.builder(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      buildDefaultDragHandles: false,
+      header: Padding(padding: const EdgeInsets.only(right: 8), child: allChip),
+      footer: ActionChip(
+        label: Icon(
+          Icons.add,
+          size: 18,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+        labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+        tooltip: _tr('새 그룹 추가', 'Add Group', '新建分组', 'グループ追加'),
+        onPressed: () {
+          if (_groupEditMode) setState(() => _groupEditMode = false);
+          _createNewGroupDialog();
+        },
+      ),
+      itemCount: movable.length,
+      onReorderStart: (_) {
+        HapticFeedback.selectionClick();
+        if (!_groupEditMode) setState(() => _groupEditMode = true);
+      },
+      onReorder: (oldIndex, newIndex) {
+        if (newIndex > oldIndex) newIndex -= 1;
+        if (newIndex == oldIndex) return;
+        final next = List<String>.of(movable);
+        next.insert(newIndex, next.removeAt(oldIndex));
+        setState(() => _groups = ['전체', ...next]);
+        StorageService.setGroupOrder(next);
+      },
+      proxyDecorator: (child, index, animation) => Material(
+        type: MaterialType.transparency,
+        child: ScaleTransition(scale: Tween<double>(begin: 1.0, end: 1.06).animate(animation), child: child),
+      ),
+      itemBuilder: (context, index) {
+        final grp = movable[index];
+        final chip = ChoiceChip(
+          label: Text(_localizeGroupName(grp)),
+          selected: grp == _selectedGroup,
+          onSelected: (_) => setState(() {
+            _groupEditMode = false;
+            _selectedGroup = grp;
+          }),
+        );
+        final Widget item = _groupEditMode
+            ? Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  chip,
+                  // 우상단 끝 빨간 - 버튼 (누르는 범위는 칩 모서리 안쪽까지 넉넉하게)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _confirmDeleteGroup(grp),
+                      child: SizedBox(
+                        width: 26,
+                        height: 22,
+                        child: Align(
+                          alignment: Alignment.topRight,
+                          child: Transform.translate(
+                            offset: const Offset(6, -5),
+                            child: Container(
+                              width: 17,
+                              height: 17,
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 1.4),
+                              ),
+                              child: const Icon(Icons.remove, size: 13, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : chip;
+        return Padding(
+          key: ValueKey('group:$grp'),
+          padding: const EdgeInsets.only(right: 8),
+          // 평소: 꾹 눌러 끌기 / 편집 중: 바로 끌기
+          child: _groupEditMode
+              ? ReorderableDragStartListener(index: index, child: item)
+              : ReorderableDelayedDragStartListener(index: index, child: item),
+        );
+      },
+    );
+  }
+
+  /// [전체]를 한 번 더 눌렀을 때: 그룹 이름 목록을 펼쳐 누르면 그 그룹으로 이동
+  Future<void> _showGroupJumpMenu() async {
+    final groups = _groups.where((g) => g != '전체').toList();
+    if (groups.isEmpty) return;
+    final box = _allGroupChipKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (box == null || overlay == null) return;
+    final Offset topLeft = box.localToGlobal(Offset(0, box.size.height), ancestor: overlay);
+    final picked = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(topLeft.dx, topLeft.dy + 4, overlay.size.width - topLeft.dx, 0),
+      constraints: const BoxConstraints(minWidth: 150, maxWidth: 260),
+      items: [
+        for (final g in groups)
+          PopupMenuItem<String>(
+            value: g,
+            child: Row(
+              children: [
+                const Icon(Icons.folder_outlined, size: 18),
+                const SizedBox(width: 10),
+                Flexible(child: Text(_localizeGroupName(g), overflow: TextOverflow.ellipsis)),
+              ],
+            ),
+          ),
+      ],
+    );
+    if (picked != null && mounted) setState(() => _selectedGroup = picked);
+  }
+
   Future<void> _confirmDeleteGroup(String groupName) async {
     if (groupName == '전체') {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1858,10 +2015,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         title: Text(_tr('"$groupName" 그룹 삭제', 'Delete "$groupName"', '删除 "$groupName"', '「$groupName」グループ削除')),
         content: Text(
           _tr(
-            '"$groupName" 그룹을 삭제할까요?\n(그룹 안의 파일들은 삭제되지 않고 [미분류]로 유지됩니다)',
-            'Delete group "$groupName"?\n(Files inside will remain as [Uncategorized])',
-            '确定删除 "$groupName" 分组吗？\n（组内文件不会删除，将归为[未分类]）',
-            '「$groupName」を削除しますか？\n(中のファイルは削除されず[未分類]になります)',
+            '"$groupName" 그룹을 삭제할까요?\n(그룹 안의 파일들은 유지됩니다)',
+            'Delete group "$groupName"?\n(Files inside will be kept)',
+            '确定删除 "$groupName" 分组吗？\n（组内文件将保留）',
+            '「$groupName」を削除しますか？\n(中のファイルはそのまま残ります)',
           ),
         ),
         actions: [
@@ -1881,6 +2038,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         _selectedGroup = '전체';
       }
       await _loadLibrary();
+      if (mounted && _groups.where((g) => g != '전체').isEmpty) setState(() => _groupEditMode = false);
     }
   }
 
@@ -2511,8 +2669,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         : _allBooks.where((f) => (_bookGroupMap[f.path] ?? '미분류') == _selectedGroup).toList();
 
     return PopScope(
-      canPop: !_isSelectionMode,
+      canPop: !_isSelectionMode && !_groupEditMode,
       onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _groupEditMode) {
+          setState(() => _groupEditMode = false);
+          return;
+        }
         if (!didPop && _isSelectionMode) {
           setState(() {
             _isSelectionMode = false;
@@ -2591,36 +2753,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           children: [
             SizedBox(
               height: 54,
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                scrollDirection: Axis.horizontal,
-                itemCount: _groups.length + 1,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  if (index == _groups.length) {
-                    return ActionChip(
-                      label: Icon(
-                        Icons.add,
-                        size: 18,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
-                      tooltip: _tr('새 그룹 추가', 'Add Group', '新建分组', 'グループ追加'),
-                      onPressed: _createNewGroupDialog,
-                    );
-                  }
-                  final grp = _groups[index];
-                  final selected = grp == _selectedGroup;
-                  return GestureDetector(
-                    onLongPress: () => _confirmDeleteGroup(grp),
-                    child: ChoiceChip(
-                      label: Text(_localizeGroupName(grp)),
-                      selected: selected,
-                      onSelected: (_) => setState(() => _selectedGroup = grp),
-                    ),
-                  );
-                },
-              ),
+              child: _buildGroupBar(),
             ),
             const Divider(height: 1),
             Expanded(
@@ -2655,6 +2788,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                       // 선택: 파일을 꾹 누른 채 드래그 / 그냥 드래그: 목록 스크롤
                       // (꾹 누름이 인식되면 목록 스크롤은 자동으로 멈추고 선택만 진행됨)
                       onPointerDown: (event) {
+                        if (_groupEditMode) setState(() => _groupEditMode = false);
                         _activeBookshelfPointers[event.pointer] = event.position;
                         if (_activeBookshelfPointers.length >= 2 && _isDragSelecting) {
                           setState(() => _isDragSelecting = false);

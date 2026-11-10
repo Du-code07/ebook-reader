@@ -479,6 +479,13 @@ class StorageService {
     }
   }
 
+  /// 그룹 순서 저장 ([전체]는 항상 맨 앞)
+  static Future<void> setGroupOrder(List<String> groups) async {
+    final prefs = await SharedPreferences.getInstance();
+    final ordered = ['전체', ...groups.where((g) => g != '전체')];
+    await prefs.setStringList('book_groups_v2', ordered);
+  }
+
   static Future<void> removeGroup(String groupName) async {
     if (groupName == '전체') return;
     final prefs = await SharedPreferences.getInstance();

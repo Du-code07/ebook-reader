@@ -77,7 +77,12 @@ class StylusOnlyDrawingLayer extends StatelessWidget {
   final void Function(PointerCancelEvent event) onStylusCancel;
   final Widget child;
 
+  /// 손가락 필기를 쓰지 않을 때 손가락 터치를 아래(본문)로 그대로 넘김
+  /// (본문 위에 덮인 필기 그림이 터치를 막아 화면 누르기·밀어서 넘기기가 안 되던 문제)
+  final bool passThroughTouch;
+
   const StylusOnlyDrawingLayer({
+    this.passThroughTouch = false,
     super.key,
     required this.enabled,
     this.allowTouch = false,
@@ -109,7 +114,7 @@ class StylusOnlyDrawingLayer extends StatelessWidget {
           },
         ),
       },
-      child: child,
+      child: (passThroughTouch && !allowTouch) ? IgnorePointer(child: child) : child,
     );
   }
 }

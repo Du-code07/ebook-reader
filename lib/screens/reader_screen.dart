@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
+import '../services/txt_page_document.dart';
 import '../services/page_snapshot_service.dart';
 import '../services/epub_validation.dart';
 import '../widgets/hwp_viewer.dart';
@@ -1033,6 +1034,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           child: Center(child: MemoToolbar(children: items)),
         );
     }
+  }
+
+  /// EPUB·TXT 본문이 시작하는 높이: 상단바(위 여백 + 버튼 줄 48) 아래로 살짝 띄움.
+  /// 상태표시줄을 잠깐 내릴 때 바뀌는 여백은 쓰지 않는다 (글이 다시 나뉘며 쪽이 바뀌지 않게)
+  double get _readerTextTop {
+    final double barBottom = MediaQueryData.fromView(View.of(context)).padding.top + 48.0;
+    // TXT는 화면 안쪽에 자체 여백(32)이 있어 그만큼 덜 내린다
+    return _isTxt ? math.max(12.0, barBottom + 10.0 - TxtPageDocument.margin) : barBottom + 10.0;
   }
 
   /// 6. 카메라(디스플레이 컷아웃)·시스템 영역 여백. 떠 있는 UI가 카메라를 가리지 않도록 좌우에 더한다.
@@ -2437,6 +2446,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       backgroundDecoration: _isPaperTheme ? null : BoxDecoration(color: _getBgColor()),
       foregroundColor: _getFgColor(),
       customCss: {
+        // 책 자체 CSS가 html에 여백을 주면 쪽(단) 경계가 어긋나 글이 두 쪽에 걸쳐 보인다 → 여백 제거
+        'html': {
+          'padding': '0 !important',
+          'margin': '0 !important',
+        },
         ':root, html, body': {
           'color-scheme': _epubBgTheme == 'dark' ? 'dark !important' : 'light !important',
           'background': '$cssBg !important',
@@ -2447,8 +2461,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           'background-color': 'transparent !important',
           'color': '$cssFg !important',
           'word-break': 'keep-all',
+          // 글자를 크게 해서 한 단어(띄어쓰기 없는 긴 글)가 쪽 너비보다 길어지면 그때만 줄을 바꿈 (옆 쪽으로 넘치지 않게)
+          'overflow-wrap': 'break-word',
           'line-height': '1.75',
           'text-align': 'justify',
+        },
+        'pre, code': {
+          'white-space': 'pre-wrap !important',
+          'overflow-wrap': 'anywhere',
+        },
+        'img, svg, video, table': {
+          'max-width': '100% !important',
         },
         '::selection': {
           'background': 'rgba(255, 215, 0, 0.35)',
@@ -3015,7 +3038,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 padding: _slideShow
                     ? EdgeInsets.zero
                     : EdgeInsets.only(
-                        top: 12.0,
+                        // EPUB·TXT: 글이 상단바에 가리지 않도록 상단바 높이보다 살짝 아래에서 시작
+                        top: (_isEpub || _isTxt) ? _readerTextTop : 12.0,
                         bottom: (bottomPadding > 0 ? bottomPadding : 8.0) + 20.0,
                       ),
                 child: IgnorePointer(
@@ -3235,6 +3259,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     return StylusOnlyDrawingLayer(
                       enabled: _isMemoMode,
                       allowTouch: _allowFingerDrawing,
+                      passThroughTouch: true,
                       onStylusDown: (event) {
                         if (!_isStylusDown) {
                           setState(() => _isStylusDown = true);
@@ -3395,8 +3420,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                               tooltip: _tr('목차', 'Contents', '目录', '目次'),
                               onPressed: () => _scaffoldKey.currentState?.openDrawer(),
                             ),
-                            // 파일 내 단어 검색 (한글·워드)
-                            if (_snapEligible)
+                            // 파일 내 단어 검색 (한글·워드·PPT)
+                            if (_snapEligible || _isPresentation)
                               IconButton(
                                 visualDensity: VisualDensity.compact,
                                 padding: btnPadding,
