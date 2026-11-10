@@ -17,7 +17,7 @@ Future<T?> showChoiceSheet<T>({
   required String title,
   required List<ChoiceOption<T>> options,
   required T current,
-  required String confirmLabel,
+  String confirmLabel = '',
 }) async {
   final r = await showModalBottomSheet<(T, bool)>(
     context: context,
@@ -39,7 +39,9 @@ Future<(T, bool)?> showChoiceSheetWithToggle<T>({
   String? toggleSubtitle,
   IconData? toggleIcon,
   required bool toggleValue,
-  required String confirmLabel,
+  String confirmLabel = '',
+  /// 고르거나 스위치를 바꿀 때마다 바로 불림 (확인 버튼 없이 바로 적용)
+  ValueChanged<(T, bool)>? onChanged,
 }) {
   return showModalBottomSheet<(T, bool)>(
     context: context,
@@ -54,6 +56,7 @@ Future<(T, bool)?> showChoiceSheetWithToggle<T>({
       toggleSubtitle: toggleSubtitle,
       toggleIcon: toggleIcon,
       toggleValue: toggleValue,
+      onChanged: onChanged,
     ),
   );
 }
@@ -68,6 +71,7 @@ class _ChoiceSheet<T> extends StatefulWidget {
     this.toggleSubtitle,
     this.toggleIcon,
     this.toggleValue = false,
+    this.onChanged,
   });
 
   final String title;
@@ -78,6 +82,7 @@ class _ChoiceSheet<T> extends StatefulWidget {
   final String? toggleSubtitle;
   final IconData? toggleIcon;
   final bool toggleValue;
+  final ValueChanged<(T, bool)>? onChanged;
 
   @override
   State<_ChoiceSheet<T>> createState() => _ChoiceSheetState<T>();
@@ -109,7 +114,12 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                     Material(
                       color: opt.value == _selected ? cs.secondaryContainer.withValues(alpha: 0.55) : Colors.transparent,
                       child: InkWell(
-                        onTap: () => setState(() => _selected = opt.value),
+                        // 누르면 바로 적용: 고르기만 있는 창은 바로 닫히고, 스위치가 함께 있는 창은 열린 채로 적용
+                        onTap: () {
+                          setState(() => _selected = opt.value);
+                          widget.onChanged?.call((_selected, _toggle));
+                          if (widget.toggleLabel == null) Navigator.pop(context, (_selected, _toggle));
+                        },
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                           child: Row(
@@ -141,7 +151,10 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                   if (widget.toggleLabel != null) ...[
                     const Divider(height: 16, indent: 24, endIndent: 24),
                     InkWell(
-                      onTap: () => setState(() => _toggle = !_toggle),
+                      onTap: () {
+                        setState(() => _toggle = !_toggle);
+                        widget.onChanged?.call((_selected, _toggle));
+                      },
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(24, 8, 16, 8),
                         child: Row(
@@ -160,7 +173,13 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                                 ],
                               ),
                             ),
-                            Switch(value: _toggle, onChanged: (v) => setState(() => _toggle = v)),
+                            Switch(
+                              value: _toggle,
+                              onChanged: (v) {
+                                setState(() => _toggle = v);
+                                widget.onChanged?.call((_selected, _toggle));
+                              },
+                            ),
                           ],
                         ),
                       ),
@@ -170,17 +189,7 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
-            child: FilledButton(
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
-                textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-              ),
-              onPressed: () => Navigator.pop(context, (_selected, _toggle)),
-              child: Text(widget.confirmLabel),
-            ),
-          ),
+          const SizedBox(height: 16),
         ],
       ),
     );

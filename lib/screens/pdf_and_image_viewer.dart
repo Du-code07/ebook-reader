@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
+import '../services/pdf_outline_service.dart';
+import '../services/toc_page_parser.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
 import '../widgets/sheet_pull_to_close.dart';
@@ -602,6 +604,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       }
       // 파일 목록에 보여 줄 '지금 쪽/전체 쪽' (열기만 하고 넘기지 않아도 남김)
       unawaited(StorageService.savePageLabel(_bookKey, '${_currentPage + 1}/$_totalPages'));
+      // 목차: 첫 화면을 그린 뒤 잠시 있다가 분석
+      if (_isPdfFile) Future<void>.delayed(const Duration(milliseconds: 600), _loadPdfOutline);
 
       _pageController = PageController(initialPage: _currentPage);
 
@@ -699,6 +703,75 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   // ── 파일 내 단어 검색 (PDF만) ──
+  // ── 목차 (PDF) ──
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  List<Map<String, Object>> _pdfToc = const [];
+
+  /// 1) 파일 속 목차(책갈피) → 2) '목차'라고 적힌 쪽의 항목들 (기기가 PDF 글 읽기를 지원할 때) → 없으면 쪽 목록
+  Future<void> _loadPdfOutline() async {
+    if (!mounted || _totalPages <= 0) return;
+    final path = widget.files.first.path;
+    var items = await PdfOutlineService.read(path);
+    if (items.isEmpty) {
+      final head = await _pdfPageTexts(path, 0, math.min(_totalPages, TocPageParser.searchPages));
+      if (TocPageParser.parse(head, _totalPages) != null) {
+        final all = await _pdfPageTexts(path, 0, math.min(_totalPages, 400));
+        items = TocPageParser.parse(all.isEmpty ? head : all, _totalPages) ?? const [];
+      }
+    }
+    if (mounted && items.isNotEmpty) setState(() => _pdfToc = items);
+  }
+
+  Future<List<String>> _pdfPageTexts(String path, int from, int to) async {
+    try {
+      final r = await _pdfChannel.invokeMethod<List<Object?>>('pdfPageTexts', {'path': path, 'from': from, 'to': to});
+      return [for (final t in r ?? const []) (t ?? '').toString()];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Widget _buildTocDrawer() {
+    final cs = Theme.of(context).colorScheme;
+    final bool outline = _pdfToc.isNotEmpty;
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(_tr('목차', 'Contents', '目录', '目次'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView.builder(
+                itemCount: outline ? _pdfToc.length : _totalPages,
+                itemBuilder: (context, index) {
+                  final item = outline ? _pdfToc[index] : null;
+                  final int page = item == null ? index : (item['page'] as int);
+                  final int level = item == null ? 1 : (item['level'] as int);
+                  return ListTile(
+                    contentPadding: EdgeInsets.only(left: 16.0 + (level - 1).clamp(0, 4) * 18.0, right: 16),
+                    title: Text(
+                      item == null ? _tr('${index + 1}쪽', 'Page ${index + 1}', '第${index + 1}页', '${index + 1}ページ') : (item['title'] as String),
+                      style: outline ? TextStyle(fontSize: level <= 1 ? 15.5 : 14, fontWeight: level <= 1 ? FontWeight.w700 : FontWeight.w400) : null,
+                    ),
+                    trailing: outline ? Text('${page + 1}', style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)) : null,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _goToPage(page, smoothAnimation: false);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   bool get _isPdfFile => widget.isPdf || widget.files.first.path.toLowerCase().endsWith('.pdf');
   bool _findOpen = false;
   List<({int page, List<Rect> rects})> _findHits = const [];
@@ -882,17 +955,18 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   List<Widget> _memoToolItems() {
     return [
       MemoToolButton(
-        icon: Icons.touch_app,
+        // 손 아이콘은 칸 안에서 아래로 치우쳐 보여 펜 아이콘과 높이를 맞춤
+        iconBuilder: (c) => Transform.translate(offset: const Offset(0, -1.5), child: Icon(Icons.touch_app, color: c, size: 18)),
         label: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
         active: _allowFingerDrawing,
         onTap: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
       ),
       // 펜: 누르면 펜 선택, 선택된 상태에서 한 번 더 누르면 선 굵기·색상 설정 창
       MemoToolButton(
-        icon: Icons.edit,
+        // 깃털 펜 + 잉크병 (잉크병 안 색 = 지금 펜 색)
+        iconBuilder: (c) => QuillInkIcon(color: c, ink: _penColor, size: 22),
         label: _tr('펜 (한 번 더 누르면 굵기·색상)', 'Pen (tap again: size & color)', '笔 (再点一次: 粗细·颜色)', 'ペン (もう一度タップ: 太さ・色)'),
         active: !_isEraserMode,
-        dotColor: _penColor,
         onTap: () => setState(() => _isEraserMode = false),
         onReselect: (_) => _openPenSettings(),
       ),
@@ -2322,6 +2396,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         }
       },
       child: Scaffold(
+      key: _scaffoldKey,
+      drawer: _isPdfFile ? _buildTocDrawer() : null,
+      drawerEnableOpenDragGesture: false,
       // 페이지 이동 창의 키보드가 올라와도 뒤의 책 화면은 줄이지 않는다 (줄어드는 동안 버벅임)
       resizeToAvoidBottomInset: false,
       backgroundColor: Colors.black,
@@ -2514,6 +2591,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         const btnPadding = EdgeInsets.symmetric(horizontal: 6, vertical: 4);
 
                         final actionButtons = <Widget>[
+                          // 목차 (PDF만) — 검색 왼쪽
+                          if (_isPdfFile)
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.list, color: Colors.white, size: 20),
+                              tooltip: _tr('목차', 'Contents', '目录', '目次'),
+                              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                            ),
                           // 파일 내 단어 검색 (PDF만)
                           if (_isPdfFile)
                             IconButton(

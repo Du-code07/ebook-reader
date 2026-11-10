@@ -280,6 +280,23 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         runOnUiThread { result.error("SEARCH_ERR", e.message, null) }
                     }
                 }
+            } else if (call.method == "pdfPageTexts") {
+                // 목차용: 쪽마다의 글 [from, to) (지원하지 않는 기기에서는 빈 목록)
+                val path = call.argument<String>("path") ?: ""
+                val from = call.argument<Int>("from") ?: 0
+                val to = call.argument<Int>("to") ?: 0
+                if (!pdfSearchSupported()) {
+                    result.success(emptyList<String>())
+                    return@setMethodCallHandler
+                }
+                thumbExecutor.execute {
+                    try {
+                        val texts = pdfPageTexts(path, from, to)
+                        runOnUiThread { result.success(texts) }
+                    } catch (e: Exception) {
+                        runOnUiThread { result.success(emptyList<String>()) }
+                    }
+                }
             } else if (call.method == "renderPdfFirstPageThumbnail") {
                 val pdfPath = call.argument<String>("pdfPath") ?: call.argument<String>("filePath")
                 val thumbPath = call.argument<String>("thumbPath") ?: call.argument<String>("outPath")
@@ -1214,6 +1231,30 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         renderer.openPage(i).use { page ->
                             addPdfMatches(out, i, page.width.toFloat(), page.height.toFloat(), page.searchText(query))
                         }
+                    }
+                }
+            }
+        } finally {
+            try { pfd.close() } catch (_: Exception) {}
+        }
+        return out
+    }
+
+    @android.annotation.SuppressLint("NewApi")
+    private fun pdfPageTexts(path: String, from: Int, to: Int): List<String> {
+        val out = ArrayList<String>()
+        val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            if (Build.VERSION.SDK_INT >= 35) {
+                PdfRenderer(pfd).use { renderer ->
+                    for (i in maxOf(0, from) until minOf(renderer.pageCount, to)) {
+                        renderer.openPage(i).use { page -> out.add(page.textContents.joinToString("\n") { it.text }) }
+                    }
+                }
+            } else {
+                android.graphics.pdf.PdfRendererPreV(pfd).use { renderer ->
+                    for (i in maxOf(0, from) until minOf(renderer.pageCount, to)) {
+                        renderer.openPage(i).use { page -> out.add(page.textContents.joinToString("\n") { it.text }) }
                     }
                 }
             }

@@ -288,7 +288,7 @@ class UserManualScreen extends StatelessWidget {
                       const SizedBox(width: 14),
                       const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 20),
                       const SizedBox(width: 14),
-                      const Icon(Icons.auto_stories_outlined, color: Colors.white, size: 20),
+                      const Icon(Icons.photo_library_outlined, color: Colors.white, size: 20),
                       const SizedBox(width: 14),
                       const Icon(Icons.delete_outline, color: Colors.white, size: 20),
                       const SizedBox(width: 14),
@@ -346,7 +346,7 @@ class UserManualScreen extends StatelessWidget {
               desc: _tr('2개 이상의 PDF 파일을 고른 순서대로 또는 파일 이름 순서대로 합쳐 하나의 PDF로 만듭니다.', 'Merges 2 or more PDF files in selected order or filename order into a single PDF.', '按所选顺序或文件名顺序将多个 PDF 合并为一个 PDF。', '2つ以上のPDFを選択順または名前順に結合して1つのPDFにします。'),
             ),
             _buildIconGuideRow(
-              iconWidget: const Icon(Icons.auto_stories_outlined, color: Colors.white, size: 22),
+              iconWidget: const Icon(Icons.photo_library_outlined, color: Colors.white, size: 22),
               title: _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'),
               desc: _tr('여러 장의 JPG/PNG 이미지를 고른 순서 또는 이름 순서대로 묶어 단권 파일(.cbz)로 만듭니다.', 'Bundles multiple JPG/PNG images in selected or filename order into a single .cbz book.', '将多张图片按选择顺序或名称顺序打包为单本文件(.cbz)。', '複数のJPG/PNG画像を選択順または名前順にまとめて1冊(.cbz)にします。'),
             ),
@@ -584,6 +584,97 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   List<String> _groups = ['전체', 'PDF/문서'];
   bool _groupEditMode = false; // 그룹을 꾹 눌러 순서 바꾸기·삭제하는 중
   bool _groupMenuOpen = false; // [전체]에서 그룹 목록을 펼친 중 (아이콘 엇갈림)
+
+  // ── 파일 검색 (상단 돋보기) ──
+  bool _searchOpen = false;
+  String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+  late final AnimationController _searchAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
+
+  void _openSearch() {
+    if (_searchOpen) return;
+    setState(() {
+      _searchOpen = true;
+      _searchQuery = '';
+      _groupEditMode = false;
+    });
+    _searchCtrl.clear();
+    _searchAnim.forward();
+    // 줄이 다 그어질 즈음 자판을 올림
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
+      if (mounted && _searchOpen) _searchFocus.requestFocus();
+    });
+  }
+
+  /// 처음 상태로: 검색어도 지움 (뒤로 가기, 파일 열기, 다른 아이콘을 누를 때)
+  void _closeSearch() {
+    if (!_searchOpen) return;
+    _searchFocus.unfocus();
+    _searchCtrl.clear();
+    setState(() {
+      _searchOpen = false;
+      _searchQuery = '';
+    });
+    _searchAnim.reverse();
+  }
+
+  /// 돋보기가 왼쪽으로 가면서 그 뒤로 검색어 밑줄이 길게 그어지고, 닫으면 다시 오른쪽 돋보기로 말려 들어감
+  Widget _buildSearchArea() {
+    final Color lineColor = Theme.of(context).colorScheme.onSurface;
+    return AnimatedBuilder(
+      animation: _searchAnim,
+      builder: (context, _) {
+        final double t = Curves.easeOutCubic.transform(_searchAnim.value);
+        if (t <= 0.001) return const SizedBox(height: 40);
+        return LayoutBuilder(
+          builder: (context, c) {
+            final double w = c.maxWidth;
+            const double iconSize = 24;
+            // 돋보기 위치: 오른쪽 끝(원래 돋보기 자리) → 왼쪽 끝
+            final double iconLeft = (w + 8) * (1 - t);
+            final double textOpacity = ((t - 0.55) / 0.45).clamp(0.0, 1.0).toDouble();
+            return SizedBox(
+              height: 40,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  // 밑줄: 돋보기가 지나간 자리부터 오른쪽 끝까지
+                  Positioned(
+                    left: iconLeft + iconSize + 4,
+                    right: 0,
+                    bottom: 5,
+                    child: Container(height: 2, decoration: BoxDecoration(color: lineColor, borderRadius: BorderRadius.circular(1))),
+                  ),
+                  Positioned(left: iconLeft, top: 8, child: Icon(Icons.search, size: iconSize, color: lineColor)),
+                  Positioned(
+                    left: iconSize + 8,
+                    right: 0,
+                    top: 0,
+                    bottom: 6,
+                    child: Opacity(
+                      opacity: textOpacity,
+                      child: TextField(
+                        controller: _searchCtrl,
+                        focusNode: _searchFocus,
+                        textInputAction: TextInputAction.search,
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                        decoration: const InputDecoration(border: InputBorder.none, isCollapsed: true, contentPadding: EdgeInsets.only(top: 8)),
+                        // 한 글자 칠 때마다 결과가 바뀜
+                        onChanged: (v) => setState(() => _searchQuery = v),
+                        // 자판의 확인(검색)을 눌러도 검색 화면은 그대로 (자판만 내림)
+                        onSubmitted: (_) => _searchFocus.unfocus(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
   final GlobalKey _allGroupChipKey = GlobalKey();
   String _selectedGroup = '전체';
   Map<String, String> _bookGroupMap = {};
@@ -734,6 +825,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   @override
   void dispose() {
+    _searchAnim.dispose();
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
     _dragEdgeScrollTimer?.cancel();
     for (final notifier in _thumbNotifiers.values) {
       notifier.dispose();
@@ -1753,6 +1847,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   }
 
   Future<void> _openFile(File file) async {
+    _closeSearch(); // 파일을 열면 검색은 처음 상태로
     final rawName = file.path.split(Platform.pathSeparator).last;
     final displayName = _formatDisplayFileName(rawName);
     final ext = rawName.split('.').last.toLowerCase();
@@ -1862,6 +1957,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         label: Text(_localizeGroupName('전체')),
         selected: allSelected,
         onSelected: (_) {
+          if (_searchOpen) {
+            _closeSearch();
+            return;
+          }
           if (_groupEditMode) {
             setState(() => _groupEditMode = false);
             return;
@@ -1889,6 +1988,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         labelPadding: const EdgeInsets.symmetric(horizontal: 2),
         tooltip: _tr('새 그룹 추가', 'Add Group', '新建分组', 'グループ追加'),
         onPressed: () {
+          _closeSearch();
           if (_groupEditMode) setState(() => _groupEditMode = false);
           _createNewGroupDialog();
         },
@@ -1915,10 +2015,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         final chip = ChoiceChip(
           label: Text(_localizeGroupName(grp)),
           selected: grp == _selectedGroup,
-          onSelected: (_) => setState(() {
-            _groupEditMode = false;
-            _selectedGroup = grp;
-          }),
+          onSelected: (_) {
+            _closeSearch();
+            setState(() {
+              _groupEditMode = false;
+              _selectedGroup = grp;
+            });
+          },
         );
         final Widget item = _groupEditMode
             ? Stack(
@@ -1969,6 +2072,23 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     );
   }
 
+  /// 파일의 점 3개 메뉴: 이름 변경 / 그룹 이동 (표지형은 휴지통 이동도)
+  Future<void> _showFileMenu(BuildContext anchor, File file, {bool withTrash = false}) async {
+    final action = await showScaleMenu<String>(anchor, [
+      ('rename', _tr('이름 변경', 'Rename', '重命名', '名前変更'), Icons.edit_outlined, null),
+      ('move_group', _tr('그룹 이동', 'Move Group', '移动分组', 'グループ移動'), Icons.drive_file_move_outline, null),
+      if (withTrash) ('trash', _tr('휴지통 이동', 'Move to Trash', '移至回收站', 'ゴミ箱へ移動'), Icons.delete_outline, Colors.redAccent),
+    ]);
+    if (!mounted || action == null) return;
+    if (action == 'rename') {
+      _renameFileDialog(file);
+    } else if (action == 'move_group') {
+      _assignGroupDialog(file);
+    } else if (action == 'trash') {
+      _moveFileToTrash(file);
+    }
+  }
+
   /// [전체]를 한 번 더 눌렀을 때: 그룹 이름 목록을 펼쳐 누르면 그 그룹으로 이동
   Future<void> _showGroupJumpMenu() async {
     final groups = _groups.where((g) => g != '전체').toList();
@@ -1981,7 +2101,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       GroupJumpMenuRoute<String>(
         anchor: topLeft & box.size,
         barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-        items: [for (final g in groups) (g, _localizeGroupName(g))],
+        items: [for (final g in groups) (g, _localizeGroupName(g), Icons.folder_outlined, null)],
       ),
     );
     if (mounted) setState(() => _groupMenuOpen = false);
@@ -2571,56 +2691,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             SizedBox(
                               width: 24,
                               height: 24,
-                              child: PopupMenuButton<String>(
-                                padding: EdgeInsets.zero,
-                                iconSize: 17,
-                                constraints: const BoxConstraints(minWidth: 125),
-                                icon: const Icon(Icons.more_vert, size: 17),
-                                tooltip: _tr('메뉴', 'More', '更多', 'メニュー'),
-                                onSelected: (action) {
-                                  if (action == 'rename') {
-                                    _renameFileDialog(file);
-                                  } else if (action == 'move_group') {
-                                    _assignGroupDialog(file);
-                                  } else if (action == 'trash') {
-                                    _moveFileToTrash(file);
-                                  }
-                                },
-                                itemBuilder: (ctx) => [
-                                  PopupMenuItem<String>(
-                                    value: 'rename',
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.edit_outlined, size: 18),
-                                        const SizedBox(width: 8),
-                                        Text(_tr('이름 변경', 'Rename', '重命名', '名前変更')),
-                                      ],
-                                    ),
-                                  ),
-                                  PopupMenuItem<String>(
-                                    value: 'move_group',
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.drive_file_move_outline, size: 18),
-                                        const SizedBox(width: 8),
-                                        Text(_tr('그룹 이동', 'Move Group', '移动分组', 'グループ移動')),
-                                      ],
-                                    ),
-                                  ),
-                                  PopupMenuItem<String>(
-                                    value: 'trash',
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          _tr('휴지통 이동', 'Move to Trash', '移至回收站', 'ゴミ箱へ移動'),
-                                          style: const TextStyle(color: Colors.redAccent),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                              // 세로 점 3개: 그룹 목록처럼 아이콘에서 커져 나오는 메뉴
+                              child: Builder(
+                                builder: (btnCtx) => IconButton(
+                                  padding: EdgeInsets.zero,
+                                  iconSize: 17,
+                                  icon: const Icon(Icons.more_vert, size: 17),
+                                  tooltip: _tr('메뉴', 'More', '更多', 'メニュー'),
+                                  onPressed: () => _showFileMenu(btnCtx, file, withTrash: true),
+                                ),
                               ),
                             ),
                         ],
@@ -2653,13 +2732,25 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    final filteredBooks = _selectedGroup == '전체'
-        ? _allBooks
-        : _allBooks.where((f) => (_bookGroupMap[f.path] ?? '미분류') == _selectedGroup).toList();
+    final String query = _searchQuery.trim().toLowerCase();
+    String nameOf(File f) => f.path.split(Platform.pathSeparator).last;
+    final List<File> filteredBooks = _searchOpen
+        // 검색 중: 검색어가 없으면 파일을 보여 주지 않고, 있으면 이름에 들어간 파일을 이름 순서대로 (모든 그룹에서)
+        ? (query.isEmpty
+            ? <File>[]
+            : (_allBooks.where((f) => nameOf(f).toLowerCase().contains(query)).toList()
+              ..sort((a, b) => _naturalCompare(nameOf(a).toLowerCase(), nameOf(b).toLowerCase()))))
+        : _selectedGroup == '전체'
+            ? _allBooks
+            : _allBooks.where((f) => (_bookGroupMap[f.path] ?? '미분류') == _selectedGroup).toList();
 
     return PopScope(
-      canPop: !_isSelectionMode && !_groupEditMode,
+      canPop: !_isSelectionMode && !_groupEditMode && !_searchOpen,
       onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _searchOpen) {
+          _closeSearch();
+          return;
+        }
         if (!didPop && _groupEditMode) {
           setState(() => _groupEditMode = false);
           return;
@@ -2709,17 +2800,43 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               ],
             )
           : AppBar(
-              title: const Text('MY'),
+              title: Row(
+                children: [
+                  const Text('MY'),
+                  const SizedBox(width: 20),
+                  Expanded(child: _buildSearchArea()),
+                ],
+              ),
               actions: [
+                // 파일 검색: 누르면 이 돋보기가 검색 밑줄로 바뀜 (검색 중에는 자리만 남김)
+                IgnorePointer(
+                  ignoring: _searchOpen,
+                  child: AnimatedOpacity(
+                    opacity: _searchOpen ? 0 : 1,
+                    duration: const Duration(milliseconds: 120),
+                    child: IconButton(
+                      icon: const Icon(Icons.search),
+                      tooltip: _tr('파일 검색', 'Search Files', '搜索文件', 'ファイル検索'),
+                      onPressed: _openSearch,
+                    ),
+                  ),
+                ),
                 IconButton(
                   icon: const Icon(Icons.picture_as_pdf_outlined),
                   tooltip: _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'),
-                  onPressed: _showMergeExistingPdfsDialog,
+                  onPressed: () {
+                    _closeSearch();
+                    _showMergeExistingPdfsDialog();
+                  },
                 ),
                 IconButton(
-                  icon: const Icon(Icons.auto_stories_outlined),
+                  // PDF 합치기 아이콘처럼 겹친 액자 모양 (색은 그대로)
+                  icon: const Icon(Icons.photo_library_outlined),
                   tooltip: _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'),
-                  onPressed: _showMergeExistingImagesDialog,
+                  onPressed: () {
+                    _closeSearch();
+                    _showMergeExistingImagesDialog();
+                  },
                 ),
                 IconButton(
                   icon: Badge(
@@ -2728,12 +2845,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     child: const Icon(Icons.delete_outline),
                   ),
                   tooltip: _tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
-                  onPressed: _showTrashBinDialog,
+                  onPressed: () {
+                    _closeSearch();
+                    _showTrashBinDialog();
+                  },
                 ),
                 IconButton(
                   icon: const Icon(Icons.settings_outlined),
                   tooltip: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
-                  onPressed: _showGlobalSettingsDialog,
+                  onPressed: () {
+                    _closeSearch();
+                    _showGlobalSettingsDialog();
+                  },
                 ),
               ],
             ),
@@ -2746,7 +2869,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             ),
             const Divider(height: 1),
             Expanded(
-              child: filteredBooks.isEmpty
+              child: filteredBooks.isEmpty && _searchOpen
+                  // 검색 중: 검색어가 없으면 아무것도, 찾은 파일이 없으면 짧게 알림
+                  ? (query.isEmpty
+                      ? const SizedBox.shrink()
+                      : Center(
+                          child: Text(
+                            _tr('찾은 파일이 없습니다', 'No matching files', '没有找到文件', '該当するファイルがありません'),
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          ),
+                        ))
+                  : filteredBooks.isEmpty
                   ? Center(
                       child: Padding(
                         padding: const EdgeInsets.all(24.0),
@@ -2950,39 +3083,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             trailing: _isSelectionMode
                                 ? null
                                 // 가로 점 3개: 이름 변경 / 그룹 이동 (표지형 세로 점 3개 메뉴와 같은 모양)
-                                : PopupMenuButton<String>(
-                                    icon: const Icon(Icons.more_horiz),
-                                    tooltip: _tr('메뉴', 'More', '更多', 'メニュー'),
-                                    constraints: const BoxConstraints(minWidth: 125),
-                                    onSelected: (action) {
-                                      if (action == 'rename') {
-                                        _renameFileDialog(file);
-                                      } else if (action == 'move_group') {
-                                        _assignGroupDialog(file);
-                                      }
-                                    },
-                                    itemBuilder: (ctx) => [
-                                      PopupMenuItem<String>(
-                                        value: 'rename',
-                                        child: Row(
-                                          children: [
-                                            const Icon(Icons.edit_outlined, size: 18),
-                                            const SizedBox(width: 8),
-                                            Text(_tr('이름 변경', 'Rename', '重命名', '名前変更')),
-                                          ],
-                                        ),
-                                      ),
-                                      PopupMenuItem<String>(
-                                        value: 'move_group',
-                                        child: Row(
-                                          children: [
-                                            const Icon(Icons.drive_file_move_outline, size: 18),
-                                            const SizedBox(width: 8),
-                                            Text(_tr('그룹 이동', 'Move Group', '移动分组', 'グループ移動')),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
+                                // 가로 점 3개: 그룹 목록처럼 아이콘에서 커져 나오는 메뉴
+                                : Builder(
+                                    builder: (btnCtx) => IconButton(
+                                      icon: const Icon(Icons.more_horiz),
+                                      tooltip: _tr('메뉴', 'More', '更多', 'メニュー'),
+                                      onPressed: () => _showFileMenu(btnCtx, file),
+                                    ),
                                   ),
                             onLongPress: () {
                               if (_activeBookshelfPointers.length >= 2) return;
@@ -3083,7 +3190,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             )
           : FloatingActionButton.extended(
               heroTag: 'fab_add_files',
-              onPressed: _pickAndImportFiles,
+              onPressed: () {
+                _closeSearch();
+                _pickAndImportFiles();
+              },
               icon: const Icon(Icons.add),
               label: Text(_tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加')),
             ),

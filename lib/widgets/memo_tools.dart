@@ -672,3 +672,72 @@ class _EraserIconPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _EraserIconPainter old) => old.color != color;
 }
+
+/// 펜 도구 아이콘: 깃털 펜 + 잉크병 (잉크병 안 색 = 지금 펜 색)
+/// 잉크병은 왼쪽 위, 깃털 펜은 왼쪽 아래(펜촉)에서 오른쪽 위로 비스듬히.
+class QuillInkIcon extends StatelessWidget {
+  const QuillInkIcon({super.key, required this.color, required this.ink, this.size = 24});
+
+  /// 펜·병 테두리 색 (선택되면 노랑)
+  final Color color;
+
+  /// 잉크(펜) 색
+  final Color ink;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(dimension: size, child: CustomPaint(painter: _QuillInkPainter(color, ink)));
+}
+
+class _QuillInkPainter extends CustomPainter {
+  _QuillInkPainter(this.color, this.ink);
+
+  final Color color;
+  final Color ink;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double u = size.width / 24.0;
+    canvas.save();
+    canvas.scale(u);
+    // ── 깃털 펜: 펜촉(왼쪽 아래) → 깃 끝(오른쪽 위). 잉크병과 살짝 띄우려고 오른쪽 아래로 조금 옮김
+    canvas.save();
+    canvas.translate(1.2, 0.8);
+    final feather = Path()
+      ..moveTo(9.0, 17.5)
+      ..cubicTo(9.5, 11.5, 14.5, 5.0, 22.0, 2.6)
+      ..cubicTo(21.0, 9.5, 16.5, 15.5, 10.4, 18.6)
+      ..close();
+    canvas.drawPath(feather, Paint()..color = color);
+    // 깃털 가운데 줄기(살짝 어둡게)와 갈라진 결
+    final shaft = Paint()
+      ..color = Colors.black.withValues(alpha: 0.45)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.9
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(9.8, 18.0), const Offset(19.6, 5.4), shaft);
+    canvas.drawLine(const Offset(15.4, 12.6), const Offset(17.6, 12.4), shaft);
+    canvas.drawLine(const Offset(13.2, 10.6), const Offset(14.0, 8.4), shaft);
+    // 깃대와 펜촉
+    final quill = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.7
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(5.2, 22.0), const Offset(10.0, 17.6), quill);
+    canvas.restore();
+    // ── 잉크병 (왼쪽 위): 병목 + 둥근 몸통, 몸통 안은 잉크 색
+    final body = RRect.fromRectAndRadius(const Rect.fromLTWH(0.6, 4.8, 8.8, 7.0), const Radius.circular(2.2));
+    canvas.drawRRect(body, Paint()..color = ink);
+    final outline = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
+    canvas.drawRRect(body, outline);
+    canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(3.0, 1.6, 4.0, 3.2), const Radius.circular(0.9)), Paint()..color = color);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_QuillInkPainter old) => old.color != color || old.ink != ink;
+}

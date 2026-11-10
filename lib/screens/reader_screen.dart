@@ -10,6 +10,7 @@ import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
 import '../services/txt_page_document.dart';
+import '../services/toc_page_parser.dart';
 import '../services/page_snapshot_service.dart';
 import '../services/epub_validation.dart';
 import '../widgets/hwp_viewer.dart';
@@ -619,7 +620,23 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   Future<void> _loadDocumentOutline(int pageCount) async {
     if (!mounted || _isTxt) return;
-    final items = await _hwpController.outline();
+    // 1) 파일 안에 '목차'라고 적힌 쪽이 있으면 그 항목들만 쓴다 (워드·한글)
+    List<Map<String, Object?>> items = const [];
+    if (!_isPresentation) {
+      final head = await _hwpController.pageText(0, math.min(pageCount, TocPageParser.searchPages));
+      if (!mounted) return;
+      if (TocPageParser.parse(head, pageCount) != null) {
+        // 제목이 실제로 나오는 쪽을 찾으려고 뒤쪽 글까지 읽음 (아주 긴 문서는 앞 400쪽까지만)
+        final all = await _hwpController.pageText(0, math.min(pageCount, 400));
+        if (!mounted) return;
+        items = [
+          for (final e in TocPageParser.parse(all.isEmpty ? head : all, pageCount) ?? const <Map<String, Object>>[])
+            {'title': e['title'], 'level': e['level'], 'page': e['page'], 'slide': false},
+        ];
+      }
+    }
+    // 2) 없으면 제목 스타일(개요) → 3) 글자 크기·굵기로 찾은 제목 (PPT는 슬라이드 제목)
+    if (items.isEmpty) items = await _hwpController.outline();
     if (!mounted || items.isEmpty || _docPageCount != pageCount) return;
     final chapters = <EpubChapter>[];
     final levels = <int>[];
@@ -963,17 +980,18 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   List<Widget> _memoToolItems() {
     return [
       MemoToolButton(
-        icon: Icons.touch_app,
+        // 손 아이콘은 칸 안에서 아래로 치우쳐 보여 펜 아이콘과 높이를 맞춤
+        iconBuilder: (c) => Transform.translate(offset: const Offset(0, -1.5), child: Icon(Icons.touch_app, color: c, size: 18)),
         label: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
         active: _allowFingerDrawing,
         onTap: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
       ),
       // 펜: 누르면 펜 선택, 선택된 상태에서 한 번 더 누르면 선 굵기·색상 설정 창
       MemoToolButton(
-        icon: Icons.edit,
+        // 깃털 펜 + 잉크병 (잉크병 안 색 = 지금 펜 색)
+        iconBuilder: (c) => QuillInkIcon(color: c, ink: _penColor, size: 22),
         label: _tr('펜 (한 번 더 누르면 굵기·색상)', 'Pen (tap again: size & color)', '笔 (再点一次: 粗细·颜色)', 'ペン (もう一度タップ: 太さ・色)'),
         active: !_isEraserMode,
-        dotColor: _penColor,
         onTap: () => setState(() => _isEraserMode = false),
         onReselect: (_) => _openPenSettings(),
       ),

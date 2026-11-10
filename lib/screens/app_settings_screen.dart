@@ -73,7 +73,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ChoiceOption('dark', _themeLabel('dark'), icon: Icons.dark_mode_outlined),
       ],
       current: _themeMode,
-      confirmLabel: _t('확인', 'OK', '确定', 'OK'),
     );
     if (v == null || !mounted) return;
     setState(() => _themeMode = v);
@@ -86,7 +85,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       title: _t('언어', 'Language', '语言', '言語'),
       options: [for (final code in LanguageSelectScreen.options) ChoiceOption(code, languageOptionLabel(code))],
       current: _langSetting,
-      confirmLabel: _t('확인', 'OK', '确定', 'OK'),
     );
     if (v == null || !mounted) return;
     widget.onChangeLanguage(v);
@@ -96,9 +94,9 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     });
   }
 
-  /// 파일 표시 방식(표지형/목록형) + 파일 이름 뒤 형식 숨기기
+  /// 파일 표시 방식(표지형/목록형) + 파일 이름 뒤 형식 숨기기 — 누르면 바로 적용
   Future<void> _pickViewMode() async {
-    final r = await showChoiceSheetWithToggle<String>(
+    await showChoiceSheetWithToggle<String>(
       context: context,
       title: _t('파일 표시 방식', 'Bookshelf View Mode', '文件显示样式', 'ファイル表示形式'),
       options: [
@@ -110,16 +108,18 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       toggleLabel: _t('파일 이름 뒤 형식 숨기기', 'Hide file extension', '隐藏文件扩展名', 'ファイル名の形式を隠す'),
       toggleSubtitle: _t('.pdf, .epub 등', '.pdf, .epub, etc.', '.pdf、.epub 等', '.pdf、.epub など'),
       toggleValue: _hideExt,
-      confirmLabel: _t('확인', 'OK', '确定', 'OK'),
+      onChanged: (r) async {
+        final (mode, hide) = r;
+        if (!mounted) return;
+        final bool modeChanged = mode != _viewMode, hideChanged = hide != _hideExt;
+        setState(() {
+          _viewMode = mode;
+          _hideExt = hide;
+        });
+        if (modeChanged) await widget.onChangeViewMode(mode);
+        if (hideChanged) await widget.onChangeHideExtension(hide);
+      },
     );
-    if (r == null || !mounted) return;
-    final (mode, hide) = r;
-    setState(() {
-      _viewMode = mode;
-      _hideExt = hide;
-    });
-    await widget.onChangeViewMode(mode);
-    await widget.onChangeHideExtension(hide);
   }
 
   Widget _section(String text) {

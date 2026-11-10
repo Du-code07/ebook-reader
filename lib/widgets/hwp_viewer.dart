@@ -31,6 +31,13 @@ class HwpReaderController {
   Future<void> showSearchResult(int index) async => _query?.call('showSearchResult', [index]);
   Future<void> clearSearch() async => _query?.call('clearSearch', []);
 
+  /// 쪽마다의 글 [from, to) — '목차' 쪽 찾기용 (지원하지 않으면 빈 목록)
+  Future<List<String>> pageText(int from, int to) async {
+    final result = await _query?.call('pageText', [from, to]);
+    if (result is! List) return const [];
+    return [for (final t in result) (t ?? '').toString()];
+  }
+
   /// 목차: 파일의 제목(개요)들. 각 항목 {title, level, page(0부터), slide?}. 못 찾으면 빈 목록
   Future<List<Map<String, Object?>>> outline() async {
     final result = await _query?.call('outline', []);
