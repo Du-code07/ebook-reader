@@ -202,7 +202,20 @@ async function paint() {
     clearFrames(); host.appendChild(fragment); paintedRevision = revision; paintedPage = requestedPage;
     step = actualStep; stepCount = totalSteps; paintedStep = actualStep;
     reportLocation();
+    emit('pageReady', { page: requestedPage });
   }
+}
+// Thumbnail source: the painted canvas itself (WebView screenshots can miss GPU canvases).
+function thumbnail(maxWidth = 800) {
+  const canvas = host.querySelector('section.slide canvas');
+  if (!canvas || !canvas.width || !canvas.height) return null;
+  const scale = Math.min(1, maxWidth / canvas.width);
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(canvas.width * scale)); out.height = Math.max(1, Math.round(canvas.height * scale));
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(canvas, 0, 0, out.width, out.height);
+  try { return out.toDataURL('image/jpeg', .85).split(',')[1] || null; } catch { return null; } finally { out.width = 0; out.height = 0; }
 }
 function requestPaint() {
   paintRevision++;
@@ -287,7 +300,7 @@ const observer = new ResizeObserver(() => {
 });
 observer.observe(host);
 host.addEventListener('click', event => { if (event.target.closest('a')) event.preventDefault(); });
-window.freaderPpt = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
+window.freaderPpt = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, thumbnail, destroy,
   getState: () => ({ ready: !disposed, loaded, page, count: presentation?.slideCount || 0, step, stepCount, received, awaitingPassword, spread: options.spread, format: options.format, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 emit('ready', { version: '0.89.8' });
