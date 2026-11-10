@@ -749,7 +749,8 @@ function renderBook(data, opts, loadToken) {
 
       // Set up a periodic check to ensure all frames are being polled
       // (in case frames are added/removed dynamically)
-      setInterval(function () {
+      // FReader(배터리): 안드로이드는 선택 이벤트가 정상 동작하므로 2초마다 감시를 다시 켜는 이 타이머는 iOS에서만
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent || '')) setInterval(function () {
         try {
           var currentContents = rendition.getContents();
           currentContents.forEach(function (cont, index) {
@@ -2160,7 +2161,10 @@ function locationPayload(location) {
     // Screen pages within the current chapter (paginated flow only).
     chapterPage: isScrolledFlow() ? null : displayedPage.page || null,
     chapterTotalPages: isScrolledFlow() ? null : displayedPage.total || null,
-    printedPage: printedPageFromCfi(location.start.cfi)
+    printedPage: printedPageFromCfi(location.start.cfi),
+    // First/last screen of the whole book (lets the app skip turns that cannot happen).
+    atStart: !!location.atStart,
+    atEnd: !!location.atEnd
   };
   return Promise.all([
     cfiToXPath(location.start.cfi),

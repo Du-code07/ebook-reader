@@ -95,12 +95,13 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     // 예전처럼 0.75초마다 계속 확인하는 반복 작업은 배터리를 소모하므로, 상태표시줄이 나타날 때(창 인셋 변경)만 처리
     private var isActivityResumed = false
     private val reHideStatusBarRunnable = Runnable {
-        if (isActivityResumed && isStatusBarCurrentlyVisible()) hideSystemStatusBar()
+        if (isActivityResumed && isStatusBarCurrentlyVisible()) hideSystemStatusBar(alsoHideNavBar = true)
     }
 
+    // 상태표시줄을 내리면 시계·배터리를 볼 수 있도록 잠시 두었다가 다시 숨김
     private fun scheduleStatusBarReHide() {
         mainHandler.removeCallbacks(reHideStatusBarRunnable)
-        mainHandler.postDelayed(reHideStatusBarRunnable, 1500L)
+        mainHandler.postDelayed(reHideStatusBarRunnable, 2500L)
     }
 
     // 흔들기(화면 잠금 해제)용 가속도 센서는 뷰어에서 '화면 잠금'이 켜져 있을 때만 켠다
@@ -110,7 +111,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val rootInsets = window?.decorView?.rootWindowInsets
-                rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true
+                rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true ||
+                    rootInsets?.isVisible(WindowInsets.Type.navigationBars()) == true
             } else {
                 @Suppress("DEPRECATION")
                 (window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0
@@ -141,8 +143,14 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
                 window.insetsController?.let { controller ->
-                    controller.systemBarsBehavior =
-                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    // 밀어서 잠깐 보이는(transient) 방식은 앱에 상태표시줄이 보인다는 사실을 알려 주지 않아
+                    // 상단바를 내릴 수 없다 → 밀면 실제로 보이게 하고(앱이 높이를 받음) 잠시 뒤 앱이 다시 숨긴다
+                    controller.systemBarsBehavior = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        WindowInsetsController.BEHAVIOR_DEFAULT
+                    } else {
+                        @Suppress("DEPRECATION")
+                        WindowInsetsController.BEHAVIOR_SHOW_BARS_BY_SWIPE
+                    }
                     // 중요: 태블릿 OneUI에서 navigationBars()와 statusBars()를 묶어서 호출하면 태스크바 때문에 상태표시줄 숨김 애니메이션이 취소되므로 반드시 분리!
                     controller.hide(WindowInsets.Type.statusBars())
                     if (alsoHideNavBar) {
@@ -183,21 +191,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 600L)
 
         window.decorView.setOnApplyWindowInsetsListener { v, insets ->
-            val statusBarVisible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                insets.isVisible(WindowInsets.Type.statusBars())
-            } else {
-                @Suppress("DEPRECATION")
-                insets.systemWindowInsetTop > 0
-            }
-            if (statusBarVisible && isActivityResumed) {
-                scheduleStatusBarReHide()
-            }
-            // 상태표시줄이 화면 위에 겹쳐 보이는 동안 그 높이를 앱에 알려 상단바를 내리게 한다
-            val barTop = if (!statusBarVisible) 0 else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
-            } else {
-                @Suppress("DEPRECATION")
-                insets.systemWindowInsetTop
+            // 안드로이드 10 이하는 예전 방식 그대로 (높이 알림 없음)
+            var barTop = 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val statusBarVisible = insets.isVisible(WindowInsets.Type.statusBars())
+                if ((statusBarVisible || insets.isVisible(WindowInsets.Type.navigationBars())) && isActivityResumed) {
+                    scheduleStatusBarReHide()
+                }
+                // 상태표시줄이 화면 위에 보이는 동안 그 높이를 앱에 알려 상단바를 내리게 한다
+                if (statusBarVisible) barTop = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
             }
             if (barTop != lastReportedStatusBarTop) {
                 lastReportedStatusBarTop = barTop
