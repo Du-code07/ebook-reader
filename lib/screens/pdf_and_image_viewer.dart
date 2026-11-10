@@ -595,6 +595,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         final savedPage = int.tryParse(savedPos) ?? 0;
         _currentPage = savedPage.clamp(0, _totalPages - 1).toInt();
       }
+      // 파일 목록에 보여 줄 '지금 쪽/전체 쪽' (열기만 하고 넘기지 않아도 남김)
+      unawaited(StorageService.savePageLabel(_bookKey, '${_currentPage + 1}/$_totalPages'));
 
       _pageController = PageController(initialPage: _currentPage);
 
@@ -795,6 +797,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     StorageService.saveLastPosition(_bookKey, page.toString());
     if (_totalPages > 0) {
       StorageService.saveProgress(_bookKey, (page + 1) / _totalPages);
+      StorageService.savePageLabel(_bookKey, '${page + 1}/$_totalPages');
     }
 
     final ctrl = _pageController;
@@ -879,27 +882,24 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         active: _allowFingerDrawing,
         onTap: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
       ),
-      // 펜: 누르면 펜 선택, 꾹 누르면 선 굵기·색상 설정 창
+      // 펜: 누르면 펜 선택, 선택된 상태에서 한 번 더 누르면 선 굵기·색상 설정 창
       MemoToolButton(
         icon: Icons.edit,
-        label: _tr('펜 (꾹 누르면 굵기·색상)', 'Pen (long-press: size & color)', '笔 (长按: 粗细·颜色)', 'ペン (長押し: 太さ・色)'),
+        label: _tr('펜 (한 번 더 누르면 굵기·색상)', 'Pen (tap again: size & color)', '笔 (再点一次: 粗细·颜色)', 'ペン (もう一度タップ: 太さ・色)'),
         active: !_isEraserMode,
         dotColor: _penColor,
         onTap: () => setState(() => _isEraserMode = false),
-        onLongPress: (_) {
-          setState(() => _isEraserMode = false);
-          _openPenSettings();
-        },
+        onReselect: (_) => _openPenSettings(),
       ),
-      // 지우개: 누르면 켜고 끄기, 꾹 누르면 획/영역 지우개 선택
+      // 지우개: 누르면 지우개 선택, 선택된 상태에서 한 번 더 누르면 획/영역 지우개 선택
       MemoToolButton(
         iconBuilder: (c) => EraserIcon(color: c),
         label: _eraserType == 'stroke'
-            ? _tr('획 지우개 (꾹 누르면 종류 선택)', 'Stroke Eraser (long-press: type)', '笔画橡皮擦 (长按: 类型)', 'ストローク消しゴム (長押し: 種類)')
-            : _tr('영역 지우개 (꾹 누르면 종류 선택)', 'Area Eraser (long-press: type)', '区域橡皮擦 (长按: 类型)', '部分消しゴム (長押し: 種類)'),
+            ? _tr('획 지우개 (한 번 더 누르면 종류 선택)', 'Stroke Eraser (tap again: type)', '笔画橡皮擦 (再点一次: 类型)', 'ストローク消しゴム (もう一度タップ: 種類)')
+            : _tr('영역 지우개 (한 번 더 누르면 종류 선택)', 'Area Eraser (tap again: type)', '区域橡皮擦 (再点一次: 类型)', '部分消しゴム (もう一度タップ: 種類)'),
         active: _isEraserMode,
-        onTap: () => setState(() => _isEraserMode = !_isEraserMode),
-        onLongPress: _chooseEraserType,
+        onTap: () => setState(() => _isEraserMode = true),
+        onReselect: _chooseEraserType,
       ),
       // 되돌리기 / 다시 실행
       MemoToolButton(
@@ -1304,6 +1304,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      // 화면의 2/3까지만 가림 (나머지는 스크롤)
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 2 / 3),
       enableDrag: false,
       transitionAnimationController: sheetCtrl,
       builder: (ctx) => SheetPullToClose(
@@ -2413,6 +2415,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     if (actualPage + 1 < _totalPages) _ensurePageDimensionLoaded(actualPage + 1);
                     StorageService.saveLastPosition(_bookKey, actualPage.toString());
                     StorageService.saveProgress(_bookKey, (actualPage + 1) / _totalPages);
+                    StorageService.savePageLabel(_bookKey, '${actualPage + 1}/$_totalPages');
                   },
                   itemBuilder: (context, viewIdx) {
                     final Widget pageChild = _buildViewPageContent(viewIdx, isSpread);

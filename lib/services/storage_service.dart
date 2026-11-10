@@ -107,6 +107,17 @@ class StorageService {
     return prefs.getDouble('prog_$bookPath') ?? 0.0;
   }
 
+  // 마지막으로 읽은 쪽 '지금/전체' (예: 6/983) — 파일 목록에 표시
+  static Future<void> savePageLabel(String bookPath, String label) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('pagelbl_$bookPath', label);
+  }
+
+  static Future<String?> getPageLabel(String bookPath) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('pagelbl_$bookPath');
+  }
+
   // 앱 테마: 'system'(기본 시스템, 휴대폰 설정 따라감) / 'light' / 'dark'
   // (예전 버전의 다크 모드 켜기/끄기 값이 있으면 그대로 이어서 쓴다)
   static Future<void> setAppThemeMode(String mode) async {
@@ -501,7 +512,7 @@ class StorageService {
       await prefs.setBool('reading_dir_rtl_v26_$newNorm', oldRtl);
       await prefs.remove('reading_dir_rtl_v26_$oldNorm');
     }
-    for (final prefix in ['pos_', 'prev_pos_', 'prog_', 'grp_']) {
+    for (final prefix in ['pos_', 'prev_pos_', 'prog_', 'pagelbl_', 'grp_']) {
       final val = prefs.get('$prefix$oldPath');
       if (val != null) {
         if (val is String) await prefs.setString('$prefix$newPath', val);
@@ -546,6 +557,7 @@ class StorageService {
     await prefs.remove('pos_$bookPath');
     await prefs.remove('prev_pos_$bookPath');
     await prefs.remove('prog_$bookPath');
+    await prefs.remove('pagelbl_$bookPath');
     await prefs.remove('bm_$bookPath');
     await prefs.remove('grp_$bookPath');
     final favs = (prefs.getStringList('favorite_book_paths') ?? []).toSet();

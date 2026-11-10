@@ -77,7 +77,7 @@ class MemoToolButton extends StatelessWidget {
     this.iconBuilder,
     required this.label,
     this.onTap,
-    this.onLongPress,
+    this.onReselect,
     this.active = false,
     this.enabled = true,
     this.dotColor,
@@ -91,8 +91,8 @@ class MemoToolButton extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
 
-  /// 꾹 눌렀을 때 (버튼 위치를 기준으로 메뉴를 띄울 수 있도록 context 전달)
-  final void Function(BuildContext buttonContext)? onLongPress;
+  /// 이미 선택된(active) 상태에서 한 번 더 눌렀을 때 (버튼 위치를 기준으로 메뉴를 띄울 수 있도록 context 전달)
+  final void Function(BuildContext buttonContext)? onReselect;
   final bool active;
   final bool enabled;
 
@@ -110,8 +110,15 @@ class MemoToolButton extends StatelessWidget {
       label: label,
       child: InkResponse(
         radius: 20,
-        onTap: enabled ? onTap : null,
-        onLongPress: (enabled && onLongPress != null) ? () => onLongPress!(context) : null,
+        onTap: !enabled
+            ? null
+            : () {
+                if (active && onReselect != null) {
+                  onReselect!(context);
+                } else {
+                  onTap?.call();
+                }
+              },
         child: SizedBox(
           width: kMemoToolExtent,
           height: kMemoToolExtent,

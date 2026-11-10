@@ -12,6 +12,7 @@ import 'screens/language_select_screen.dart';
 import 'screens/app_settings_screen.dart';
 import 'widgets/sheet_pull_to_close.dart';
 import 'widgets/file_type_icon.dart';
+import 'widgets/favorite_ribbon.dart';
 import 'services/storage_service.dart';
 import 'services/doc_thumbnail_service.dart';
 import 'services/system_ui_service.dart';
@@ -155,7 +156,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
           opacity: _rotationFadeAnim,
           child: ScaleTransition(
             scale: _rotationScaleAnim,
-            child: content,
+            // 아이콘을 꾹 누르거나 S펜을 가까이 대면 뜨던 이름 말풍선을 모두 끔 (화면 낭독용 이름은 그대로)
+            child: TooltipVisibility(visible: false, child: content),
           ),
         );
       },
@@ -313,8 +315,6 @@ class UserManualScreen extends StatelessWidget {
                         child: const Icon(Icons.add, size: 16, color: Colors.amber),
                       ),
                       const Spacer(),
-                      const Icon(Icons.star_rounded, color: Colors.amber, size: 20),
-                      const SizedBox(width: 10),
                       const Icon(Icons.edit_outlined, color: Colors.white70, size: 19),
                       const SizedBox(width: 10),
                       const Icon(Icons.drive_file_move_outline, color: Colors.white70, size: 19),
@@ -355,9 +355,13 @@ class UserManualScreen extends StatelessWidget {
               desc: _tr('그룹 네모칸 맨 오른쪽의 [+] 아이콘을 눌러 새 그룹을 추가합니다. (기존 그룹 길게 누르기: 삭제)', 'Tap [+] at the right end of the group bar to add a group (long-press a group to delete).', '点击分组栏最右侧的 [+] 新建分组（长按分组可删除）。', 'グループバー右端の[+]で新規グループを追加します(長押しで削除)。'),
             ),
             _buildIconGuideRow(
-              iconWidget: const Icon(Icons.star_rounded, color: Colors.amber, size: 24),
-              title: _tr('즐겨찾기 (별 아이콘)', 'Favorite (Star Icon)', '收藏 (星标)', 'お気に入り (星アイコン)'),
-              desc: _tr('누르면 노란색 별(★)로 바뀌며 해당 그룹의 가장 상단에 위치합니다.', 'Turns yellow (★) and pins the file to the very top of its group.', '点击变为黄色星标(★)，并将文件置顶于当前分组最上方。', '黄色い星(★)になり、そのグループの最上部に固定されます。'),
+              iconWidget: const SizedBox(
+                width: 24,
+                height: 24,
+                child: ClipRect(child: FavoriteRibbon(active: true, width: 12, height: 18, isDark: true)),
+              ),
+              title: _tr('즐겨찾기 (책갈피)', 'Favorite (Bookmark)', '收藏 (书签)', 'お気に入り (しおり)'),
+              desc: _tr('파일 왼쪽 위의 책갈피를 누르거나, 목록형에서 파일을 오른쪽으로 밀면 책갈피가 노랗게 내려오며 해당 그룹의 가장 상단에 위치합니다. 한 번 더 누르거나 밀면 해제됩니다.', 'Tap the bookmark at the top-left of a file, or swipe a file right in list view: the bookmark drops down in yellow and the file is pinned to the top of its group. Tap or swipe again to remove.', '点击文件左上角的书签，或在列表视图中向右滑动文件：书签变黄落下并置顶于当前分组。再次点击或滑动即可取消。', 'ファイル左上のしおりをタップ、またはリスト表示でファイルを右へスワイプすると、しおりが黄色く下りてグループの最上部に固定されます。もう一度で解除します。'),
             ),
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.edit_outlined, color: Colors.white, size: 22),
@@ -569,7 +573,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   List<String> _groups = ['전체', 'PDF/문서'];
   String _selectedGroup = '전체';
   Map<String, String> _bookGroupMap = {};
-  Map<String, double> _bookProgressMap = {};
+  Map<String, String> _bookPageLabelMap = {}; // 마지막으로 읽은 쪽 '지금/전체'
   Set<String> _favoritePaths = {};
   bool _hideFileExtension = false;
   String _bookshelfViewMode = 'list'; // 기본값: 'list' (목록형)
@@ -803,11 +807,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
     final groups = await StorageService.getGroups();
     final grpMap = <String, String>{};
-    final progMap = <String, double>{};
+    final pageMap = <String, String>{};
 
     for (final f in files) {
       grpMap[f.path] = await StorageService.getBookGroup(f.path);
-      progMap[f.path] = await StorageService.getProgress(f.path);
+      final lbl = await StorageService.getPageLabel(f.path);
+      if (lbl != null) pageMap[f.path] = lbl;
     }
 
     // 디스크에 이미 생성되어 있는 썸네일 바이트(MemoryImage)를 setState 전에 동기식으로 즉시 메모리에 고정하여 스크롤 시 재로딩 원천 차단
@@ -874,7 +879,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           _selectedGroup = '전체';
         }
         _bookGroupMap = grpMap;
-        _bookProgressMap = progMap;
+        _bookPageLabelMap = pageMap;
         _selectedFilePaths.removeWhere((p) => !_allBooks.any((f) => f.path == p));
         if (_selectedFilePaths.isEmpty) {
           _isSelectionMode = false;
@@ -2186,12 +2191,30 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     disposeSheetControllerWhenDone(sheetCtrl);
   }
 
+  /// 즐겨찾기 켜기/끄기: 책갈피가 먼저 움직이고, 잠시 뒤 즐겨찾기 순서로 목록을 다시 정렬한다
+  Future<void> _toggleFavorite(File file) async {
+    final path = file.path;
+    setState(() {
+      _favoritePaths = Set<String>.of(_favoritePaths);
+      if (!_favoritePaths.remove(path)) _favoritePaths.add(path);
+    });
+    await StorageService.toggleFavoriteBook(path);
+    await Future<void>.delayed(const Duration(milliseconds: 380));
+    if (mounted) await _loadLibrary();
+  }
+
+  /// 파일 목록에 보여 줄 마지막으로 읽은 쪽 (예: {6/983}), 연 적 없으면 빈 문자열
+  String _pageLabelText(String path) {
+    final lbl = _bookPageLabelMap[path];
+    return lbl == null ? '' : '{$lbl}';
+  }
+
   /// 1, 3, 10, 11, 13. 표지형(썸네일) 그리드 카드:
   /// - 고화질 첫 페이지 썸네일 (FilterQuality.high)
   /// - 휴대폰 한 화면에 9개(3×3) 들어가는 크기
-  /// - 우측 상단 즐겨찾기 별 아이콘, 하단 점 3개(이름 변경 / 그룹 이동 / 휴지통 이동)
+  /// - 왼쪽 위 즐겨찾기 책갈피, 하단 점 3개(이름 변경 / 그룹 이동 / 휴지통 이동)
   /// - 진행바 및 진행률(%) 제거 (#11)
-  /// - 그룹 이름은 [전체] 탭에서만 표시하고 개별 그룹 탭에서는 숨김 (#10)
+  /// - 그룹 이름은 [전체] 탭에서만 표시하고 개별 그룹 탭에서는 숨김 (#10), 그 오른쪽(또는 그 자리)에 마지막으로 읽은 쪽 {지금/전체}
   Widget _buildGridBookCard(File file) {
     final rowKey = _fileRowKeys.putIfAbsent(file.path, () => GlobalKey());
     final rawFileName = file.path.split(Platform.pathSeparator).last;
@@ -2203,6 +2226,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final isFavorite = _favoritePaths.contains(file.path);
     final lowerExt = rawFileName.split('.').last.toLowerCase();
     final thumbNotifier = _getThumbNotifier(file.path);
+    final pageText = _pageLabelText(file.path);
 
 
     return RepaintBoundary(
@@ -2257,7 +2281,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 상단: 고화질 파일 첫 페이지 썸네일 영역 + 우측 상단 즐겨찾기 버튼
+                // 상단: 고화질 파일 첫 페이지 썸네일 영역 + 왼쪽 위 즐겨찾기 책갈피
                 Expanded(
                   child: Stack(
                     fit: StackFit.expand,
@@ -2340,30 +2364,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             ),
                           ),
                         ),
-                      // 우측 상단 즐겨찾기 버튼
-                      Positioned(
-                        top: 4,
-                        right: 4,
-                        child: Material(
-                          color: Colors.black45,
-                          shape: const CircleBorder(),
-                          child: InkWell(
-                            customBorder: const CircleBorder(),
-                            onTap: () async {
-                              await StorageService.toggleFavoriteBook(file.path);
-                              await _loadLibrary();
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.all(4.5),
-                              child: Icon(
-                                isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
-                                color: isFavorite ? Colors.amber : Colors.white,
-                                size: 18,
-                              ),
-                            ),
+                      // 왼쪽 위 끝에 걸친 즐겨찾기 책갈피
+                      if (!_isSelectionMode)
+                        Positioned(
+                          top: 0,
+                          left: 4, // 둥근 모서리를 피해 살짝 안쪽
+                          child: FavoriteRibbon(
+                            active: isFavorite,
+                            onImage: true,
+                            width: 13,
+                            height: 20,
+                            onTap: () => _toggleFavorite(file),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -2449,10 +2462,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             ),
                         ],
                       ),
-                      if (showGroupLabel) ...[
+                      ...[
                         const SizedBox(height: 1),
                         Text(
-                          '[$grpDisplay]',
+                          // 그룹 이름 오른쪽에 마지막으로 읽은 쪽 (특정 그룹 탭에서는 쪽만)
+                          showGroupLabel
+                              ? (pageText.isEmpty ? '[$grpDisplay]' : '[$grpDisplay]  •  $pageText')
+                              : pageText,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -2700,15 +2716,39 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         final rawFileName = file.path.split(Platform.pathSeparator).last;
                         final displayFileName = _formatDisplayFileName(rawFileName);
                         final grp = _bookGroupMap[file.path] ?? '미분류';
-                        final prog = (_bookProgressMap[file.path] ?? 0.0) * 100;
                         final isSelected = _selectedFilePaths.contains(file.path);
                         final isFavorite = _favoritePaths.contains(file.path);
                         final lowerExt = rawFileName.split('.').last.toLowerCase();
 
                         return Dismissible(
                           key: ValueKey(file.path),
-                          direction: _isSelectionMode ? DismissDirection.none : DismissDirection.endToStart,
+                          // 오른쪽으로 밀기: 즐겨찾기 켜기/끄기 (파일은 제자리로 돌아옴) / 왼쪽으로 밀기: 휴지통
+                          direction: _isSelectionMode ? DismissDirection.none : DismissDirection.horizontal,
+                          confirmDismiss: (direction) async {
+                            if (direction == DismissDirection.startToEnd) {
+                              unawaited(_toggleFavorite(file));
+                              return false;
+                            }
+                            return true;
+                          },
                           background: Container(
+                            color: Colors.amber.shade600,
+                            alignment: Alignment.centerLeft,
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: Row(
+                              children: [
+                                Icon(isFavorite ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined, color: Colors.white),
+                                const SizedBox(width: 6),
+                                Text(
+                                  isFavorite
+                                      ? _tr('즐겨찾기 해제', 'Remove Favorite', '取消收藏', 'お気に入り解除')
+                                      : _tr('즐겨찾기', 'Favorite', '收藏', 'お気に入り'),
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                          secondaryBackground: Container(
                             color: Colors.redAccent,
                             alignment: Alignment.centerRight,
                             padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -2724,7 +2764,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           onDismissed: (_) => _moveFileToTrash(file),
                           child: Container(
                             key: rowKey,
-                            child: ListTile(
+                            child: Stack(
+                            clipBehavior: Clip.hardEdge,
+                            children: [
+                            ListTile(
                             selected: isSelected,
                             leading: _isSelectionMode
                                 ? Checkbox(
@@ -2751,11 +2794,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             subtitle: Builder(
                               builder: (context) {
                                 final grpDisplay = _localizeGroupName(grp);
-                                final progLabel = _tr('진행률', 'Progress', '进度', '進行率');
+                                final pageText = _pageLabelText(file.path);
                                 // 10. [전체]에서만 그룹 이름 표시, 특정 그룹 선택 시 그룹 이름 표시 제거
+                                // 그룹 이름 오른쪽: 마지막으로 읽은 쪽 (예: {6/983})
                                 final subText = _selectedGroup == '전체'
-                                    ? '[$grpDisplay]  •  $progLabel ${prog.toStringAsFixed(1)}%'
-                                    : '$progLabel ${prog.toStringAsFixed(1)}%';
+                                    ? (pageText.isEmpty ? '[$grpDisplay]' : '[$grpDisplay]  •  $pageText')
+                                    : pageText;
                                 return Text(
                                   subText,
                                   style: const TextStyle(fontSize: 12),
@@ -2769,18 +2813,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                 : Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      IconButton(
-                                        visualDensity: VisualDensity.compact,
-                                        icon: Icon(
-                                          isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
-                                          color: isFavorite ? Colors.amber : null,
-                                        ),
-                                        tooltip: _tr('즐겨찾기', 'Favorite', '收藏', 'お気に入り'),
-                                        onPressed: () async {
-                                          await StorageService.toggleFavoriteBook(file.path);
-                                          await _loadLibrary();
-                                        },
-                                      ),
                                       IconButton(
                                         visualDensity: VisualDensity.compact,
                                         icon: const Icon(Icons.edit_outlined),
@@ -2827,6 +2859,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                 _openFile(file);
                               }
                             },
+                          ),
+                            // 왼쪽 위 끝에 걸친 즐겨찾기 책갈피
+                            if (!_isSelectionMode)
+                              Positioned(
+                                top: 0,
+                                left: 0,
+                                child: FavoriteRibbon(
+                                  active: isFavorite,
+                                  isDark: widget.isDarkMode,
+                                  onTap: () => _toggleFavorite(file),
+                                ),
+                              ),
+                            ],
                           ),
                           ),
                         );

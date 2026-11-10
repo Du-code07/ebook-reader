@@ -260,6 +260,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       ? 'hidden'
       : _progressBarPosSetting;
   bool _epubLocated = false; // EPUB 첫 위치 알림을 받았는지
+  bool _epubAtStart = false; // EPUB 책의 첫 화면인지
+  bool _epubAtEnd = false; // EPUB 책의 마지막 화면인지
   bool _epubSinglePage = false; // EPUB 전체가 한 화면(장 1개, 화면 1쪽)
   String _memoToolbarPos = 'bottom'; // 메모 도구모음 위치
   String _quickMenuSide = 'right'; // 도구 모음(활 메뉴) 위치
@@ -649,6 +651,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     });
     await StorageService.saveLastPosition(widget.filePath, position);
     await StorageService.saveProgress(widget.filePath, progress);
+    await StorageService.savePageLabel(widget.filePath, _progressPageLabel());
     final strokes = await StorageService.getEpubLocationStrokes(widget.filePath, position);
     if (mounted && relocation == _docRelocation) setState(() => _epubStrokes = strokes);
   }
@@ -924,27 +927,24 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         active: _allowFingerDrawing,
         onTap: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
       ),
-      // 펜: 누르면 펜 선택, 꾹 누르면 선 굵기·색상 설정 창
+      // 펜: 누르면 펜 선택, 선택된 상태에서 한 번 더 누르면 선 굵기·색상 설정 창
       MemoToolButton(
         icon: Icons.edit,
-        label: _tr('펜 (꾹 누르면 굵기·색상)', 'Pen (long-press: size & color)', '笔 (长按: 粗细·颜色)', 'ペン (長押し: 太さ・色)'),
+        label: _tr('펜 (한 번 더 누르면 굵기·색상)', 'Pen (tap again: size & color)', '笔 (再点一次: 粗细·颜色)', 'ペン (もう一度タップ: 太さ・色)'),
         active: !_isEraserMode,
         dotColor: _penColor,
         onTap: () => setState(() => _isEraserMode = false),
-        onLongPress: (_) {
-          setState(() => _isEraserMode = false);
-          _openPenSettings();
-        },
+        onReselect: (_) => _openPenSettings(),
       ),
-      // 지우개: 누르면 켜고 끄기, 꾹 누르면 획/영역 지우개 선택
+      // 지우개: 누르면 지우개 선택, 선택된 상태에서 한 번 더 누르면 획/영역 지우개 선택
       MemoToolButton(
         iconBuilder: (c) => EraserIcon(color: c),
         label: _eraserType == 'stroke'
-            ? _tr('획 지우개 (꾹 누르면 종류 선택)', 'Stroke Eraser (long-press: type)', '笔画橡皮擦 (长按: 类型)', 'ストローク消しゴム (長押し: 種類)')
-            : _tr('영역 지우개 (꾹 누르면 종류 선택)', 'Area Eraser (long-press: type)', '区域橡皮擦 (长按: 类型)', '部分消しゴム (長押し: 種類)'),
+            ? _tr('획 지우개 (한 번 더 누르면 종류 선택)', 'Stroke Eraser (tap again: type)', '笔画橡皮擦 (再点一次: 类型)', 'ストローク消しゴム (もう一度タップ: 種類)')
+            : _tr('영역 지우개 (한 번 더 누르면 종류 선택)', 'Area Eraser (tap again: type)', '区域橡皮擦 (再点一次: 类型)', '部分消しゴム (もう一度タップ: 種類)'),
         active: _isEraserMode,
-        onTap: () => setState(() => _isEraserMode = !_isEraserMode),
-        onLongPress: _chooseEraserType,
+        onTap: () => setState(() => _isEraserMode = true),
+        onReselect: _chooseEraserType,
       ),
       // 되돌리기 / 다시 실행
       MemoToolButton(
@@ -1410,6 +1410,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      // 화면의 2/3까지만 가림 (나머지는 스크롤)
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 2 / 3),
       enableDrag: false,
       transitionAnimationController: sheetCtrl,
       builder: (ctx) => SheetPullToClose(
@@ -1942,6 +1944,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   int _vPeekWanted = 0;
   bool _vPeekActive = false; // 미리 보기 작업이 끝나지 않음 (손을 뗀 뒤 정리까지)
   int _vBasePage = 0; // 밀기 시작할 때의 쪽 (문서)
+  bool _vBaseAtStart = false, _vBaseAtEnd = false; // 밀기 시작할 때 EPUB 첫/마지막 화면이었는지
   String? _vBasePos; // 밀기 시작할 때의 위치
   Future<void> _vPeekChain = Future<void>.value();
   // 동작(손가락을 대고 뗄 때까지)마다 번호를 붙인다. 앞 동작의 넘김·정리가 끝나기 전에 다음 동작이
@@ -1965,6 +1968,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (_isPresentation) return dir > 0 || page > 0 || _posOrder(mine ? _vBasePos : _currentCfi) % 100000 > 0;
       return dir > 0 ? page < _docPageCount - 1 : page > 0;
     }
+    if (!_isOfflineDocument) {
+      // EPUB: 책의 마지막(첫) 화면에서는 더 넘길 곳이 없다
+      final bool mine = _vPeekActive && _vPeekOwner == _vGestureSeq;
+      return dir > 0 ? !(mine ? _vBaseAtEnd : _epubAtEnd) : !(mine ? _vBaseAtStart : _epubAtStart);
+    }
     return true;
   }
 
@@ -1975,6 +1983,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_vPreSnap != null) return;
     _vBasePage = _docPage;
     _vBasePos = _currentCfi;
+    _vBaseAtStart = _epubAtStart;
+    _vBaseAtEnd = _epubAtEnd;
     _vPreSnap = _vCaptureCurrent();
     _vPreSnapOwner = _vGestureSeq;
   }
@@ -1992,6 +2002,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (_vPreSnap == null || _vPreSnapOwner != _vGestureSeq) {
         _vBasePage = _docPage;
         _vBasePos = _currentCfi;
+        _vBaseAtStart = _epubAtStart;
+        _vBaseAtEnd = _epubAtEnd;
       }
       _vPeekActive = true;
       _vPeekOwner = _vGestureSeq;
@@ -2522,11 +2534,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 진행바에 표시할 '지금 쪽/전체 쪽' (페이지 이동 창·하단 정보 표시와 같은 계산)
-  String _progressPageLabel() {
+  String _progressPageLabel([double? progress]) {
     final int totalEstPages = _isOfflineDocument ? math.max(1, _docPageCount) : (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
     final int curEstPage = _isOfflineDocument
         ? (_docPage + 1).clamp(1, totalEstPages).toInt()
-        : ((_progress * totalEstPages).round()).clamp(1, totalEstPages).toInt();
+        : (((progress ?? _progress) * totalEstPages).round()).clamp(1, totalEstPages).toInt();
     return '$curEstPage/$totalEstPages';
   }
 
@@ -3149,11 +3161,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       }
                       _hasRestoredInitialPosition = true;
                       _currentCfi = value.startCfi;
+                      _epubAtStart = value.atStart;
+                      _epubAtEnd = value.atEnd;
                       final double clampedProg = value.progress.clamp(0.0, 1.0).toDouble();
                       final String newLocKey = _computeLocationKey(value.startCfi, clampedProg);
 
                       StorageService.saveLastPosition(widget.filePath, value.startCfi);
                       StorageService.saveProgress(widget.filePath, clampedProg);
+                      StorageService.savePageLabel(widget.filePath, _progressPageLabel(clampedProg));
 
                       // 3. 페이지 이동 시 해당 페이지(CFI)에 저장된 필기만 불러와서 표시!
                       final pageStrokes = await StorageService.getEpubLocationStrokes(

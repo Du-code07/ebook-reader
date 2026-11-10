@@ -67,7 +67,7 @@ class VerticalPageSwipe extends ChangeNotifier {
   }
 
   /// [enabled]: 지금 세로 밀기를 써도 되는 상황인지 (설정 켜짐, 확대 아님, 필기 중 아님 등)
-  /// [canTurn]: 해당 방향(+1 다음, -1 이전)으로 넘길 페이지가 있는지 (없으면 고무줄처럼 덜 움직임)
+  /// [canTurn]: 해당 방향(+1 다음, -1 이전)으로 넘길 페이지가 있는지 (없으면 움직이지 않음)
   void move(PointerMoveEvent e, {required bool enabled, required bool Function(int dir) canTurn}) {
     final start = _start;
     if (start == null || _multi || _busy) return;
@@ -95,7 +95,9 @@ class VerticalPageSwipe extends ChangeNotifier {
 
     if (_locked != true) return;
     final int dir = d.dy < 0 ? 1 : -1;
-    offset = canTurn(dir) ? d.dy : d.dy * 0.3;
+    // 넘길 페이지가 없는 쪽(마지막 장에서 위로, 첫 장에서 아래로)은 페이지를 움직이지 않는다
+    // (조금이라도 움직이면 아래의 빈 화면이 잠깐 드러남)
+    offset = canTurn(dir) ? d.dy : 0.0;
     notifyListeners();
   }
 
