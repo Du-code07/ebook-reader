@@ -642,7 +642,88 @@ function applySearchHighlights() {
   if (all.length) CSS.highlights.set('freader-search', new Highlight(...all));
   if (current.length) CSS.highlights.set('freader-search-current', new Highlight(...current));
 }
+// ── 목차: 파일에 개요(제목 스타일)가 있으면 그것만, 없으면 글자 크기·굵기로 제목을 찾는다 ──
+function guessOutline(blocks) {
+  const sizeKey = fs => Math.round(fs * 2) / 2;
+  const sizeChars = new Map();
+  for (const b of blocks) sizeChars.set(sizeKey(b.fs), (sizeChars.get(sizeKey(b.fs)) || 0) + b.chars);
+  let body = 0, most = -1;
+  for (const [size, chars] of sizeChars) if (chars > most) { most = chars; body = size; }
+  if (!body) return [];
+  const candidates = blocks.filter(b => !b.cell && b.text.length <= 80 && /\p{L}/u.test(b.text) &&
+    (b.fs >= body * 1.15 || (b.bold && b.fs >= body * 0.95 && b.text.length <= 50)));
+  // 제목이 너무 많으면(본문 대부분이 굵은 글씨 등) 제목으로 보지 않는다
+  if (!candidates.length || candidates.length > Math.max(40, blocks.length * 0.35)) return [];
+  // 쪽마다 되풀이되는 머리말은 뺀다
+  const repeats = new Map();
+  for (const c of candidates) repeats.set(c.text, (repeats.get(c.text) || 0) + 1);
+  const kept = candidates.filter(c => repeats.get(c.text) <= 2);
+  const sizes = [...new Set(kept.map(c => sizeKey(c.fs)))].sort((a, b) => b - a);
+  return kept.slice(0, 400).map(c => ({ title: c.text, level: Math.min(3, sizes.indexOf(sizeKey(c.fs)) + 1), page: c.page }));
+}
+/** 문단(글 덩어리)마다 글, 쪽, 가장 큰 글자 크기, 굵기 */
+function outlineBlocks() {
+  const pageOf = new Map(), blocks = [];
+  pages.forEach((entry, index) => {
+    if (!pageOf.has(entry.source)) pageOf.set(entry.source, []);
+    pageOf.get(entry.source)[entry.column] = index;
+  });
+  for (const [source, columns] of pageOf) {
+    const inner = source.querySelector('.freader-columns') || source.querySelector('.odr-page-inner');
+    if (!inner) continue;
+    const entry = pages[columns.find(i => i != null)];
+    const innerRect = inner.getBoundingClientRect();
+    const scale = inner.offsetWidth ? innerRect.width / inner.offsetWidth : 1;
+    const stride = (entry.columnStride || entry.bodyWidth || inner.offsetWidth) * (scale || 1);
+    for (const block of textBlocksOf(inner)) {
+      const text = block.text.replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      let fs = 0, chars = 0, bold = 0, column = 0;
+      for (const { node } of block.nodes) {
+        const n = node.data.trim().length;
+        if (!n) continue;
+        const cs = getComputedStyle(node.parentElement);
+        fs = Math.max(fs, parseFloat(cs.fontSize) || 0); chars += n;
+        if ((parseInt(cs.fontWeight, 10) || 400) >= 600) bold += n;
+      }
+      if (!chars) continue;
+      const range = document.createRange();
+      try { range.selectNodeContents(block.nodes[0].node); } catch (_) {}
+      const rect = [...range.getClientRects()].find(r => r.width > 0 || r.height > 0);
+      if (rect && stride > 0) column = Math.max(0, Math.floor((rect.left - innerRect.left + 0.5) / stride));
+      const page = columns[Math.min(column, columns.length - 1)] ?? columns.find(i => i != null);
+      if (page == null) continue;
+      blocks.push({ text, page, fs, chars, bold: bold >= chars * 0.9, cell: !!block.key.closest?.('td, th') });
+    }
+  }
+  return blocks;
+}
+async function outline() {
+  if (!pages.length) return [];
+  const blocks = outlineBlocks();
+  // 파일의 제목 스타일(개요 수준) 문단: 앱이 파일에서 읽어 준 순서대로 쪽을 찾아 붙인다
+  const headings = options.docxLayout?.headings;
+  if (Array.isArray(headings) && headings.length) {
+    const norm = t => String(t || '').replace(/\s+/g, '').toLowerCase();
+    const result = [];
+    let cursor = 0;
+    for (const h of headings) {
+      const want = norm(h.text).slice(0, 60);
+      if (!want) continue;
+      for (let i = cursor; i < blocks.length; i++) {
+        const have = norm(blocks[i].text);
+        if (have === want || (want.length >= 4 && have.startsWith(want)) || (have.length >= 4 && want.startsWith(have))) {
+          result.push({ title: String(h.text).replace(/\s+/g, ' ').trim(), level: Math.max(1, Math.min(6, h.level || 1)), page: blocks[i].page });
+          cursor = i + 1;
+          break;
+        }
+      }
+    }
+    if (result.length) return result;
+  }
+  return guessOutline(blocks);
+}
 window.freaderDocx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
-  search, showSearchResult, clearSearch,
+  search, showSearchResult, clearSearch, outline,
   getState: () => ({ ready, page, count: pages.length, received, spread: options.spread, awaitingPassword, unavailableImages, imageCacheBytes, cachedImages: imageCache.size, visibleImages: activeImagePaths.size, maxBytes: MAX_BYTES, format: detectedFormat }) };
 window.addEventListener('pagehide', destroy, { once: true });
