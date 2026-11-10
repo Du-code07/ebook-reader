@@ -373,6 +373,34 @@ function applySearchHighlights() {
     });
   }
 }
+// ── 목차: 슬라이드마다 가장 큰 글자(같으면 가장 위)의 글 상자를 제목으로 본다 ──
+async function outline() {
+  if (!presentation) return [];
+  const out = [], current = generation;
+  for (let i = 0; i < presentation.slideCount; i++) {
+    let runs = [];
+    try { runs = await presentation.collectSlideRuns(i, 480); } catch (_) {}
+    if (current !== generation || disposed) return [];
+    if (!slideTextCache.has(i)) slideTextCache.set(i, runs.map(run => (typeof run?.text === 'string' ? run.text : '')).join(''));
+    const shapes = new Map();
+    for (const run of runs) {
+      if (run.origin && run.origin !== 'slide') continue; // 배경(마스터·레이아웃)의 글은 제외
+      const text = typeof run.text === 'string' ? run.text : '';
+      if (!text.trim()) continue;
+      const id = run.shapeId ?? '?';
+      let shape = shapes.get(id);
+      if (!shape) { shape = { fs: 0, y: run.shapeY ?? 0, parts: [], lineY: null }; shapes.set(id, shape); }
+      shape.fs = Math.max(shape.fs, run.fontSize || 0);
+      if (shape.lineY != null && Math.abs((run.inShapeY ?? 0) - shape.lineY) > 1) shape.parts.push(' ');
+      shape.parts.push(text); shape.lineY = run.inShapeY ?? 0;
+    }
+    let best = null;
+    for (const shape of shapes.values()) if (!best || shape.fs > best.fs + 0.5 || (Math.abs(shape.fs - best.fs) <= 0.5 && shape.y < best.y)) best = shape;
+    out.push({ title: best ? best.parts.join('').replace(/\s+/g, ' ').trim().slice(0, 80) : '', level: 1, page: i, slide: true });
+    if (i % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  return out;
+}
 function destroy() {
   disposed = true; generation++; paintRevision++; clearInterval(bridgeTimer); observer.disconnect();
   closePresentation(); wipe(incoming); incoming = null; received = 0; events = [];
@@ -383,7 +411,7 @@ const observer = new ResizeObserver(() => {
 observer.observe(host);
 host.addEventListener('click', event => { if (event.target.closest('a')) event.preventDefault(); });
 window.freaderPpt = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, thumbnail, destroy,
-  search, showSearchResult, clearSearch,
+  search, showSearchResult, clearSearch, outline,
   getState: () => ({ ready: !disposed, loaded, page, count: presentation?.slideCount || 0, step, stepCount, received, awaitingPassword, spread: options.spread, format: options.format, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 emit('ready', { version: '0.89.8' });
