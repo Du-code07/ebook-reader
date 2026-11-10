@@ -137,20 +137,37 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       builder: (context, child) {
         // 상태표시줄을 내려 화면 위에 보이는 동안에는 그 높이만큼 위쪽 여백을 늘려
         // 상단바(SafeArea를 쓰는 곳 모두)가 함께 내려와 겹치지 않게 한다
-        final content = ValueListenableBuilder<double>(
-          valueListenable: SystemUiService.statusBarTop,
-          child: child ?? const SizedBox.shrink(),
-          builder: (context, barTop, child) {
-            final mq = MediaQuery.of(context);
-            if (barTop <= mq.padding.top + 0.5) return child!;
-            return MediaQuery(
-              data: mq.copyWith(
-                padding: mq.padding.copyWith(top: barTop),
-                viewPadding: mq.viewPadding.copyWith(top: math.max(mq.viewPadding.top, barTop)),
-              ),
-              child: child!,
-            );
-          },
+        // 위 끝에서 밀어 상태표시줄을 내리면 상단바를 그 높이만큼 부드럽게 내리고, 올라가면 다시 올린다.
+        // (트리 모양이 바뀌면 열려 있는 화면이 처음부터 다시 만들어지므로 MediaQuery는 항상 둔다)
+        final content = Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: SystemUiService.onPointerDown,
+          onPointerMove: SystemUiService.onPointerMove,
+          onPointerUp: SystemUiService.onPointerEnd,
+          onPointerCancel: SystemUiService.onPointerEnd,
+          child: ValueListenableBuilder<double>(
+            valueListenable: SystemUiService.statusBarTop,
+            child: child ?? const SizedBox.shrink(),
+            builder: (context, barTop, child) => TweenAnimationBuilder<double>(
+              tween: Tween<double>(end: barTop),
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: child,
+              builder: (context, top, child) {
+                final mq = MediaQuery.of(context);
+                final bool shift = top > mq.padding.top + 0.5;
+                return MediaQuery(
+                  data: shift
+                      ? mq.copyWith(
+                          padding: mq.padding.copyWith(top: top),
+                          viewPadding: mq.viewPadding.copyWith(top: math.max(mq.viewPadding.top, top)),
+                        )
+                      : mq,
+                  child: child!,
+                );
+              },
+            ),
+          ),
         );
         return FadeTransition(
           opacity: _rotationFadeAnim,
@@ -315,9 +332,7 @@ class UserManualScreen extends StatelessWidget {
                         child: const Icon(Icons.add, size: 16, color: Colors.amber),
                       ),
                       const Spacer(),
-                      const Icon(Icons.edit_outlined, color: Colors.white70, size: 19),
-                      const SizedBox(width: 10),
-                      const Icon(Icons.drive_file_move_outline, color: Colors.white70, size: 19),
+                      const Icon(Icons.more_horiz, color: Colors.white70, size: 20),
                     ],
                   ),
                 ],
@@ -358,20 +373,20 @@ class UserManualScreen extends StatelessWidget {
               iconWidget: const SizedBox(
                 width: 24,
                 height: 24,
-                child: ClipRect(child: FavoriteRibbon(active: true, width: 12, height: 18, isDark: true)),
+                child: FavoriteRibbon(active: true, width: 12, height: 18, isDark: true),
               ),
               title: _tr('즐겨찾기 (책갈피)', 'Favorite (Bookmark)', '收藏 (书签)', 'お気に入り (しおり)'),
               desc: _tr('파일 왼쪽 위의 책갈피를 누르거나, 목록형에서 파일을 오른쪽으로 밀면 책갈피가 노랗게 내려오며 해당 그룹의 가장 상단에 위치합니다. 한 번 더 누르거나 밀면 해제됩니다.', 'Tap the bookmark at the top-left of a file, or swipe a file right in list view: the bookmark drops down in yellow and the file is pinned to the top of its group. Tap or swipe again to remove.', '点击文件左上角的书签，或在列表视图中向右滑动文件：书签变黄落下并置顶于当前分组。再次点击或滑动即可取消。', 'ファイル左上のしおりをタップ、またはリスト表示でファイルを右へスワイプすると、しおりが黄色く下りてグループの最上部に固定されます。もう一度で解除します。'),
             ),
             _buildIconGuideRow(
-              iconWidget: const Icon(Icons.edit_outlined, color: Colors.white, size: 22),
-              title: _tr('이름 변경 (연필 아이콘)', 'Rename File (Pencil Icon)', '重命名文件 (铅笔图标)', 'ファイル名変更 (鉛筆アイコン)'),
-              desc: _tr('확장자를 유지한 채 파일 이름을 변경합니다.', 'Renames the file while preserving its format extension.', '保持扩展名不变并修改文件名称。', '拡張子を維持したままファイル名を変更します。'),
+              iconWidget: const Icon(Icons.more_horiz, color: Colors.white, size: 22),
+              title: _tr('이름 변경 (점 3개 메뉴)', 'Rename File (⋯ Menu)', '重命名文件 (⋯ 菜单)', 'ファイル名変更 (⋯ メニュー)'),
+              desc: _tr('파일 오른쪽의 점 3개를 눌러 확장자를 유지한 채 파일 이름을 변경합니다.', 'Tap the ⋯ on the right of a file to rename it while preserving its extension.', '点击文件右侧的 ⋯，保持扩展名不变并修改文件名称。', 'ファイル右の ⋯ をタップし、拡張子を維持したままファイル名を変更します。'),
             ),
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.drive_file_move_outline, color: Colors.white, size: 22),
               title: _tr('그룹 이동 (개별 및 다중 선택)', 'Move to Group (Single & Batch)', '移动分组 (单个与批量)', 'グループ移動 (個別・一括)'),
-              desc: _tr('파일을 다른 그룹으로 옮깁니다. 파일을 길게 눌러 다중 선택하면 하단 [그룹 이동] 버튼으로 한 번에 이동할 수 있습니다.', 'Moves the file to another group. Long-press files to batch move multiple files at once.', '将文件移至其他分组；长按多选后可通过底部按钮批量移动。', '別のグループへ移動します。長押しで複数選択すると一括移動できます。'),
+              desc: _tr('점 3개 메뉴에서 파일을 다른 그룹으로 옮깁니다. 파일을 길게 눌러 다중 선택하면 하단 [그룹 이동] 버튼으로 한 번에 이동할 수 있습니다.', 'Moves the file to another group. Long-press files to batch move multiple files at once.', '将文件移至其他分组；长按多选后可通过底部按钮批量移动。', '別のグループへ移動します。長押しで複数選択すると一括移動できます。'),
             ),
 
             const Divider(height: 36),
@@ -2203,10 +2218,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     if (mounted) await _loadLibrary();
   }
 
-  /// 파일 목록에 보여 줄 마지막으로 읽은 쪽 (예: {6/983}), 연 적 없으면 빈 문자열
+  /// 파일 목록에 보여 줄 마지막으로 읽은 쪽 (예: (6/983)), 연 적 없으면 빈 문자열
   String _pageLabelText(String path) {
     final lbl = _bookPageLabelMap[path];
-    return lbl == null ? '' : '{$lbl}';
+    return lbl == null ? '' : '($lbl)';
   }
 
   /// 1, 3, 10, 11, 13. 표지형(썸네일) 그리드 카드:
@@ -2214,7 +2229,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   /// - 휴대폰 한 화면에 9개(3×3) 들어가는 크기
   /// - 왼쪽 위 즐겨찾기 책갈피, 하단 점 3개(이름 변경 / 그룹 이동 / 휴지통 이동)
   /// - 진행바 및 진행률(%) 제거 (#11)
-  /// - 그룹 이름은 [전체] 탭에서만 표시하고 개별 그룹 탭에서는 숨김 (#10), 그 오른쪽(또는 그 자리)에 마지막으로 읽은 쪽 {지금/전체}
+  /// - 그룹 이름은 [전체] 탭에서만 표시하고 개별 그룹 탭에서는 숨김 (#10), 그 오른쪽(또는 그 자리)에 마지막으로 읽은 쪽 (지금/전체)
   Widget _buildGridBookCard(File file) {
     final rowKey = _fileRowKeys.putIfAbsent(file.path, () => GlobalKey());
     final rawFileName = file.path.split(Platform.pathSeparator).last;
@@ -2372,8 +2387,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           child: FavoriteRibbon(
                             active: isFavorite,
                             onImage: true,
-                            width: 13,
-                            height: 20,
+                            width: 18,
+                            height: 27,
+                            extraHitArea: 22, // 표지를 누르려다 파일이 열리지 않도록 누르는 범위를 넓게
                             onTap: () => _toggleFavorite(file),
                           ),
                         ),
@@ -2796,7 +2812,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                 final grpDisplay = _localizeGroupName(grp);
                                 final pageText = _pageLabelText(file.path);
                                 // 10. [전체]에서만 그룹 이름 표시, 특정 그룹 선택 시 그룹 이름 표시 제거
-                                // 그룹 이름 오른쪽: 마지막으로 읽은 쪽 (예: {6/983})
+                                // 그룹 이름 오른쪽: 마지막으로 읽은 쪽 (예: (6/983))
                                 final subText = _selectedGroup == '전체'
                                     ? (pageText.isEmpty ? '[$grpDisplay]' : '[$grpDisplay]  •  $pageText')
                                     : pageText;
@@ -2810,20 +2826,38 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             ),
                             trailing: _isSelectionMode
                                 ? null
-                                : Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        visualDensity: VisualDensity.compact,
-                                        icon: const Icon(Icons.edit_outlined),
-                                        tooltip: _tr('이름 변경', 'Rename', '重命名', '名前変更'),
-                                        onPressed: () => _renameFileDialog(file),
+                                // 가로 점 3개: 이름 변경 / 그룹 이동 (표지형 세로 점 3개 메뉴와 같은 모양)
+                                : PopupMenuButton<String>(
+                                    icon: const Icon(Icons.more_horiz),
+                                    tooltip: _tr('메뉴', 'More', '更多', 'メニュー'),
+                                    constraints: const BoxConstraints(minWidth: 125),
+                                    onSelected: (action) {
+                                      if (action == 'rename') {
+                                        _renameFileDialog(file);
+                                      } else if (action == 'move_group') {
+                                        _assignGroupDialog(file);
+                                      }
+                                    },
+                                    itemBuilder: (ctx) => [
+                                      PopupMenuItem<String>(
+                                        value: 'rename',
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.edit_outlined, size: 18),
+                                            const SizedBox(width: 8),
+                                            Text(_tr('이름 변경', 'Rename', '重命名', '名前変更')),
+                                          ],
+                                        ),
                                       ),
-                                      IconButton(
-                                        visualDensity: VisualDensity.compact,
-                                        icon: const Icon(Icons.drive_file_move_outline),
-                                        tooltip: _tr('그룹 변경', 'Move Group', '移动分组', 'グループ移動'),
-                                        onPressed: () => _assignGroupDialog(file),
+                                      PopupMenuItem<String>(
+                                        value: 'move_group',
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.drive_file_move_outline, size: 18),
+                                            const SizedBox(width: 8),
+                                            Text(_tr('그룹 이동', 'Move Group', '移动分组', 'グループ移動')),
+                                          ],
+                                        ),
                                       ),
                                     ],
                                   ),

@@ -109,7 +109,7 @@ class MemoToolButton extends StatelessWidget {
       button: true,
       label: label,
       child: InkResponse(
-        radius: 20,
+        radius: 18, // 누를 때 퍼지는 효과가 칸(40) 안에 머물도록
         onTap: !enabled
             ? null
             : () {
@@ -160,7 +160,7 @@ class MemoDoneButton extends StatelessWidget {
       button: true,
       label: label,
       child: InkResponse(
-        radius: 22,
+        radius: 18,
         onTap: onTap,
         child: ConstrainedBox(
           constraints: const BoxConstraints(minWidth: kMemoToolExtent, minHeight: kMemoToolExtent),
@@ -192,6 +192,8 @@ class MemoToolbar extends StatelessWidget {
       color: Colors.black87,
       borderRadius: BorderRadius.circular(24),
       elevation: 6,
+      // 아이콘을 누를 때 퍼지는 효과가 도구모음 밖으로 나가지 않게 자름
+      clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: vertical ? const EdgeInsets.symmetric(horizontal: 4, vertical: 8) : const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: SingleChildScrollView(

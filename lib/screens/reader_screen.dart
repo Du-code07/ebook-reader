@@ -262,6 +262,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _epubLocated = false; // EPUB 첫 위치 알림을 받았는지
   bool _epubAtStart = false; // EPUB 책의 첫 화면인지
   bool _epubAtEnd = false; // EPUB 책의 마지막 화면인지
+  int _pptStepsLeft = 0; // PPT 지금 슬라이드에 남은 애니메이션 단계 수
   bool _epubSinglePage = false; // EPUB 전체가 한 화면(장 1개, 화면 1쪽)
   String _memoToolbarPos = 'bottom'; // 메모 도구모음 위치
   String _quickMenuSide = 'right'; // 도구 모음(활 메뉴) 위치
@@ -691,6 +692,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           onLoaded: _onDocumentLoaded,
           onLocation: _onDocumentLocation,
           onPageReady: _onDocumentPageReady,
+          onStepsLeft: (n) => _pptStepsLeft = n,
           onError: _handleEpubLoadError,
           onCancelled: () {
             if (mounted) Navigator.of(context).pop();
@@ -1945,6 +1947,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _vPeekActive = false; // 미리 보기 작업이 끝나지 않음 (손을 뗀 뒤 정리까지)
   int _vBasePage = 0; // 밀기 시작할 때의 쪽 (문서)
   bool _vBaseAtStart = false, _vBaseAtEnd = false; // 밀기 시작할 때 EPUB 첫/마지막 화면이었는지
+  int _vBaseStepsLeft = 0; // 밀기 시작할 때 PPT 슬라이드에 남은 애니메이션 단계 수
   String? _vBasePos; // 밀기 시작할 때의 위치
   Future<void> _vPeekChain = Future<void>.value();
   // 동작(손가락을 대고 뗄 때까지)마다 번호를 붙인다. 앞 동작의 넘김·정리가 끝나기 전에 다음 동작이
@@ -1964,8 +1967,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_isOfflineDocument && _docPageCount > 0) {
       final bool mine = _vPeekActive && _vPeekOwner == _vGestureSeq; // 이 동작이 미리 보기를 맡은 경우만 시작 쪽 기준
       final int page = mine ? _vBasePage : _docPage;
-      // 파워포인트는 마지막 슬라이드에도 애니메이션 단계가 남아 있을 수 있다
-      if (_isPresentation) return dir > 0 || page > 0 || _posOrder(mine ? _vBasePos : _currentCfi) % 100000 > 0;
+      // 파워포인트는 마지막 슬라이드에도 애니메이션 단계가 남아 있을 수 있다 (남은 단계가 없으면 더 넘길 곳 없음)
+      if (_isPresentation) {
+        return dir > 0
+            ? page < _docPageCount - 1 || (mine ? _vBaseStepsLeft : _pptStepsLeft) > 0
+            : page > 0 || _posOrder(mine ? _vBasePos : _currentCfi) % 100000 > 0;
+      }
       return dir > 0 ? page < _docPageCount - 1 : page > 0;
     }
     if (!_isOfflineDocument) {
@@ -1985,6 +1992,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _vBasePos = _currentCfi;
     _vBaseAtStart = _epubAtStart;
     _vBaseAtEnd = _epubAtEnd;
+    _vBaseStepsLeft = _pptStepsLeft;
     _vPreSnap = _vCaptureCurrent();
     _vPreSnapOwner = _vGestureSeq;
   }
@@ -2004,6 +2012,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         _vBasePos = _currentCfi;
         _vBaseAtStart = _epubAtStart;
         _vBaseAtEnd = _epubAtEnd;
+        _vBaseStepsLeft = _pptStepsLeft;
       }
       _vPeekActive = true;
       _vPeekOwner = _vGestureSeq;

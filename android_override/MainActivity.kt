@@ -64,6 +64,12 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var pdfMethodChannel: MethodChannel? = null
     private var systemUiChannel: MethodChannel? = null
     private var lastReportedStatusBarTop = -1
+    private var lastReportedStatusBarStable = -1
+
+    private fun statusBarDimen(): Int {
+        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else 0
+    }
 
     private var isVolUpPressed = false
     private var isVolDownPressed = false
@@ -95,13 +101,12 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     // 예전처럼 0.75초마다 계속 확인하는 반복 작업은 배터리를 소모하므로, 상태표시줄이 나타날 때(창 인셋 변경)만 처리
     private var isActivityResumed = false
     private val reHideStatusBarRunnable = Runnable {
-        if (isActivityResumed && isStatusBarCurrentlyVisible()) hideSystemStatusBar(alsoHideNavBar = true)
+        if (isActivityResumed && isStatusBarCurrentlyVisible()) hideSystemStatusBar()
     }
 
-    // 상태표시줄을 내리면 시계·배터리를 볼 수 있도록 잠시 두었다가 다시 숨김
     private fun scheduleStatusBarReHide() {
         mainHandler.removeCallbacks(reHideStatusBarRunnable)
-        mainHandler.postDelayed(reHideStatusBarRunnable, 2500L)
+        mainHandler.postDelayed(reHideStatusBarRunnable, 1500L)
     }
 
     // 흔들기(화면 잠금 해제)용 가속도 센서는 뷰어에서 '화면 잠금'이 켜져 있을 때만 켠다
@@ -111,8 +116,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val rootInsets = window?.decorView?.rootWindowInsets
-                rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true ||
-                    rootInsets?.isVisible(WindowInsets.Type.navigationBars()) == true
+                rootInsets?.isVisible(WindowInsets.Type.statusBars()) == true
             } else {
                 @Suppress("DEPRECATION")
                 (window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN) == 0
@@ -143,14 +147,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
                 window.insetsController?.let { controller ->
-                    // 밀어서 잠깐 보이는(transient) 방식은 앱에 상태표시줄이 보인다는 사실을 알려 주지 않아
-                    // 상단바를 내릴 수 없다 → 밀면 실제로 보이게 하고(앱이 높이를 받음) 잠시 뒤 앱이 다시 숨긴다
-                    controller.systemBarsBehavior = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        WindowInsetsController.BEHAVIOR_DEFAULT
-                    } else {
-                        @Suppress("DEPRECATION")
-                        WindowInsetsController.BEHAVIOR_SHOW_BARS_BY_SWIPE
-                    }
+                    controller.systemBarsBehavior =
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                     // 중요: 태블릿 OneUI에서 navigationBars()와 statusBars()를 묶어서 호출하면 태스크바 때문에 상태표시줄 숨김 애니메이션이 취소되므로 반드시 분리!
                     controller.hide(WindowInsets.Type.statusBars())
                     if (alsoHideNavBar) {
@@ -191,20 +189,28 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 600L)
 
         window.decorView.setOnApplyWindowInsetsListener { v, insets ->
-            // 안드로이드 10 이하는 예전 방식 그대로 (높이 알림 없음)
-            var barTop = 0
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val statusBarVisible = insets.isVisible(WindowInsets.Type.statusBars())
-                if ((statusBarVisible || insets.isVisible(WindowInsets.Type.navigationBars())) && isActivityResumed) {
-                    scheduleStatusBarReHide()
-                }
-                // 상태표시줄이 화면 위에 보이는 동안 그 높이를 앱에 알려 상단바를 내리게 한다
-                if (statusBarVisible) barTop = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
+            val statusBarVisible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.isVisible(WindowInsets.Type.statusBars())
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetTop > 0
             }
-            if (barTop != lastReportedStatusBarTop) {
+            if (statusBarVisible && isActivityResumed) {
+                scheduleStatusBarReHide()
+            }
+            // 상태표시줄이 실제로 보이는 동안의 높이 (안드로이드 11 이상만. 10 이하는 숨겨도 값이 남아 있어 쓰지 않음)
+            val barTop = if (statusBarVisible && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
+            } else 0
+            // 상태표시줄 본래 높이: 손가락으로 잠깐 내렸을 때(앱에는 알려 주지 않음) 상단바를 이만큼 내린다
+            val stable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
+            } else statusBarDimen()
+            if (barTop != lastReportedStatusBarTop || stable != lastReportedStatusBarStable) {
                 lastReportedStatusBarTop = barTop
+                lastReportedStatusBarStable = stable
                 try {
-                    systemUiChannel?.invokeMethod("statusBar", mapOf("visible" to (barTop > 0), "top" to barTop))
+                    systemUiChannel?.invokeMethod("statusBar", mapOf("visible" to (barTop > 0), "top" to barTop, "stable" to stable))
                 } catch (_: Exception) {}
             }
             v.onApplyWindowInsets(insets)
@@ -232,7 +238,19 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        systemUiChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ebook_reader/system_ui")
+        systemUiChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ebook_reader/system_ui").also { ch ->
+            // 앱(Dart)이 준비된 뒤 현재 상태표시줄 높이를 물어봄 (그 전에 보낸 알림은 받지 못했을 수 있음)
+            ch.setMethodCallHandler { call, result ->
+                if (call.method == "query") {
+                    val stable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        window.decorView.rootWindowInsets?.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars())?.top ?: statusBarDimen()
+                    } else statusBarDimen()
+                    result.success(mapOf("visible" to (lastReportedStatusBarTop > 0), "top" to maxOf(0, lastReportedStatusBarTop), "stable" to stable))
+                } else {
+                    result.notImplemented()
+                }
+            }
+        }
         hideSystemStatusBar()
         mainHandler.postDelayed({ hideSystemStatusBar() }, 200L)
         mainHandler.postDelayed({ hideSystemStatusBar() }, 600L)

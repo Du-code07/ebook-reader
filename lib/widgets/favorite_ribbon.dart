@@ -4,15 +4,7 @@ import 'package:flutter/material.dart';
 /// 꺼져 있으면 빈 책갈피가 살짝 위로 올라가 있고, 켜지면 살짝 내려오면서 노랗게 바뀐다.
 /// 부모가 위쪽을 잘라(clip) 주면 책갈피가 위 테두리에 꽂혀 있는 것처럼 보인다.
 class FavoriteRibbon extends StatelessWidget {
-  const FavoriteRibbon({
-    super.key,
-    required this.active,
-    this.onTap,
-    this.width = 12,
-    this.height = 19,
-    this.onImage = false,
-    this.isDark = false,
-  });
+  const FavoriteRibbon({super.key, required this.active, this.onTap, this.width = 14, this.height = 22, this.onImage = false, this.isDark = false, this.extraHitArea = 0});
 
   final bool active;
   final VoidCallback? onTap;
@@ -22,6 +14,9 @@ class FavoriteRibbon extends StatelessWidget {
   /// 표지(그림) 위에 놓일 때: 어떤 그림 위에서도 보이도록 흰 테두리 + 옅은 그림자
   final bool onImage;
   final bool isDark;
+
+  /// 누르는 범위를 오른쪽·아래로 이만큼 더 넓힘 (책갈피 위치는 그대로)
+  final double extraHitArea;
 
   /// 꺼져 있을 때 위로 올라가 있는 정도
   double get _lift => height * 0.32;
@@ -33,29 +28,32 @@ class FavoriteRibbon extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: SizedBox(
-        width: width + 14,
-        height: height + 8,
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: TweenAnimationBuilder<double>(
-            tween: Tween<double>(end: active ? 1.0 : 0.0),
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeOutBack,
-            builder: (context, t, _) {
-              final double c = t.clamp(0.0, 1.0).toDouble();
-              return Transform.translate(
-                offset: Offset(0, -_lift * (1 - t)),
-                child: CustomPaint(
-                  size: Size(width, height),
-                  painter: _RibbonPainter(
-                    fill: Color.lerp(emptyFill, Colors.amber, c)!,
-                    stroke: Color.lerp(outline, const Color(0xFFE0A000), c)!,
-                    shadow: onImage,
-                  ),
-                ),
-              );
-            },
+      // 위로 올라간 부분은 잘라서 파일 칸 위로 튀어나오지 않게 함
+      // (Stack의 clip은 Transform으로 옮긴 그림을 자르지 못함)
+      child: ClipRect(
+        child: SizedBox(
+          width: width + 14 + extraHitArea,
+          height: height + 8 + extraHitArea,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 7),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: active ? 1.0 : 0.0),
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeOutBack,
+                builder: (context, t, _) {
+                  final double c = t.clamp(0.0, 1.0).toDouble();
+                  return Transform.translate(
+                    offset: Offset(0, -_lift * (1 - t)),
+                    child: CustomPaint(
+                      size: Size(width, height),
+                      painter: _RibbonPainter(fill: Color.lerp(emptyFill, Colors.amber, c)!, stroke: Color.lerp(outline, const Color(0xFFE0A000), c)!, shadow: onImage),
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
         ),
       ),

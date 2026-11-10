@@ -47,6 +47,8 @@ class HwpViewer extends StatefulWidget {
   final VoidCallback onCancelled;
   /// 쪽 안의 그림까지 다 그려졌을 때 (워드·한글)
   final ValueChanged<int>? onPageReady;
+  /// 파워포인트: 지금 슬라이드에서 남은 애니메이션 단계 수 (위치가 바뀔 때마다)
+  final ValueChanged<int>? onStepsLeft;
 
   const HwpViewer({
     super.key,
@@ -62,6 +64,7 @@ class HwpViewer extends StatefulWidget {
     required this.onError,
     required this.onCancelled,
     this.onPageReady,
+    this.onStepsLeft,
   });
 
   @override
@@ -263,6 +266,8 @@ class _HwpViewerState extends State<HwpViewer> {
         break;
       case 'location':
         if (!_loaded) return;
+        final stepCount = event['stepCount'], step = event['step'];
+        if (stepCount is num) widget.onStepsLeft?.call((stepCount - (step is num ? step : 0)).toInt());
         widget.onLocation(
           (event['page'] as num).toInt(),
           (event['pageCount'] as num).toInt(),
