@@ -366,25 +366,6 @@ function applySearchHighlights() {
     });
   }
 }
-// ── 목차: 파일에 개요(제목 스타일)가 있으면 그것만, 없으면 글자 크기·굵기로 제목을 찾는다 ──
-function guessOutline(blocks) {
-  const sizeKey = fs => Math.round(fs * 2) / 2;
-  const sizeChars = new Map();
-  for (const b of blocks) sizeChars.set(sizeKey(b.fs), (sizeChars.get(sizeKey(b.fs)) || 0) + b.chars);
-  let body = 0, most = -1;
-  for (const [size, chars] of sizeChars) if (chars > most) { most = chars; body = size; }
-  if (!body) return [];
-  const candidates = blocks.filter(b => !b.cell && b.text.length <= 80 && /\p{L}/u.test(b.text) &&
-    (b.fs >= body * 1.15 || (b.bold && b.fs >= body * 0.95 && b.text.length <= 50)));
-  // 제목이 너무 많으면(본문 대부분이 굵은 글씨 등) 제목으로 보지 않는다
-  if (!candidates.length || candidates.length > Math.max(40, blocks.length * 0.35)) return [];
-  // 쪽마다 되풀이되는 머리말은 뺀다
-  const repeats = new Map();
-  for (const c of candidates) repeats.set(c.text, (repeats.get(c.text) || 0) + 1);
-  const kept = candidates.filter(c => repeats.get(c.text) <= 2);
-  const sizes = [...new Set(kept.map(c => sizeKey(c.fs)))].sort((a, b) => b - a);
-  return kept.slice(0, 400).map(c => ({ title: c.text, level: Math.min(3, sizes.indexOf(sizeKey(c.fs)) + 1), page: c.page }));
-}
 /** 지금 화면에 보이는 글과 그 위치 (화면 크기 대비 0~1) — 내보낸 PDF에 보이지 않는 글자 층을 넣는 데 씀 */
 function visibleTextBoxes() {
   const W = innerWidth || 1, H = innerHeight || 1, out = [];
@@ -417,44 +398,34 @@ async function pageText(from, to) {
   }
   return out;
 }
-async function outline() {
+// ── 목차 후보: 번호로 시작하는 문단 {title, page, bold} — 앱이 '번호 + 굵은 글씨' 규칙으로 고른다 ──
+const NUMBERED_START = /^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]|[IVX]{1,5}\s*[.)]|\(\s*\d|\d)/;
+async function headingCandidates() {
   if (!doc) return [];
-  try {
-    const nav = JSON.parse(doc.getOutlineNavigation()).outline || [];
-    if (nav.length) {
-      return nav.slice(0, 500).map(n => ({
-        title: [n.number, n.title].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim(),
-        level: Math.max(1, Math.min(6, n.level || 1)),
-        page: Math.max(0, Math.min(count - 1, (n.page || 1) - 1)),
-      })).filter(n => n.title);
-    }
-  } catch (_) {}
-  const blocks = [], current = doc;
+  const out = [], current = doc;
   for (let i = 0; i < count; i++) {
     const paras = new Map();
     for (const run of pageRuns(i)) {
       if (run.secIdx == null || run.paraIdx == null) continue; // 표 안 글자 등
       const key = `${run.secIdx}:${run.paraIdx}`;
       let b = paras.get(key);
-      if (!b) { b = { text: '', page: i, fs: 0, bold: 0, chars: 0, cell: false }; paras.set(key, b); }
+      if (!b) { b = { text: '', bold: 0, chars: 0 }; paras.set(key, b); }
       b.text += run.text;
       const n = run.text.trim().length;
-      if (!n) continue;
-      b.fs = Math.max(b.fs, run.fontSize || 0); b.chars += n; if (run.bold) b.bold += n;
+      b.chars += n; if (run.bold) b.bold += n;
     }
     for (const b of paras.values()) {
-      b.text = b.text.replace(/\s+/g, ' ').trim();
-      if (!b.text || !b.chars) continue;
-      b.bold = b.bold >= b.chars * 0.9;
-      blocks.push(b);
+      const text = b.text.replace(/\s+/g, ' ').trim();
+      if (!text || !b.chars || text.length > 100 || !NUMBERED_START.test(text)) continue;
+      out.push({ title: text, page: i, bold: b.bold >= b.chars * 0.9 });
     }
     if (i % 10 === 9) await new Promise(resolve => setTimeout(resolve, 0));
     if (doc !== current) return [];
   }
-  return guessOutline(blocks);
+  return out.slice(0, 2000);
 }
 window.freaderHwp = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
-  search, showSearchResult, clearSearch, outline, pageText, visibleTextBoxes,
+  search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes,
   getState: () => ({ ready: readyReported, page, count, cachedPages: cache.size, cachedBytes, received, spread: options.spread, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 

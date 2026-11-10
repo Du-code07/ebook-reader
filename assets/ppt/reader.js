@@ -58,7 +58,7 @@ function closePresentation() {
   animationSteps?.close(); animationSteps = null;
   presentation?.destroy(); presentation = null;
   clearFrames(); loaded = false; paintedPage = -1; paintedStep = -1; step = 0; stepCount = 0;
-  slideTextCache.clear(); searchState = { query: '', results: [], current: -1 };
+  slideTextCache.clear(); slideLineCache.clear(); searchState = { query: '', results: [], current: -1 };
 }
 function beginDocument(length, config = {}) {
   if (disposed) throw new Error('뷰어가 종료되었습니다.');
@@ -373,18 +373,17 @@ function applySearchHighlights() {
     });
   }
 }
-/** 글자 읽기(OCR)용: 슬라이드 그림의 위쪽 [topFraction]만 JPEG(base64)로. 글자가 그림으로만 된 슬라이드의 제목 찾기에 씀 */
-async function slideImage(index, width = 1100, topFraction = 0.45) {
+/** 글자 읽기(OCR)용: 슬라이드 전체 그림(JPEG base64). 글자가 그림으로만 된 발표 자료의 목차 찾기에 씀 */
+async function slideImage(index, width = 1800) {
   if (!presentation || index < 0 || index >= presentation.slideCount) return null;
   const canvas = document.createElement('canvas');
   try {
     await presentation.renderSlide(canvas, index, { width, dpr: 1, skipMediaControls: true,
-      imageResources: { decodedByteBudget: 64 * 1024 * 1024, strategy: 'adaptive', resolution: 'display' } });
-    const h = Math.max(1, Math.round(canvas.height * Math.min(1, Math.max(0.1, topFraction))));
+      imageResources: { decodedByteBudget: 64 * 1024 * 1024, strategy: 'adaptive', resolution: 'native-if-fit' } });
     const out = document.createElement('canvas');
-    out.width = canvas.width; out.height = h;
+    out.width = canvas.width; out.height = canvas.height;
     const ctx = out.getContext('2d');
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, h);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height);
     ctx.drawImage(canvas, 0, 0);
     const data = out.toDataURL('image/jpeg', 0.92).split(',')[1] || null;
     out.width = 0; out.height = 0;
@@ -395,34 +394,54 @@ async function slideImage(index, width = 1100, topFraction = 0.45) {
     canvas.width = 0; canvas.height = 0;
   }
 }
-// ── 목차: 슬라이드마다 가장 큰 글자(같으면 가장 위)의 글 상자를 제목으로 본다 ──
-async function outline() {
+// ── 목차용: 슬라이드마다 글 줄들 {t, bold} (배경·마스터 글 제외). 앱이 '목차' 쪽 찾기와 '번호 + 굵은 글씨' 규칙에 씀 ──
+const slideLineCache = new Map();
+async function slideLines(index) {
+  if (slideLineCache.has(index)) return slideLineCache.get(index);
+  let runs = [];
+  try { runs = await presentation.collectSlideRuns(index, 480); } catch (_) {}
+  if (!slideTextCache.has(index)) slideTextCache.set(index, runs.map(run => (typeof run?.text === 'string' ? run.text : '')).join(''));
+  const lines = new Map();
+  for (const run of runs) {
+    if (run.origin && run.origin !== 'slide') continue;
+    const text = typeof run.text === 'string' ? run.text : '';
+    if (!text) continue;
+    const key = `${run.shapeId ?? '?'}|${Math.round(run.inShapeY ?? 0)}`;
+    let line = lines.get(key);
+    if (!line) { line = { t: '', chars: 0, bold: 0, y: (run.shapeY ?? 0) + (run.inShapeY ?? 0) }; lines.set(key, line); }
+    line.t += text;
+    const n = text.trim().length;
+    line.chars += n;
+    if (/\b(bold|bolder|[6-9]00)\b/.test(String(run.font || ''))) line.bold += n;
+  }
+  const out = [...lines.values()].map(l => ({ t: l.t.replace(/\s+/g, ' ').trim(), bold: l.chars > 0 && l.bold >= l.chars * 0.9, y: l.y }))
+    .filter(l => l.t).sort((a, b) => a.y - b.y);
+  slideLineCache.set(index, out);
+  return out;
+}
+/** 슬라이드마다의 글 (줄마다 \n) */
+async function pageText(from, to) {
   if (!presentation) return [];
-  const out = [], current = generation;
-  for (let i = 0; i < presentation.slideCount; i++) {
-    let runs = [];
-    try { runs = await presentation.collectSlideRuns(i, 480); } catch (_) {}
+  const out = [], current = generation, end = Math.min(presentation.slideCount, Math.max(0, to | 0));
+  for (let i = Math.max(0, from | 0); i < end; i++) {
+    out.push((await slideLines(i)).map(l => l.t).join('\n'));
     if (current !== generation || disposed) return [];
-    if (!slideTextCache.has(i)) slideTextCache.set(i, runs.map(run => (typeof run?.text === 'string' ? run.text : '')).join(''));
-    const shapes = new Map();
-    for (const run of runs) {
-      if (run.origin && run.origin !== 'slide') continue; // 배경(마스터·레이아웃)의 글은 제외
-      const text = typeof run.text === 'string' ? run.text : '';
-      if (!text.trim()) continue;
-      const id = run.shapeId ?? '?';
-      let shape = shapes.get(id);
-      if (!shape) { shape = { fs: 0, y: run.shapeY ?? 0, parts: [], lineY: null }; shapes.set(id, shape); }
-      shape.fs = Math.max(shape.fs, run.fontSize || 0);
-      if (shape.lineY != null && Math.abs((run.inShapeY ?? 0) - shape.lineY) > 1) shape.parts.push(' ');
-      shape.parts.push(text); shape.lineY = run.inShapeY ?? 0;
-    }
-    let best = null;
-    for (const shape of shapes.values()) if (!best || shape.fs > best.fs + 0.5 || (Math.abs(shape.fs - best.fs) <= 0.5 && shape.y < best.y)) best = shape;
-    out.push({ title: best ? best.parts.join('').replace(/\s+/g, ' ').trim().slice(0, 80) : '', level: 1, page: i, slide: true });
     if (i % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
   }
   return out;
 }
+/** 번호로 시작하는 줄들 {title, page, bold} */
+async function headingCandidates() {
+  if (!presentation) return [];
+  const out = [], current = generation;
+  for (let i = 0; i < presentation.slideCount; i++) {
+    for (const l of await slideLines(i)) if (l.t.length <= 100 && NUMBERED_START.test(l.t)) out.push({ title: l.t, page: i, bold: l.bold });
+    if (current !== generation || disposed) return [];
+    if (i % 4 === 3) await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  return out.slice(0, 2000);
+}
+const NUMBERED_START = /^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]|[IVX]{1,5}\s*[.)]|\(\s*\d|\d)/;
 function destroy() {
   disposed = true; generation++; paintRevision++; clearInterval(bridgeTimer); observer.disconnect();
   closePresentation(); wipe(incoming); incoming = null; received = 0; events = [];
@@ -433,7 +452,7 @@ const observer = new ResizeObserver(() => {
 observer.observe(host);
 host.addEventListener('click', event => { if (event.target.closest('a')) event.preventDefault(); });
 window.freaderPpt = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, thumbnail, destroy,
-  search, showSearchResult, clearSearch, outline, slideImage,
+  search, showSearchResult, clearSearch, pageText, headingCandidates, slideImage,
   getState: () => ({ ready: !disposed, loaded, page, count: presentation?.slideCount || 0, step, stepCount, received, awaitingPassword, spread: options.spread, format: options.format, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 emit('ready', { version: '0.89.8' });
