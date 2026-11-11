@@ -13,6 +13,7 @@ import '../services/toc_page_parser.dart';
 import '../services/heading_rules.dart';
 import '../services/outline_cache.dart';
 import '../widgets/outline_progress.dart';
+import '../widgets/text_copy_sheet.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
 import '../widgets/sheet_pull_to_close.dart';
@@ -730,6 +731,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final int pages = _totalPages;
     var items = await PdfOutlineService.read(path);
     if (!mounted) return;
+    // '슬라이드 1', 'Page 2'처럼 쪽 번호만 적힌 책갈피(발표 자료를 PDF로 저장할 때 생김)는 목차로 쓰지 않음
+    if (items.isNotEmpty &&
+        items.every((e) => RegExp(r'^\s*(슬라이드|slide|페이지|page|쪽)?\s*\d+\s*(쪽|페이지)?\s*$', caseSensitive: false).hasMatch('${e['title']}'))) {
+      items = const [];
+    }
     if (items.isEmpty) {
       final cached = (await OutlineCache.read(path))[pages];
       if (!mounted) return;
@@ -2001,13 +2007,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 label: Text(_tr('현재 페이지 북마크 추가', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),
                 onPressed: () async {
                   final now = DateTime.now();
+                  final bool spread = _isSpreadActive(context);
+                  final int first = spread ? (_currentPage ~/ 2) * 2 : _currentPage;
                   await StorageService.addBookmark(
                     _bookKey,
                     BookmarkItem(
                       id: now.millisecondsSinceEpoch.toString(),
-                      label: '${_currentPage + 1}페이지 북마크',
-                      position: _currentPage.toString(),
+                      label: spread && first + 1 < _totalPages ? '${first + 1}, ${first + 2}페이지' : '${first + 1}페이지',
+                      position: first.toString(),
                       createdAt: '${now.month}/${now.day} ${now.hour}:${now.minute.toString().padLeft(2, '0')}',
+                      spread: spread,
                     ),
                   );
                   if (ctx.mounted) Navigator.pop(ctx);
@@ -2028,9 +2037,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   itemCount: bookmarks.length,
                   itemBuilder: (_, idx) {
                     final bm = bookmarks[idx];
+                    final int bp = int.tryParse(bm.position) ?? 0;
                     return ListTile(
-                      leading: const Icon(Icons.bookmark, color: Colors.amber),
-                      title: Text(bm.label),
+                      leading: Icon(bm.spread ? Icons.menu_book : Icons.bookmark, color: Colors.amber),
+                      title: Text(bm.spread && bp + 1 < _totalPages ? '${bp + 1}, ${bp + 2}페이지' : '${bp + 1}페이지'),
                       subtitle: Text('저장 시각: ${bm.createdAt}'),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete_outline),
@@ -2040,9 +2050,21 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                           _showBookmarkSheet();
                         },
                       ),
-                      onTap: () {
+                      onTap: () async {
                         Navigator.pop(ctx);
                         final target = int.tryParse(bm.position) ?? 0;
+                        // 2페이지 보기에서 저장한 북마크: 가로 모드 2페이지 보기로 바꾼 뒤 그 쪽으로
+                        if (bm.spread && !_isSpreadActive(context)) {
+                          if (!_enableTwoPageInLandscape) {
+                            await StorageService.setTwoPageLandscape(true);
+                            if (!mounted) return;
+                            setState(() => _enableTwoPageInLandscape = true);
+                          }
+                          final size = MediaQuery.sizeOf(context);
+                          if (size.height >= size.width) await _toggleScreenOrientation();
+                          await Future<void>.delayed(const Duration(milliseconds: 700));
+                          if (!mounted) return;
+                        }
                         _goToPage(target, smoothAnimation: false);
                       },
                     );
@@ -2465,7 +2487,24 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         onTap: _showBookmarkSheet,
         closeAfterTap: true,
       ),
+      if (_isPdfFile)
+        QuickArcMenuItem(
+          icon: const Icon(Icons.copy_all_outlined, color: Colors.white, size: 19),
+          tooltip: _tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
+          onTap: _openTextCopySheet,
+          closeAfterTap: true,
+        ),
     ];
+  }
+
+  /// 지금 보고 있는 쪽(2페이지 보기면 두 쪽)의 글을 보여 주고 복사할 수 있게 함
+  Future<void> _openTextCopySheet() async {
+    final bool spread = _isSpreadActive(context);
+    final int first = spread ? (_currentPage ~/ 2) * 2 : _currentPage;
+    final pages = await _pdfLines(widget.files.first.path, first, math.min(_totalPages, first + (spread ? 2 : 1)), false);
+    if (!mounted) return;
+    final text = pages.map((p) => p.lines.map((l) => l['t']).join('\n')).join('\n\n');
+    await showTextCopySheet(context, text: text, tr: _tr);
   }
 
   @override

@@ -679,7 +679,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           animation: _searchCurve,
           builder: (context, _) {
             final double t = _searchCurve.value;
-            if (t <= 0.001) return const SizedBox(height: 40);
+            if (_searchAnim.isDismissed) return const SizedBox(height: 40);
             // 돋보기 위치: 오른쪽(원래 돋보기 자리) → 글자 길이에 맞는 자리
             final double iconLeft = home + (openLeft - home) * t;
             final double textOpacity = ((t - 0.55) / 0.45).clamp(0.0, 1.0).toDouble();
@@ -734,6 +734,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Set<String> _favoritePaths = {};
   bool _hideFileExtension = false;
   bool _hideGroupName = false; // 파일 아래 [그룹 이름] 숨기기
+  bool _hideThumbnails = false; // 표지형: 표지 그림 끄기 (아이콘만)
+  Map<String, String> _customCovers = {}; // 사용자가 고른 표지
   String _bookshelfViewMode = 'list'; // 기본값: 'list' (목록형)
   static final Map<String, ImageProvider> _globalThumbMemoryCache = {};
   final Map<String, ValueNotifier<ImageProvider?>> _thumbNotifiers = {};
@@ -954,6 +956,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final favs = await StorageService.getFavoriteBooks();
     final hideExt = await StorageService.getHideFileExtension();
     final hideGroup = await StorageService.getHideGroupName();
+    final hideThumbs = await StorageService.getHideThumbnails();
+    final covers = await StorageService.getCustomCovers();
     final viewMode = await StorageService.getBookshelfViewMode();
 
     files.sort((a, b) {
@@ -1022,6 +1026,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         _cacheThumbnailFromFileSync(path, path, isRawOriginalImage: true);
         continue;
       }
+      // 사용자가 고른 표지가 있으면 그것
+      final custom = covers[path];
+      if (custom != null && File(custom).existsSync()) {
+        _cacheThumbnailFromFileSync(path, custom, isRawOriginalImage: true);
+        continue;
+      }
       final safeKey = path.hashCode.toUnsigned(32).toString();
       final existingThumbPath = (ext == 'pptx' || ext == 'ppt')
           ? existingSlideThumbBySafeKey[safeKey]
@@ -1044,6 +1054,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         _favoritePaths = favs;
         _hideFileExtension = hideExt;
         _hideGroupName = hideGroup;
+        _hideThumbnails = hideThumbs;
+        _customCovers = covers;
         _bookshelfViewMode = viewMode;
         if (!_groups.contains(_selectedGroup)) {
           _selectedGroup = '전체';
@@ -1088,6 +1100,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     _thumbnailGeneratingPaths.add(path);
 
     try {
+      final custom = _customCovers[path];
+      if (custom != null && File(custom).existsSync()) {
+        _cacheThumbnailFromFileSync(path, custom, isRawOriginalImage: true);
+        return;
+      }
       final ext = path.split('.').last.toLowerCase();
       if (_imageExts.contains(ext)) {
         _cacheThumbnailFromFileSync(path, path, isRawOriginalImage: true);
@@ -2152,6 +2169,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final action = await showScaleMenu<String>(anchor, [
       ('rename', _tr('이름 변경', 'Rename', '重命名', '名前変更'), Icons.edit_outlined, null),
       ('move_group', _tr('그룹 이동', 'Move Group', '移动分组', 'グループ移動'), Icons.drive_file_move_outline, null),
+      if (_bookshelfViewMode == 'grid') ('cover', _tr('표지 변경', 'Change Cover', '更换封面', '表紙を変更'), Icons.image_outlined, null),
+      if (_bookshelfViewMode == 'grid' && _customCovers.containsKey(file.path))
+        ('cover_reset', _tr('원래 표지로', 'Original Cover', '恢复原封面', '元の表紙に戻す'), Icons.restore, null),
       if (withTrash) ('trash', _tr('휴지통 이동', 'Move to Trash', '移至回收站', 'ゴミ箱へ移動'), Icons.delete_outline, Colors.redAccent),
     ]);
     if (!mounted || action == null) return;
@@ -2161,7 +2181,57 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       _assignGroupDialog(file);
     } else if (action == 'trash') {
       _moveFileToTrash(file);
+    } else if (action == 'cover') {
+      _changeCover(file);
+    } else if (action == 'cover_reset') {
+      _resetCover(file);
     }
+  }
+
+  /// 표지 변경: 갖고 있는 그림을 골라 이 파일의 표지로 씀 (앱 안에 복사해 둠)
+  Future<void> _changeCover(File file) async {
+    final result = await _pickFilesWithNotice(type: FileType.image, allowMultiple: false);
+    final picked = result?.files.firstOrNull?.path;
+    if (picked == null || !mounted) return;
+    try {
+      final dir = Directory('${(await getApplicationDocumentsDirectory()).path}/.covers');
+      await dir.create(recursive: true);
+      final ext = picked.split('.').last.toLowerCase();
+      final out = File('${dir.path}/${DateTime.now().millisecondsSinceEpoch}.${ext.length <= 4 ? ext : 'jpg'}');
+      await File(picked).copy(out.path);
+      final old = _customCovers[file.path];
+      await StorageService.setCustomCover(file.path, out.path);
+      if (old != null) {
+        try {
+          await File(old).delete();
+        } catch (_) {}
+      }
+      _customCovers = await StorageService.getCustomCovers();
+      _globalThumbMemoryCache.remove(file.path);
+      _cacheThumbnailFromFileSync(file.path, out.path, isRawOriginalImage: true);
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_tr('표지를 바꾸지 못했습니다.', 'Could not change the cover.', '无法更换封面。', '表紙を変更できませんでした。'))),
+      );
+    }
+  }
+
+  /// 원래 표지로: 고른 표지를 지우고 파일에서 만든 표지를 다시 씀
+  Future<void> _resetCover(File file) async {
+    final old = _customCovers[file.path];
+    await StorageService.setCustomCover(file.path, null);
+    if (old != null) {
+      try {
+        await File(old).delete();
+      } catch (_) {}
+    }
+    _customCovers = await StorageService.getCustomCovers();
+    _globalThumbMemoryCache.remove(file.path);
+    _getThumbNotifier(file.path).value = null;
+    if (mounted) setState(() {});
+    _ensureBookThumbnail(file);
   }
 
   /// [전체]를 한 번 더 눌렀을 때: 그룹 이름 목록을 펼쳐 누르면 그 그룹으로 이동
@@ -2524,6 +2594,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           viewMode: _bookshelfViewMode,
           hideExtension: _hideFileExtension,
           hideGroupName: _hideGroupName,
+          hideThumbnails: _hideThumbnails,
+          onChangeHideThumbnails: (hide) async {
+            await StorageService.setHideThumbnails(hide);
+            if (mounted) setState(() => _hideThumbnails = hide);
+          },
           onChangeHideGroupName: (hide) async {
             await StorageService.setHideGroupName(hide);
             if (mounted) setState(() => _hideGroupName = hide);
@@ -2717,8 +2792,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         child: ValueListenableBuilder<ImageProvider?>(
                           valueListenable: thumbNotifier,
                           builder: (context, thumbProvider, _) {
-                            if (thumbProvider != null) {
-                              final bool slides = lowerExt == 'pptx' || lowerExt == 'ppt';
+                            // 표지 그림 끄기: 사용자가 고른 표지가 아니면 아이콘만
+                            if (thumbProvider != null && (!_hideThumbnails || _customCovers.containsKey(file.path))) {
+                              final bool slides = (lowerExt == 'pptx' || lowerExt == 'ppt') && !_customCovers.containsKey(file.path);
                               return Image(
                                 image: thumbProvider,
                                 // 슬라이드(가로)는 잘리지 않게 전체를 보여 준다
@@ -2953,14 +3029,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               ),
               actions: [
                 // 파일 검색: 누르면 이 돋보기가 검색 밑줄로 바뀜 (검색 중에는 자리만 남김)
+                // 움직이는 돋보기와 겹쳐 잔상이 보이지 않게: 펼쳐지는 동안에는 바로 숨기고, 다 돌아온 순간에만 다시 보임
+                // (누를 때 퍼지는 물결도 남지 않게 없앰)
                 IgnorePointer(
                   ignoring: _searchOpen,
-                  child: AnimatedOpacity(
-                    opacity: _searchOpen ? 0 : 1,
-                    duration: const Duration(milliseconds: 120),
+                  child: AnimatedBuilder(
+                    animation: _searchAnim,
+                    builder: (context, child) => Opacity(opacity: !_searchOpen && _searchAnim.isDismissed ? 1 : 0, child: child),
                     child: IconButton(
                       icon: const Icon(Icons.search),
                       tooltip: _tr('파일 검색', 'Search Files', '搜索文件', 'ファイル検索'),
+                      style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory, highlightColor: Colors.transparent),
                       onPressed: _openSearch,
                     ),
                   ),

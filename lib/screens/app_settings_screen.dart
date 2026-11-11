@@ -15,6 +15,8 @@ class AppSettingsScreen extends StatefulWidget {
     required this.hideExtension,
     this.hideGroupName = false,
     this.onChangeHideGroupName,
+    this.hideThumbnails = false,
+    this.onChangeHideThumbnails,
     required this.onChangeLanguage,
     required this.onChangeViewMode,
     required this.onChangeHideExtension,
@@ -32,6 +34,8 @@ class AppSettingsScreen extends StatefulWidget {
   final bool hideExtension;
   final bool hideGroupName;
   final Future<void> Function(bool hide)? onChangeHideGroupName;
+  final bool hideThumbnails;
+  final Future<void> Function(bool hide)? onChangeHideThumbnails;
   final ValueChanged<String> onChangeLanguage; // 'system' | ko/en/zh/ja
   final Future<void> Function(String mode) onChangeViewMode;
   final Future<void> Function(bool hide) onChangeHideExtension;
@@ -55,6 +59,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   late String _viewMode = widget.viewMode;
   late bool _hideExt = widget.hideExtension;
   late bool _hideGroup = widget.hideGroupName;
+  late bool _hideThumbs = widget.hideThumbnails;
 
   String _t(String ko, String en, String zh, String ja) => AppI18n.t(_lang, ko: ko, en: en, zh: zh, ja: ja);
 
@@ -125,6 +130,19 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         if (hideChanged) await widget.onChangeHideExtension(hide);
       },
       moreToggles: [
+        // 표지형을 골랐을 때만: 표지 그림 끄기 (TXT처럼 가운데 아이콘만)
+        SheetToggle(
+          icon: Icons.hide_image_outlined,
+          label: _t('표지 그림 끄기', 'Hide covers', '隐藏封面', '表紙を隠す'),
+          subtitle: _t('표지 대신 파일 아이콘만', 'Show file icons only', '只显示文件图标', 'ファイルアイコンのみ'),
+          value: _hideThumbs,
+          onlyFor: 'grid',
+          onChanged: (v) async {
+            if (!mounted) return;
+            setState(() => _hideThumbs = v);
+            await widget.onChangeHideThumbnails?.call(v);
+          },
+        ),
         SheetToggle(
           icon: Icons.label_off_outlined,
           label: _t('그룹 이름 숨기기', 'Hide group name', '隐藏分组名称', 'グループ名を隠す'),

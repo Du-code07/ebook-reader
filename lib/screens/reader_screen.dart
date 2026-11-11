@@ -15,6 +15,7 @@ import '../services/toc_page_parser.dart';
 import '../services/heading_rules.dart';
 import '../services/outline_cache.dart';
 import '../widgets/outline_progress.dart';
+import '../widgets/text_copy_sheet.dart';
 import '../services/page_snapshot_service.dart';
 import '../services/epub_validation.dart';
 import '../widgets/hwp_viewer.dart';
@@ -720,42 +721,69 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final tmp = Directory('${(await getTemporaryDirectory()).path}/ppt_ocr');
     await tmp.create(recursive: true);
     int fresh = 0;
+    // 슬라이드 하나를 [width] 너비로 그려 글자를 읽음
+    Future<List<Map<String, Object?>>> readSlide(int page, int width) async {
+      final lines = <Map<String, Object?>>[];
+      final b64 = await _hwpController.slideImage(page, width: width);
+      if (b64 == null) return lines;
+      final img = File('${tmp.path}/slide_$page.jpg');
+      try {
+        await img.writeAsBytes(base64Decode(b64), flush: true);
+        final raw = await _pdfChannel.invokeMethod<List<Object?>>('ocrLines', {'path': img.path}) ?? const [];
+        for (final e in raw) {
+          if (e is! Map) continue;
+          final t = (e['t'] ?? '').toString().trim();
+          if (t.isEmpty) continue;
+          lines.add({'t': t, 'y': e['y'], 'h': e['h']});
+        }
+      } catch (_) {
+      } finally {
+        try {
+          await img.delete();
+        } catch (_) {}
+      }
+      return lines;
+    }
+
     for (int page = 0; page < pageCount; page++) {
       if (slides.containsKey(page)) continue;
       if (!mounted || _docPageCount != pageCount) {
         if (fresh > 0) await OutlineCache.writeOcr(path, slides);
         return null;
       }
-      final b64 = await _hwpController.slideImage(page);
-      final lines = <Map<String, Object?>>[];
-      if (b64 != null) {
-        final img = File('${tmp.path}/slide_$page.jpg');
-        try {
-          await img.writeAsBytes(base64Decode(b64), flush: true);
-          final raw = await _pdfChannel.invokeMethod<List<Object?>>('ocrLines', {'path': img.path}) ?? const [];
-          for (final e in raw) {
-            if (e is! Map) continue;
-            final t = (e['t'] ?? '').toString().trim();
-            if (t.isEmpty) continue;
-            lines.add({'t': t, 'y': e['y'], 'h': e['h']});
-          }
-        } catch (_) {
-        } finally {
-          try {
-            await img.delete();
-          } catch (_) {}
-        }
-      }
-      slides[page] = lines;
+      slides[page] = await readSlide(page, 1800);
       _setOutlineProgress(0.05 + 0.9 * (page + 1) / pageCount);
       if (++fresh % 5 == 0) await OutlineCache.writeOcr(path, slides);
       // 읽는 화면이 버벅이지 않게 슬라이드 사이에 잠깐 쉼
       await Future<void>.delayed(const Duration(milliseconds: 120));
     }
     if (!mounted || _docPageCount != pageCount) return null;
-    final texts = [for (int p = 0; p < pageCount; p++) [for (final l in slides[p] ?? const <Map<String, Object?>>[]) l['t']].join('\n')];
+    List<String> textsOf() => [for (int p = 0; p < pageCount; p++) [for (final l in slides[p] ?? const <Map<String, Object?>>[]) l['t']].join('\n')];
     // 목차 슬라이드가 있으면 그것만, 없으면 슬라이드마다 제목(가장 큰 글자)과 그 바로 아래 부제목
-    final List<Map<String, Object?>> items = TocPageParser.parse(texts, pageCount) ??
+    var toc = TocPageParser.parse(textsOf(), pageCount);
+    if (toc != null) {
+      // 목차 슬라이드는 글자가 작아 잘못 읽기 쉬움: 더 크게 그려 한 번 더 읽음
+      final tocPage = TocPageParser.tocPageOf(textsOf(), toc);
+      if (tocPage != null && mounted) {
+        final sharper = await readSlide(tocPage, 2800);
+        if (sharper.isNotEmpty) {
+          final before = slides[tocPage];
+          slides[tocPage] = sharper;
+          final again = TocPageParser.parse(textsOf(), pageCount);
+          if (again != null && again.length >= toc.length) {
+            toc = again;
+          } else {
+            slides[tocPage] = before ?? const [];
+          }
+        }
+      }
+      // 목차 글자 다듬기: 연결된 슬라이드의 제목·부제목(큰 글씨라 더 정확히 읽힘)과 거의 같으면 그 글자로
+      toc = [
+        for (final e in toc)
+          {...e, 'title': TocPageParser.refineTitle('${e['title']}', [for (final l in slides[e['page'] as int] ?? const <Map<String, Object?>>[]) '${l['t']}'])},
+      ];
+    }
+    final List<Map<String, Object?>> items = toc ??
         HeadingRules.slides([for (int p = 0; p < pageCount; p++) slides[p] ?? const <Map<String, Object?>>[]], ocr: true);
     await OutlineCache.clearOcr(path);
     return items;
@@ -1939,6 +1967,48 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     disposeSheetControllerWhenDone(sheetCtrl);
   }
 
+  /// 지금 가로 모드 2페이지로 보고 있는가
+  bool get _bookmarkSpreadNow {
+    final size = MediaQuery.sizeOf(context);
+    return size.width > size.height && _enableTwoPageInLandscape && !_slideShow && (!_isOfflineDocument || _docPageCount > 1);
+  }
+
+  /// 북마크 이름: 쪽 번호 ('12페이지', 2페이지 보기면 '12, 13페이지')
+  String _bookmarkPageLabel(bool spread) {
+    final int total = _isOfflineDocument ? math.max(1, _docPageCount) : (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
+    final int page = _isOfflineDocument ? (_docPage + 1).clamp(1, total).toInt() : ((_progress * total).round()).clamp(1, total).toInt();
+    if (spread && page + 1 <= total) return '$page, ${page + 1}페이지';
+    return '$page페이지';
+  }
+
+  /// 예전 북마크('진행률 …% 지점')도 문서는 쪽 번호로 보여 줌
+  String _bookmarkTitle(BookmarkItem bm) {
+    final m = RegExp(r'^[a-z]+:(\d+)$').firstMatch(bm.position);
+    if (m != null) {
+      final int page = int.parse(m.group(1)!) + 1;
+      return bm.spread && (page + 1 <= _docPageCount || _docPageCount == 0) ? '$page, ${page + 1}페이지' : '$page페이지';
+    }
+    return bm.label;
+  }
+
+  /// 북마크로 이동: 2페이지 보기에서 저장했으면 가로 모드 2페이지 보기로 바꾼 뒤 그 자리를 보여 줌
+  Future<void> _openBookmark(BookmarkItem bm) async {
+    if (bm.spread && !_bookmarkSpreadNow) {
+      if (!_enableTwoPageInLandscape) {
+        await StorageService.setTwoPageLandscape(true);
+        if (!mounted) return;
+        setState(() => _enableTwoPageInLandscape = true);
+      }
+      final size = MediaQuery.sizeOf(context);
+      setState(() => _initialCfi = bm.position);
+      if (size.height >= size.width) await _toggleScreenOrientation();
+      // 화면이 돌고 다시 그려진 뒤 그 자리로
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      if (!mounted) return;
+    }
+    _readerDisplay(bm.position);
+  }
+
   Future<void> _openBookmarkSheet() async {
     final bookmarks = await StorageService.getBookmarks(widget.filePath);
     if (mounted) {
@@ -1960,13 +2030,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 onPressed: () async {
                   if (_currentCfi == null) return;
                   final now = DateTime.now();
+                  final bool spread = _bookmarkSpreadNow;
                   await StorageService.addBookmark(
                     widget.filePath,
                     BookmarkItem(
                       id: now.millisecondsSinceEpoch.toString(),
-                      label: '진행률 ${(_progress * 100).toStringAsFixed(1)}% 지점',
+                      label: _bookmarkPageLabel(spread),
                       position: _currentCfi!,
                       createdAt: '${now.month}/${now.day} ${now.hour}:${now.minute.toString().padLeft(2, '0')}',
+                      spread: spread,
                     ),
                   );
                   if (ctx.mounted) Navigator.pop(ctx);
@@ -1988,8 +2060,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   itemBuilder: (_, idx) {
                     final bm = bookmarks[idx];
                     return ListTile(
-                      leading: const Icon(Icons.bookmark, color: Colors.amber),
-                      title: Text(bm.label),
+                      leading: Icon(bm.spread ? Icons.menu_book : Icons.bookmark, color: Colors.amber),
+                      title: Text(_bookmarkTitle(bm)),
                       subtitle: Text('저장 시각: ${bm.createdAt}'),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete_outline),
@@ -2001,7 +2073,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       ),
                       onTap: () {
                         Navigator.pop(ctx);
-                        _readerDisplay(bm.position);
+                        _openBookmark(bm);
                       },
                     );
                   },
@@ -3151,7 +3223,30 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         onTap: _openBookmarkSheet,
         closeAfterTap: true,
       ),
+      QuickArcMenuItem(
+        icon: const Icon(Icons.copy_all_outlined, color: Colors.white, size: 19),
+        tooltip: _tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
+        onTap: _openTextCopySheet,
+        closeAfterTap: true,
+      ),
     ];
+  }
+
+  /// 지금 보고 있는 쪽(2페이지 보기면 두 쪽)의 글을 보여 주고 복사할 수 있게 함
+  Future<void> _openTextCopySheet() async {
+    String text = '';
+    try {
+      if (_isTxt) {
+        text = _txtController.visibleText;
+      } else if (_isOfflineDocument) {
+        final n = _snapSpread ? 2 : 1;
+        text = (await _hwpController.pageText(_docPage, math.min(_docPageCount, _docPage + n))).join('\n\n');
+      } else {
+        text = (await _epubController.extractCurrentPageText()).text ?? '';
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    await showTextCopySheet(context, text: text, tr: _tr);
   }
 
   @override

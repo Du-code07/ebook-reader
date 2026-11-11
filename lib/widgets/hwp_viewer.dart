@@ -32,8 +32,8 @@ class HwpReaderController {
   Future<void> clearSearch() async => _query?.call('clearSearch', []);
 
   /// PPT: 슬라이드 전체 그림(JPEG base64) — 글자가 그림으로만 된 슬라이드의 글자를 읽는 데 씀
-  Future<String?> slideImage(int index) async {
-    final result = await _query?.call('slideImage', [index]);
+  Future<String?> slideImage(int index, {int width = 1800}) async {
+    final result = await _query?.call('slideImage', [index, width]);
     return result is String && result.isNotEmpty ? result : null;
   }
 

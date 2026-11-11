@@ -32,13 +32,16 @@ Future<T?> showChoiceSheet<T>({
 /// '확인'을 누르면 (고른 값, 스위치 값)을 돌려준다. 그냥 닫으면 null.
 /// 고르기 창 아래에 붙는 스위치 하나 (켜고 끌 때마다 [onChanged]가 바로 불림)
 class SheetToggle {
-  const SheetToggle({required this.label, this.subtitle, this.icon, required this.value, required this.onChanged});
+  const SheetToggle({required this.label, this.subtitle, this.icon, required this.value, required this.onChanged, this.onlyFor});
 
   final String label;
   final String? subtitle;
   final IconData? icon;
   final bool value;
   final ValueChanged<bool> onChanged;
+
+  /// 이 값이 골라져 있을 때만 보임 (예: '표지형'일 때만 '표지 그림 끄기')
+  final Object? onlyFor;
 }
 
 Future<(T, bool)?> showChoiceSheetWithToggle<T>({
@@ -206,6 +209,7 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                       },
                     ),
                     for (int i = 0; i < widget.moreToggles.length; i++)
+                      if (widget.moreToggles[i].onlyFor == null || widget.moreToggles[i].onlyFor == _selected)
                       _toggleRow(
                         cs,
                         icon: widget.moreToggles[i].icon,

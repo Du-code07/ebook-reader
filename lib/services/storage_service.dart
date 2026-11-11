@@ -8,11 +8,15 @@ class BookmarkItem {
   final String position;
   final String createdAt;
 
+  /// 가로 모드 2페이지 보기에서 저장한 북마크 (누르면 그 보기로 돌아가서 보여 줌)
+  final bool spread;
+
   BookmarkItem({
     required this.id,
     required this.label,
     required this.position,
     required this.createdAt,
+    this.spread = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -20,6 +24,7 @@ class BookmarkItem {
         'label': label,
         'position': position,
         'createdAt': createdAt,
+        if (spread) 'spread': true,
       };
 
   factory BookmarkItem.fromJson(Map<String, dynamic> json) => BookmarkItem(
@@ -27,6 +32,7 @@ class BookmarkItem {
         label: json['label'] ?? '',
         position: json['position'] ?? '',
         createdAt: json['createdAt'] ?? '',
+        spread: json['spread'] == true,
       );
 }
 
@@ -201,6 +207,39 @@ class StorageService {
   static Future<bool> getHideFileExtension() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool('hide_file_extension') ?? false;
+  }
+
+  /// 표지형에서 표지 그림 끄기 (켜면 아이콘만)
+  static Future<void> setHideThumbnails(bool hide) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('hide_thumbnails', hide);
+  }
+
+  static Future<bool> getHideThumbnails() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('hide_thumbnails') ?? false;
+  }
+
+  /// 사용자가 고른 표지 그림: 파일 경로 → 표지 그림 경로
+  static Future<Map<String, String>> getCustomCovers() async {
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      final m = jsonDecode(prefs.getString('custom_covers') ?? '{}') as Map<String, dynamic>;
+      return m.map((k, v) => MapEntry(k, '$v'));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> setCustomCover(String bookPath, String? coverPath) async {
+    final prefs = await SharedPreferences.getInstance();
+    final m = await getCustomCovers();
+    if (coverPath == null) {
+      m.remove(bookPath);
+    } else {
+      m[bookPath] = coverPath;
+    }
+    await prefs.setString('custom_covers', jsonEncode(m));
   }
 
   /// 파일 목록에서 [그룹 이름] 숨기기
@@ -537,6 +576,12 @@ class StorageService {
         if (val is double) await prefs.setDouble('$prefix$newPath', val);
         await prefs.remove('$prefix$oldPath');
       }
+    }
+    final covers = await getCustomCovers();
+    final cover = covers.remove(oldPath);
+    if (cover != null) {
+      covers[newPath] = cover;
+      await prefs.setString('custom_covers', jsonEncode(covers));
     }
     final bms = prefs.getStringList('bm_$oldPath');
     if (bms != null) {

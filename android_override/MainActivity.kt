@@ -1507,21 +1507,41 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         val out = ArrayList<Map<String, Any>>()
         val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
         fun collect(pw: Float, ph: Float, contents: List<android.graphics.pdf.content.PdfPageTextContent>, draw: ((Bitmap) -> Unit)?) {
-            val lines = ArrayList<Pair<String, android.graphics.RectF>>()
+            // 글 조각들: 줄바꿈 수와 상자 수가 같으면 줄마다 짝짓고, 다르면 상자 너비에 비례해 글자를 나눠 담음
+            val segs = ArrayList<Pair<String, android.graphics.RectF>>()
             if (pw > 0f && ph > 0f) {
                 for (c in contents) {
                     val text = c.text ?: continue
-                    val rects = c.bounds
+                    val rects = c.bounds.filter { it.width() > 0f && it.height() > 0f }
                     if (rects.isEmpty() || text.isBlank()) continue
-                    val parts = text.split('\n')
+                    val parts = text.split(Regex("\r\n|\n|\r"))
                     if (parts.size == rects.size) {
-                        for (k in rects.indices) if (parts[k].isNotBlank()) lines.add(parts[k] to rects[k])
+                        for (k in rects.indices) if (parts[k].isNotBlank()) segs.add(parts[k] to rects[k])
                     } else {
-                        val u = android.graphics.RectF(rects[0])
-                        for (r in rects) u.union(r)
-                        lines.add(text.replace('\n', ' ') to u)
+                        val flat = text.replace(Regex("[\r\n]+"), " ")
+                        val total = rects.sumOf { it.width().toDouble() }.coerceAtLeast(1.0)
+                        var pos = 0
+                        for ((k, r) in rects.withIndex()) {
+                            val n = if (k == rects.size - 1) flat.length - pos else Math.round(flat.length * r.width() / total).toInt()
+                            val end = (pos + n).coerceIn(pos, flat.length)
+                            val piece = flat.substring(pos, end)
+                            pos = end
+                            if (piece.isNotBlank()) segs.add(piece to android.graphics.RectF(r))
+                        }
                     }
                 }
+            }
+            // 같은 높이(같은 줄)에 있는 조각은 한 줄로 합침
+            segs.sortWith(compareBy({ it.second.centerY() }, { it.second.left }))
+            val lines = ArrayList<Pair<String, android.graphics.RectF>>()
+            for ((t, r) in segs) {
+                val last = lines.lastOrNull()
+                if (last != null && Math.abs(last.second.centerY() - r.centerY()) < minOf(last.second.height(), r.height()) * 0.5f &&
+                    r.left >= last.second.left - 1f && r.left - last.second.right < r.height() * 3f) {
+                    val u = android.graphics.RectF(last.second); u.union(r)
+                    val gap = if (r.left - last.second.right > r.height() * 0.15f) " " else ""
+                    lines[lines.size - 1] = (last.first + gap + t) to u
+                } else lines.add(t to r)
             }
             var bmp: Bitmap? = null
             var scale = 1f

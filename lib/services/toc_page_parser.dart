@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 /// 파일 안에 '목차'(차례, Contents)라고 적힌 쪽이 있으면 그 쪽의 항목들로 목차를 만든다.
 ///
 /// 항목 한 줄은 "제목 ……… 쪽번호" 꼴이다. 쪽번호는 인쇄된 번호라 실제 쪽과 다를 수 있으므로,
@@ -141,6 +142,59 @@ class TocPageParser {
     return text;
   }
 
+  /// 목차 항목들이 가장 많이 적혀 있는 앞쪽 (목차 쪽 번호)
+  static int? tocPageOf(List<String> pageTexts, List<Map<String, Object>> entries) {
+    int? best;
+    int bestCount = 0;
+    for (int p = 0; p < pageTexts.length && p < searchPages; p++) {
+      final page = _norm(pageTexts[p]);
+      final n = entries.where((e) => page.contains(_norm('${e['title']}'))).length;
+      if (n > bestCount) {
+        bestCount = n;
+        best = p;
+      }
+    }
+    return bestCount >= 3 ? best : null;
+  }
+
+  /// 그림 속 글자로 읽은 목차 제목을, 연결된 쪽의 거의 같은 줄 글자로 바꿈 (번호는 목차 것 그대로).
+  /// 예: '02. 의약품 분해 메커L즘' + 쪽의 '의약품 분해 매커니즘' → '02. 의약품 분해 매커니즘'
+  static String refineTitle(String title, List<String> lines) {
+    final core = _core(title).trim();
+    final nc = _norm(core);
+    if (nc.length < 2) return title;
+    final nums = _numbers(title);
+    String? bestLine;
+    double best = 0;
+    bool byNumber = false;
+    for (final line in lines) {
+      final lc = _core(line).trim();
+      double sim = _similar(_norm(lc), nc);
+      bool numbered = false;
+      // 같은 이어진 번호(2-3 등)로 시작하는 줄이면 글자가 많이 틀려도 같은 항목 (그림 글자 읽기에서 '이'를 '01'로 읽는 등)
+      final ln = _numbers(line);
+      if (nums != null && ln != null && ln.length >= 2 && nums.length >= ln.length &&
+          List.generate(ln.length, (i) => nums[i] == ln[i]).every((x) => x) && sim >= 0.2) {
+        sim = math.max(sim, 0.75);
+        numbered = true;
+      }
+      if (sim > best) {
+        best = sim;
+        bestLine = numbered ? line.trim() : lc;
+        byNumber = numbered;
+      }
+    }
+    // 긴 제목은 조금 더 너그럽게 (글자 몇 개만 틀린 경우)
+    final double need = nc.length >= 6 ? 0.5 : 0.6;
+    if (bestLine == null || best < need || (best >= 0.999 && !byNumber)) return title;
+    if (byNumber) return bestLine;
+    // 길이가 너무 다르면(다른 말이 붙은 줄) 바꾸지 않음
+    if (bestLine.length > core.length * 1.6 + 2 || bestLine.length < core.length * 0.5) return title;
+    final i = title.indexOf(core);
+    final prefix = i > 0 ? title.substring(0, i).trimRight() : '';
+    return prefix.isEmpty ? bestLine : '$prefix $bestLine';
+  }
+
   /// 쪽 [lines] 안에 제목이 있는가 (그대로, 번호 뗀 제목, 거의 같은 줄)
   static bool _pageHas(String normPage, List<String> lines, String title) {
     final full = _norm(title), core = _norm(_core(title));
@@ -167,8 +221,14 @@ class TocPageParser {
     if (tocStart < 0) {
       // '목차' 글자를 못 읽었어도(그림 속 글자 등) 앞 3쪽 중 번호 항목이 5개 이상이고
       // 그 대부분이 뒤쪽에 다시 나오면 목차 쪽으로 본다
+      // 단, 쪽의 대부분이 짧은 항목이어야 함 (본문 속 1) 2) 목록이 목차로 잡히지 않게)
       for (int i = 0; i < pageTexts.length && i < 3; i++) {
-        if (pageTexts[i].split('\n').expand(_numberedEntries).length < 5) continue;
+        final lines = pageTexts[i].split('\n').where((l) => l.trim().isNotEmpty).toList();
+        final entries = lines.expand(_numberedEntries).where((e) {
+          final k = _kind(e);
+          return e.length <= 40 && k != 'paren' && k != 'halfparen' && k != 'hangulparen';
+        }).toList();
+        if (entries.length < 5 || entries.length < lines.length * 0.5) continue;
         final r = _parseNumbered(pageTexts, totalPages, i, minFound: 0.6);
         if (r != null) return r;
       }
