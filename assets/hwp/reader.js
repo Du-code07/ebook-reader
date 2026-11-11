@@ -82,6 +82,27 @@ async function addUserFaces(name, faces) {
     } catch (e) {}
   }));
 }
+// 앱에 들어 있는 무료 한글 글꼴 (문서가 이 이름을 쓰면 원본 글꼴로 보여 줌)
+const FREE_FONTS = [
+  [/^(나눔고딕|nanumgothic|nanum gothic)$/i, 'NanumGothic', true],
+  [/^(나눔명조|nanummyeongjo|nanum myeongjo)$/i, 'NanumMyeongjo', true],
+  [/^(나눔고딕코딩|nanumgothiccoding|nanum gothic coding)$/i, 'NanumGothicCoding', true],
+  [/^(고운바탕|gowunbatang|gowun batang)$/i, 'GowunBatang', true],
+  [/^(고운돋움|gowundodum|gowun dodum)$/i, 'GowunDodum', false],
+];
+function freeFont(name) {
+  const n = String(name).replace(/^DOCX /, '').trim();
+  for (const [re, base, bold] of FREE_FONTS) if (re.test(n)) return { base, bold };
+  return null;
+}
+async function addFreeFaces(name, free, dir) {
+  await Promise.all((free.bold ? [400, 700] : [400]).map(async w => {
+    try {
+      const face = new FontFace(name, `url(${dir}/${free.base}-${w === 700 ? 'Bold' : 'Regular'}.woff2)`, { weight: String(w) });
+      await face.load(); document.fonts.add(face);
+    } catch (e) {}
+  }));
+}
 async function loadFontAliases(names) {
   await Promise.all([...new Set(names)].slice(0, 128).map(async raw => {
     const name = String(raw).trim();
@@ -90,6 +111,13 @@ async function loadFontAliases(names) {
     if (user.length) {
       // 사용자 글꼴: 굵은 글꼴이 없으면 브라우저가 굵게 만들어 그림
       const job = addUserFaces(name, user);
+      fonts.set(name, job);
+      await job;
+      return;
+    }
+    const free = freeFont(name);
+    if (free) {
+      const job = addFreeFaces(name, free, '../docx/fonts/free');
       fonts.set(name, job);
       await job;
       return;

@@ -119,6 +119,27 @@ function metricFont(name) {
   for (const [re, base] of METRIC_FONTS) if (re.test(n)) return base;
   return null;
 }
+// 앱에 들어 있는 무료 한글 글꼴 (문서가 이 이름을 쓰면 원본 글꼴로 보여 줌)
+const FREE_FONTS = [
+  [/^(나눔고딕|nanumgothic|nanum gothic)$/i, 'NanumGothic', true],
+  [/^(나눔명조|nanummyeongjo|nanum myeongjo)$/i, 'NanumMyeongjo', true],
+  [/^(나눔고딕코딩|nanumgothiccoding|nanum gothic coding)$/i, 'NanumGothicCoding', true],
+  [/^(고운바탕|gowunbatang|gowun batang)$/i, 'GowunBatang', true],
+  [/^(고운돋움|gowundodum|gowun dodum)$/i, 'GowunDodum', false],
+];
+function freeFont(name) {
+  const n = String(name).replace(/^DOCX /, '').trim();
+  for (const [re, base, bold] of FREE_FONTS) if (re.test(n)) return { base, bold };
+  return null;
+}
+async function addFreeFaces(name, free, dir) {
+  await Promise.all((free.bold ? [400, 700] : [400]).map(async w => {
+    try {
+      const face = new FontFace(name, `url(${dir}/${free.base}-${w === 700 ? 'Bold' : 'Regular'}.woff2)`, { weight: String(w) });
+      await face.load(); document.fonts.add(face);
+    } catch (e) {}
+  }));
+}
 function userFontFaces(name) {
   const n = String(name).trim().toLowerCase();
   return (options.userFonts || []).filter(f => (f.n || []).some(x => String(x).trim().toLowerCase() === n));
@@ -159,6 +180,11 @@ async function loadFonts(root) {
       }));
       fonts.set(name, job); return job;
     }
+    const free = freeFont(localName);
+    if (free) {
+      const job = addFreeFaces(name, free, './fonts/free');
+      fonts.set(name, job); return job;
+    }
     const kind = fontKind(localName), base = kind === 'math' ? 'LatinModernMath' : kind === 'serif' ? 'NotoSerifKR' : 'NotoSansKR';
     const metric = kind === 'math' ? null : metricFont(localName);
     const job = Promise.all((kind === 'math' ? [400] : [400, 700]).map(async weight => {
@@ -170,8 +196,11 @@ async function loadFonts(root) {
         await symbols.load(); document.fonts.add(symbols);
         if (metric) {
           // Arial·Times New Roman·Calibri 등: 글자 폭이 같은 무료 글꼴로 영문을 그려 줄바꿈·배치가 원본과 같게
-          const latin = new FontFace(name, `local(${JSON.stringify(localName)}), url(./fonts/metric/${metric}-${suffix}.woff2)`, { weight: String(weight), unicodeRange: LATIN_RANGE });
-          await latin.load(); document.fonts.add(latin);
+          // 없어도 문서는 계속 보이게 (기본 글꼴로)
+          try {
+            const latin = new FontFace(name, `local(${JSON.stringify(localName)}), url(./fonts/metric/${metric}-${suffix}.woff2)`, { weight: String(weight), unicodeRange: LATIN_RANGE });
+            await latin.load(); document.fonts.add(latin);
+          } catch (e) {}
         } else if (name.startsWith('DOCX ')) {
         const latin = new FontFace(name, `local(${JSON.stringify(localName)}), url(./fonts/Noto${kind === 'serif' ? 'Serif' : 'Sans'}-Latin-${suffix}.ttf)`, { weight: String(weight), unicodeRange: 'U+0000-024F' });
         await latin.load(); document.fonts.add(latin);
