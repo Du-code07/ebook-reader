@@ -19,8 +19,6 @@ class AppSettingsScreen extends StatefulWidget {
     this.onChangeHideGroupName,
     this.hideThumbnails = false,
     this.onChangeHideThumbnails,
-    this.hideAddedDate = false,
-    this.onChangeHideAddedDate,
     this.hidePageCount = false,
     this.onChangeHidePageCount,
     required this.onChangeLanguage,
@@ -42,8 +40,6 @@ class AppSettingsScreen extends StatefulWidget {
   final Future<void> Function(bool hide)? onChangeHideGroupName;
   final bool hideThumbnails;
   final Future<void> Function(bool hide)? onChangeHideThumbnails;
-  final bool hideAddedDate;
-  final Future<void> Function(bool hide)? onChangeHideAddedDate;
   final bool hidePageCount;
   final Future<void> Function(bool hide)? onChangeHidePageCount;
   final ValueChanged<String> onChangeLanguage; // 'system' | ko/en/zh/ja
@@ -70,7 +66,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   late bool _hideExt = widget.hideExtension;
   late bool _hideGroup = widget.hideGroupName;
   late bool _hideThumbs = widget.hideThumbnails;
-  late bool _hideDate = widget.hideAddedDate;
   late bool _hidePages = widget.hidePageCount;
   bool _rememberPage = StorageService.rememberPage;
 
@@ -174,17 +169,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             if (!mounted) return;
             setState(() => _hideGroup = v);
             await widget.onChangeHideGroupName?.call(v);
-          },
-        ),
-        SheetToggle(
-          icon: Icons.event_busy_outlined,
-          label: _t('추가 날짜 숨기기', 'Hide date added', '隐藏添加日期', '追加日を隠す'),
-          subtitle: _t('파일 아래 추가 날짜 (예: 26.11.11)', 'Date under each file (e.g. 26.11.11)', '文件下方的添加日期', 'ファイルの下の追加日'),
-          value: _hideDate,
-          onChanged: (v) async {
-            if (!mounted) return;
-            setState(() => _hideDate = v);
-            await widget.onChangeHideAddedDate?.call(v);
           },
         ),
         SheetToggle(

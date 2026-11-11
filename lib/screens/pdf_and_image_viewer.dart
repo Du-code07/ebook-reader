@@ -497,7 +497,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     return rotationIcon(want == null ? 'auto' : (want ? 'landscape' : 'portrait'));
   }
 
-  /// 페이지 표시 고르기 (한 페이지 / 두 페이지 / 화면 비율에 따라)
+  /// 페이지 표시 고르기 (한 페이지 / 두 페이지 / 자동)
   Future<void> _pickPageDisplay() async {
     await showPageDisplayDialog(
       context,
@@ -562,7 +562,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final dir = await getApplicationDocumentsDirectory();
     const supportedExts = [
       'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
-      'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt',
+      'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt', 'xlsx', 'xlsm', 'xls',
     ];
     const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
 
@@ -628,7 +628,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ),
     );
 
-    if (const ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt'].contains(nextExt)) {
+    if (const ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt', 'xlsx', 'xlsm', 'xls'].contains(nextExt)) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -1806,26 +1806,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   ],
                 ),
                 const SizedBox(height: 26),
-                _settingsHeader(Icons.grid_view_rounded, _tr('도구 모음 위치', 'Toolbox Position', '工具箱位置', 'ツールボックスの位置')),
-                const SizedBox(height: 8),
-                SettingGroup(
-                  children: [
-                    for (final opt in <(String, String)>[
-                      ('right', _tr('오른쪽', 'Right', '右侧', '右')),
-                      ('left', _tr('왼쪽', 'Left', '左侧', '左')),
-                    ])
-                      SettingOption(
-                        label: Text(opt.$2),
-                        selected: _quickMenuSide == opt.$1,
-                        onSelected: (_) async {
-                          await StorageService.setQuickMenuSide(opt.$1);
-                          setState(() => _quickMenuSide = opt.$1);
-                          setModalState(() {});
-                        },
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 26),
                 _settingsHeader(Icons.view_week_outlined, _tr('도구 모음 형태', 'Toolbox Style', '工具箱样式', 'ツールボックスの形')),
                 const SizedBox(height: 8),
                 SettingGroup(
@@ -1846,6 +1826,29 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   ],
                 ),
                 const SizedBox(height: 26),
+                // 도구 모음 위치는 반원일 때만 (바로 바꾸면 숨김, 고른 위치는 기억)
+                if (_toolbarStyle == 'arc') ...[
+                  _settingsHeader(Icons.grid_view_rounded, _tr('도구 모음 위치', 'Toolbox Position', '工具箱位置', 'ツールボックスの位置')),
+                  const SizedBox(height: 8),
+                  SettingGroup(
+                    children: [
+                      for (final opt in <(String, String)>[
+                        ('right', _tr('오른쪽', 'Right', '右侧', '右')),
+                        ('left', _tr('왼쪽', 'Left', '左侧', '左')),
+                      ])
+                        SettingOption(
+                          label: Text(opt.$2),
+                          selected: _quickMenuSide == opt.$1,
+                          onSelected: (_) async {
+                            await StorageService.setQuickMenuSide(opt.$1);
+                            setState(() => _quickMenuSide = opt.$1);
+                            setModalState(() {});
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 26),
+                ],
                 _settingsHeader(Icons.info_outline, _tr('하단 정보 표시', 'Footer Info Display', '底部信息显示', '下部情報表示')),
                 const SizedBox(height: 8),
                 SettingGroup(
@@ -2559,7 +2562,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         closeAfterTap: true,
       ),
       QuickArcMenuItem(
-        // 페이지 표시 (한 페이지 / 두 페이지 / 화면 비율에 따라)
+        // 페이지 표시 (한 페이지 / 두 페이지 / 자동)
         icon: Icon(
           pageDisplayIcon(_pageDisplay),
           color: _pageDisplay != 'one' ? Colors.amber : Colors.white,

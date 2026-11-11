@@ -2,16 +2,17 @@ import 'dart:math' as math;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 typedef ViewerTr = String Function(String ko, String en, String zh, String ja);
 
 /// 탭 모드에서 누른 자리: 위쪽은 메뉴, 아래 왼쪽은 이전 쪽, 아래 오른쪽은 다음 쪽.
-/// 세로 화면은 위 절반, 가로 화면은 위 40%가 메뉴 자리.
+/// 세로·가로 모두 위 2/3가 메뉴 자리, 아래 1/3이 이전/다음 쪽.
 enum TapZone { menu, left, right }
 
 TapZone tapZoneAt(Offset local, Size size) {
-  final bool landscape = size.width > size.height;
-  final double menuBottom = size.height * (landscape ? 0.40 : 0.5);
+  // 세로·가로 모두: 위 2/3는 메뉴, 아래 1/3은 왼쪽 반 = 이전 / 오른쪽 반 = 다음
+  final double menuBottom = size.height * 2 / 3;
   if (local.dy < menuBottom) return TapZone.menu;
   return local.dx < size.width / 2 ? TapZone.left : TapZone.right;
 }
@@ -45,7 +46,7 @@ Widget _dialogFrame(BuildContext context, {required Widget child}) {
   );
 }
 
-/// 페이지 표시: 한 페이지 / 두 페이지 / 화면 비율에 따라. 누르면 바로 적용 ([onChanged]), '닫기'로 닫음
+/// 페이지 표시: 한 페이지 / 두 페이지 / 자동. 누르면 바로 적용 ([onChanged]), '닫기'로 닫음
 Future<void> showPageDisplayDialog(
   BuildContext context, {
   required String current,
@@ -80,7 +81,7 @@ Future<void> showPageDisplayDialog(
               for (final (value, label, sub) in <(String, String, String?)>[
                 ('one', tr('한 페이지', 'One Page', '单页', '1ページ'), null),
                 ('two', tr('두 페이지', 'Two Pages', '双页', '2ページ'), null),
-                ('auto', tr('화면 비율에 따라', 'By Screen Ratio', '根据屏幕比例', '画面比率に合わせる'),
+                ('auto', tr('자동', 'Auto', '自动', '自動'),
                     tr('화면이 넓으면 두 페이지, 좁으면 한 페이지로 표시해요.', 'Two pages on wide screens, one on narrow screens.', '屏幕宽时显示双页，窄时显示单页。', '画面が広いと2ページ、狭いと1ページで表示します。')),
               ])
                 InkWell(
@@ -245,6 +246,7 @@ class ContinuousPageList extends StatefulWidget {
     this.controller,
     this.background = Colors.black,
     this.zoomable = true,
+    this.gap = 0,
   });
 
   final int count;
@@ -258,17 +260,36 @@ class ContinuousPageList extends StatefulWidget {
   final Color background;
   final bool zoomable;
 
+  /// 쪽과 쪽 사이 빈칸 (확대 1배 기준)
+  final double gap;
+
   @override
   State<ContinuousPageList> createState() => _ContinuousPageListState();
 }
 
-class _ContinuousPageListState extends State<ContinuousPageList> {
-  ScrollController? _sc;
-  final TransformationController _zoom = TransformationController();
+class _ContinuousPageListState extends State<ContinuousPageList> with SingleTickerProviderStateMixin {
+  // 쪽 위치(확대 1배, 너비 = 화면 너비 기준). _tops[i]는 i번째 쪽의 위쪽 끝
   double _width = 0;
+  double _height = 0;
   List<double> _tops = const [];
   int _current = -1;
-  bool _zoomed = false;
+
+  // 지금 보이는 자리: 확대 배율과 왼쪽 위 좌표(확대된 좌표)
+  double _scale = 1;
+  double _ox = 0;
+  double _oy = 0;
+  bool _placed = false;
+
+  // 손가락 두 개로 벌리고 오므리기 / 한 손가락으로 끌기 (둘 다 여기서 직접 처리)
+  double _startScale = 1;
+  Offset _startContent = Offset.zero;
+  int _pointers = 0;
+
+  // 손을 뗀 뒤 미끄러지기·부드러운 이동
+  late final Ticker _ticker = createTicker(_tick);
+  Simulation? _simX, _simY;
+  Duration _simStart = Duration.zero;
+  bool _simStarted = false;
 
   @override
   void initState() {
@@ -283,39 +304,55 @@ class _ContinuousPageListState extends State<ContinuousPageList> {
       oldWidget.controller?._state = null;
       widget.controller?._state = this;
     }
+    if (oldWidget.count != widget.count) _tops = const [];
   }
 
   @override
   void dispose() {
     if (widget.controller?._state == this) widget.controller?._state = null;
-    _sc?.dispose();
-    _zoom.dispose();
+    _ticker.dispose();
     super.dispose();
   }
 
-  void _layout(double width) {
-    if (width == _width && _tops.length == widget.count + 1) return;
-    final double oldTop = (_sc != null && _sc!.hasClients && _tops.length > 1) ? _pageAt(_sc!.offset).toDouble() : -1;
+  double get _maxScale => widget.zoomable ? 5 : 1;
+  double get _contentHeight => (_tops.isEmpty ? 0 : _tops.last) * _scale;
+  double get _maxX => math.max(0, _width * _scale - _width);
+  double get _maxY => math.max(0, _contentHeight - _height);
+
+  void _clamp() {
+    _ox = _ox.clamp(0.0, _maxX).toDouble();
+    _oy = _oy.clamp(0.0, _maxY).toDouble();
+  }
+
+  void _layout(double width, double height) {
+    final bool sameWidth = width == _width && _tops.length == widget.count + 1;
+    _height = height;
+    if (sameWidth) {
+      _clamp();
+      return;
+    }
+    // 화면 너비가 바뀌면(회전 등) 보던 쪽을 그대로
+    final int page = _placed && _tops.length > 1 ? _pageAt(_oy) : widget.initialPage.clamp(0, math.max(0, widget.count - 1)).toInt();
+    final double within = _placed && _tops.length > 1 ? ((_oy / _scale) - _tops[page]) / math.max(1, _tops[page + 1] - _tops[page]) : 0;
     _width = width;
     final tops = List<double>.filled(widget.count + 1, 0);
     for (int i = 0; i < widget.count; i++) {
-      tops[i + 1] = tops[i] + width * widget.aspectOf(i);
+      tops[i + 1] = tops[i] + width * widget.aspectOf(i) + (i < widget.count - 1 ? widget.gap : 0);
     }
     _tops = tops;
-    final int page = oldTop >= 0 ? oldTop.toInt() : widget.initialPage.clamp(0, math.max(0, widget.count - 1)).toInt();
-    if (_sc == null) {
-      _sc = ScrollController(initialScrollOffset: _tops[page])..addListener(_onScroll);
-      _current = page;
-    } else if (_sc!.hasClients) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _sc!.hasClients) _sc!.jumpTo(_tops[page].clamp(0.0, _sc!.position.maxScrollExtent));
-      });
+    if (widget.count > 0) {
+      final double h = tops[page + 1] - tops[page];
+      _oy = (tops[page] + within * h) * _scale;
     }
+    _placed = true;
+    _clamp();
+    _current = page;
   }
 
-  int _pageAt(double offset) {
-    // 화면 위쪽 1/3 지점에 걸친 쪽
-    final double y = offset + (_sc?.hasClients == true ? _sc!.position.viewportDimension / 3 : 0);
+  /// 화면 위쪽 1/3 지점에 걸친 쪽 (oy: 확대된 좌표)
+  int _pageAt(double oy) {
+    if (_tops.length < 2) return 0;
+    final double y = (oy + _height / 3) / _scale;
     int lo = 0, hi = widget.count - 1;
     while (lo < hi) {
       final mid = (lo + hi + 1) >> 1;
@@ -328,28 +365,105 @@ class _ContinuousPageListState extends State<ContinuousPageList> {
     return lo;
   }
 
-  void _onScroll() {
-    final sc = _sc;
-    if (sc == null || !sc.hasClients || _tops.length < 2) return;
-    final p = _pageAt(sc.offset);
-    if (p != _current) {
+  void _moved() {
+    _clamp();
+    final p = _pageAt(_oy);
+    if (p != _current && _tops.length > 1) {
       _current = p;
       widget.onPageChanged(p);
     }
+    setState(() {});
+  }
+
+  void _stopSim() {
+    if (_ticker.isActive) _ticker.stop();
+    _simX = _simY = null;
+  }
+
+  void _tick(Duration elapsed) {
+    if (!_simStarted) {
+      _simStart = elapsed;
+      _simStarted = true;
+    }
+    final double t = (elapsed - _simStart).inMicroseconds / 1e6;
+    bool done = true;
+    if (_simX != null) {
+      _ox = _simX!.x(t);
+      if (!_simX!.isDone(t)) done = false;
+    }
+    if (_simY != null) {
+      _oy = _simY!.x(t);
+      if (!_simY!.isDone(t)) done = false;
+    }
+    final double ox = _ox, oy = _oy;
+    _moved();
+    // 끝에 닿으면 멈춤
+    if (_simX != null && (ox != _ox)) _simX = null;
+    if (_simY != null && (oy != _oy)) _simY = null;
+    if (done || (_simX == null && _simY == null)) _stopSim();
+  }
+
+  void _runSim({Simulation? x, Simulation? y}) {
+    _stopSim();
+    _simX = x;
+    _simY = y;
+    if (x == null && y == null) return;
+    _simStarted = false;
+    _ticker.start();
+  }
+
+  void _animateTo(double ox, double oy) {
+    _runSim(
+      x: (ox - _ox).abs() < 0.5 ? null : _EaseSimulation(_ox, ox, 0.26),
+      y: (oy - _oy).abs() < 0.5 ? null : _EaseSimulation(_oy, oy, 0.26),
+    );
   }
 
   void _jumpTo(int page) {
-    final sc = _sc;
-    if (sc == null || !sc.hasClients || _tops.length < 2) return;
+    if (_tops.length < 2) return;
+    _stopSim();
     final p = page.clamp(0, widget.count - 1).toInt();
-    sc.jumpTo(_tops[p].clamp(0.0, sc.position.maxScrollExtent));
+    _oy = _tops[p] * _scale;
+    _moved();
   }
 
   void _scrollByScreen(int dir) {
-    final sc = _sc;
-    if (sc == null || !sc.hasClients) return;
-    final double target = (sc.offset + dir * sc.position.viewportDimension * 0.9).clamp(0.0, sc.position.maxScrollExtent);
-    sc.animateTo(target, duration: const Duration(milliseconds: 260), curve: Curves.easeOutCubic);
+    if (_tops.length < 2) return;
+    final double target = (_oy + dir * _height * 0.9).clamp(0.0, _maxY).toDouble();
+    _animateTo(_ox, target);
+  }
+
+  void _onScaleStart(ScaleStartDetails d) {
+    _stopSim();
+    _startScale = _scale;
+    _startContent = Offset((_ox + d.localFocalPoint.dx) / _scale, (_oy + d.localFocalPoint.dy) / _scale);
+    _pointers = d.pointerCount;
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails d) {
+    // 손가락 수가 바뀌면 기준을 다시 잡아 튀지 않게
+    if (d.pointerCount != _pointers) {
+      _pointers = d.pointerCount;
+      _startScale = _scale / (d.scale == 0 ? 1 : d.scale);
+      _startContent = Offset((_ox + d.localFocalPoint.dx) / _scale, (_oy + d.localFocalPoint.dy) / _scale);
+    }
+    final double ns = (_startScale * d.scale).clamp(1.0, _maxScale).toDouble();
+    _scale = ns;
+    _ox = _startContent.dx * ns - d.localFocalPoint.dx;
+    _oy = _startContent.dy * ns - d.localFocalPoint.dy;
+    _moved();
+  }
+
+  void _onScaleEnd(ScaleEndDetails d) {
+    final v = d.velocity.pixelsPerSecond;
+    if (_scale < 1.03 && _scale != 1) {
+      _scale = 1;
+      _moved();
+    }
+    _runSim(
+      x: v.dx.abs() > 60 && _maxX > 0 ? ClampingScrollSimulation(position: _ox, velocity: -v.dx) : null,
+      y: v.dy.abs() > 60 ? ClampingScrollSimulation(position: _oy, velocity: -v.dy) : null,
+    );
   }
 
   @override
@@ -358,34 +472,54 @@ class _ContinuousPageListState extends State<ContinuousPageList> {
       color: widget.background,
       child: LayoutBuilder(
         builder: (context, c) {
-          _layout(c.maxWidth);
-          final list = ListView.builder(
-            controller: _sc,
-            physics: _zoomed ? const NeverScrollableScrollPhysics() : const ClampingScrollPhysics(),
-            itemCount: widget.count,
-            // 쪽 높이를 미리 다 알고 있어 어디로 가도 자리가 흔들리지 않음
-            itemExtentBuilder: (i, _) => _tops[i + 1] - _tops[i],
-            // 앞뒤 몇 쪽을 미리 그려 두어 넘길 때 끊기지 않게
-            cacheExtent: c.maxHeight * 2.5,
-            itemBuilder: (context, i) => RepaintBoundary(child: widget.pageBuilder(context, i)),
-          );
-          if (!widget.zoomable) return list;
-          return InteractiveViewer(
-            transformationController: _zoom,
-            minScale: 1,
-            maxScale: 5,
-            panEnabled: _zoomed,
-            onInteractionEnd: (_) {
-              final z = _zoom.value.getMaxScaleOnAxis() > 1.03;
-              if (!z) _zoom.value = Matrix4.identity();
-              if (z != _zoomed) setState(() => _zoomed = z);
-            },
-            child: list,
+          _layout(c.maxWidth, c.maxHeight);
+          final children = <Widget>[];
+          if (_tops.length > 1) {
+            final double s = _scale;
+            // 화면 앞뒤로 한 화면 반씩 더 그려 두어 움직일 때 비어 보이지 않게
+            final double from = (_oy - _height * 1.5) / s, to = (_oy + _height * 2.5) / s;
+            int i = _pageAt(math.max(0, _oy - _height * 1.5));
+            while (i > 0 && _tops[i] > from) {
+              i--;
+            }
+            for (; i < widget.count && _tops[i] < to; i++) {
+              final double h = (_tops[i + 1] - _tops[i] - (i < widget.count - 1 ? widget.gap : 0)) * s;
+              children.add(Positioned(
+                key: ValueKey(i),
+                left: -_ox,
+                top: _tops[i] * s - _oy,
+                width: _width * s,
+                height: h,
+                child: RepaintBoundary(child: widget.pageBuilder(context, i)),
+              ));
+            }
+          }
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onScaleStart: _onScaleStart,
+            onScaleUpdate: _onScaleUpdate,
+            onScaleEnd: _onScaleEnd,
+            child: ClipRect(child: Stack(clipBehavior: Clip.hardEdge, children: children)),
           );
         },
       ),
     );
   }
+}
+
+/// 정해진 시간 동안 부드럽게 a → b
+class _EaseSimulation extends Simulation {
+  _EaseSimulation(this.a, this.b, this.seconds);
+  final double a, b, seconds;
+
+  @override
+  double x(double time) => a + (b - a) * Curves.easeOutCubic.transform((time / seconds).clamp(0.0, 1.0).toDouble());
+
+  @override
+  double dx(double time) => 0;
+
+  @override
+  bool isDone(double time) => time >= seconds;
 }
 
 /// 그림 파일의 크기를 머리 부분만 읽어 빠르게 알아냄 (PNG·JPEG·WebP). 모르면 null
@@ -580,7 +714,7 @@ class SettingDoneButton extends StatelessWidget {
 
 /// 파일을 처음 열 때 가운데에 뜨는 로딩: 돌아가는 원 + 문구 (+ 진행률)
 class FileLoadingView extends StatelessWidget {
-  const FileLoadingView({super.key, required this.label, this.progress, this.sublabel, this.dark = false});
+  const FileLoadingView({super.key, required this.label, this.progress, this.sublabel, this.dark = false, this.background});
   final String label;
 
   /// 0~1 (모르면 null: 문구에 %를 붙이지 않음)
@@ -590,10 +724,15 @@ class FileLoadingView extends StatelessWidget {
   /// 어두운 바탕 위인가 (사진·PDF 화면)
   final bool dark;
 
+  /// 뒤 바탕색 (알려 주면 앱 테마와 관계없이 바탕에 맞춰 잘 보이는 글자색)
+  final Color? background;
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final Color fg = dark ? Colors.white : cs.onSurface;
+    final Color? bg = background;
+    final bool onDark = bg != null ? bg.computeLuminance() < 0.4 : dark;
+    final Color fg = bg != null ? (onDark ? Colors.white : Colors.black) : (dark ? Colors.white : cs.onSurface);
     final p = progress;
     return Center(
       child: Column(
@@ -605,7 +744,7 @@ class FileLoadingView extends StatelessWidget {
             child: CircularProgressIndicator(
               strokeWidth: 4.5,
               strokeCap: StrokeCap.round,
-              color: dark ? Colors.amber : cs.primary,
+              color: bg != null ? (onDark ? const Color(0xFF9FA8FF) : const Color(0xFF3F51B5)) : (dark ? Colors.amber : cs.primary),
               backgroundColor: fg.withValues(alpha: 0.12),
             ),
           ),

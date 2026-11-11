@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import '../services/user_fonts.dart';
 import '../services/storage_service.dart';
 import 'viewer_dialogs.dart';
@@ -21,6 +23,11 @@ class HwpReaderController {
   Future<void> previous() async => _invoke?.call('previous', []);
   Future<void> toProgress(double progress) async =>
       _invoke?.call('progress', [progress]);
+
+  /// Excel navigation operates on the live worksheet, not document pages.
+  Future<void> selectSheet(int index) async => _invoke?.call('selectSheet', [index]);
+  Future<void> zoomSheet(double factor) async => _invoke?.call('zoomBy', [factor]);
+  Future<void> resetSheetZoom() async => _invoke?.call('resetZoom', []);
 
   // ── 파일 내 단어 검색 ──
   Future<Object?> Function(String, List<Object?>)? _query;
@@ -119,6 +126,7 @@ class HwpViewer extends StatefulWidget {
   final ValueChanged<int>? onPageReady;
   /// 파워포인트: 지금 슬라이드에서 남은 애니메이션 단계 수 (위치가 바뀔 때마다)
   final ValueChanged<int>? onStepsLeft;
+  final ValueChanged<List<String>>? onSheetNames;
 
   const HwpViewer({
     super.key,
@@ -135,6 +143,7 @@ class HwpViewer extends StatefulWidget {
     required this.onCancelled,
     this.onPageReady,
     this.onStepsLeft,
+    this.onSheetNames,
   });
 
   @override
@@ -148,14 +157,16 @@ class _HwpViewerState extends State<HwpViewer> {
   bool get _isWord => _isDocx || _isDoc;
   // 파워포인트(.ppt/.pptx)도 같은 문서 화면에서 연다
   bool get _isPresentation => RegExp(r'\.pptx?$', caseSensitive: false).hasMatch(widget.filePath);
+  bool get _isSpreadsheet => RegExp(r'\.xls[xm]?$', caseSensitive: false).hasMatch(widget.filePath);
+  String get _spreadsheetFormat => widget.filePath.split('.').last.toLowerCase();
   String get _presentationFormat => widget.filePath.toLowerCase().endsWith('.pptx') ? 'pptx' : 'ppt';
-  String get _format => _isPresentation ? _presentationFormat.toUpperCase() : _isDocx
+  String get _format => _isSpreadsheet ? _spreadsheetFormat.toUpperCase() : _isPresentation ? _presentationFormat.toUpperCase() : _isDocx
       ? 'DOCX'
       : _isDoc
       ? 'DOC'
       : 'HWP';
   String get _entry =>
-      '$_origin/assets/flutter_assets/assets/${_isPresentation ? 'ppt' : _isWord ? 'docx' : 'hwp'}/index.html';
+      '$_origin/assets/flutter_assets/assets/${_isSpreadsheet ? 'xlsx' : _isPresentation ? 'ppt' : _isWord ? 'docx' : 'hwp'}/index.html';
   /// 표시 파일을 못 불러왔을 때: 앱 안에 그 파일이 아예 없으면(빌드에 빠짐) 무엇이 빠졌는지 알려 준다
   Future<void> _reportMissingAsset(String url, String description) async {
     // 없어도 되는 글꼴(같은 폭 무료 글꼴·사용자 글꼴)은 못 불러와도 기본 글꼴로 계속 보여 줌
@@ -175,7 +186,7 @@ class _HwpViewerState extends State<HwpViewer> {
     _reportError('문서 표시 파일을 불러오지 못했습니다: $description');
   }
 
-  String get _jsObject => _isPresentation ? 'freaderPpt' : _isWord ? 'freaderDocx' : 'freaderHwp';
+  String get _jsObject => _isSpreadsheet ? 'freaderXlsx' : _isPresentation ? 'freaderPpt' : _isWord ? 'freaderDocx' : 'freaderHwp';
   Map<String, Object> _docxLayout = {};
   static const _maxBytes = 256 * 1024 * 1024;
   static const _chunkBytes = 192 * 1024;
@@ -197,6 +208,7 @@ class _HwpViewerState extends State<HwpViewer> {
     'progress': widget.initialProgress,
     if (_isWord) 'format': _isDoc ? 'doc' : 'docx',
     if (_isPresentation) 'format': _presentationFormat,
+    if (_isSpreadsheet) 'format': _spreadsheetFormat,
     if (_isDocx) 'docxLayout': _docxLayout,
     if (_cacheKey != null) 'cacheKey': _cacheKey,
     if (_userFonts.isNotEmpty) 'userFonts': _userFonts,
@@ -344,6 +356,9 @@ class _HwpViewerState extends State<HwpViewer> {
         _timeout?.cancel();
         unawaited(_invoke('configure', [_options]));
         widget.onLoaded((event['pageCount'] as num).toInt());
+        if (_isSpreadsheet && event['chapters'] is List) {
+          widget.onSheetNames?.call([for (final name in event['chapters'] as List) name.toString()]);
+        }
         break;
       case 'location':
         if (!_loaded) return;
@@ -436,6 +451,7 @@ class _HwpViewerState extends State<HwpViewer> {
     _generation++;
     _timeout?.cancel();
     widget.controller._invoke = null;
+    widget.controller._query = null;
     unawaited(_closeFile());
     // The platform view owns its controller and releases the WASM heap on close.
     _web = null;
@@ -457,13 +473,20 @@ class _HwpViewerState extends State<HwpViewer> {
       fit: StackFit.expand,
       children: [
         InAppWebView(
+          // Excel owns two-dimensional pan and pinch; the outer reader still owns its toolbar.
+          gestureRecognizers: _isSpreadsheet
+              ? {Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer())}
+              : null,
           initialUrlRequest: URLRequest(url: WebUri(_entry)),
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,
             transparentBackground: true,
             supportZoom: false,
-            disableHorizontalScroll: true,
-            disableVerticalScroll: true,
+            // Android consumes ACTION_MOVE when both flags are true. That
+            // prevents the canvas from receiving either drag or pinch events.
+            // Excel controls its own viewport; CSS prevents page scrolling.
+            disableHorizontalScroll: !_isSpreadsheet,
+            disableVerticalScroll: !_isSpreadsheet,
             horizontalScrollBarEnabled: false,
             verticalScrollBarEnabled: false,
             allowFileAccess: false,
@@ -549,7 +572,7 @@ class _HwpViewerState extends State<HwpViewer> {
         if (!_loaded)
           ValueListenableBuilder<double?>(
             valueListenable: _loadProgress,
-            builder: (context, p, _) => FileLoadingView(label: AppI18n.t(StorageService.appLangNotifier.value, ko: '파일 여는 중', en: 'Opening file', zh: '正在打开文件', ja: 'ファイルを開いています'), progress: p),
+            builder: (context, p, _) => FileLoadingView(label: AppI18n.t(StorageService.appLangNotifier.value, ko: '파일 여는 중', en: 'Opening file', zh: '正在打开文件', ja: 'ファイルを開いています'), progress: p, background: widget.theme == 'dark' ? const Color(0xFF1E1E1E) : Colors.white),
           ),
       ],
     );

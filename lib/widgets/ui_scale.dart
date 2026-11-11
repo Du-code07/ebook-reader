@@ -2,8 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// 화면이 넓은 기기(태블릿 등)에서 앱 화면 전체를 기준 휴대폰(갤럭시 S25, 짧은 변 360)과
-/// 같은 비율로 크게 보여 준다. 글자·아이콘·버튼이 함께 커짐.
+/// 태블릿(짧은 변 600 이상)에서만 앱 화면 전체를 조금 크게 보여 준다:
+/// 보통 글자(14pt)가 2pt 커지는 만큼(16/14배). 휴대폰은 그대로.
 /// 책 본문(문서·사진 화면)은 [UiUnscale]로 감싸 원래 선명도·크기 그대로 둔다.
 class UiScale extends InheritedWidget {
   const UiScale({super.key, required this.scale, required super.child});
@@ -11,10 +11,10 @@ class UiScale extends InheritedWidget {
 
   static double of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<UiScale>()?.scale ?? 1.0;
 
-  /// 기준 기기 짧은 변 (dp)
-  static const double baseShortestSide = 360;
+  /// 태블릿으로 보는 짧은 변 (dp)
+  static const double tabletShortestSide = 600;
 
-  static double scaleFor(Size size) => (size.shortestSide / baseShortestSide).clamp(1.0, 2.4).toDouble();
+  static double scaleFor(Size size) => size.shortestSide >= tabletShortestSide ? 16 / 14 : 1.0;
 
   @override
   bool updateShouldNotify(UiScale old) => old.scale != scale;

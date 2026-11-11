@@ -548,7 +548,7 @@ class UserManualScreen extends StatelessWidget {
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.menu_book, color: Colors.amber, size: 19),
               title: _tr('페이지 표시', 'Page Display', '页面显示', 'ページ表示'),
-              desc: _tr('한 페이지 / 두 페이지 / 화면 비율에 따라(넓으면 두 페이지) 중에서 고릅니다. 세로 화면에도 적용되며, 스크롤 모드에서는 바뀌지 않습니다.', 'Choose One Page / Two Pages / By Screen Ratio. Works in portrait too; not applied in scroll mode.', '可选择单页 / 双页 / 根据屏幕比例。竖屏同样适用，滚动模式下不变。', '1ページ / 2ページ / 画面比率に合わせる から選びます。縦画面にも適用され、スクロールモードでは変わりません。'),
+              desc: _tr('한 페이지 / 두 페이지 / 자동(넓으면 두 페이지) 중에서 고릅니다. 세로 화면에도 적용되며, 스크롤 모드에서는 바뀌지 않습니다.', 'Choose One Page / Two Pages / Auto. Works in portrait too; not applied in scroll mode.', '可选择单页 / 双页 / 自动。竖屏同样适用，滚动模式下不变。', '1ページ / 2ページ / 自動 から選びます。縦画面にも適用され、スクロールモードでは変わりません。'),
             ),
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.screen_rotation, color: Colors.white, size: 19),
@@ -786,7 +786,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Set<String> _favoritePaths = {};
   bool _hideFileExtension = false;
   bool _hideGroupName = false; // 파일 아래 [그룹 이름] 숨기기
-  bool _hideAddedDate = false; // 파일 아래 추가 날짜 숨기기
   bool _hidePageCount = false; // 파일 아래 페이지 수 숨기기
   Map<String, int> _addedDates = {}; // 파일 추가 날짜 (밀리초)
   // 파일 정렬: 기준 'name'(이름) | 'date'(추가 날짜), 오름차순(이름 가→하 / 오래된 순)
@@ -908,18 +907,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     return _sortAsc ? c : -c;
   }
 
-  /// 파일 아래 작은 글: [그룹] • 추가 날짜(26.11.11) • 마지막으로 읽은 쪽(6/983)
+  /// 파일 아래 작은 글: [그룹] • 마지막으로 읽은 쪽(6/983)
   String _fileMetaText(String path, String grpDisplay, bool showGroup) {
     final parts = <String>[];
     if (showGroup) parts.add('[$grpDisplay]');
-    if (!_hideAddedDate) {
-      final ms = _addedDates[path];
-      if (ms != null) {
-        final d = DateTime.fromMillisecondsSinceEpoch(ms);
-        String two(int n) => n.toString().padLeft(2, '0');
-        parts.add('${two(d.year % 100)}.${two(d.month)}.${two(d.day)}');
-      }
-    }
     if (!_hidePageCount) {
       final p = _pageLabelText(path);
       if (p.isNotEmpty) parts.add(p);
@@ -948,12 +939,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   // 메모장(.txt), 워드(.docx, .doc), 한글(.hwpx, .hwp), 파워포인트(.pptx, .ppt)도 열람 (모두 기기 안에서 처리)
   static const _supportedExts = [
     'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
-    'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt',
+    'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt', 'xlsx', 'xlsm', 'xls',
   ];
   static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
 
   /// 글 문서(리더 화면에서 여는 형식)
-  static const _readerExts = ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt'];
+  static const _readerExts = ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt', 'xlsx', 'xlsm', 'xls'];
 
   String? _findFileRowPathAtGlobalPos(Offset globalPos) {
     for (final entry in _fileRowKeys.entries) {
@@ -1151,7 +1142,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final hideThumbs = await StorageService.getHideThumbnails();
     final covers = await StorageService.getCustomCovers();
     final viewMode = await StorageService.getBookshelfViewMode();
-    final hideDate = await StorageService.getHideAddedDate();
     final hidePages = await StorageService.getHidePageCount();
     // 파일 추가 날짜: 처음 보는 파일은 지금 파일 시각으로 정해 저장 (이후 그대로)
     final dates = await StorageService.getAddedDates();
@@ -1263,7 +1253,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         _favoritePaths = favs;
         _hideFileExtension = hideExt;
         _hideGroupName = hideGroup;
-        _hideAddedDate = hideDate;
         _hidePageCount = hidePages;
         _hideThumbnails = hideThumbs;
         _customCovers = covers;
@@ -2325,6 +2314,23 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     );
   }
 
+  /// 그룹 이름이 파일 형식 이름이면 그 형식(아이콘용 확장자), 아니면 null
+  static String? _groupFormatExt(String name) {
+    final n = name.trim().toLowerCase().replaceAll(RegExp(r'^\.'), '');
+    const map = {
+      'pdf': 'pdf',
+      'epub': 'epub', '이펍': 'epub', '전자책': 'epub',
+      'txt': 'txt', '텍스트': 'txt', '메모장': 'txt',
+      'doc': 'docx', 'docx': 'docx', 'word': 'docx', '워드': 'docx',
+      'hwp': 'hwp', 'hwpx': 'hwp', '한글': 'hwp', '한글 문서': 'hwp', '한글문서': 'hwp',
+      'ppt': 'pptx', 'pptx': 'pptx', 'powerpoint': 'pptx', '파워포인트': 'pptx', 'ppt 문서': 'pptx',
+      'xls': 'xlsx', 'xlsx': 'xlsx', 'xlsm': 'xlsx', 'excel': 'xlsx', '엑셀': 'xlsx',
+      'cbz': 'cbz', '만화': 'cbz', 'comic': 'cbz', 'comics': 'cbz',
+      'jpg': 'jpg', 'jpeg': 'jpg', 'png': 'jpg', 'webp': 'jpg', '이미지': 'jpg', '사진': 'jpg', 'image': 'jpg', 'images': 'jpg',
+    };
+    return map[n];
+  }
+
   Widget _buildGroupBar() {
     final movable = _groups.where((g) => g != '전체').toList();
     final allSelected = _selectedGroup == '전체';
@@ -2363,8 +2369,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final favChip = ChoiceChip(
       showCheckmark: false,
       tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
-      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
-      label: const SizedBox(width: 14, height: 18, child: FavoriteRibbon(active: true, width: 12, height: 17, isDark: false)),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+      // 도구 모음의 북마크 아이콘과 같은 모양, 칩 가운데에
+      label: const SizedBox(width: 22, height: 22, child: Center(child: Icon(Icons.bookmarks, color: Colors.amber, size: 21))),
       selected: false,
       onSelected: (_) {
         _closeSearch();
@@ -2415,7 +2422,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       ),
       itemBuilder: (context, index) {
         final grp = movable[index];
+        final formatExt = _groupFormatExt(grp);
         final chip = ChoiceChip(
+          // 그룹 이름이 파일 형식이면(PDF, EPUB, 워드 등) 그 형식 아이콘을 앞에
+          avatar: formatExt == null ? null : FileTypeIcon(ext: formatExt, size: 18),
+          showCheckmark: formatExt == null,
           label: Text(_localizeGroupName(grp)),
           selected: grp == _selectedGroup,
           onSelected: (_) {
@@ -2913,11 +2924,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           onChangeHideGroupName: (hide) async {
             await StorageService.setHideGroupName(hide);
             if (mounted) setState(() => _hideGroupName = hide);
-          },
-          hideAddedDate: _hideAddedDate,
-          onChangeHideAddedDate: (hide) async {
-            await StorageService.setHideAddedDate(hide);
-            if (mounted) setState(() => _hideAddedDate = hide);
           },
           hidePageCount: _hidePageCount,
           onChangeHidePageCount: (hide) async {

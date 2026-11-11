@@ -495,6 +495,84 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         runOnUiThread { result.error("PDF_ERR", e.message, null) }
                     }
                 }.start()
+            } else if (call.method == "cropTrimImage") {
+                // 스크롤 보기용 쪽 그림: 쪽 자리만 잘라 내고(crop = [x, y, w, h], 0~1),
+                // 위아래의 빈 종이(paper 색)를 걷어 내 쪽 사이가 너무 벌어지지 않게 (pad = 남길 여백, 너비 대비)
+                val inPath = call.argument<String>("input")
+                val outPath = call.argument<String>("output")
+                if (inPath == null || outPath == null) {
+                    result.error("ARG", "path", null)
+                    return@setMethodCallHandler
+                }
+                val crop = call.argument<List<Number>>("crop")
+                val trim = call.argument<Boolean>("trim") ?: true
+                val paper = (call.argument<Number>("paper") ?: 0xFFFFFFFFL).toLong().toInt()
+                val pad = ((call.argument<Number>("pad") ?: 0.035).toFloat()).coerceIn(0f, 0.3f)
+                Thread {
+                    try {
+                        val src = BitmapFactory.decodeFile(inPath) ?: throw IllegalStateException("decode")
+                        val bw = src.width
+                        val bh = src.height
+                        var shot = src
+                        if (crop != null && crop.size == 4) {
+                            val cx = (crop[0].toFloat() * bw).toInt().coerceIn(0, bw - 1)
+                            val cy = (crop[1].toFloat() * bh).toInt().coerceIn(0, bh - 1)
+                            val cw = (crop[2].toFloat() * bw).toInt().coerceIn(1, bw - cx)
+                            val ch = (crop[3].toFloat() * bh).toInt().coerceIn(1, bh - cy)
+                            shot = Bitmap.createBitmap(src, cx, cy, cw, ch)
+                            if (shot !== src) src.recycle()
+                        }
+                        if (trim) {
+                            val w = shot.width
+                            val h = shot.height
+                            val pr = (paper shr 16) and 0xFF
+                            val pg = (paper shr 8) and 0xFF
+                            val pb = paper and 0xFF
+                            val row = IntArray(w)
+                            // 테두리 가장자리 몇 픽셀은 쪽 테두리(그림자 등)일 수 있어 빼고 본다
+                            val edge = maxOf(2, w / 100)
+                            fun blank(y: Int): Boolean {
+                                shot.getPixels(row, 0, w, 0, y, w, 1)
+                                var x = edge
+                                while (x < w - edge) {
+                                    val c = row[x]
+                                    if (Math.abs(((c shr 16) and 0xFF) - pr) > 24 ||
+                                        Math.abs(((c shr 8) and 0xFF) - pg) > 24 ||
+                                        Math.abs((c and 0xFF) - pb) > 24) return false
+                                    x += 1
+                                }
+                                return true
+                            }
+                            var top = 0
+                            while (top < h && blank(top)) top++
+                            var bottom = h - 1
+                            while (bottom > top && blank(bottom)) bottom--
+                            val keep = (w * pad).toInt()
+                            if (top >= h) {
+                                // 빈 쪽: 얇은 띠만
+                                val strip = maxOf(1, minOf(h, (w * 0.12f).toInt()))
+                                val t = Bitmap.createBitmap(shot, 0, 0, w, strip)
+                                if (t !== shot) shot.recycle()
+                                shot = t
+                            } else {
+                                val y0 = maxOf(0, top - keep)
+                                val y1 = minOf(h, bottom + 1 + keep)
+                                if (y0 > 0 || y1 < h) {
+                                    val t = Bitmap.createBitmap(shot, 0, y0, w, y1 - y0)
+                                    if (t !== shot) shot.recycle()
+                                    shot = t
+                                }
+                            }
+                        }
+                        val outW = shot.width
+                        val outH = shot.height
+                        FileOutputStream(File(outPath)).use { out -> shot.compress(Bitmap.CompressFormat.JPEG, 90, out) }
+                        shot.recycle()
+                        runOnUiThread { result.success(listOf(outW, outH)) }
+                    } catch (e: Throwable) {
+                        runOnUiThread { result.error("CROP_ERR", e.message, null) }
+                    }
+                }.start()
             } else if (call.method == "wakeHiddenWebViews") {
                 // 서재 표지(첫 페이지) 만들기용 화면 밖 WebView: 숨김 상태면 그리기를 멈추므로
                 // 완전히 투명하게 + 화면 밖으로 옮긴 뒤 '보이는' 상태로 둔다 (사용자에게는 안 보임)
