@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show DeviceGestureSettings;
 import 'package:flutter/scheduler.dart';
 
 typedef ViewerTr = String Function(String ko, String en, String zh, String ja);
@@ -440,10 +441,14 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
     _animateTo(_ox, target);
   }
 
+  Offset? _downLocal; // 손가락이 처음 닿은 자리
+
   void _onScaleStart(ScaleStartDetails d) {
     _stopSim();
     _startScale = _scale;
-    _startContent = Offset((_ox + d.localFocalPoint.dx) / _scale, (_oy + d.localFocalPoint.dy - _padYFor(_scale)) / _scale);
+    // 한 손가락 끌기: 손가락이 처음 닿은 자리를 기준으로 (움직이기 시작한 거리만큼 버리지 않고 그대로 따라오게)
+    final Offset f = d.pointerCount <= 1 && _downLocal != null ? _downLocal! : d.localFocalPoint;
+    _startContent = Offset((_ox + f.dx) / _scale, (_oy + f.dy - _padYFor(_scale)) / _scale);
     _pointers = d.pointerCount;
   }
 
@@ -502,7 +507,13 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
               ));
             }
           }
-          return GestureDetector(
+          final mq = MediaQuery.of(context);
+          // 끌기가 빨리 시작되게 (기본은 손가락이 꽤 움직여야 시작돼 화면이 끈적하게 느껴짐). 쪽 안의 다른 동작은 원래 값 그대로
+          return MediaQuery(
+            data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: 6)),
+            child: Listener(
+            onPointerDown: (e) => _downLocal = e.localPosition,
+            child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onScaleStart: _onScaleStart,
             onScaleUpdate: _onScaleUpdate,
@@ -518,7 +529,9 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
                     }
                     widget.onLongPressPage!(p);
                   },
-            child: ClipRect(child: Stack(clipBehavior: Clip.hardEdge, children: children)),
+            child: MediaQuery(data: mq, child: ClipRect(child: Stack(clipBehavior: Clip.hardEdge, children: children))),
+          ),
+            ),
           );
         },
       ),

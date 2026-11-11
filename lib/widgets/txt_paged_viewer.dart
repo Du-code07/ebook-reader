@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'text_copy_sheet.dart';
+import 'word_selection_layer.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/txt_page_document.dart';
@@ -139,6 +141,29 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
     });
   }
 
+  String _tr(String ko, String en, String zh, String ja) =>
+      AppI18n.t(StorageService.appLangNotifier.value, ko: ko, en: en, zh: zh, ja: ja);
+
+  /// 종이 위 낱말 자리 (종이 크기 대비 0~1)
+  static List<SelectableWord> _wordsOf(String text) {
+    final layout = TxtPageDocument.painter(text);
+    const size = TxtPageDocument.paperSize;
+    final out = <SelectableWord>[];
+    for (final m in RegExp(r'\S+').allMatches(text)) {
+      final boxes = layout.getBoxesForSelection(TextSelection(baseOffset: m.start, extentOffset: m.end));
+      // 줄이 바뀌며 나뉜 낱말은 줄마다 따로
+      int from = m.start;
+      for (final b in boxes) {
+        final r = b.toRect().shift(const Offset(TxtPageDocument.margin, TxtPageDocument.margin));
+        final part = boxes.length == 1 ? m.group(0)! : text.substring(from, (from + ((m.end - m.start) * (b.right - b.left) / boxes.fold<double>(0, (a, x) => a + x.right - x.left)).round()).clamp(from, m.end));
+        from += part.length;
+        out.add(SelectableWord(part, Rect.fromLTWH(r.left / size.width, r.top / size.height, r.width / size.width, r.height / size.height)));
+      }
+    }
+    layout.dispose();
+    return out;
+  }
+
   /// 이 쪽에서 찾은 곳들 (글자 위치), 지금 고른 곳
   List<int> _hitsOn(int page) => [for (final h in _hits) if (h.$1 == page) h.$2];
   int? _currentOn(int page) => _current >= 0 && _current < _hits.length && _hits[_current].$1 == page ? _hits[_current].$2 : null;
@@ -260,9 +285,15 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
       alignment: Alignment.topCenter,
       child: SizedBox.fromSize(
         size: TxtPageDocument.paperSize,
-        child: CustomPaint(
-          painter: _TxtPaperPainter(text, foreground,
-              query: _query, hits: _query.isEmpty ? const [] : _hitsOn(page), current: _currentOn(page)),
+        // EPUB처럼 글을 길게 눌러 골라 복사
+        child: WordSelectionLayer(
+          tr: _tr,
+          onCopy: (t) => showTextCopySheet(context, text: t, tr: _tr),
+          loadWords: () async => _wordsOf(text),
+          child: CustomPaint(
+            painter: _TxtPaperPainter(text, foreground,
+                query: _query, hits: _query.isEmpty ? const [] : _hitsOn(page), current: _currentOn(page)),
+          ),
         ),
       ),
     );

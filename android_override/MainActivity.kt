@@ -517,6 +517,19 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         runOnUiThread { result.error("CROP_ERR", e.message, null) }
                     }
                 }.start()
+            } else if (call.method == "requestNotificationPermission") {
+                // 안드로이드 13 이상: 알림 허용을 한 번 물음 (이미 허용했거나 거절했으면 조용히)
+                if (Build.VERSION.SDK_INT >= 33 &&
+                    checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    try { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 4711) } catch (_: Throwable) {}
+                }
+                result.success(null)
+            } else if (call.method == "showNotification") {
+                // 휴대폰 상태 표시줄 알림 (누르면 앱으로). 알림을 쓸 수 없으면 false
+                val title = call.argument<String>("title") ?: "FReader"
+                val text = call.argument<String>("text") ?: ""
+                val id = (call.argument<Number>("id") ?: 1).toInt()
+                result.success(postStatusNotification(title, text, id))
             } else if (call.method == "captureScrollPage") {
                 // 스크롤 보기 준비용 숨은 문서 화면(주소에 freaderScroll=1)을 바로 그림으로:
                 // 화면(UI) 스레드에서는 그리기만 하고, 자르기·여백 걷기·저장은 다른 스레드에서 (화면이 버벅이지 않게)
@@ -529,7 +542,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 val paper = (call.argument<Number>("paper") ?: 0xFFFFFFFFL).toLong().toInt()
                 val pad = ((call.argument<Number>("pad") ?: 0.035).toFloat()).coerceIn(0f, 0.3f)
                 val trimTop = call.argument<Boolean>("trimTop") ?: true
-                val webView = findScrollWebView(window.decorView)
+                val tag = call.argument<String>("tag")
+                val webView = findScrollWebView(window.decorView, tag)
                 if (webView == null || webView.width <= 0 || webView.height <= 0) {
                     result.error("NO_WEBVIEW", "scroll webview not found", null)
                     return@setMethodCallHandler
@@ -1205,15 +1219,50 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     // ── PDF 내보내기 ──────────────────────────────────────────────────────────
 
     /** 화면에 보이는 WebView 중 가장 큰 것 (EPUB 본문) */
-    private fun findScrollWebView(root: View): WebView? {
+    private fun postStatusNotification(title: String, text: String, id: Int): Boolean {
+        return try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            if (Build.VERSION.SDK_INT >= 24 && !nm.areNotificationsEnabled()) return false
+            val channelId = "freader_prep"
+            if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(channelId) == null) {
+                val ch = android.app.NotificationChannel(channelId, "스크롤 보기 준비", android.app.NotificationManager.IMPORTANCE_DEFAULT)
+                ch.description = "스크롤 보기 준비가 끝나면 알려 줘요"
+                ch.setSound(null, null)
+                nm.createNotificationChannel(ch)
+            }
+            val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            }
+            val pi = if (launch != null) android.app.PendingIntent.getActivity(
+                this, id, launch,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) android.app.PendingIntent.FLAG_IMMUTABLE else 0)
+            ) else null
+            val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, channelId)
+                    else @Suppress("DEPRECATION") android.app.Notification.Builder(this)
+            b.setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(android.app.Notification.BigTextStyle().bigText(text))
+                .setAutoCancel(true)
+                .setShowWhen(true)
+            if (pi != null) b.setContentIntent(pi)
+            nm.notify(id, b.build())
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun findScrollWebView(root: View, tag: String? = null): WebView? {
         if (root is WebView) {
             val url = try { root.url } catch (_: Throwable) { null }
-            if (url != null && url.contains("freaderScroll=1")) return root
+            // 숨은 화면이 여러 개(동시에 2개 준비)일 수 있어 작업 표시(tag)까지 맞는 것만
+            if (url != null && url.contains("freaderScroll=1") && (tag == null || url.contains("freaderTag=$tag"))) return root
             return null
         }
         if (root is ViewGroup) {
             for (i in 0 until root.childCount) {
-                val found = findScrollWebView(root.getChildAt(i))
+                val found = findScrollWebView(root.getChildAt(i), tag)
                 if (found != null) return found
             }
         }

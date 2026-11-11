@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 /// 태블릿(짧은 변 600 이상)에서만 앱 화면 전체를 조금 크게 보여 준다:
 /// 보통 글자(14pt)가 2pt 커지는 만큼(16/14배). 휴대폰은 그대로.
@@ -81,4 +82,61 @@ class UiUnscale extends StatelessWidget {
 Offset uiScaledPosition(BuildContext context, Offset global) {
   final s = UiScale.of(context);
   return s == 1 ? global : global / math.max(0.01, s);
+}
+
+/// 크게 보이게 한 화면에서 끌어 옮기는 항목(그룹 칩 등)이 손가락 밑에 그대로 있게 바로잡기.
+/// 플러터의 순서 바꾸기 목록은 끄는 그림의 자리를 화면 전체 좌표로 계산해 오버레이에 그대로 넣기 때문에,
+/// 앱 전체를 [scale]배로 키운 상태에서는 손가락에서 점점 벗어난다. 이 상자가 그 차이만큼 그림을 옮긴다.
+/// [grab]: 항목 안에서 손가락이 닿은 자리(항목 기준, 확대 전 단위)
+/// [dropT]: 놓은 뒤 제자리로 돌아가는 중이면 그 진행 값(1→0), 끄는 중이면 null
+class UiScaleDragFix extends SingleChildRenderObjectWidget {
+  const UiScaleDragFix({super.key, required this.scale, required this.grab, this.dropT, required super.child});
+  final double scale;
+  final Offset grab;
+  final double? dropT;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderUiScaleDragFix(scale, grab, dropT, Overlay.maybeOf(context)?.context.findRenderObject());
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderUiScaleDragFix r) {
+    r
+      ..scale = scale
+      ..grab = grab
+      ..dropT = dropT
+      ..overlay = Overlay.maybeOf(context)?.context.findRenderObject();
+    r.markNeedsPaint();
+  }
+}
+
+class _RenderUiScaleDragFix extends RenderProxyBox {
+  _RenderUiScaleDragFix(this.scale, this.grab, this.dropT, this.overlay);
+  double scale;
+  Offset grab;
+  double? dropT;
+  RenderObject? overlay;
+
+  Offset _fix() {
+    final o = overlay;
+    if ((scale - 1).abs() < 0.02 || o == null || !o.attached || !attached) return Offset.zero;
+    // 오버레이 안에서 지금 놓인 자리
+    final Offset at = MatrixUtils.transformPoint(getTransformTo(o), Offset.zero);
+    final double k = dropT == null ? 1.0 : Curves.easeOut.transform(dropT!.clamp(0.0, 1.0));
+    return (at + grab * k) * (1 / scale - 1);
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child != null) context.paintChild(child!, offset + _fix());
+  }
+
+  @override
+  void applyPaintTransform(RenderBox child, Matrix4 transform) {
+    final f = _fix();
+    transform.translateByDouble(f.dx, f.dy, 0, 1);
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) => false;
 }

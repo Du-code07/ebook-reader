@@ -39,7 +39,11 @@ class DocScrollPrep {
   static final Map<String, double> _progress = {};
   static final Set<String> _failed = {};
   static final List<_Job> _queue = [];
-  static _Job? _running;
+  static final List<_Job> _running = [];
+  static int _seq = 0;
+  // 동시에 준비하는 파일 수 (그 이상은 줄 서서 기다림)
+  static const int _maxParallel = 2;
+  static bool _askedNotify = false;
 
   /// 그림 너비(px)를 정함: 화면 너비 기준, 너무 크면 줄임
   static double renderWidth(double logicalWidth) => math.min(logicalWidth, 900).toDouble();
@@ -72,7 +76,7 @@ class DocScrollPrep {
   static Future<Directory?> _dir(String path, String theme, int widthPx) async {
     final base = await PageSnapshotService.documentDir(path);
     if (base == null) return null;
-    final d = Directory('${base.path}/scroll5_${widthPx}_$theme');
+    final d = Directory('${base.path}/scroll6_${widthPx}_$theme');
     if (!d.existsSync()) d.createSync(recursive: true);
     return d;
   }
@@ -114,17 +118,28 @@ class DocScrollPrep {
     required int pageCount,
   }) {
     final key = _key(path, theme, widthPx);
-    if (_running?.key == key || _queue.any((j) => j.key == key)) return;
+    if (_running.any((j) => j.key == key) || _queue.any((j) => j.key == key)) return;
     _failed.remove(key);
     _progress[key] = _progress[key] ?? 0;
     _queue.insert(0, _Job(key, path, theme, widthPx, logicalWidth, pageCount));
+    // 준비가 끝나면 상태 표시줄로 알려 주므로, 처음 한 번 알림 허용을 물음 (안드로이드 13 이상)
+    if (!_askedNotify) {
+      _askedNotify = true;
+      _native.invokeMethod('requestNotificationPermission').catchError((_) => null);
+    }
     // 같은 파일의 다른 너비(회전 전) 요청은 뒤로 미룸
     _pump();
   }
 
   static void _pump() {
-    if (_running != null || _queue.isEmpty) return;
-    final job = _running = _queue.removeAt(0);
+    while (_running.length < _maxParallel && _queue.isNotEmpty) {
+      _start(_queue.removeAt(0));
+    }
+  }
+
+  static void _start(_Job job) {
+    _running.add(job);
+    job.tag = 'j${++_seq}x';
     () async {
       bool ok = false;
       try {
@@ -136,10 +151,21 @@ class DocScrollPrep {
       // 뒤에서 새로 준비를 마쳤으면 알림 (이미 다 되어 있던 파일은 알리지 않음)
       if (ok && job.rendered > 0) {
         final name = job.path.split('/').last;
-        showAppNotice(AppI18n.t(StorageService.appLangNotifier.value,
-            ko: '스크롤 보기 준비 완료 · $name', en: 'Scroll view ready · $name', zh: '滚动视图已准备好 · $name', ja: 'スクロール表示の準備完了 · $name'));
+        final lang = StorageService.appLangNotifier.value;
+        final title = AppI18n.t(lang, ko: '스크롤 보기 준비 완료', en: 'Scroll view ready', zh: '滚动视图已准备好', ja: 'スクロール表示の準備完了');
+        // 휴대폰 상태 표시줄 알림. 알림을 쓸 수 없으면(허용 안 함 등) 앱 안 알림으로
+        bool shown = false;
+        try {
+          shown = await _native.invokeMethod<bool>('showNotification', {
+                'title': title,
+                'text': name,
+                'id': 7000 + (job.path.hashCode & 0x3FFF),
+              }) ??
+              false;
+        } catch (_) {}
+        if (!shown) showAppNotice('$title · $name');
       }
-      _running = null;
+      _running.remove(job);
       changed.value++;
       _pump();
     }();
@@ -166,7 +192,7 @@ class DocScrollPrep {
     final String prefix = isDocx ? 'docx' : isDoc ? 'doc' : isPpt ? (lower.endsWith('.ppt') ? 'ppt' : 'pptx') : 'hwp';
     // 주소 끝 표시로 앱(안드로이드)이 이 숨은 화면을 찾아 바로 그림으로 찍음
     final String folder = isWord ? 'docx' : isPpt ? 'ppt' : 'hwp';
-    final String entry = '$_origin/assets/flutter_assets/assets/$folder/index.html?freaderScroll=1';
+    final String entry = '$_origin/assets/flutter_assets/assets/$folder/index.html?freaderScroll=1&freaderTag=${job.tag}';
     final String jsObject = isWord ? 'freaderDocx' : isPpt ? 'freaderPpt' : 'freaderHwp';
 
     final source = File(job.path);
@@ -360,6 +386,7 @@ class DocScrollPrep {
           'pad': 0.035,
           // 위 여백은 그대로 (쪽 넘김 보기와 같은 자리에서 글이 시작), 아래 빈 종이만 걷음
           'trimTop': false,
+          'tag': job.tag,
         };
         List<Object?>? size;
         try {
@@ -379,6 +406,25 @@ class DocScrollPrep {
         }
         if (size == null || size.length < 2) return false;
         final double ow = v(size[0]), oh = v(size[1]);
+        // 쪽 그림 위에서 글을 길게 눌러 고를 수 있게 낱말 자리도 저장 (그림 크기 대비 0~1)
+        try {
+          final boxes = await call('visibleTextBoxes', []);
+          final double rx = rect == null ? 0 : v(rect['x']), ry = rect == null ? 0 : v(rect['y']);
+          final double rw = rect == null || v(rect['w']) <= 0 ? 1 : v(rect['w']);
+          // 그림이 덮는 화면 세로 비율 (화면은 가로의 1.5배 높이, 아래 빈 곳은 잘림)
+          final double hv = ow <= 0 ? 1 : oh * rw / (ow * 1.5);
+          final words = <Map<String, Object>>[];
+          if (boxes is List) {
+            for (final b in boxes) {
+              if (b is! Map) continue;
+              final double y = (v(b['y']) - ry) / hv, h = v(b['h']) / hv;
+              final double x = (v(b['x']) - rx) / rw, ww = v(b['w']) / rw;
+              if (y + h < 0 || y > 1 || x + ww < 0 || x > 1) continue;
+              words.add({'t': '${b['t'] ?? ''}', 'x': x, 'y': y, 'w': ww, 'h': h});
+            }
+          }
+          File('${dir.path}/p$i.words.json').writeAsStringSync(jsonEncode(words));
+        } catch (_) {}
         meta['$i'] = ow <= 0 ? 1.414 : (oh / ow).clamp(0.02, 8.0).toDouble();
         try {
           File('${dir.path}/meta.json').writeAsStringSync(jsonEncode(meta));
@@ -410,4 +456,5 @@ class _Job {
   final double logicalWidth;
   final int pageCount;
   int rendered = 0; // 이번에 새로 그린 쪽 수
+  String tag = ''; // 숨은 화면을 앱(안드로이드)이 찾는 표시 (동시에 여러 개 준비할 때 구별)
 }

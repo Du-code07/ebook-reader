@@ -669,6 +669,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   List<File> _trashedBooks = [];
   List<String> _groups = ['전체', 'PDF/문서'];
   bool _groupEditMode = false; // 그룹을 꾹 눌러 순서 바꾸기·삭제하는 중
+  Offset _groupDragGrab = Offset.zero; // 끄는 그룹 칩 안에서 손가락이 닿은 자리
   bool _groupMenuOpen = false; // [전체]에서 그룹 목록을 펼친 중 (아이콘 엇갈림)
 
   // ── 파일 검색 (상단 돋보기) ──
@@ -1434,19 +1435,25 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               builder: (ctx) => PopScope(
                 canPop: false,
                 child: AlertDialog(
+                  // 위아래 여백을 똑같이 → 문구가 네모칸 한가운데에
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
                   content: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
                       const SizedBox(width: 18),
-                      Expanded(
+                      Flexible(
                         child: Text(
                           _tr(
-                            '선택한 파일을 불러오는 중입니다…\n파일이 많으면 시간이 조금 걸릴 수 있어요.',
-                            'Loading the selected files…\nThis may take a while for many files.',
-                            '正在读取所选文件…\n文件较多时可能需要一些时间。',
-                            '選択したファイルを読み込み中…\nファイルが多いと時間がかかることがあります。',
+                            '파일을 불러오는 중...\n시간이 조금 걸릴 수 있어요.',
+                            'Loading files...\nThis may take a moment.',
+                            '正在读取文件...\n可能需要一点时间。',
+                            'ファイルを読み込み中...\n少し時間がかかることがあります。',
                           ),
-                          style: const TextStyle(fontSize: 14, height: 1.4),
+                          style: const TextStyle(fontSize: 14, height: 1.4, leadingDistribution: TextLeadingDistribution.even),
+                          textHeightBehavior: const TextHeightBehavior(applyHeightToFirstAscent: false, applyHeightToLastDescent: false),
                         ),
                       ),
                     ],
@@ -1670,7 +1677,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: Text(_tr('합치기', 'Merge', '合并', '結合')),
+              child: Text(_tr('확인', 'OK', '确定', 'OK')),
             ),
           ],
         ),
@@ -1900,10 +1907,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.picture_as_pdf, size: 16),
+            ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
-              label: Text(_tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合')),
+              child: Text(_tr('확인', 'OK', '确定', 'OK')),
             ),
           ],
         ),
@@ -2374,7 +2380,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
       labelPadding: const EdgeInsets.symmetric(horizontal: 4),
       // 도구 모음의 북마크 아이콘과 같은 모양, 칩 가운데에
-      label: const SizedBox(width: 20, height: 20, child: Center(child: Icon(Icons.bookmarks, color: Colors.amber, size: 18))),
+      // 글자 줄 안에 아이콘을 넣어, 다른 그룹(글자) 칩과 높이가 똑같게
+      label: const Text.rich(TextSpan(children: [
+        WidgetSpan(alignment: PlaceholderAlignment.middle, child: Icon(Icons.bookmarks, color: Colors.amber, size: 16)),
+      ])),
       selected: false,
       onSelected: (_) {
         _closeSearch();
@@ -2419,10 +2428,23 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         setState(() => _groups = ['전체', ...next]);
         StorageService.setGroupOrder(next);
       },
-      proxyDecorator: (child, index, animation) => Material(
-        type: MaterialType.transparency,
-        child: ScaleTransition(scale: Tween<double>(begin: 1.0, end: 1.06).animate(animation), child: child),
-      ),
+      proxyDecorator: (child, index, animation) {
+        final double uiScale = UiScale.of(context);
+        return Material(
+          type: MaterialType.transparency,
+          // 태블릿(앱 전체를 크게)에서도 끄는 칩이 손가락 밑에 있게
+          child: AnimatedBuilder(
+            animation: animation,
+            builder: (_, c) => UiScaleDragFix(
+              scale: uiScale,
+              grab: _groupDragGrab,
+              dropT: animation.status == AnimationStatus.reverse ? animation.value : null,
+              child: c!,
+            ),
+            child: ScaleTransition(scale: Tween<double>(begin: 1.0, end: 1.06).animate(animation), child: child),
+          ),
+        );
+      },
       itemBuilder: (context, index) {
         final grp = movable[index];
         final formatExt = _groupFormatExt(grp);
@@ -2480,10 +2502,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         return Padding(
           key: ValueKey('group:$grp'),
           padding: const EdgeInsets.only(right: 8),
-          // 평소: 꾹 눌러 끌기 / 편집 중: 바로 끌기
-          child: _groupEditMode
-              ? ReorderableDragStartListener(index: index, child: item)
-              : ReorderableDelayedDragStartListener(index: index, child: item),
+          // 칩 안에서 손가락이 닿은 자리 (끄는 칩을 손가락 밑에 두는 데 씀)
+          child: Builder(
+            builder: (itemCtx) => Listener(
+              onPointerDown: (e) {
+                final box = itemCtx.findRenderObject();
+                if (box is RenderBox && box.hasSize) _groupDragGrab = box.globalToLocal(e.position);
+              },
+              // 평소: 꾹 눌러 끌기 / 편집 중: 바로 끌기
+              child: _groupEditMode
+                  ? ReorderableDragStartListener(index: index, child: item)
+                  : ReorderableDelayedDragStartListener(index: index, child: item),
+            ),
+          ),
         );
       },
     );
@@ -2572,6 +2603,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         anchor: topLeft & box.size,
         barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
         items: [for (final g in groups) (g, _localizeGroupName(g), Icons.folder_outlined, null)],
+        // 그룹 이름이 파일 형식이면 그 형식 아이콘
+        leadingFor: (g) {
+          final ext = _groupFormatExt(g);
+          return ext == null ? null : FileTypeIcon(ext: ext, size: 18);
+        },
       ),
     );
     if (mounted) setState(() => _groupMenuOpen = false);
@@ -3474,7 +3510,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           _lastDragTouchedPath = null;
                         }
                       },
-                      child: _bookshelfViewMode == 'grid'
+                      child: AbsorbPointer(
+                        // 그룹 편집 중에 목록을 누르면 편집만 끝나고 파일은 열리지 않게
+                        absorbing: _groupEditMode,
+                        child: _bookshelfViewMode == 'grid'
                           ? LayoutBuilder(
                               builder: (context, constraints) {
                                 // 3. 휴대폰 기준 한 페이지에 9개(가로 3개 × 세로 3개)가 들어갈 정도로 크기 자동 조절
@@ -3673,7 +3712,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           ),
                         ), slide: true);
                       },
-                    ),
+                    )),
                           ),
                         ),
                       ],

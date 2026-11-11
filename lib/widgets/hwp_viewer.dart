@@ -33,9 +33,17 @@ class HwpReaderController {
   Future<Object?> Function(String, List<Object?>)? _query;
 
   /// 찾은 곳 수 (못 찾거나 아직 열리지 않았으면 0)
+  /// 마지막으로 찾은 곳들이 있는 쪽 (스크롤 보기에서 그 쪽으로 옮길 때)
+  List<int> lastSearchPages = const [];
+
   Future<int> search(String text) async {
     final result = await _query?.call('search', [text]);
-    if (result is Map) return (result['count'] as num?)?.toInt() ?? 0;
+    if (result is Map) {
+      final pages = result['pages'];
+      lastSearchPages = pages is List ? [for (final p in pages) (p as num?)?.toInt() ?? 0] : const [];
+      return (result['count'] as num?)?.toInt() ?? 0;
+    }
+    lastSearchPages = const [];
     return 0;
   }
 

@@ -1264,13 +1264,25 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         StorageService.saveProgress(_bookKey, (p + 1) / _totalPages);
         StorageService.savePageLabel(_bookKey, '${p + 1}/$_totalPages');
       },
-      pageBuilder: (ctx, i) => Image.file(
-        _imagePages[i],
-        fit: BoxFit.fill,
-        cacheWidth: math.min(4096, (w * dpr).round()),
-        gaplessPlayback: true,
-        filterQuality: FilterQuality.medium,
-      ),
+      pageBuilder: (ctx, i) {
+        final img = Image.file(
+          _imagePages[i],
+          fit: BoxFit.fill,
+          cacheWidth: math.min(4096, (w * dpr).round()),
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.medium,
+        );
+        // 스크롤 보기에서도 찾은 단어를 형광펜으로
+        final all = <Rect>[], current = <Rect>[];
+        for (int k = 0; k < _findHits.length; k++) {
+          if (_findHits[k].page == i) (k == _findCurrent ? current : all).addAll(_findHits[k].rects);
+        }
+        if (all.isEmpty && current.isEmpty) return img;
+        return Stack(fit: StackFit.expand, children: [
+          img,
+          IgnorePointer(child: CustomPaint(painter: _FindMarkPainter(all, current))),
+        ]);
+      },
     );
   }
 
