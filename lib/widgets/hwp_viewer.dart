@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
+import '../services/user_fonts.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../services/docx_layout_hints.dart';
@@ -35,6 +36,15 @@ class HwpReaderController {
   Future<String?> slideImage(int index, {int width = 1800}) async {
     final result = await _query?.call('slideImage', [index, width]);
     return result is String && result.isNotEmpty ? result : null;
+  }
+
+  /// 지금 보이는 쪽이 화면에서 차지하는 자리 (0~1 비율). 모르면 null
+  Future<Rect?> pageRect() async {
+    final r = await _query?.call('pageRect', []);
+    if (r is! Map) return null;
+    double v(Object? x) => (x as num?)?.toDouble() ?? 0;
+    final rect = Rect.fromLTWH(v(r['x']), v(r['y']), v(r['w']), v(r['h']));
+    return rect.width > 0.05 && rect.height > 0.05 ? rect : null;
   }
 
   /// 지금 화면에 보이는 글과 위치 [{t, x, y, w, h}] (화면 크기 대비 0~1) — 내보낸 PDF의 글자 층용
@@ -184,7 +194,10 @@ class _HwpViewerState extends State<HwpViewer> {
     if (_isPresentation) 'format': _presentationFormat,
     if (_isDocx) 'docxLayout': _docxLayout,
     if (_cacheKey != null) 'cacheKey': _cacheKey,
+    if (_userFonts.isNotEmpty) 'userFonts': _userFonts,
   };
+  /// 사용자가 넣은 글꼴 (같은 이름의 글꼴 대신 씀)
+  List<Map<String, Object>> _userFonts = const [];
   /// 파일이 바뀌면 달라지는 열쇠 (변환된 그림 저장소 이름에 사용)
   String? _cacheKey;
 
@@ -276,6 +289,9 @@ class _HwpViewerState extends State<HwpViewer> {
         final path = widget.filePath;
         _docxLayout = await Isolate.run(() => DocxLayoutHints.readLayout(path));
       }
+      try {
+        _userFonts = await UserFonts.forViewer();
+      } catch (_) {}
       if (_disposed || !mounted) return;
       await _invoke('beginDocument', [length, _options]);
       if (_failed || _disposed) return;
@@ -439,7 +455,11 @@ class _HwpViewerState extends State<HwpViewer> {
             javaScriptHandlersOriginAllowList: {_origin},
             useShouldOverrideUrlLoading: true,
             webViewAssetLoader: WebViewAssetLoader(
-              pathHandlers: [AssetsPathHandler(path: '/assets/')],
+              pathHandlers: [
+                AssetsPathHandler(path: '/assets/'),
+                if (UserFonts.cachedDirPath != null)
+                  InternalStoragePathHandler(path: UserFonts.urlPath, directory: UserFonts.cachedDirPath!),
+              ],
             ),
           ),
           contextMenu: ContextMenu(

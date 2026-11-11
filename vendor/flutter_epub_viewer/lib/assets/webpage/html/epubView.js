@@ -235,7 +235,7 @@ function renderBook(data, opts, loadToken) {
     try {
       var md = (book.package && book.package.metadata) || {};
       var rtl = md.direction === 'rtl' || (book.spine && book.spine.direction === 'rtl');
-      if (rtl && rendition && rendition.settings && rendition.settings.manager === 'continuous') {
+      if (rtl && rendition && rendition.settings && rendition.settings.manager === 'continuous' && rendition.settings.flow === 'paginated') {
         rendition.settings.manager = 'default';
       }
     } catch (e) {}
@@ -1647,16 +1647,13 @@ function renderBook(data, opts, loadToken) {
             return;
           }
 
-          if (direction == 'l') {
+          // FReader: 읽기 방향이 우→좌면 오른쪽으로 밀 때 다음 쪽
+          var goNext = (direction == 'l') !== !!freaderSwipeReversed;
+          // FReader: 페이지 모드에서 '슬라이드'를 끄면 밀어서 넘기지 않음
+          if ((direction == 'l' || direction == 'r') && freaderSwipeEnabled) {
             // Double-check before calling
             if (!hasActiveSelection()) {
-              rendition.next();
-            }
-          }
-          if (direction == 'r') {
-            // Double-check before calling
-            if (!hasActiveSelection()) {
-              rendition.prev();
+              if (goNext) rendition.next(); else rendition.prev();
             }
           }
         });
@@ -1967,7 +1964,9 @@ notifyEpubReady();
 // Helper function to check if there's an active text selection (global version)
 function hasActiveSelection() {
   // Check our tracking variables first
-  if (isSelecting || lastCfiRange) {
+  // FReader: 기억해 둔 선택(lastCfiRange)만 남고 화면의 선택은 이미 사라진 경우까지 '선택 중'으로 보면
+  // 쪽을 넘길 때마다 막히고 원래 쪽으로 되돌아간다 → 실제로 글이 선택되어 있는지만 본다
+  if (isSelecting) {
     return true;
   }
 
@@ -2050,6 +2049,18 @@ function setupRenditionBlocking() {
     };
   }
 }
+
+// FReader: 읽기 방향이 우→좌일 때 손가락으로 미는 방향을 반대로
+var freaderSwipeReversed = false;
+var freaderSwipeEnabled = true;
+function setSwipeEnabled(v) {
+  freaderSwipeEnabled = !!v;
+}
+window.setSwipeEnabled = setSwipeEnabled;
+function setSwipeReversed(v) {
+  freaderSwipeReversed = !!v;
+}
+window.setSwipeReversed = setSwipeReversed;
 
 //move to next page
 function next() {
@@ -2381,9 +2392,11 @@ function clearSelection() {
       }
 
       // Notify Flutter that selection was cleared - only if we've actually sent a selection
-      if (hasSentSelection && (isSelecting || lastCfiRange) && window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
-        isSelecting = false;
-        lastCfiRange = null;
+      var hadSelection = hasSentSelection && (isSelecting || lastCfiRange);
+      // FReader: 알림 여부와 관계없이 선택 상태는 항상 지운다 (남아 있으면 쪽 넘김이 막히거나 되돌아감)
+      isSelecting = false;
+      lastCfiRange = null;
+      if (hadSelection && window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
         hasSentSelection = false;
         if (selectionTimeout) {
           clearTimeout(selectionTimeout);

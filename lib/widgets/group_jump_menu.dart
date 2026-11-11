@@ -71,7 +71,7 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     child: Row(
                       children: [
-                        Icon(icon, size: 18, color: color ?? cs.onSurfaceVariant),
+                        Icon(icon, size: 16, color: color ?? cs.onSurfaceVariant),
                         const SizedBox(width: 10),
                         Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, color: color))),
                       ],

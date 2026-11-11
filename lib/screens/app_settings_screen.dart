@@ -1,3 +1,4 @@
+import 'user_fonts_screen.dart';
 import 'package:flutter/material.dart';
 
 import '../services/storage_service.dart';
@@ -60,6 +61,12 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   late bool _hideExt = widget.hideExtension;
   late bool _hideGroup = widget.hideGroupName;
   late bool _hideThumbs = widget.hideThumbnails;
+  bool _rememberPage = StorageService.rememberPage;
+
+  Future<void> _setRememberPage(bool v) async {
+    setState(() => _rememberPage = v);
+    await StorageService.setRememberPage(v);
+  }
 
   String _t(String ko, String en, String zh, String ja) => AppI18n.t(_lang, ko: ko, en: en, zh: zh, ja: ja);
 
@@ -67,11 +74,13 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       ? _t('표지형 (썸네일)', 'Cover View (Thumbnail)', '封面视图 (缩略图)', '表紙表示 (サムネイル)')
       : _t('목록형 (리스트)', 'List View', '列表视图', 'リスト表示');
 
-  String _themeLabel(String mode) => mode == 'dark'
-      ? _t('다크 모드', 'Dark mode', '深色模式', 'ダークモード')
-      : mode == 'light'
-          ? _t('라이트 모드', 'Light mode', '浅色模式', 'ライトモード')
-          : _t('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト');
+  String _themeLabel(String mode) => switch (mode) {
+        'dark' => _t('다크 모드', 'Dark mode', '深色模式', 'ダークモード'),
+        'black' => _t('완전 다크 모드 (검정)', 'Pure black mode', '纯黑模式', '完全ダーク（黒）'),
+        'dim' => _t('밝은 다크 모드 (회색)', 'Dim dark mode (gray)', '浅色深色模式（灰）', '明るいダーク（グレー）'),
+        'light' => _t('라이트 모드', 'Light mode', '浅色模式', 'ライトモード'),
+        _ => _t('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト'),
+      };
 
   Future<void> _pickTheme() async {
     final v = await showChoiceSheet<String>(
@@ -81,6 +90,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ChoiceOption('system', _themeLabel('system'), icon: Icons.brightness_auto_outlined),
         ChoiceOption('light', _themeLabel('light'), icon: Icons.light_mode_outlined),
         ChoiceOption('dark', _themeLabel('dark'), icon: Icons.dark_mode_outlined),
+        ChoiceOption('dim', _themeLabel('dim'), icon: Icons.contrast),
+        ChoiceOption('black', _themeLabel('black'), icon: Icons.dark_mode),
       ],
       current: _themeMode,
     );
@@ -109,6 +120,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     await showChoiceSheetWithToggle<String>(
       context: context,
       title: _t('파일 표시 방식', 'Bookshelf View Mode', '文件显示样式', 'ファイル表示形式'),
+      confirmLabel: _t('완료', 'Done', '完成', '完了'),
       options: [
         ChoiceOption('list', _viewModeLabel('list'), icon: Icons.view_list_rounded),
         ChoiceOption('grid', _viewModeLabel('grid'), icon: Icons.grid_view_rounded),
@@ -178,7 +190,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     final cs = Theme.of(context).colorScheme;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-      leading: Icon(icon, size: 26, color: cs.onSurface),
+      leading: Icon(icon, size: 23, color: cs.onSurface),
       title: Text(title, style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w600)),
       subtitle: subtitle == null ? null : Text(subtitle, style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
       trailing: trailing ?? Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
@@ -251,6 +263,35 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                 if (_hideGroup) _t('그룹 숨김', 'groups hidden', '隐藏分组', 'グループを隠す'),
               ].join(' · '),
               onTap: _pickViewMode,
+            ),
+            _section(_t('읽기', 'Reading', '阅读', '読書')),
+            _item(
+              icon: Icons.bookmark_added_outlined,
+              title: _t('페이지 기억하기', 'Remember Last Page', '记住页面', 'ページを記憶'),
+              subtitle: _rememberPage
+                  ? _t('마지막으로 읽던 쪽부터 열어요', 'Opens where you left off', '从上次阅读的页面打开', '最後に読んだページから開きます')
+                  : _t('처음부터 열어요 (다시 켜면 끄기 전 쪽부터)', 'Opens from the start (turn on to resume where you were)', '从头打开（重新开启后从关闭前的页面继续）', '最初から開きます（再びオンにすると前のページから）'),
+              onTap: () => _setRememberPage(!_rememberPage),
+              trailing: Switch(value: _rememberPage, onChanged: _setRememberPage),
+            ),
+            _section(_t('글꼴', 'Fonts', '字体', 'フォント')),
+            _item(
+              icon: Icons.description_outlined,
+              title: _t('한글·워드·PDF 글꼴', 'HWP·Word·PDF Fonts', 'HWP·Word·PDF 字体', 'HWP・Word・PDFフォント'),
+              subtitle: _t('문서에 쓰였지만 휴대폰에 없는 글꼴 넣기', 'Add fonts used in documents but missing on the phone', '添加文档使用但手机缺少的字体', '文書で使われ端末にないフォントを追加'),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'doc'))),
+            ),
+            _item(
+              icon: Icons.font_download_outlined,
+              title: _t('앱 글꼴', 'App Font', '应用字体', 'アプリのフォント'),
+              subtitle: _t('메뉴·목록·설정 화면 글꼴', 'Font for menus, lists and settings', '菜单、列表、设置的字体', 'メニュー・一覧・設定のフォント'),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'app'))),
+            ),
+            _item(
+              icon: Icons.menu_book_outlined,
+              title: _t('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント'),
+              subtitle: _t('EPUB 책 본문 글꼴', 'Font for EPUB book text', 'EPUB正文字体', 'EPUB本文のフォント'),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'epub'))),
             ),
             _section(_t('도움말', 'Help', '帮助', 'ヘルプ')),
             _item(

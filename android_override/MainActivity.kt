@@ -118,7 +118,41 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
+    // 서재(첫 화면): 상태표시줄은 늘 보이고, 내비게이션 바는 버튼 방식일 때만 보임. 파일 열람 중에는 모두 숨김
+    @Volatile private var libraryBars = true
+
+    /// 내비게이션 바가 버튼(3버튼·2버튼) 방식인가 (제스처 방식이면 false)
+    private fun isButtonNavigation(): Boolean = try {
+        android.provider.Settings.Secure.getInt(contentResolver, "navigation_mode", 0) != 2
+    } catch (_: Throwable) { true }
+
+    private fun showLibraryBars() {
+        try {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.setDecorFitsSystemWindows(false)
+                window.insetsController?.let { controller ->
+                    controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_DEFAULT
+                    controller.show(WindowInsets.Type.statusBars())
+                    if (isButtonNavigation()) controller.show(WindowInsets.Type.navigationBars())
+                    else controller.hide(WindowInsets.Type.navigationBars())
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                )
+            }
+        } catch (_: Throwable) {}
+    }
+
     private fun hideSystemStatusBar(alsoHideNavBar: Boolean = false) {
+        if (libraryBars) {
+            showLibraryBars()
+            return
+        }
         try {
             window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
             window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
@@ -187,7 +221,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 @Suppress("DEPRECATION")
                 insets.systemWindowInsetTop > 0
             }
-            if (statusBarVisible && isActivityResumed) {
+            if (statusBarVisible && isActivityResumed && !libraryBars) {
                 scheduleStatusBarReHide()
             }
             v.onApplyWindowInsets(insets)
@@ -496,9 +530,19 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     canvas.scale(bw.toFloat() / webView.width, bh.toFloat() / webView.height)
                     canvas.translate(-webView.scrollX.toFloat(), -webView.scrollY.toFloat())
                     webView.draw(canvas)
+                    // 스크롤 보기용: 쪽 자리만 잘라 냄 (crop = [x, y, w, h], 화면 대비 0~1)
+                    val crop = call.argument<List<Number>>("crop")
+                    val shot = if (crop != null && crop.size == 4) {
+                        val cx = (crop[0].toFloat() * bw).toInt().coerceIn(0, bw - 1)
+                        val cy = (crop[1].toFloat() * bh).toInt().coerceIn(0, bh - 1)
+                        val cw = (crop[2].toFloat() * bw).toInt().coerceIn(1, bw - cx)
+                        val ch = (crop[3].toFloat() * bh).toInt().coerceIn(1, bh - cy)
+                        Bitmap.createBitmap(bmp, cx, cy, cw, ch).also { if (it !== bmp) bmp.recycle() }
+                    } else bmp
                     val transparent = (bg ushr 24) == 0
                     Thread {
                         try {
+                            val bmp = shot
                             val out = java.io.ByteArrayOutputStream()
                             // 배경이 투명(종이 질감 위)이면 투명도를 살리는 PNG로
                             if (transparent) bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
@@ -666,6 +710,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 val mode = call.argument<String>("mode") ?: "unspecified"
                 runOnUiThread {
                     applyRequestedScreenOrientation(mode)
+                    result.success(true)
+                }
+            } else if (call.method == "setLibraryBars") {
+                // 서재에서는 상태표시줄(과 버튼식 내비게이션 바)을 보이고, 파일을 열면 모두 숨김
+                val on = call.argument<Boolean>("on") ?: true
+                runOnUiThread {
+                    libraryBars = on
+                    hideSystemStatusBar(alsoHideNavBar = !on)
+                    if (!on) mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 200L)
                     result.success(true)
                 }
             } else {
@@ -1506,14 +1559,49 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private fun pdfLines(path: String, from: Int, to: Int, withBold: Boolean): List<Map<String, Any>> {
         val out = ArrayList<Map<String, Any>>()
         val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
-        fun collect(pw: Float, ph: Float, contents: List<android.graphics.pdf.content.PdfPageTextContent>, draw: ((Bitmap) -> Unit)?) {
+        fun collect(pw: Float, ph: Float, contents: List<android.graphics.pdf.content.PdfPageTextContent>, draw: ((Bitmap) -> Unit)?,
+                    search: (String) -> List<android.graphics.pdf.models.PageMatchBounds>) {
             // 글 조각들: 줄바꿈 수와 상자 수가 같으면 줄마다 짝짓고, 다르면 상자 너비에 비례해 글자를 나눠 담음
             val segs = ArrayList<Pair<String, android.graphics.RectF>>()
             if (pw > 0f && ph > 0f) {
                 for (c in contents) {
                     val text = c.text ?: continue
                     val rects = c.bounds.filter { it.width() > 0f && it.height() > 0f }
-                    if (rects.isEmpty() || text.isBlank()) continue
+                    if (text.isBlank()) continue
+                    if (rects.isEmpty()) {
+                        // 기기에 따라 쪽 글 전체만 주고 위치(상자)는 주지 않는다 → 줄마다 '쪽 안에서 찾기'로 위치를 얻음
+                        val seen = HashMap<String, Int>()
+                        val used = ArrayList<android.graphics.RectF>()
+                        var lastY = 0f
+                        var searched = 0
+                        for (raw in text.split(Regex("\r\n|\n|\r"))) {
+                            val line = raw.trim()
+                            if (line.isEmpty()) continue
+                            var box: android.graphics.RectF? = null
+                            if (line.length <= 120 && searched < 80) {
+                                searched++
+                                val k = seen[line] ?: 0
+                                seen[line] = k + 1
+                                try {
+                                    // 찾은 자리마다 한 줄 상자로 (줄이 바뀐 부분은 빼고)
+                                    val boxes = search(line).mapNotNull { m ->
+                                        val first = m.bounds.firstOrNull { it.width() > 0f && it.height() > 0f } ?: return@mapNotNull null
+                                        val u = android.graphics.RectF(first)
+                                        for (r in m.bounds) if (r.width() > 0f && r.height() > 0f && Math.abs(r.centerY() - u.centerY()) < u.height()) u.union(r)
+                                        u
+                                    }
+                                    // 이미 다른 줄이 차지한 자리 안(더 긴 줄 속 같은 글자)은 건너뜀
+                                    box = boxes.firstOrNull { b -> used.none { it.contains(b.centerX(), b.centerY()) } } ?: boxes.getOrNull(k) ?: boxes.firstOrNull()
+                                    box?.let { used.add(it) }
+                                } catch (_: Throwable) {}
+                            }
+                            // 위치를 못 찾은 줄은 앞 줄 바로 아래로 (글 복사에는 순서만 맞으면 됨)
+                            val r = box ?: android.graphics.RectF(0f, lastY + 0.01f, pw, lastY + 0.02f)
+                            lastY = r.bottom
+                            segs.add(line to r)
+                        }
+                        continue
+                    }
                     val parts = text.split(Regex("\r\n|\n|\r"))
                     if (parts.size == rects.size) {
                         for (k in rects.indices) if (parts[k].isNotBlank()) segs.add(parts[k] to rects[k])
@@ -1575,7 +1663,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     for (i in maxOf(0, from) until minOf(renderer.pageCount, to)) {
                         renderer.openPage(i).use { pg ->
                             collect(pg.width.toFloat(), pg.height.toFloat(), pg.textContents,
-                                if (withBold) { b -> pg.render(b, null, android.graphics.Matrix().apply { setScale(b.width / pg.width.toFloat(), b.width / pg.width.toFloat()) }, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) } else null)
+                                if (withBold) { b -> pg.render(b, null, android.graphics.Matrix().apply { setScale(b.width / pg.width.toFloat(), b.width / pg.width.toFloat()) }, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) } else null,
+                                { q -> pg.searchText(q) })
                         }
                     }
                 }
@@ -1585,7 +1674,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         renderer.openPage(i).use { pg ->
                             collect(pg.width.toFloat(), pg.height.toFloat(), pg.textContents,
                                 if (withBold) { b -> pg.render(b, null, android.graphics.Matrix().apply { setScale(b.width / pg.width.toFloat(), b.width / pg.width.toFloat()) },
-                                    android.graphics.pdf.RenderParams.Builder(android.graphics.pdf.RenderParams.RENDER_MODE_FOR_DISPLAY).build()) } else null)
+                                    android.graphics.pdf.RenderParams.Builder(android.graphics.pdf.RenderParams.RENDER_MODE_FOR_DISPLAY).build()) } else null,
+                                { q -> pg.searchText(q) })
                         }
                     }
                 }

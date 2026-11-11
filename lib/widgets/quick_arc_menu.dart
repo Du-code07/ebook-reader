@@ -477,3 +477,56 @@ class _WiggleOnChangeState extends State<WiggleOnChange> with SingleTickerProvid
     );
   }
 }
+
+/// 도구 모음 '바' 형태: 화면 아래에 둥근 가로 막대로 아이콘을 한 줄로 늘어놓음
+/// (아이콘이 많으면 옆으로 밀어서 봄). 누르면 그 기능을 바로 실행
+class QuickToolBar extends StatelessWidget {
+  const QuickToolBar({super.key, required this.items, this.onClose});
+
+  final List<QuickArcMenuItem> items;
+
+  /// 누른 항목이 메뉴를 닫는 항목일 때 부름 (상단바·진행바도 함께 숨김)
+  final VoidCallback? onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 56,
+      decoration: BoxDecoration(
+        color: const Color(0xEE1C1C1E),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+        boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 10, offset: Offset(0, 3))],
+      ),
+      child: LayoutBuilder(
+        builder: (context, c) {
+          const double minSlot = 42;
+          final bool fits = items.length * minSlot <= c.maxWidth;
+          final double slot = fits ? c.maxWidth / items.length : minSlot;
+          final row = Row(
+            mainAxisSize: fits ? MainAxisSize.max : MainAxisSize.min,
+            children: [
+              for (final it in items)
+                SizedBox(
+                  width: slot,
+                  height: 56,
+                  child: IconButton(
+                    icon: IconTheme.merge(data: const IconThemeData(color: Colors.white, size: 20), child: it.icon),
+                    tooltip: it.tooltip,
+                    onPressed: () {
+                      it.onTap();
+                      if (it.closeAfterTap) onClose?.call();
+                    },
+                  ),
+                ),
+            ],
+          );
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(22),
+            child: fits ? row : SingleChildScrollView(scrollDirection: Axis.horizontal, child: row),
+          );
+        },
+      ),
+    );
+  }
+}

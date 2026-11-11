@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/txt_page_document.dart';
+import 'viewer_dialogs.dart';
 
 class TxtPageController {
   Future<void> Function(String, Object?)? _invoke;
@@ -31,6 +32,10 @@ class TxtPagedViewer extends StatefulWidget {
   final String theme;
   final bool spread;
   final bool rtl;
+
+  /// 스크롤 모드: 쪽을 간격 없이 세로로 이어 보여 줌
+  final bool scroll;
+  final ContinuousPageController? scrollController;
   final ValueChanged<int> onLoaded;
   final void Function(int, int, String, double) onLocation;
   final ValueChanged<String> onError;
@@ -44,6 +49,8 @@ class TxtPagedViewer extends StatefulWidget {
     required this.theme,
     required this.spread,
     required this.rtl,
+    this.scroll = false,
+    this.scrollController,
     required this.onLoaded,
     required this.onLocation,
     required this.onError,
@@ -58,6 +65,7 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
   List<String> _visibleText = const [];
   int _page = 0;
   int _request = 0;
+  final Map<int, Future<String>> _scrollCache = {};
   bool _disposed = false;
 
   @override
@@ -138,6 +146,10 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
         await _show(_page - step);
       case 'display':
         final match = RegExp(r'^txt:(\d+)$').firstMatch(value.toString());
+        if (match != null && widget.scroll) {
+          widget.scrollController?.jumpToPage(int.parse(match[1]!));
+          return;
+        }
         if (match != null) await _show(int.parse(match[1]!));
       case 'progress':
         await _show(
@@ -149,7 +161,7 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
   @override
   void didUpdateWidget(covariant TxtPagedViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.spread != widget.spread) unawaited(_show(_page));
+    if (oldWidget.spread != widget.spread || oldWidget.scroll != widget.scroll) unawaited(_show(_page));
   }
 
   @override
@@ -181,6 +193,7 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
         child: CustomPaint(painter: _TxtPaperPainter(text, foreground)),
       ),
     );
+    if (widget.scroll && _document != null) return _buildScroll(background, foreground, paper);
     final children = _visibleText
         .map((text) => Expanded(child: paper(text)))
         .toList();
@@ -197,6 +210,41 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
                   : children,
             ),
     );
+  }
+}
+
+extension on _TxtPagedViewerState {
+  /// 스크롤 모드: 종이 쪽들을 세로로 이어 붙임 (보이는 쪽 근처만 그때그때 읽어 둠)
+  Widget _buildScroll(Color background, Color foreground, Widget Function(String) paper) {
+    final doc = _document!;
+    final double aspect = TxtPageDocument.paperSize.height / TxtPageDocument.paperSize.width;
+    return ContinuousPageList(
+      controller: widget.scrollController,
+      count: doc.pageCount,
+      aspectOf: (_) => aspect,
+      initialPage: _page,
+      background: background,
+      zoomable: false,
+      onPageChanged: (p) {
+        _page = p;
+        widget.onLocation(p, doc.pageCount, 'txt:$p', doc.pageCount <= 1 ? 0 : p / (doc.pageCount - 1));
+      },
+      pageBuilder: (ctx, i) => ColoredBox(
+        color: background,
+        child: FutureBuilder<String>(
+          future: _scrollText(i),
+          builder: (ctx, snap) => snap.hasData ? paper(snap.data!) : const SizedBox.expand(),
+        ),
+      ),
+    );
+  }
+
+  Future<String> _scrollText(int i) {
+    final cache = _scrollCache;
+    final hit = cache[i];
+    if (hit != null) return hit;
+    if (cache.length > 40) cache.remove(cache.keys.first);
+    return cache[i] = _document!.readPage(i);
   }
 }
 

@@ -7,9 +7,11 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:archive/archive_io.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
+import '../services/system_bars.dart';
 import '../services/txt_page_document.dart';
 import '../services/toc_page_parser.dart';
 import '../services/heading_rules.dart';
@@ -17,11 +19,13 @@ import '../services/outline_cache.dart';
 import '../widgets/outline_progress.dart';
 import '../widgets/text_copy_sheet.dart';
 import '../services/page_snapshot_service.dart';
+import '../services/user_fonts.dart';
 import '../services/epub_validation.dart';
 import '../widgets/hwp_viewer.dart';
 import '../widgets/txt_paged_viewer.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
+import '../widgets/viewer_dialogs.dart';
 import '../widgets/sheet_pull_to_close.dart';
 import '../services/pdf_export_service.dart';
 import '../widgets/memo_tools.dart';
@@ -134,9 +138,23 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   String? _initialCfi;
   String? _currentCfi;
   String? _selectedCfiRange;
+  String _selectedText = '';
   bool _isLoading = true;
   String _epubBgTheme = 'white'; // 'white', 'sepia', 'dark'
-  bool _enableTwoPageInLandscape = false;
+  // 페이지 표시: 'one' / 'two' / 'auto'(화면이 넓으면 두 페이지)
+  String _pageDisplay = 'one';
+  // 도구 모음 형태: 'arc'(반원) / 'bar'(아래 가로 바)
+  String _toolbarStyle = 'arc';
+  // 사용자가 고른 EPUB 본문 글꼴 (없으면 책의 글꼴)
+  UserFontEntry? _epubFont;
+  // 페이지 모드: 탭(누른 자리로 넘김) / 스크롤(세로로 이어 보기) / 슬라이드(= _useSwipeTurn)
+  bool _pageModeTap = true;
+  bool _pageModeScroll = false;
+  final ContinuousPageController _scrollCtrl = ContinuousPageController();
+
+  /// 두 쪽을 나란히 보여 줄 때인가 (스크롤 모드는 쪽이 바뀌지 않음)
+  bool _spreadFor(bool isLandscape) =>
+      !_pageModeScroll && !_slideShow && (_pageDisplay == 'two' || (_pageDisplay == 'auto' && isLandscape));
   bool _isMangaRtlMode = false;
   int _fontSize = 18;
   List<EpubChapter> _chapters = [];
@@ -332,6 +350,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   void initState() {
     super.initState();
+    SystemBars.enterViewer(); // 파일 열람 중에는 상태표시줄·내비게이션 바를 모두 숨김
     _activeFilePath = widget.filePath;
     WidgetsBinding.instance.addObserver(this);
     _startOutlineCacheRead(); // 저장해 둔 목차를 문서가 열리는 동안 미리 읽어 둠
@@ -368,18 +387,154 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     );
   }
 
-  Future<void> _toggleScreenOrientation() async {
-    final Size currentSize = MediaQuery.sizeOf(context);
-    final bool currentlyLandscape = currentSize.width > currentSize.height;
-    final bool nextLandscape = !currentlyLandscape;
-    StorageService.desiredLandscapeNotifier.value = nextLandscape;
+  /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 넘김 버튼'
+  /// 스크롤과 슬라이드는 함께 켤 수 없음 (하나를 켜면 다른 하나는 꺼짐). 그 외에는 함께 사용 가능
+  List<Widget> _pageModeSettings(StateSetter setModalState) {
+    Future<void> apply(VoidCallback change) async {
+      setState(change);
+      setModalState(() {});
+      await StorageService.setPageModeTap(_pageModeTap);
+      await StorageService.setPageModeScroll(_pageModeScroll);
+      await StorageService.setUseSwipeTurn(_useSwipeTurn);
+      _onPageModeChanged();
+    }
 
-    try {
-      await _pdfChannel.invokeMethod('setScreenOrientation', {
-        'mode': nextLandscape ? 'landscape' : 'portrait',
-      });
-    } catch (_) {}
+    return [
+      _settingsHeader(Icons.swipe_outlined, _tr('페이지 모드', 'Page Mode', '翻页模式', 'ページモード')),
+      const SizedBox(height: 4),
+      Text(
+        _tr('스크롤과 슬라이드는 함께 쓸 수 없어요.', 'Scroll and Slide cannot be used together.', '滚动和滑动不能同时使用。', 'スクロールとスライドは同時に使えません。'),
+        style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+      ),
+      const SizedBox(height: 6),
+      SettingGroup(
+        children: [
+          SettingToggle(
+            label: Text(_tr('탭', 'Tap', '点击', 'タップ')),
+            selected: _pageModeTap,
+            onSelected: (val) => apply(() => _pageModeTap = val),
+          ),
+          SettingToggle(
+            label: Text(_tr('스크롤', 'Scroll', '滚动', 'スクロール')),
+            selected: _pageModeScroll,
+            onSelected: (val) => apply(() {
+              _pageModeScroll = val;
+              if (val) _useSwipeTurn = false;
+            }),
+          ),
+          SettingToggle(
+            label: Text(_tr('슬라이드', 'Slide', '滑动', 'スライド')),
+            selected: _useSwipeTurn,
+            onSelected: (val) => apply(() {
+              _useSwipeTurn = val;
+              if (val) _pageModeScroll = false;
+            }),
+          ),
+        ],
+      ),
+      const SizedBox(height: 18),
+      _settingsHeader(Icons.smart_button_outlined, _tr('페이지 넘김 버튼 (동시 사용 가능)', 'Page Turn Buttons (Multiple allowed)', '翻页按钮 (可同时启用)', 'ページめくりボタン (同時使用可)')),
+      const SizedBox(height: 6),
+      SettingGroup(
+        children: [
+          SettingToggle(
+            label: Text(_tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン')),
+            selected: _useVolumeTurn,
+            onSelected: (val) async {
+              await StorageService.setUseVolumeTurn(val);
+              setState(() => _useVolumeTurn = val);
+              setModalState(() {});
+            },
+          ),
+          SettingToggle(
+            label: Text(_tr('페이지 이동 버튼', 'Page Nav Buttons', '翻页按钮', 'ページ移動ボタン')),
+            selected: _useQuickNavTurn,
+            onSelected: (val) async {
+              await StorageService.setUseQuickNavTurn(val);
+              setState(() => _useQuickNavTurn = val);
+              setModalState(() {});
+            },
+          ),
+          SettingToggle(
+            label: Text(_tr('S펜 버튼', 'S Pen Button', 'S Pen 按钮', 'Sペンボタン')),
+            selected: _useSpenTurn,
+            onSelected: (val) async {
+              await StorageService.setUseSpenTurn(val);
+              setState(() => _useSpenTurn = val);
+              setModalState(() {});
+            },
+          ),
+        ],
+      ),
+    ];
   }
+
+  void _setPageDisplay(String mode) {
+    if (!mounted || mode == _pageDisplay) return;
+    setState(() {
+      _initialCfi = _currentCfi;
+      _pageDisplay = mode;
+    });
+  }
+
+  /// 페이지 모드가 바뀌었을 때: 보던 자리에서 다시 보여 줌 (EPUB은 넘김/스크롤 방식이 바뀌어 다시 염)
+  void _onPageModeChanged() {
+    if (!mounted) return;
+    setState(() {
+      _initialCfi = _currentCfi;
+      _docScrollReady = false;
+    });
+    if (_pageModeScroll && _isOfflineDocument && !_isTxt) unawaited(_prepareDocScroll());
+    // 스크롤을 끄면 스크롤에서 보던 쪽을 그대로 이어서
+    if (!_pageModeScroll && _isOfflineDocument && !_isTxt && _docPageCount > 0) {
+      _docScrollGen++;
+      unawaited(_hwpController.display('$_documentPositionPrefix:$_docPage'));
+    }
+    if (!_isOfflineDocument) {
+      try {
+        _epubController.setSwipeEnabled(_useSwipeTurn && !_pageModeScroll);
+      } catch (_) {}
+    }
+  }
+
+  /// 화면 회전 고르기 (자동 / 세로 고정 / 가로 고정)
+  Future<void> _pickRotation() async {
+    final bool? want = StorageService.desiredLandscapeNotifier.value;
+    final current = want == null ? 'auto' : (want ? 'landscape' : 'portrait');
+    final picked = await showRotationDialog(context, current: current, tr: _tr);
+    if (picked == null || !mounted) return;
+    await _applyRotation(picked);
+  }
+
+  Future<void> _applyRotation(String mode) async {
+    StorageService.desiredLandscapeNotifier.value = mode == 'auto' ? null : mode == 'landscape';
+    setState(() => _rotateTapCount++);
+    try {
+      await _pdfChannel.invokeMethod('setScreenOrientation', {'mode': mode == 'auto' ? 'unspecified' : mode});
+    } catch (_) {}
+    if (mounted) setState(() {});
+  }
+
+  /// 지금 화면 회전 설정 아이콘
+  IconData get _rotationIconNow {
+    final bool? want = StorageService.desiredLandscapeNotifier.value;
+    return rotationIcon(want == null ? 'auto' : (want ? 'landscape' : 'portrait'));
+  }
+
+  /// 페이지 표시 고르기 (한 페이지 / 두 페이지 / 화면 비율에 따라)
+  Future<void> _pickPageDisplay() async {
+    await showPageDisplayDialog(
+      context,
+      current: _pageDisplay,
+      tr: _tr,
+      scrollMode: _pageModeScroll,
+      onChanged: (mode) {
+        StorageService.setPageDisplay(mode);
+        _setPageDisplay(mode);
+      },
+    );
+  }
+
 
   int _naturalCompare(String a, String b) {
     final reg = RegExp(r'(\d+)|(\D+)');
@@ -524,9 +679,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       }
     }
     final savedCfi = await StorageService.getLastPosition(widget.filePath);
-    final savedProg = await StorageService.getProgress(widget.filePath);
-    final twoPage = await StorageService.getTwoPageLandscape();
-    final isRtl = await StorageService.getBookReadingDirectionRtl(widget.filePath);
+    // 페이지 기억하기를 끄면 처음부터
+    final savedProg = StorageService.rememberPage ? await StorageService.getProgress(widget.filePath) : 0.0;
+    final pageDisplay = await StorageService.getPageDisplay();
+    final toolbarStyle = await StorageService.getToolbarStyle();
+    UserFontEntry? epubFont;
+    try {
+      epubFont = await UserFonts.epubFont();
+    } catch (_) {}
+    final pageModeTap = await StorageService.getPageModeTap();
+    final pageModeScroll = await StorageService.getPageModeScroll();
+    // 읽기 방향: 직접 정한 적이 없으면, 오른쪽→왼쪽으로 넘기는 EPUB(세로쓰기 일본 소설 등)은 우→좌로 시작
+    final bool isRtl = await StorageService.getBookReadingDirectionRtlOrNull(widget.filePath) ??
+        (_isEpub && await _epubProgressionRtl(_activeFilePath));
     final savedBg = await StorageService.getEpubBgTheme();
     final footerMode = await StorageService.getFooterInfoMode();
     final barPos = await StorageService.getProgressBarPosition();
@@ -557,7 +722,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _progress = savedProg.clamp(0.0, 1.0).toDouble();
       _initialProgress = _progress;
       _currentPageLocationKey = initLocKey;
-      _enableTwoPageInLandscape = twoPage;
+      _pageDisplay = pageDisplay;
+      _toolbarStyle = toolbarStyle;
+      _epubFont = epubFont;
+      _pageModeTap = pageModeTap;
+      _pageModeScroll = pageModeScroll;
       _isMangaRtlMode = isRtl;
       // 기본값은 라이트. 종이색은 EPUB에서만 쓰므로 다른 문서에서는 라이트로 보여 준다.
       _epubBgTheme = savedBg.isEmpty || (savedBg == 'sepia' && !_isEpub) || _isPresentation ? 'white' : savedBg; // PPT는 배경 색상을 적용하지 않음
@@ -581,7 +750,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   // ── 페이지 이동: EPUB이면 EPUB 뷰어, TXT·워드·한글이면 각 문서 뷰어로 보낸다 ──
+  /// 스크롤 모드의 한글·워드·PPT·TXT: 쪽 그림 목록을 한 화면씩 움직임
+  bool get _docScrollActive => _pageModeScroll && _isOfflineDocument && (_isTxt || _docScrollReady);
+
   void _readerNext() {
+    if (_docScrollActive) {
+      _scrollCtrl.scrollByScreen(1);
+      return;
+    }
     if (_isTxt) {
       _txtController.next();
     } else if (_isOfflineDocument) {
@@ -593,6 +769,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   void _readerPrevious() {
+    if (_docScrollActive) {
+      _scrollCtrl.scrollByScreen(-1);
+      return;
+    }
     if (_isTxt) {
       _txtController.previous();
     } else if (_isOfflineDocument) {
@@ -614,6 +794,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   void _readerDisplay(String position) {
+    if (_docScrollActive) {
+      final m = RegExp(r':(\d+)$').firstMatch(position);
+      if (m != null) {
+        _scrollCtrl.jumpToPage(int.parse(m.group(1)!));
+        return;
+      }
+    }
     if (_isTxt) {
       _txtController.display(position);
     } else if (_isOfflineDocument) {
@@ -762,31 +949,61 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     // 목차 슬라이드가 있으면 그것만, 없으면 슬라이드마다 제목(가장 큰 글자)과 그 바로 아래 부제목
     var toc = TocPageParser.parse(textsOf(), pageCount);
     if (toc != null) {
-      // 목차 슬라이드는 글자가 작아 잘못 읽기 쉬움: 더 크게 그려 한 번 더 읽음
+      // 목차 슬라이드는 글자가 작아 잘못 읽기 쉬움: 크기를 바꿔 여러 번 읽고, 같은 항목끼리 비교해 고름
       final tocPage = TocPageParser.tocPageOf(textsOf(), toc);
+      final variants = <List<Map<String, Object>>>[];
       if (tocPage != null && mounted) {
-        final sharper = await readSlide(tocPage, 2800);
-        if (sharper.isNotEmpty) {
-          final before = slides[tocPage];
-          slides[tocPage] = sharper;
-          final again = TocPageParser.parse(textsOf(), pageCount);
-          if (again != null && again.length >= toc.length) {
-            toc = again;
-          } else {
-            slides[tocPage] = before ?? const [];
-          }
+        final original = slides[tocPage] ?? const <Map<String, Object?>>[];
+        for (final w in const [2400, 3200, 1400]) {
+          if (!mounted) break;
+          final again = await readSlide(tocPage, w);
+          if (again.isEmpty) continue;
+          slides[tocPage] = again;
+          final v = TocPageParser.parse(textsOf(), pageCount);
+          if (v != null) variants.add(v);
         }
+        slides[tocPage] = original;
       }
-      // 목차 글자 다듬기: 연결된 슬라이드의 제목·부제목(큰 글씨라 더 정확히 읽힘)과 거의 같으면 그 글자로
+      final base = toc;
       toc = [
-        for (final e in toc)
-          {...e, 'title': TocPageParser.refineTitle('${e['title']}', [for (final l in slides[e['page'] as int] ?? const <Map<String, Object?>>[]) '${l['t']}'])},
+        for (final e in base)
+          {
+            ...e,
+            'title': TocPageParser.chooseTitle(
+              '${e['title']}',
+              [
+                for (final v in variants)
+                  for (final x in v)
+                    if (x['page'] == e['page'] && (x['level'] == e['level']) && _sameTocEntry('${x['title']}', '${e['title']}')) '${x['title']}',
+              ],
+              // 연결된 슬라이드(와 바로 다음 슬라이드)의 제목·부제목: 큰 글씨라 더 정확히 읽힘
+              [
+                for (final p in [e['page'] as int, (e['page'] as int) + 1])
+                  if (p < pageCount)
+                    for (final l in slides[p] ?? const <Map<String, Object?>>[]) '${l['t']}',
+              ],
+            ),
+          },
       ];
     }
     final List<Map<String, Object?>> items = toc ??
         HeadingRules.slides([for (int p = 0; p < pageCount; p++) slides[p] ?? const <Map<String, Object?>>[]], ocr: true);
     await OutlineCache.clearOcr(path);
     return items;
+  }
+
+  /// 다른 크기로 다시 읽은 목차 항목이 같은 항목인가 (번호가 같거나 글이 꽤 비슷)
+  static bool _sameTocEntry(String a, String b) {
+    final na = RegExp(r'^\(?(\d{1,3}(?:[.\-]\d{1,3})?)').firstMatch(a.trim())?.group(1);
+    final nb = RegExp(r'^\(?(\d{1,3}(?:[.\-]\d{1,3})?)').firstMatch(b.trim())?.group(1);
+    if (na != null && nb != null) return na == nb;
+    final x = a.replaceAll(RegExp(r'\s+'), ''), y = b.replaceAll(RegExp(r'\s+'), '');
+    if (x.isEmpty || y.isEmpty) return false;
+    int same = 0;
+    for (final ch in x.split('')) {
+      if (y.contains(ch)) same++;
+    }
+    return same >= x.length * 0.6;
   }
 
   void _applyDocumentOutline(List<Map<String, Object?>> items, int pageCount) {
@@ -831,6 +1048,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _docPageCount = pageCount;
       _chapters = _pageListChapters(pageCount);
     });
+    if (_pageModeScroll && !_isTxt) WidgetsBinding.instance.addPostFrameCallback((_) => _prepareDocScroll());
     if (_isTxt) return;
     final cached = _cachedOutlines?[pageCount];
     if (cached != null && cached.isNotEmpty) {
@@ -846,6 +1064,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (!mounted) return;
     final waiter = _relocateWaiter;
     if (waiter != null && !waiter.isCompleted) waiter.complete();
+    // 스크롤 보기를 준비하느라 쪽을 넘기는 중에는 읽던 자리로 저장하지 않음
+    if (_docScrollPreparing) return;
     final relocation = ++_docRelocation;
     if (page != _docPage) _lastReadyPage = -1;
     if (_snapShownPage != null && _snapShownPage != page) _snapShow(page);
@@ -877,8 +1097,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           initialPosition: _currentCfi ?? _initialCfi,
           initialProgress: _initialProgress,
           theme: _epubBgTheme,
-          spread: isLandscape && _enableTwoPageInLandscape && !_slideShow,
+          spread: _spreadFor(isLandscape),
           rtl: _isMangaRtlMode,
+          scroll: _pageModeScroll,
+          scrollController: _scrollCtrl,
           onLoaded: _onDocumentLoaded,
           onLocation: _onDocumentLocation,
           onError: _handleEpubLoadError,
@@ -896,7 +1118,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           initialPosition: _currentCfi ?? _initialCfi,
           initialProgress: _initialProgress,
           theme: _epubBgTheme,
-          spread: isLandscape && _enableTwoPageInLandscape && !_slideShow,
+          spread: _spreadFor(isLandscape),
           rtl: _isMangaRtlMode,
           onLoaded: _onDocumentLoaded,
           onLocation: _onDocumentLocation,
@@ -908,14 +1130,167 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           },
         ),
         // 한 번 본 쪽: 실제 쪽(특히 사진)이 다 준비될 때까지 저장해 둔 화면을 먼저 보여 줌
-        if (shown != null)
+        if (shown != null && !_pageModeScroll)
           Positioned.fill(
             child: IgnorePointer(
               child: Image.file(shown, fit: BoxFit.fill, gaplessPlayback: true, filterQuality: FilterQuality.medium),
             ),
           ),
+        // 스크롤 모드: 쪽마다 한 번 그림으로 만들어 두고(다음부터는 바로), 간격 없이 세로로 이어 보여 줌
+        if (_pageModeScroll) Positioned.fill(child: _buildDocScroll()),
       ],
     );
+  }
+
+  // ── 스크롤 모드 (한글·워드·PPT) ──
+  bool _docScrollReady = false;
+  double _docScrollProgress = 0;
+  List<File> _docScrollFiles = const [];
+  List<double> _docScrollAspects = const [];
+  int _docScrollGen = 0;
+  bool _docScrollPreparing = false;
+  Completer<int>? _pageReadyWaiter;
+
+  Widget _buildDocScroll() {
+    final cs = Theme.of(context).colorScheme;
+    if (!_docScrollReady || _docScrollFiles.isEmpty) {
+      return ColoredBox(
+        color: _getBgColor(),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(width: 160, child: LinearProgressIndicator(value: _docScrollProgress > 0 ? _docScrollProgress : null)),
+              const SizedBox(height: 12),
+              Text(
+                _tr('스크롤 보기 준비 중 ${(_docScrollProgress * 100).round()}%', 'Preparing scroll view ${(_docScrollProgress * 100).round()}%',
+                    '正在准备滚动视图 ${(_docScrollProgress * 100).round()}%', 'スクロール表示を準備中 ${(_docScrollProgress * 100).round()}%'),
+                style: TextStyle(color: _getFgColor().withValues(alpha: 0.75), fontSize: 13),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _tr('처음 한 번만 걸려요', 'Only the first time', '仅首次需要', '初回のみ'),
+                style: TextStyle(color: cs.outline, fontSize: 11.5),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final double dpr = MediaQuery.devicePixelRatioOf(context);
+    final double w = MediaQuery.sizeOf(context).width;
+    return ContinuousPageList(
+      controller: _scrollCtrl,
+      count: _docScrollFiles.length,
+      aspectOf: (i) => _docScrollAspects[i],
+      initialPage: _docPage.clamp(0, _docScrollFiles.length - 1).toInt(),
+      background: _getBgColor(),
+      onPageChanged: (p) {
+        final n = _docScrollFiles.length;
+        _onDocumentLocation(p, n, '$_documentPositionPrefix:$p', n <= 1 ? 1 : p / (n - 1));
+      },
+      pageBuilder: (ctx, i) => Image.file(
+        _docScrollFiles[i],
+        fit: BoxFit.fill,
+        cacheWidth: math.min(4096, (w * dpr).round()),
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+      ),
+    );
+  }
+
+  /// 쪽을 하나씩 화면에 그려 그림으로 저장 (다음부터는 저장한 그림을 바로 씀)
+  Future<void> _prepareDocScroll() async {
+    final int gen = ++_docScrollGen;
+    final int n = _docPageCount;
+    if (!mounted || n <= 0 || !_pageModeScroll) return;
+    final dir = await PageSnapshotService.documentDir(widget.filePath);
+    if (!mounted || dir == null || gen != _docScrollGen) return;
+    final size = MediaQuery.sizeOf(context);
+    final double dpr = MediaQuery.devicePixelRatioOf(context);
+    final sub = Directory('${dir.path}/scroll_${size.width.round()}x${size.height.round()}_$_epubBgTheme');
+    if (!sub.existsSync()) sub.createSync(recursive: true);
+    final metaFile = File('${sub.path}/meta.json');
+    Map<String, dynamic> meta = {};
+    try {
+      if (metaFile.existsSync()) meta = jsonDecode(metaFile.readAsStringSync()) as Map<String, dynamic>;
+    } catch (_) {}
+    final files = <File>[];
+    final aspects = <double>[];
+    final int startPage = _docPage;
+    bool moved = false;
+    setState(() => _docScrollProgress = 0);
+    _docScrollPreparing = true;
+    try {
+    for (int i = 0; i < n; i++) {
+      if (!mounted || gen != _docScrollGen || !_pageModeScroll) return;
+      final f = File('${sub.path}/p$i.jpg');
+      final known = meta['$i'];
+      if (known is num && f.existsSync()) {
+        files.add(f);
+        aspects.add(known.toDouble());
+        continue;
+      }
+      Uint8List? bytes;
+      try {
+        if (_isPresentation) {
+          final b64 = await _hwpController.slideImage(i, width: (size.width * dpr).round().clamp(900, 2400).toInt());
+          if (b64 != null) bytes = base64Decode(b64);
+        } else {
+          moved = true;
+          final waiter = Completer<int>();
+          _pageReadyWaiter = waiter;
+          await _hwpController.display('$_documentPositionPrefix:$i');
+          await waiter.future.timeout(const Duration(seconds: 6), onTimeout: () => i);
+          await Future<void>.delayed(const Duration(milliseconds: 160));
+          if (!mounted || gen != _docScrollGen) return;
+          final r = await _hwpController.pageRect();
+          bytes = await _pdfChannel.invokeMethod<Uint8List>('snapshotWebView', {
+            'background': _getBgColor().toARGB32(),
+            'scale': 1.0,
+            if (r != null) 'crop': [r.left, r.top, r.width, r.height],
+          });
+        }
+      } catch (_) {}
+      if (bytes != null && bytes.length > 512) {
+        await f.writeAsBytes(bytes, flush: true);
+        final sz = readImageSizeSync(f.path);
+        final double aspect = sz == null ? 1.414 : (sz.height / sz.width).clamp(0.2, 8.0).toDouble();
+        meta['$i'] = aspect;
+        files.add(f);
+        aspects.add(aspect);
+      } else {
+        // 그리지 못한 쪽은 빈 쪽으로
+        files.add(f);
+        aspects.add(aspects.isNotEmpty ? aspects.last : 1.414);
+      }
+      if (mounted) setState(() => _docScrollProgress = (i + 1) / n);
+      if (i % 5 == 4) {
+        try {
+          metaFile.writeAsStringSync(jsonEncode(meta));
+        } catch (_) {}
+      }
+    }
+    } finally {
+      _docScrollPreparing = false;
+    }
+    try {
+      metaFile.writeAsStringSync(jsonEncode(meta));
+    } catch (_) {}
+    if (!mounted || gen != _docScrollGen) return;
+    // 그리느라 넘긴 쪽을 원래 보던 쪽으로 (스크롤을 끄면 그 자리에서 이어 봄)
+    if (moved) {
+      _docScrollPreparing = true;
+      await _runAndWaitRelocate(() => _hwpController.display('$_documentPositionPrefix:$startPage'), const Duration(seconds: 3));
+      _docScrollPreparing = false;
+      if (!mounted || gen != _docScrollGen) return;
+    }
+    setState(() {
+      _docScrollFiles = files;
+      _docScrollAspects = aspects;
+      _docScrollReady = true;
+      _docPage = startPage;
+    });
   }
 
   // ── 쪽 화면 저장·미리 띄우기 (워드·한글) ──
@@ -926,7 +1301,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   Timer? _snapHideTimer;
   bool get _snapSpread {
     final size = MediaQuery.sizeOf(context);
-    return size.width > size.height && _enableTwoPageInLandscape && !_slideShow;
+    return _spreadFor(size.width > size.height);
   }
   int _snapCaptureSerial = 0;
   int get _snapStep => _snapSpread ? 2 : 1;
@@ -991,6 +1366,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   void _onDocumentPageReady(int page) {
     _lastReadyPage = page;
+    final readyWaiter = _pageReadyWaiter;
+    if (readyWaiter != null && !readyWaiter.isCompleted) {
+      _pageReadyWaiter = null;
+      readyWaiter.complete(page);
+    }
+    if (_docScrollPreparing) return;
     if (!mounted || !_snapEligible) return;
     if (page != _docPage) return;
     if (_snapShownPage == page) {
@@ -1631,22 +2012,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 뷰어 표시 설정 (JPG 뷰어와 100% 동일한 UI + EPUB 글자 크기 및 다크 모드 설정 포함)
   /// 뷰어 표시 설정 항목 제목: 관련 아이콘 + 문구 (줄바꿈돼도 아이콘이 문구 앞에 붙어 있음)
   Widget _settingsHeader(IconData icon, String text, {bool isTitle = false}) {
-    return Text.rich(
-      TextSpan(
-        children: [
-          WidgetSpan(
-            alignment: PlaceholderAlignment.middle,
-            child: Padding(
-              padding: EdgeInsets.only(right: isTitle ? 8 : 6),
-              child: Icon(icon, size: isTitle ? 20 : 17),
-            ),
-          ),
-          TextSpan(text: text),
-        ],
-      ),
+    // 정렬 및 보기 창처럼 아이콘 없이 글자만
+    return Text(
+      text,
+      // 제목은 크게, 항목 이름은 작은 회색 글씨 (정렬 및 보기 창 모양)
       style: isTitle
-          ? const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-          : const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ? const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)
+          : TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
     );
   }
 
@@ -1667,12 +2039,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           child: SingleChildScrollView(
             controller: sheetScroll,
             physics: sheetPhysics,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.fromLTRB(24, 18, 24, 12),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _settingsHeader(Icons.tune, _tr('뷰어 표시 설정', 'Viewer Display Settings', '阅读器显示设置', '뷰어表示設定'), isTitle: true),
+                _settingsHeader(Icons.tune, _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'), isTitle: true),
                 const SizedBox(height: 12),
                 if (!_isOfflineDocument)
                 Row(
@@ -1704,12 +2076,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 if (!_isPresentation) ...[
                 const SizedBox(height: 8),
                 _settingsHeader(Icons.palette_outlined, _tr('배경 색상', 'Background Color', '背景颜色', '背景色')),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
+                const SizedBox(height: 8),
+                SettingGroup(
                   children: [
-                    ChoiceChip(
+                    SettingOption(
                       label: Text(_tr('라이트', 'Light', '浅色', 'ライト')),
                       selected: _epubBgTheme == 'white',
                       onSelected: (_) async {
@@ -1717,7 +2087,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         setModalState(() {});
                       },
                     ),
-                    ChoiceChip(
+                    SettingOption(
                       label: Text(_tr('다크', 'Dark', '深色', 'ダーク')),
                       selected: _epubBgTheme == 'dark',
                       onSelected: (_) async {
@@ -1727,7 +2097,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ),
                     // 종이색(종이 질감)은 EPUB에서만
                     if (_isEpub)
-                      ChoiceChip(
+                      SettingOption(
                         label: Text(_tr('종이색', 'Paper', '纸张色', '紙色')),
                         selected: _epubBgTheme == 'sepia',
                         onSelected: (_) async {
@@ -1738,14 +2108,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   ],
                 ),
                 ],
-                const Divider(height: 16),
+                const SizedBox(height: 18),
                 _settingsHeader(Icons.lock_open_outlined, _tr('화면 잠금 끄기 설정 (동시 사용 가능)', 'Screen Unlock Settings (Multiple allowed)', '解除屏幕锁定设置 (可同时启用)', '画面ロック解除設定 (同時使用可)')),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
+                const SizedBox(height: 8),
+                SettingGroup(
                   children: [
-                    FilterChip(
+                    SettingToggle(
                       label: Text(_tr('음량 버튼 동시에 눌러서 끄기', 'Press Both Volume Keys to Unlock', '同时按音量键关闭锁定', '音量ボタン同時押しで解除')),
                       selected: _useVolumeComboLock,
                       onSelected: (val) async {
@@ -1754,7 +2122,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         setModalState(() {});
                       },
                     ),
-                    FilterChip(
+                    SettingToggle(
                       label: Text(_tr('흔들어서 끄기', 'Shake to Unlock', '摇晃关闭锁定', '振って解除')),
                       selected: _useShakeLock,
                       onSelected: (val) async {
@@ -1765,69 +2133,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ),
                   ],
                 ),
-                const Divider(height: 20),
-                _settingsHeader(Icons.swipe_outlined, _tr('페이지 전환 설정 (동시 사용 가능)', 'Page Turn Settings (Multiple allowed)', '翻页方式设置 (可同时启用)', 'ページめくり設定 (同時使用可)')),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    FilterChip(
-                      label: Text(_tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン')),
-                      selected: _useVolumeTurn,
-                      onSelected: (val) async {
-                        await StorageService.setUseVolumeTurn(val);
-                        setState(() => _useVolumeTurn = val);
-                        setModalState(() {});
-                      },
-                    ),
-                    FilterChip(
-                      label: Text(_tr('옆으로 밀기', 'Swipe to Turn', '横向滑动翻页', '横にスワイプ')),
-                      selected: _useSwipeTurn,
-                      onSelected: (val) async {
-                        await StorageService.setUseSwipeTurn(val);
-                        setState(() => _useSwipeTurn = val);
-                        setModalState(() {});
-                      },
-                    ),
-                    FilterChip(
-                      label: Text(_tr('위로 밀기', 'Swipe Up to Turn', '向上滑动翻页', '上にスワイプ')),
-                      selected: _useSwipeUpTurn,
-                      onSelected: (val) async {
-                        await StorageService.setUseSwipeUpTurn(val);
-                        setState(() => _useSwipeUpTurn = val);
-                        setModalState(() {});
-                      },
-                    ),
-                    FilterChip(
-                      label: Text(_tr('페이지 이동 버튼', 'Page Nav Buttons', '翻页按钮', 'ページ移動ボタン')),
-                      selected: _useQuickNavTurn,
-                      onSelected: (val) async {
-                        await StorageService.setUseQuickNavTurn(val);
-                        setState(() => _useQuickNavTurn = val);
-                        setModalState(() {});
-                      },
-                    ),
-                    FilterChip(
-                      label: Text(_tr('S펜 버튼', 'S Pen Button', 'S Pen 按钮', 'Sペンボタン')),
-                      selected: _useSpenTurn,
-                      onSelected: (val) async {
-                        await StorageService.setUseSpenTurn(val);
-                        setState(() => _useSpenTurn = val);
-                        setModalState(() {});
-                      },
-                    ),
-                  ],
-                ),
+                const SizedBox(height: 18),
+                ..._pageModeSettings(setModalState),
 
-                const Divider(height: 24),
+                const SizedBox(height: 18),
                 _settingsHeader(Icons.linear_scale, _tr('진행도 UI 위치', 'Progress Bar Position', '进度条位置', '進行度バーの位置')),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
+                const SizedBox(height: 8),
+                SettingGroup(
                   children: [
-                    ChoiceChip(
+                    SettingOption(
                       label: Text(_tr('하단', 'Bottom', '底部', '下部')),
                       selected: _progressBarPosSetting == 'bottom',
                       onSelected: (_) async {
@@ -1836,7 +2150,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         setModalState(() {});
                       },
                     ),
-                    ChoiceChip(
+                    SettingOption(
                       label: Text(_tr('오른쪽', 'Right', '右侧', '右')),
                       selected: _progressBarPosSetting == 'right',
                       onSelected: (_) async {
@@ -1845,7 +2159,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         setModalState(() {});
                       },
                     ),
-                    ChoiceChip(
+                    SettingOption(
                       label: Text(_tr('왼쪽', 'Left', '左侧', '左')),
                       selected: _progressBarPosSetting == 'left',
                       onSelected: (_) async {
@@ -1854,7 +2168,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         setModalState(() {});
                       },
                     ),
-                    ChoiceChip(
+                    SettingOption(
                       label: Text(_tr('숨김', 'Hidden', '隐藏', '非表示')),
                       selected: _progressBarPosSetting == 'hidden',
                       onSelected: (_) async {
@@ -1865,12 +2179,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ),
                   ],
                 ),
-                const Divider(height: 24),
+                const SizedBox(height: 18),
                 _settingsHeader(Icons.draw_outlined, _tr('메모 도구 모음 위치', 'Memo Toolbar Position', '笔记工具栏位置', 'メモツールバーの位置')),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
+                const SizedBox(height: 8),
+                SettingGroup(
                   children: [
                     for (final opt in <(String, String)>[
                       ('bottom', _tr('하단', 'Bottom', '底部', '下部')),
@@ -1878,7 +2190,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       ('left', _tr('왼쪽', 'Left', '左侧', '左')),
                       ('right', _tr('오른쪽', 'Right', '右侧', '右')),
                     ])
-                      ChoiceChip(
+                      SettingOption(
                         label: Text(opt.$2),
                         selected: _memoToolbarPos == opt.$1,
                         onSelected: (_) async {
@@ -1889,18 +2201,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       ),
                   ],
                 ),
-                const Divider(height: 24),
+                const SizedBox(height: 18),
                 _settingsHeader(Icons.grid_view_rounded, _tr('도구 모음 위치', 'Toolbox Position', '工具箱位置', 'ツールボックスの位置')),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
+                const SizedBox(height: 8),
+                SettingGroup(
                   children: [
                     for (final opt in <(String, String)>[
                       ('right', _tr('오른쪽', 'Right', '右侧', '右')),
                       ('left', _tr('왼쪽', 'Left', '左侧', '左')),
                     ])
-                      ChoiceChip(
+                      SettingOption(
                         label: Text(opt.$2),
                         selected: _quickMenuSide == opt.$1,
                         onSelected: (_) async {
@@ -1911,14 +2221,32 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       ),
                   ],
                 ),
-                const Divider(height: 24),
-                _settingsHeader(Icons.info_outline, _tr('하단 정보 표시', 'Footer Info Display', '底部信息显示', '下部情報表示')),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
+                const SizedBox(height: 18),
+                _settingsHeader(Icons.view_week_outlined, _tr('도구 모음 형태', 'Toolbox Style', '工具箱样式', 'ツールボックスの形')),
+                const SizedBox(height: 8),
+                SettingGroup(
                   children: [
-                    ChoiceChip(
+                    for (final opt in <(String, String)>[
+                      ('arc', _tr('반원', 'Arc', '半圆', '半円')),
+                      ('bar', _tr('바', 'Bar', '横栏', 'バー')),
+                    ])
+                      SettingOption(
+                        label: Text(opt.$2),
+                        selected: _toolbarStyle == opt.$1,
+                        onSelected: (_) async {
+                          await StorageService.setToolbarStyle(opt.$1);
+                          setState(() => _toolbarStyle = opt.$1);
+                          setModalState(() {});
+                        },
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                _settingsHeader(Icons.info_outline, _tr('하단 정보 표시', 'Footer Info Display', '底部信息显示', '下部情報表示')),
+                const SizedBox(height: 8),
+                SettingGroup(
+                  children: [
+                    SettingOption(
                       label: Text(_tr('정보 표시 없음', 'None', '不显示', '表示なし')),
                       selected: _footerInfoMode == 'none',
                       onSelected: (_) async {
@@ -1927,7 +2255,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         setModalState(() {});
                       },
                     ),
-                    ChoiceChip(
+                    SettingOption(
                       label: Text(_tr('진행률', 'Progress %', '进度百分比', '進行率')),
                       selected: _footerInfoMode == 'progress',
                       onSelected: (_) async {
@@ -1936,7 +2264,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         setModalState(() {});
                       },
                     ),
-                    ChoiceChip(
+                    SettingOption(
                       label: Text(_tr('페이지 번호', 'Page Number', '页码', 'ページ番号')),
                       selected: _footerInfoMode == 'page',
                       onSelected: (_) async {
@@ -1945,7 +2273,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         setModalState(() {});
                       },
                     ),
-                    ChoiceChip(
+                    SettingOption(
                       label: Text(_tr('진행률 및 페이지 번호', 'Both Progress & Page', '进度与页码', '進行率とページ番号')),
                       selected: _footerInfoMode == 'both',
                       onSelected: (_) async {
@@ -1956,7 +2284,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                SettingDoneButton(label: _tr('완료', 'Done', '完成', '完了'), onPressed: () => Navigator.of(ctx).pop()),
               ],
             ),
           ),
@@ -1970,7 +2298,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 지금 가로 모드 2페이지로 보고 있는가
   bool get _bookmarkSpreadNow {
     final size = MediaQuery.sizeOf(context);
-    return size.width > size.height && _enableTwoPageInLandscape && !_slideShow && (!_isOfflineDocument || _docPageCount > 1);
+    return _spreadFor(size.width > size.height) && (!_isOfflineDocument || _docPageCount > 1);
   }
 
   /// 북마크 이름: 쪽 번호 ('12페이지', 2페이지 보기면 '12, 13페이지')
@@ -1993,15 +2321,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// 북마크로 이동: 2페이지 보기에서 저장했으면 가로 모드 2페이지 보기로 바꾼 뒤 그 자리를 보여 줌
   Future<void> _openBookmark(BookmarkItem bm) async {
-    if (bm.spread && !_bookmarkSpreadNow) {
-      if (!_enableTwoPageInLandscape) {
-        await StorageService.setTwoPageLandscape(true);
+    if (bm.spread && !_pageModeScroll && !_bookmarkSpreadNow) {
+      if (_pageDisplay == 'one') {
+        await StorageService.setPageDisplay('auto');
         if (!mounted) return;
-        setState(() => _enableTwoPageInLandscape = true);
+        setState(() => _pageDisplay = 'auto');
       }
       final size = MediaQuery.sizeOf(context);
       setState(() => _initialCfi = bm.position);
-      if (size.height >= size.width) await _toggleScreenOrientation();
+      if (size.height >= size.width && _pageDisplay == 'auto') await _applyRotation('landscape');
       // 화면이 돌고 다시 그려진 뒤 그 자리로
       await Future<void>.delayed(const Duration(milliseconds: 900));
       if (!mounted) return;
@@ -2025,7 +2353,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ListTile(
               title: Text(_tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.bold)),
               trailing: ElevatedButton.icon(
-                icon: const Icon(Icons.bookmark_add, size: 18),
+                icon: const Icon(Icons.bookmark_add, size: 16),
                 label: Text(_tr('현재 페이지 북마크', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),
                 onPressed: () async {
                   if (_currentCfi == null) return;
@@ -2186,7 +2514,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.close, color: Colors.white, size: 18),
+                              const Icon(Icons.close, color: Colors.white, size: 16),
                               const SizedBox(width: 6),
                               Text(_tr('슬라이드 쇼 끝내기', 'End Slide Show', '结束幻灯片放映', 'スライドショー終了'),
                                   style: const TextStyle(color: Colors.white, fontSize: 13)),
@@ -2633,15 +2961,53 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
   }
 
-  // epub.js와 같은 방향 규칙: 왼쪽으로 밀면 다음, 오른쪽으로 밀면 이전
+  /// EPUB에서 길게 눌러 고른 글의 선택 표시를 지움
+  void _clearEpubSelection() {
+    _hasTextSelection = false;
+    _selectedText = '';
+    try {
+      if (!_isOfflineDocument) _epubController.clearSelection();
+    } catch (_) {}
+  }
+
+  // 왼쪽으로 밀면 다음, 오른쪽으로 밀면 이전. 읽기 방향이 우→좌(세로쓰기 책·만화)면 반대로
   void _turnBySwipeDirection(double dx) {
     _hasTextSelection = false;
     setState(() => _activeStrokePoints.clear());
-    if (dx < 0) {
+    if ((dx < 0) != _isMangaRtlMode) {
       _readerNext();
     } else {
       _readerPrevious();
     }
+  }
+
+  /// EPUB 책 정보(content.opf)에 쪽 넘김 방향이 오른쪽→왼쪽(page-progression-direction="rtl")으로 적혀 있는지
+  static Future<bool> _epubProgressionRtl(String path) async {
+    InputFileStream? input;
+    try {
+      input = InputFileStream(path);
+      final zip = ZipDecoder().decodeBuffer(input);
+      String? opfPath;
+      for (final f in zip.files) {
+        if (f.name == 'META-INF/container.xml') {
+          final xml = utf8.decode(f.content as List<int>, allowMalformed: true);
+          opfPath = RegExp(r'full-path\s*=\s*"([^"]+)"').firstMatch(xml)?.group(1);
+          break;
+        }
+      }
+      for (final f in zip.files) {
+        if (opfPath != null ? f.name == opfPath : f.name.toLowerCase().endsWith('.opf')) {
+          final opf = utf8.decode(f.content as List<int>, allowMalformed: true);
+          return RegExp(r'page-progression-direction\s*=\s*"rtl"').hasMatch(opf);
+        }
+      }
+    } catch (_) {
+    } finally {
+      try {
+        await input?.close();
+      } catch (_) {}
+    }
+    return false;
   }
 
   void _onFlickStart(DragStartDetails details) {
@@ -2694,10 +3060,51 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final duration = DateTime.now().difference(_pointerDownTime!).inMilliseconds;
 
     if (distance < 24.0 && duration < 380) {
-      _toggleControls();
+      if (_hasTextSelection && !_isOfflineDocument) {
+        // 글이 선택된 상태에서 화면을 누르면 선택 표시만 지움
+        _clearEpubSelection();
+      } else {
+        _onReaderTap(event.position);
+      }
     }
     _pointerDownPosition = null;
     _pointerDownTime = null;
+  }
+
+  /// 화면을 한 번 눌렀을 때: 탭 모드면 위쪽은 메뉴, 아래 왼쪽·오른쪽은 이전·다음 쪽
+  /// (메뉴가 떠 있거나 필기 중이면 메뉴만 닫음. 읽기 방향 우→좌면 왼쪽이 다음, 스크롤 모드는 원래 순서)
+  void _onReaderTap(Offset global) {
+    if (!_pageModeTap || _showControls || _isMemoMode || _slideShow) {
+      _toggleControls();
+      return;
+    }
+    switch (tapZoneAt(global, MediaQuery.sizeOf(context))) {
+      case TapZone.menu:
+        _toggleControls();
+      case TapZone.left:
+        _tapTurn(-1);
+      case TapZone.right:
+        _tapTurn(1);
+    }
+  }
+
+  void _tapTurn(int dir) {
+    if (_pageModeScroll) {
+      // 스크롤 모드: 원래 순서대로 한 화면씩
+      if (_isOfflineDocument) {
+        _scrollCtrl.scrollByScreen(dir);
+      } else if (dir > 0) {
+        _readerNext();
+      } else {
+        _readerPrevious();
+      }
+      return;
+    }
+    if (dir > 0) {
+      _turnNext();
+    } else {
+      _turnPrev();
+    }
   }
 
   Color _getBgColor() {
@@ -2754,6 +3161,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         },
         '::selection': {
           'background': 'rgba(255, 215, 0, 0.35)',
+        },
+        // 사용자가 고른 EPUB 글꼴 (앱 저장소의 글꼴 파일을 같은 주소에서 읽음)
+        if (_epubFont != null) ...{
+          '@font-face': {
+            'font-family': "'FReaderEpubFont'",
+            'src': "url('https://appassets.androidplatform.net/userfonts/${_epubFont!.file}')",
+          },
+          'body, p, div, section, article, span, main, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, a, em, strong, b, i': {
+            'font-family': "'FReaderEpubFont' !important",
+          },
         },
       },
     );
@@ -2905,7 +3322,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             child: Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.first_page, color: Colors.white, size: 18),
+                  icon: const Icon(Icons.first_page, color: Colors.white, size: 16),
                   tooltip: '처음으로 이동',
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
@@ -2944,7 +3361,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.last_page, color: Colors.white, size: 18),
+                  icon: const Icon(Icons.last_page, color: Colors.white, size: 16),
                   tooltip: '마지막으로 이동',
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
@@ -2979,7 +3396,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           child: Column(
             children: [
               IconButton(
-                icon: const Icon(Icons.vertical_align_top, color: Colors.white, size: 18),
+                icon: const Icon(Icons.vertical_align_top, color: Colors.white, size: 16),
                 tooltip: '처음으로 이동',
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
@@ -3025,7 +3442,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.vertical_align_bottom, color: Colors.white, size: 18),
+                icon: const Icon(Icons.vertical_align_bottom, color: Colors.white, size: 16),
                 tooltip: '마지막으로 이동',
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
@@ -3054,7 +3471,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.amber, size: 19),
+                icon: const Icon(Icons.arrow_back, color: Colors.amber, size: 17),
                 tooltip: '이전 페이지',
                 visualDensity: VisualDensity.compact,
                 constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
@@ -3063,7 +3480,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               ),
               Container(width: 1, height: 18, color: Colors.white24),
               IconButton(
-                icon: const Icon(Icons.arrow_forward, color: Colors.amber, size: 19),
+                icon: const Icon(Icons.arrow_forward, color: Colors.amber, size: 17),
                 tooltip: '다음 페이지',
                 visualDensity: VisualDensity.compact,
                 constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
@@ -3079,6 +3496,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    SystemBars.leaveViewer();
     _snapHideTimer?.cancel();
     _slideShowExitTimer?.cancel();
     if (_slideShow) {
@@ -3109,19 +3527,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   List<QuickArcMenuItem> _buildQuickMenuItems() {
     return [
       QuickArcMenuItem(
-        icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 22),
+        icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 19),
         tooltip: _tr('이전 파일로 이동', 'Previous File', '上一个文件', '前のファイル'),
         onTap: () => _openAdjacentFileInSameGroup(-1),
         closeAfterTap: true,
       ),
       QuickArcMenuItem(
-        icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 22),
+        icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 19),
         tooltip: _tr('다음 파일로 이동', 'Next File', '下一个文件', '次のファイル'),
         onTap: () => _openAdjacentFileInSameGroup(1),
         closeAfterTap: true,
       ),
       QuickArcMenuItem(
-        icon: const Icon(Icons.lock_outline, color: Colors.white, size: 19),
+        icon: const Icon(Icons.lock_outline, color: Colors.white, size: 17),
         tooltip: _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
         onTap: () {
           setState(() {
@@ -3140,37 +3558,29 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       ),
       QuickArcMenuItem(
         // 누르면 살짝 흔들리고, 가로로 돌려 둔 상태면 노란색
+        // 누르면 회전 설정 창 (자동 / 세로 고정 / 가로 고정). 아이콘은 고른 설정 모양, 고정이면 노란색
         icon: WiggleOnChange(
           trigger: _rotateTapCount,
           child: Icon(
-            Icons.screen_rotation,
-            color: StorageService.desiredLandscapeNotifier.value == true ? Colors.amber : Colors.white,
-            size: 19,
+            _rotationIconNow,
+            color: StorageService.desiredLandscapeNotifier.value != null ? Colors.amber : Colors.white,
+            size: 17,
           ),
         ),
         tooltip: _tr('화면 회전', 'Rotate Screen', '旋转屏幕', '画面回転'),
-        onTap: () {
-          setState(() => _rotateTapCount++);
-          _toggleScreenOrientation().then((_) {
-            if (mounted) setState(() {});
-          });
-        },
+        onTap: _pickRotation,
+        closeAfterTap: true,
       ),
       QuickArcMenuItem(
+        // 페이지 표시 (한 페이지 / 두 페이지 / 화면 비율에 따라)
         icon: Icon(
-          _enableTwoPageInLandscape ? Icons.menu_book : Icons.stay_current_portrait,
-          color: _enableTwoPageInLandscape ? Colors.amber : Colors.white,
-          size: 20,
+          pageDisplayIcon(_pageDisplay),
+          color: _pageDisplay != 'one' ? Colors.amber : Colors.white,
+          size: 17,
         ),
-        tooltip: _tr('가로 모드 2페이지 보기', '2-Page Spread in Landscape', '横屏双页显示', '横画面2ページ表示'),
-        onTap: () async {
-          final nextVal = !_enableTwoPageInLandscape;
-          await StorageService.setTwoPageLandscape(nextVal);
-          setState(() {
-            _initialCfi = _currentCfi;
-            _enableTwoPageInLandscape = nextVal;
-          });
-        },
+        tooltip: _tr('페이지 표시', 'Page Display', '页面显示', 'ページ表示'),
+        onTap: _pickPageDisplay,
+        closeAfterTap: true,
       ),
       QuickArcMenuItem(
         icon: _buildDualDirectionIcon(),
@@ -3181,6 +3591,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           final nextRtl = !_isMangaRtlMode;
           await StorageService.setBookReadingDirectionRtl(widget.filePath, nextRtl);
           setState(() => _isMangaRtlMode = nextRtl);
+          if (!_isOfflineDocument) {
+            try {
+              _epubController.setSwipeReversed(nextRtl);
+            } catch (_) {}
+          }
           if (mounted) {
             ScaffoldMessenger.of(context).clearSnackBars();
             ScaffoldMessenger.of(context).showSnackBar(
@@ -3190,7 +3605,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   children: [
                     Text(_tr('읽기 방향 전환 (', 'Reading Direction (', '切换阅读方向 (', '読書方向切替 (')),
                     Text(nextRtl ? _tr('우 ', 'R ', '右 ', '右 ') : _tr('좌 ', 'L ', '左 ', '左 ')),
-                    const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 16),
+                    const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 14),
                     Text(nextRtl ? _tr(' 좌)', ' L)', ' 左)', ' 左)') : _tr(' 우)', ' R)', ' 右)', ' 右)')),
                   ],
                 ),
@@ -3214,19 +3629,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         closeAfterTap: true,
       ),
       QuickArcMenuItem(
-        icon: Icon(
-          _isCurrentPageBookmarked ? Icons.bookmarks : Icons.bookmarks_outlined,
-          color: _isCurrentPageBookmarked ? Colors.amber : Colors.white,
-          size: 19,
-        ),
-        tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
-        onTap: _openBookmarkSheet,
+        icon: const Icon(Icons.copy_all_outlined, color: Colors.white, size: 17),
+        tooltip: _tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
+        onTap: _openTextCopySheet,
         closeAfterTap: true,
       ),
       QuickArcMenuItem(
-        icon: const Icon(Icons.copy_all_outlined, color: Colors.white, size: 19),
-        tooltip: _tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
-        onTap: _openTextCopySheet,
+        icon: Icon(
+          _isCurrentPageBookmarked ? Icons.bookmarks : Icons.bookmarks_outlined,
+          color: _isCurrentPageBookmarked ? Colors.amber : Colors.white,
+          size: 17,
+        ),
+        tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
+        onTap: _openBookmarkSheet,
         closeAfterTap: true,
       ),
     ];
@@ -3261,10 +3676,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final bottomPadding = MediaQuery.viewPaddingOf(context).bottom;
     final bool isLandscape = screenSize.width > screenSize.height;
     final EpubSpread spreadSetting =
-        (isLandscape && _enableTwoPageInLandscape) ? EpubSpread.always : EpubSpread.none;
+        _spreadFor(isLandscape) ? EpubSpread.always : EpubSpread.none;
 
     final String epubViewerKey =
-        '${_activeFilePath}_${spreadSetting}_${_epubBgTheme}_$_epubViewerGeneration';
+        '${_activeFilePath}_${spreadSetting}_${_epubBgTheme}_${_pageModeScroll ? 'scroll' : 'page'}_$_epubViewerGeneration';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !_isOfflineDocument) _startEpubLoadWatchdog(epubViewerKey);
     });
@@ -3459,22 +3874,26 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     initialCfi: _initialCfi,
                     onEpubLoaded: () {
                       _epubDisplayed = true;
+                      _epubController.setSwipeReversed(_isMangaRtlMode);
+                      _epubController.setSwipeEnabled(_useSwipeTurn && !_pageModeScroll);
                       _epubLoadWatchdog?.cancel();
                     },
                     onLoadError: (error) => _handleEpubLoadError(error.message),
                     displaySettings: EpubDisplaySettings(
-                      flow: EpubFlow.paginated,
-                      snap: true,
+                      // 스크롤 모드: 장을 이어 붙여 세로로 / 그 외: 쪽 넘김
+                      flow: _pageModeScroll ? EpubFlow.scrolled : EpubFlow.paginated,
+                      snap: !_pageModeScroll,
                       spread: spreadSetting,
                       fontSize: _fontSize,
                       theme: _buildTheme(),
                     ),
+                    // 글을 길게 눌러 고르면: 형광펜 칠하기 / 글자 복사(다른 파일과 같은 복사 창). 누른 뒤에는 선택 표시를 지움
                     selectionContextMenu: EpubContextMenu(
-                      hideDefaultSystemItems: false,
+                      hideDefaultSystemItems: true,
                       items: [
                         EpubContextMenuItem(
                           id: 1,
-                          title: '형광펜 칠하기',
+                          title: _tr('형광펜 칠하기', 'Highlight', '荧光笔', 'マーカー'),
                           action: () {
                             if (_selectedCfiRange != null) {
                               _epubController.addHighlight(
@@ -3482,6 +3901,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                 color: Colors.amber,
                               );
                             }
+                            _clearEpubSelection();
+                          },
+                        ),
+                        EpubContextMenuItem(
+                          id: 2,
+                          title: _tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
+                          action: () {
+                            final text = _selectedText;
+                            _clearEpubSelection();
+                            if (mounted && text.trim().isNotEmpty) showTextCopySheet(context, text: text, tr: _tr);
                           },
                         ),
                       ],
@@ -3503,6 +3932,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     },
                     onTextSelected: (epubTextSelection) {
                       _selectedCfiRange = epubTextSelection.selectionCfi;
+                      _selectedText = epubTextSelection.selectedText;
                       _hasTextSelection = true;
                     },
                     onDeselection: () {
@@ -3742,7 +4172,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                               visualDensity: VisualDensity.compact,
                               padding: btnPadding,
                               constraints: btnConstraints,
-                              icon: const Icon(Icons.list, color: Colors.white, size: 20),
+                              icon: const Icon(Icons.list, color: Colors.white, size: 17),
                               tooltip: _tr('목차', 'Contents', '目录', '目次'),
                               onPressed: () => _scaffoldKey.currentState?.openDrawer(),
                             ),
@@ -3752,7 +4182,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                 visualDensity: VisualDensity.compact,
                                 padding: btnPadding,
                                 constraints: btnConstraints,
-                                icon: const Icon(Icons.search, color: Colors.white, size: 21),
+                                icon: const Icon(Icons.search, color: Colors.white, size: 18),
                                 tooltip: _tr('파일 내 단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
                                 onPressed: () => setState(() {
                                   _findOpen = true;
@@ -3765,7 +4195,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                 visualDensity: VisualDensity.compact,
                                 padding: btnPadding,
                                 constraints: btnConstraints,
-                                icon: const Icon(Icons.slideshow, color: Colors.white, size: 20),
+                                icon: const Icon(Icons.slideshow, color: Colors.white, size: 17),
                                 tooltip: _tr('슬라이드 쇼', 'Slide Show', '幻灯片放映', 'スライドショー'),
                                 onPressed: _startSlideShow,
                               ),
@@ -3782,8 +4212,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                               visualDensity: VisualDensity.compact,
                               padding: btnPadding,
                               constraints: btnConstraints,
-                              icon: const Icon(Icons.tune, color: Colors.white, size: 20),
-                              tooltip: _tr('뷰어 표시 설정', 'Viewer Settings', '阅读器显示设置', 'ビューア表示設定'),
+                              icon: const Icon(Icons.tune, color: Colors.white, size: 17),
+                              tooltip: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
                               onPressed: _showViewerSettingsSheet,
                             ),
                           ];
@@ -3794,7 +4224,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                                 visualDensity: VisualDensity.compact,
                                 padding: btnPadding,
                                 constraints: btnConstraints,
-                                icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                                icon: const Icon(Icons.arrow_back, color: Colors.white, size: 17),
                                 onPressed: () => Navigator.pop(context),
                               ),
                               // 파일 이름은 화면 방향과 상관없이 항상 표시 (남는 공간을 모두 사용)
@@ -3826,7 +4256,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
             // 도구 모음 버튼 + 활 모양 메뉴 (상단바/진행바와 함께 보였다 사라짐)
             // 평소엔 진행바 바로 위에 붙어 있고, 열리면 호가 진행바에 닿지 않을 만큼 올라간다
-            if (_showControls && !_isTouchLocked)
+            // 도구 모음 '바' 형태: 화면 아래 가로 막대 (뷰어 설정 → 도구 모음 형태)
+            if (_showControls && !_isTouchLocked && _toolbarStyle == 'bar')
+              Positioned(
+                left: 12.0 + _safeSides.left,
+                right: 12.0 + _safeSides.right,
+                bottom: math.max<double>(bottomPadding + 16.0, 20.0) +
+                    ((_progressBarPos == 'bottom' || _useQuickNavTurn) ? 44.0 : 0.0) +
+                    ((_isMemoMode && _memoToolbarPos == 'bottom') ? 56.0 : 0.0),
+                child: QuickToolBar(items: _buildQuickMenuItems()),
+              ),
+            if (_showControls && !_isTouchLocked && _toolbarStyle == 'arc')
               Positioned(
                 right: _quickMenuSide == 'left' ? null : ((_progressBarPos == 'right' ? 56.0 : 12.0) + _safeSides.right + (_quickMenuBesideMemoBar ? 56.0 : 0.0)),
                 left: _quickMenuSide == 'left' ? ((_progressBarPos == 'left' ? 56.0 : 12.0) + _safeSides.left + (_quickMenuBesideMemoBar ? 56.0 : 0.0)) : null,

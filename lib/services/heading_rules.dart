@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 /// 목차 쪽이 없을 때의 목차 규칙.
 ///
 /// 한글·워드·PDF ([build]):
@@ -145,9 +146,14 @@ class HeadingRules {
         lines.add((t: t, y: (l['y'] as num?)?.toDouble() ?? 0, size: size));
       }
       if (lines.isEmpty) continue;
-      var title = lines.first;
-      for (final l in lines) {
-        if (l.size > title.size + 1e-6 || ((l.size - title.size).abs() < 1e-6 && l.y < title.y)) title = l;
+      // 슬라이드 제목은 보통 위쪽에 있음: 위쪽 30% 안에 꽤 큰 줄이 있으면 그 안에서 고름 (그림 속 큰 글자가 제목이 되지 않게)
+      final double maxSize = lines.map((l) => l.size).reduce(math.max);
+      final top = lines.where((l) => l.y < 0.3).toList();
+      final pool = top.isNotEmpty && top.map((l) => l.size).reduce(math.max) >= maxSize * 0.6 ? top : lines;
+      var title = pool.first;
+      for (final l in pool) {
+        // 크기가 거의 같으면(5% 이내) 위쪽 줄을 제목으로 (글자 위치 읽기 오차로 아래 줄이 뽑히지 않게)
+        if (l.size > title.size * 1.05 + 1e-6 || ((l.size - title.size).abs() <= title.size * 0.05 + 1e-6 && l.y < title.y)) title = l;
       }
       String sub = '';
       final below = lines.where((l) => !identical(l, title) && l.y > title.y && l.t != title.t).toList()
