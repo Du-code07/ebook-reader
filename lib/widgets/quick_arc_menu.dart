@@ -491,7 +491,7 @@ class QuickToolBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 56,
+      height: 52,
       decoration: BoxDecoration(
         color: const Color(0xEE1C1C1E),
         borderRadius: BorderRadius.circular(22),
@@ -500,17 +500,17 @@ class QuickToolBar extends StatelessWidget {
       ),
       child: LayoutBuilder(
         builder: (context, c) {
-          const double minSlot = 42;
-          final bool fits = items.length * minSlot <= c.maxWidth;
-          final double slot = fits ? c.maxWidth / items.length : minSlot;
+          // 아이콘 사이를 좁게 (한 칸 40), 화면보다 길면 옆으로 밀어서 봄
+          const double slot = 40;
           final row = Row(
-            mainAxisSize: fits ? MainAxisSize.max : MainAxisSize.min,
+            mainAxisSize: MainAxisSize.min,
             children: [
               for (final it in items)
                 SizedBox(
                   width: slot,
-                  height: 56,
+                  height: 52,
                   child: IconButton(
+                    padding: EdgeInsets.zero,
                     icon: IconTheme.merge(data: const IconThemeData(color: Colors.white, size: 20), child: it.icon),
                     tooltip: it.tooltip,
                     onPressed: () {
@@ -523,7 +523,11 @@ class QuickToolBar extends StatelessWidget {
           );
           return ClipRRect(
             borderRadius: BorderRadius.circular(22),
-            child: fits ? row : SingleChildScrollView(scrollDirection: Axis.horizontal, child: row),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: row,
+            ),
           );
         },
       ),

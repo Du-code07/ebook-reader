@@ -78,7 +78,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
   String get _title => switch (widget.category) {
         'app' => _t('앱 글꼴', 'App Font', '应用字体', 'アプリのフォント'),
         'epub' => _t('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント'),
-        _ => _t('한글·워드·PDF 글꼴', 'HWP·Word·PDF Fonts', 'HWP·Word·PDF 字体', 'HWP・Word・PDFフォント'),
+        _ => _t('한글·워드 글꼴', 'HWP·Word Fonts', 'HWP·Word 字体', 'HWP・Wordフォント'),
       };
 
   String get _description => switch (widget.category) {
@@ -93,18 +93,14 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
         _ => _t(
             '한글·워드 문서에 쓰인 글꼴(예: 맑은 고딕, 함초롬바탕)이 휴대폰에 없으면 다른 글꼴로 바뀌어 글과 사진 배치가 밀릴 수 있어요. '
                 '가지고 있는 글꼴 파일을 넣으면 같은 이름의 글꼴 대신 그 파일로 보여 줘요. 넣은 글꼴은 이 기기 안에서만 쓰여요.\n'
-                'Arial·Times New Roman·Courier New·Calibri·Cambria는 글자 폭이 같은 무료 글꼴로 자동으로 바꿔 보여 줘요.\n'
-                'PDF는 휴대폰의 PDF 기능이 그리기 때문에, 파일에 글꼴이 들어 있지 않은 PDF에는 넣은 글꼴이 쓰이지 않아요.',
+                'Arial·Times New Roman·Courier New·Calibri·Cambria는 글자 폭이 같은 무료 글꼴로 자동으로 바꿔 보여 줘요.',
             'If a font used in a document (e.g. Malgun Gothic) is missing on this phone, another font is used and text or pictures may shift. '
                 'Add font files you own and they will be used for fonts with the same name. Added fonts stay on this device.\n'
-                'Arial, Times New Roman, Courier New, Calibri and Cambria are automatically replaced with free fonts of the same widths.\n'
-                'PDFs are drawn by the phone\'s PDF engine, so added fonts are not used for PDFs without embedded fonts.',
+                'Arial, Times New Roman, Courier New, Calibri and Cambria are automatically replaced with free fonts of the same widths.',
             '如果文档中使用的字体（如 Malgun Gothic）在手机上没有，会换成其他字体，文字和图片位置可能偏移。添加您拥有的字体文件后，将用于同名字体。添加的字体只在本机使用。\n'
-                'Arial、Times New Roman、Courier New、Calibri、Cambria 会自动换成字宽相同的免费字体。\n'
-                'PDF由手机的PDF功能绘制，未嵌入字体的PDF不会使用添加的字体。',
+                'Arial、Times New Roman、Courier New、Calibri、Cambria 会自动换成字宽相同的免费字体。',
             '文書で使われたフォント（例: Malgun Gothic）が端末にないと別のフォントになり、文字や画像の配置がずれることがあります。お持ちのフォントファイルを追加すると、同じ名前のフォントの代わりに使います。追加したフォントはこの端末内だけで使われます。\n'
-                'Arial・Times New Roman・Courier New・Calibri・Cambria は文字幅が同じ無料フォントに自動で置き換えます。\n'
-                'PDFは端末のPDF機能で描くため、フォントが埋め込まれていないPDFには追加したフォントは使われません。'),
+                'Arial・Times New Roman・Courier New・Calibri・Cambria は文字幅が同じ無料フォントに自動で置き換えます。'),
       };
 
   @override

@@ -4,6 +4,9 @@ import 'dart:io';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
 import '../services/user_fonts.dart';
+import '../services/storage_service.dart';
+import 'viewer_dialogs.dart';
+import 'text_copy_sheet.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../services/docx_layout_hints.dart';
@@ -155,6 +158,8 @@ class _HwpViewerState extends State<HwpViewer> {
       '$_origin/assets/flutter_assets/assets/${_isPresentation ? 'ppt' : _isWord ? 'docx' : 'hwp'}/index.html';
   /// 표시 파일을 못 불러왔을 때: 앱 안에 그 파일이 아예 없으면(빌드에 빠짐) 무엇이 빠졌는지 알려 준다
   Future<void> _reportMissingAsset(String url, String description) async {
+    // 없어도 되는 글꼴(같은 폭 무료 글꼴·사용자 글꼴)은 못 불러와도 기본 글꼴로 계속 보여 줌
+    if (url.contains('/fonts/metric/') || url.contains('/fonts/free/') || url.contains('/userfonts/')) return;
     final marker = '$_origin/assets/flutter_assets/';
     if (url.startsWith(marker)) {
       final asset = Uri.decodeComponent(url.substring(marker.length).split('?').first);
@@ -198,6 +203,8 @@ class _HwpViewerState extends State<HwpViewer> {
   };
   /// 사용자가 넣은 글꼴 (같은 이름의 글꼴 대신 씀)
   List<Map<String, Object>> _userFonts = const [];
+  /// 처음 열 때 파일을 넘기는 진행률 (0~1)
+  final ValueNotifier<double?> _loadProgress = ValueNotifier<double?>(0);
   /// 파일이 바뀌면 달라지는 열쇠 (변환된 그림 저장소 이름에 사용)
   String? _cacheKey;
 
@@ -311,6 +318,7 @@ class _HwpViewerState extends State<HwpViewer> {
           throw const FormatException('문서를 읽는 중 파일 크기가 변경되었습니다.');
         await _invoke('appendChunk', [offset, base64Encode(chunk)]);
         offset += chunk.length;
+        _loadProgress.value = 0.9 * offset / length;
         _armTimeout();
       }
       await _closeFile();
@@ -434,6 +442,15 @@ class _HwpViewerState extends State<HwpViewer> {
     super.dispose();
   }
 
+  String _tr(String ko, String en, String zh, String ja) =>
+      AppI18n.t(StorageService.appLangNotifier.value, ko: ko, en: en, zh: zh, ja: ja);
+
+  Future<void> _clearSelection() async {
+    try {
+      await _web?.evaluateJavascript(source: 'try{window.getSelection().removeAllRanges()}catch(e){}');
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -462,12 +479,30 @@ class _HwpViewerState extends State<HwpViewer> {
               ],
             ),
           ),
+          // 글을 길게 눌러 고르면 EPUB과 같은 메뉴: 형광펜 칠하기 / 글자 복사(복사 창). 누른 뒤 선택 표시는 지움
           contextMenu: ContextMenu(
+            settings: ContextMenuSettings(hideDefaultSystemContextMenuItems: true),
             menuItems: [
               ContextMenuItem(
                 id: 1,
-                title: '형광펜 칠하기',
-                action: () => _invoke('highlightSelection', []),
+                title: _tr('형광펜 칠하기', 'Highlight', '荧光笔', 'マーカー'),
+                action: () async {
+                  await _invoke('highlightSelection', []);
+                  await _clearSelection();
+                },
+              ),
+              ContextMenuItem(
+                id: 2,
+                title: _tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
+                action: () async {
+                  String text = '';
+                  try {
+                    final r = await _web?.evaluateJavascript(source: 'String(window.getSelection ? window.getSelection().toString() : "")');
+                    text = r is String ? r : '';
+                  } catch (_) {}
+                  await _clearSelection();
+                  if (mounted && text.trim().isNotEmpty) await showTextCopySheet(context, text: text, tr: _tr);
+                },
               ),
             ],
           ),
@@ -510,7 +545,12 @@ class _HwpViewerState extends State<HwpViewer> {
             _reportError('문서 표시 프로세스가 종료되었습니다. 문서를 다시 열어 주세요.');
           },
         ),
-        if (!_loaded) const Center(child: CircularProgressIndicator()),
+        // 처음 열 때: 돌아가는 원 + '파일 여는 중 n%' (파일을 넘기는 동안 진행률)
+        if (!_loaded)
+          ValueListenableBuilder<double?>(
+            valueListenable: _loadProgress,
+            builder: (context, p, _) => FileLoadingView(label: AppI18n.t(StorageService.appLangNotifier.value, ko: '파일 여는 중', en: 'Opening file', zh: '正在打开文件', ja: 'ファイルを開いています'), progress: p),
+          ),
       ],
     );
   }

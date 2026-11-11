@@ -1,3 +1,4 @@
+import '../widgets/file_type_icon.dart';
 import 'user_fonts_screen.dart';
 import 'package:flutter/material.dart';
 
@@ -18,6 +19,10 @@ class AppSettingsScreen extends StatefulWidget {
     this.onChangeHideGroupName,
     this.hideThumbnails = false,
     this.onChangeHideThumbnails,
+    this.hideAddedDate = false,
+    this.onChangeHideAddedDate,
+    this.hidePageCount = false,
+    this.onChangeHidePageCount,
     required this.onChangeLanguage,
     required this.onChangeViewMode,
     required this.onChangeHideExtension,
@@ -37,6 +42,10 @@ class AppSettingsScreen extends StatefulWidget {
   final Future<void> Function(bool hide)? onChangeHideGroupName;
   final bool hideThumbnails;
   final Future<void> Function(bool hide)? onChangeHideThumbnails;
+  final bool hideAddedDate;
+  final Future<void> Function(bool hide)? onChangeHideAddedDate;
+  final bool hidePageCount;
+  final Future<void> Function(bool hide)? onChangeHidePageCount;
   final ValueChanged<String> onChangeLanguage; // 'system' | ko/en/zh/ja
   final Future<void> Function(String mode) onChangeViewMode;
   final Future<void> Function(bool hide) onChangeHideExtension;
@@ -61,6 +70,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   late bool _hideExt = widget.hideExtension;
   late bool _hideGroup = widget.hideGroupName;
   late bool _hideThumbs = widget.hideThumbnails;
+  late bool _hideDate = widget.hideAddedDate;
+  late bool _hidePages = widget.hidePageCount;
   bool _rememberPage = StorageService.rememberPage;
 
   Future<void> _setRememberPage(bool v) async {
@@ -91,7 +102,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ChoiceOption('light', _themeLabel('light'), icon: Icons.light_mode_outlined),
         ChoiceOption('dark', _themeLabel('dark'), icon: Icons.dark_mode_outlined),
         ChoiceOption('dim', _themeLabel('dim'), icon: Icons.contrast),
-        ChoiceOption('black', _themeLabel('black'), icon: Icons.dark_mode),
       ],
       current: _themeMode,
     );
@@ -166,6 +176,28 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             await widget.onChangeHideGroupName?.call(v);
           },
         ),
+        SheetToggle(
+          icon: Icons.event_busy_outlined,
+          label: _t('추가 날짜 숨기기', 'Hide date added', '隐藏添加日期', '追加日を隠す'),
+          subtitle: _t('파일 아래 추가 날짜 (예: 26.11.11)', 'Date under each file (e.g. 26.11.11)', '文件下方的添加日期', 'ファイルの下の追加日'),
+          value: _hideDate,
+          onChanged: (v) async {
+            if (!mounted) return;
+            setState(() => _hideDate = v);
+            await widget.onChangeHideAddedDate?.call(v);
+          },
+        ),
+        SheetToggle(
+          icon: Icons.filter_none_outlined,
+          label: _t('페이지 수 숨기기', 'Hide page count', '隐藏页数', 'ページ数を隠す'),
+          subtitle: _t('파일 아래 읽은 쪽 (예: 6/983)', 'Pages under each file (e.g. 6/983)', '文件下方的页数', 'ファイルの下のページ数'),
+          value: _hidePages,
+          onChanged: (v) async {
+            if (!mounted) return;
+            setState(() => _hidePages = v);
+            await widget.onChangeHidePageCount?.call(v);
+          },
+        ),
       ],
     );
   }
@@ -186,11 +218,12 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     String? subtitle,
     VoidCallback? onTap,
     Widget? trailing,
+    Widget? leading,
   }) {
     final cs = Theme.of(context).colorScheme;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-      leading: Icon(icon, size: 23, color: cs.onSurface),
+      leading: leading ?? Icon(icon, size: 23, color: cs.onSurface),
       title: Text(title, style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w600)),
       subtitle: subtitle == null ? null : Text(subtitle, style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
       trailing: trailing ?? Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
@@ -249,6 +282,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             ),
             _item(
               icon: Icons.language,
+              leading: const LanguageGlyphIcon(size: 23),
               title: _t('언어', 'Language', '语言', '言語'),
               subtitle: languageOptionLabel(_langSetting),
               onTap: _pickLanguage,
@@ -277,7 +311,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             _section(_t('글꼴', 'Fonts', '字体', 'フォント')),
             _item(
               icon: Icons.description_outlined,
-              title: _t('한글·워드·PDF 글꼴', 'HWP·Word·PDF Fonts', 'HWP·Word·PDF 字体', 'HWP・Word・PDFフォント'),
+              leading: const DocPairIcon(size: 25),
+              title: _t('한글·워드 글꼴', 'HWP·Word Fonts', 'HWP·Word 字体', 'HWP・Wordフォント'),
               subtitle: _t('문서에 쓰였지만 휴대폰에 없는 글꼴 넣기', 'Add fonts used in documents but missing on the phone', '添加文档使用但手机缺少的字体', '文書で使われ端末にないフォントを追加'),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'doc'))),
             ),
@@ -289,6 +324,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             ),
             _item(
               icon: Icons.menu_book_outlined,
+              leading: FileTypeIcon(ext: 'epub', size: 24, color: Theme.of(context).colorScheme.onSurface),
               title: _t('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント'),
               subtitle: _t('EPUB 책 본문 글꼴', 'Font for EPUB book text', 'EPUB正文字体', 'EPUB本文のフォント'),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'epub'))),

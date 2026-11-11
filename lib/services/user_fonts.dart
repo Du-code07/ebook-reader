@@ -128,12 +128,27 @@ class UserFonts {
     }
     final d = await dir();
     int added = 0;
+    // 글꼴 모음(.ttc, 예: 굴림·돋움이 함께 든 gulim.ttc)은 글꼴마다 따로 떼어 모두 넣음
+    final pieces = <(String, Uint8List)>[];
     for (final p in paths) {
       try {
         final bytes = await File(p).readAsBytes();
+        final parts = FontNameReader.splitCollection(bytes);
+        if (parts != null) {
+          for (final part in parts) {
+            pieces.add(('x.ttf', part));
+          }
+        } else {
+          pieces.add((p, bytes));
+        }
+      } catch (_) {}
+    }
+    if (category != 'doc' && pieces.length > 1) pieces.removeRange(1, pieces.length);
+    for (final (p, bytes) in pieces) {
+      try {
         final info = FontNameReader.read(bytes);
         if (info == null || info.names.isEmpty) continue;
-        final ext = p.toLowerCase().endsWith('.otf') ? 'otf' : (p.toLowerCase().endsWith('.ttc') ? 'ttc' : 'ttf');
+        final ext = p.toLowerCase().endsWith('.otf') ? 'otf' : 'ttf';
         final file = 'f${DateTime.now().microsecondsSinceEpoch}.$ext';
         await File('${d.path}/$file').writeAsBytes(bytes, flush: true);
         // 같은 이름·굵기·기울임이 이미 있으면 바꿔 넣음
@@ -172,6 +187,46 @@ class FontNameInfo {
 }
 
 class FontNameReader {
+  /// 글꼴 모음(TTC)을 글꼴 하나짜리 파일(TTF/OTF)들로 나눔. 모음이 아니면 null
+  static List<Uint8List>? splitCollection(Uint8List b) {
+    if (b.length < 16 || !(b[0] == 0x74 && b[1] == 0x74 && b[2] == 0x63 && b[3] == 0x66)) return null;
+    final bd = ByteData.sublistView(b);
+    final int n = bd.getUint32(8);
+    if (n <= 0 || n > 64 || 12 + n * 4 > b.length) return null;
+    final out = <Uint8List>[];
+    for (int f = 0; f < n; f++) {
+      try {
+        final int base = bd.getUint32(12 + f * 4);
+        final int numTables = bd.getUint16(base + 4);
+        final recs = <(int tag, int sum, int off, int len)>[];
+        for (int i = 0; i < numTables; i++) {
+          final r = base + 12 + i * 16;
+          recs.add((bd.getUint32(r), bd.getUint32(r + 4), bd.getUint32(r + 8), bd.getUint32(r + 12)));
+        }
+        int size = 12 + numTables * 16;
+        for (final t in recs) {
+          size += (t.$4 + 3) & ~3;
+        }
+        final o = Uint8List(size);
+        final od = ByteData.sublistView(o);
+        o.setRange(0, 12, b.sublist(base, base + 12)); // sfnt 머리 (판 번호·표 수)
+        int pos = 12 + numTables * 16;
+        for (int i = 0; i < recs.length; i++) {
+          final (tag, sum, off, len) = recs[i];
+          final r = 12 + i * 16;
+          od.setUint32(r, tag);
+          od.setUint32(r + 4, sum);
+          od.setUint32(r + 8, pos);
+          od.setUint32(r + 12, len);
+          o.setRange(pos, pos + len, b.sublist(off, off + len));
+          pos += (len + 3) & ~3;
+        }
+        out.add(o);
+      } catch (_) {}
+    }
+    return out.isEmpty ? null : out;
+  }
+
   static FontNameInfo? read(Uint8List b) {
     if (b.length < 12) return null;
     final bd = ByteData.sublistView(b);

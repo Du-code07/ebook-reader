@@ -577,3 +577,49 @@ class SettingDoneButton extends StatelessWidget {
     );
   }
 }
+
+/// 파일을 처음 열 때 가운데에 뜨는 로딩: 돌아가는 원 + 문구 (+ 진행률)
+class FileLoadingView extends StatelessWidget {
+  const FileLoadingView({super.key, required this.label, this.progress, this.sublabel, this.dark = false});
+  final String label;
+
+  /// 0~1 (모르면 null: 문구에 %를 붙이지 않음)
+  final double? progress;
+  final String? sublabel;
+
+  /// 어두운 바탕 위인가 (사진·PDF 화면)
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final Color fg = dark ? Colors.white : cs.onSurface;
+    final p = progress;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 46,
+            height: 46,
+            child: CircularProgressIndicator(
+              strokeWidth: 4.5,
+              strokeCap: StrokeCap.round,
+              color: dark ? Colors.amber : cs.primary,
+              backgroundColor: fg.withValues(alpha: 0.12),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            p == null ? label : '$label ${(p.clamp(0.0, 1.0) * 100).round()}%',
+            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: fg.withValues(alpha: 0.85)),
+          ),
+          if (sublabel != null) ...[
+            const SizedBox(height: 4),
+            Text(sublabel!, style: TextStyle(fontSize: 12, color: fg.withValues(alpha: 0.55))),
+          ],
+        ],
+      ),
+    );
+  }
+}

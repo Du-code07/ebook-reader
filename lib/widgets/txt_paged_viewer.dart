@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../services/txt_page_document.dart';
 import 'viewer_dialogs.dart';
+import '../services/storage_service.dart';
 
 class TxtPageController {
   Future<void> Function(String, Object?)? _invoke;
@@ -202,7 +203,7 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
     return ColoredBox(
       color: background,
       child: _visibleText.isEmpty
-          ? const Center(child: CircularProgressIndicator())
+          ? FileLoadingView(label: AppI18n.t(StorageService.appLangNotifier.value, ko: '파일 여는 중', en: 'Opening file', zh: '正在打开文件', ja: 'ファイルを開いています'))
           : Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: widget.rtl && widget.spread

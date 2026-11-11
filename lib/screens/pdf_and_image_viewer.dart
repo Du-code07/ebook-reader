@@ -18,6 +18,7 @@ import '../widgets/text_copy_sheet.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
 import '../widgets/viewer_dialogs.dart';
+import '../widgets/ui_scale.dart';
 import '../widgets/sheet_pull_to_close.dart';
 import '../services/pdf_export_service.dart';
 import '../widgets/memo_tools.dart';
@@ -414,7 +415,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           ),
         ],
       ),
-      const SizedBox(height: 18),
+      const SizedBox(height: 26),
       _settingsHeader(Icons.smart_button_outlined, _tr('페이지 넘김 버튼 (동시 사용 가능)', 'Page Turn Buttons (Multiple allowed)', '翻页按钮 (可同时启用)', 'ページめくりボタン (同時使用可)')),
       const SizedBox(height: 6),
       SettingGroup(
@@ -425,15 +426,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             onSelected: (val) async {
               await StorageService.setUseVolumeTurn(val);
               setState(() => _useVolumeTurn = val);
-              setModalState(() {});
-            },
-          ),
-          SettingToggle(
-            label: Text(_tr('페이지 이동 버튼', 'Page Nav Buttons', '翻页按钮', 'ページ移動ボタン')),
-            selected: _useQuickNavTurn,
-            onSelected: (val) async {
-              await StorageService.setUseQuickNavTurn(val);
-              setState(() => _useQuickNavTurn = val);
               setModalState(() {});
             },
           ),
@@ -1680,13 +1672,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   /// 뷰어 표시 설정 항목 제목: 관련 아이콘 + 문구 (줄바꿈돼도 아이콘이 문구 앞에 붙어 있음)
   Widget _settingsHeader(IconData icon, String text, {bool isTitle = false}) {
-    // 정렬 및 보기 창처럼 아이콘 없이 글자만
-    return Text(
-      text,
-      // 제목은 크게, 항목 이름은 작은 회색 글씨 (정렬 및 보기 창 모양)
-      style: isTitle
-          ? const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)
-          : TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+    if (isTitle) return Text(text, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800));
+    // 구역 이름: 아이콘 + 굵은 글씨를 옅은 띠 위에 두어, 아래 설정이 어느 기능의 것인지 한눈에 보이게
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(color: cs.secondaryContainer.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(12)),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: cs.onSecondaryContainer),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: cs.onSecondaryContainer))),
+        ],
+      ),
     );
   }
 
@@ -1738,10 +1737,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     ),
                   ],
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 26),
                 ..._pageModeSettings(setModalState),
 
-                const SizedBox(height: 18),
+                const SizedBox(height: 26),
                 _settingsHeader(Icons.linear_scale, _tr('진행도 UI 위치', 'Progress Bar Position', '进度条位置', '進行度バーの位置')),
                 const SizedBox(height: 8),
                 SettingGroup(
@@ -1784,7 +1783,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     ),
                   ],
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 26),
                 _settingsHeader(Icons.draw_outlined, _tr('메모 도구 모음 위치', 'Memo Toolbar Position', '笔记工具栏位置', 'メモツールバーの位置')),
                 const SizedBox(height: 8),
                 SettingGroup(
@@ -1806,7 +1805,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       ),
                   ],
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 26),
                 _settingsHeader(Icons.grid_view_rounded, _tr('도구 모음 위치', 'Toolbox Position', '工具箱位置', 'ツールボックスの位置')),
                 const SizedBox(height: 8),
                 SettingGroup(
@@ -1826,7 +1825,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       ),
                   ],
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 26),
                 _settingsHeader(Icons.view_week_outlined, _tr('도구 모음 형태', 'Toolbox Style', '工具箱样式', 'ツールボックスの形')),
                 const SizedBox(height: 8),
                 SettingGroup(
@@ -1846,7 +1845,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       ),
                   ],
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 26),
                 _settingsHeader(Icons.info_outline, _tr('하단 정보 표시', 'Footer Info Display', '底部信息显示', '下部情報表示')),
                 const SizedBox(height: 8),
                 SettingGroup(
@@ -1861,29 +1860,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       },
                     ),
                     SettingOption(
-                      label: Text(_tr('진행률', 'Progress %', '进度百分比', '進行率')),
-                      selected: _footerInfoMode == 'progress',
-                      onSelected: (_) async {
-                        await StorageService.setFooterInfoMode('progress');
-                        setState(() => _footerInfoMode = 'progress');
-                        setModalState(() {});
-                      },
-                    ),
-                    SettingOption(
                       label: Text(_tr('페이지 번호', 'Page Number', '页码', 'ページ番号')),
                       selected: _footerInfoMode == 'page',
                       onSelected: (_) async {
                         await StorageService.setFooterInfoMode('page');
                         setState(() => _footerInfoMode = 'page');
-                        setModalState(() {});
-                      },
-                    ),
-                    SettingOption(
-                      label: Text(_tr('진행률 및 페이지 번호', 'Both Progress & Page', '进度与页码', '進行率とページ番号')),
-                      selected: _footerInfoMode == 'both',
-                      onSelected: (_) async {
-                        await StorageService.setFooterInfoMode('both');
-                        setState(() => _footerInfoMode = 'both');
                         setModalState(() {});
                       },
                     ),
@@ -2594,6 +2575,19 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ? _tr('읽기 방향 전환 (우 → 좌)', 'Reading Direction (R → L)', '切换阅读方向 (右 → 左)', '読書方向切替 (右 → 左)')
             : _tr('읽기 방향 전환 (좌 → 우)', 'Reading Direction (L → R)', '切换阅读方向 (左 → 右)', '読書方向切替 (左 → 右)'),
         onTap: () async {
+          // 스크롤 모드는 원본 순서 그대로라 읽기 방향을 바꾸지 않음
+          if (_pageModeScroll) {
+            ScaffoldMessenger.of(context)
+              ..clearSnackBars()
+              ..showSnackBar(SnackBar(
+                content: Text(_tr('스크롤 모드에서는 읽기 방향이 바뀌지 않아요. 탭·슬라이드 모드에서 바꿀 수 있어요.',
+                    'Reading direction does not change in scroll mode. Change it in tap/slide mode.',
+                    '滚动模式下不能切换阅读方向，请在点击/滑动模式下切换。',
+                    'スクロールモードでは読書方向は変わりません。タップ・スライドモードで変更できます。')),
+                duration: const Duration(seconds: 2),
+              ));
+            return;
+          }
           final nextRtl = !_isMangaRtlMode;
           await StorageService.setBookReadingDirectionRtl(_bookKey, nextRtl);
           setState(() => _isMangaRtlMode = nextRtl);
@@ -2677,11 +2671,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   Widget build(BuildContext context) {
     _syncShakeListening();
     if (_isPreparingPages || _pageController == null) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: Colors.black,
-        body: Center(
-          child: CircularProgressIndicator(color: Colors.amber),
-        ),
+        body: FileLoadingView(label: _tr('파일 여는 중', 'Opening file', '正在打开文件', 'ファイルを開いています'), dark: true),
       );
     }
 
@@ -2782,8 +2774,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTapUp: (d) => _onViewerTap(d.localPosition),
+                  // PDF: 길게 누르면 그 쪽의 글을 고르고 복사하는 창 (그림으로만 된 쪽은 그림 속 글자를 읽음)
+                  onLongPress: _isPdfFile ? () {
+                    if (_isMemoMode || _isTouchLocked || _activeTouchPointerIds.length >= 2 || _currentZoomScale > 1.03) return;
+                    HapticFeedback.selectionClick();
+                    _openTextCopySheet();
+                  } : null,
                   // 위/아래로 밀 때 페이지 영역이 손가락을 따라 움직임
-                  child: _pageModeScroll ? _buildScrollPages() : AnimatedBuilder(
+                  // 사진·PDF 쪽은 원래 크기·선명도 그대로 (앱 화면을 크게 보여 줄 때도)
+                  child: UiUnscale(child: _pageModeScroll ? _buildScrollPages() : AnimatedBuilder(
                     animation: _vPageSwipe,
                     builder: (context, child) => _buildVerticalSwipeStage(context, child!, isSpread, viewItemCount),
                     child: PageView.builder(
@@ -2844,7 +2843,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     );
                   },
                   ),
-                  ),
+                  )),
                 ),
               ),
             ),
@@ -2988,10 +2987,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             Positioned(
               left: 12.0 + _safeSides.left,
               right: 12.0 + _safeSides.right,
-              bottom: math.max<double>(bottomInset + 16.0, 20.0) +
+              bottom: math.max<double>(bottomInset + 16.0, 20.0) + 8.0 +
                   ((_progressBarPos == 'bottom' || _useQuickNavTurn) ? 44.0 : 0.0) +
                   ((_isMemoMode && _memoToolbarPos == 'bottom') ? 56.0 : 0.0),
-              child: QuickToolBar(items: _buildQuickMenuItems()),
+              child: Center(child: QuickToolBar(items: _buildQuickMenuItems())),
             ),
           if (_showControls && !_isTouchLocked && _toolbarStyle == 'arc')
             Positioned(

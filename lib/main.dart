@@ -17,6 +17,8 @@ import 'widgets/memo_tools.dart';
 import 'widgets/favorite_ribbon.dart';
 import 'widgets/group_stack_icon.dart';
 import 'widgets/group_jump_menu.dart';
+import 'widgets/viewer_dialogs.dart';
+import 'widgets/ui_scale.dart';
 import 'services/storage_service.dart';
 import 'services/user_fonts.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart' show EpubBookServer;
@@ -97,7 +99,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    _themeMode = widget.initialThemeMode;
+    // '완전 다크 모드'는 없앰: 예전에 고른 경우 다크 모드로
+    _themeMode = widget.initialThemeMode == 'black' ? 'dark' : widget.initialThemeMode;
     _appLang = widget.initialLang;
     _needsLanguage = widget.needsLanguage;
     WidgetsBinding.instance.addObserver(this);
@@ -188,8 +191,12 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       useMaterial3: true,
       colorScheme: scheme,
       fontFamily: appFont == null ? null : UserFonts.appFontFamily(appFont),
-      iconTheme: const IconThemeData(size: 21),
-      appBarTheme: const AppBarTheme(iconTheme: IconThemeData(size: 21), actionsIconTheme: IconThemeData(size: 21)),
+      iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
+      // 상단바 아이콘: 테마 글자색 (다크·밝은 다크에서도 보이게)
+      appBarTheme: AppBarTheme(
+        iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
+        actionsIconTheme: IconThemeData(size: 21, color: scheme.onSurfaceVariant),
+      ),
     );
   }
 
@@ -246,7 +253,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
           child: ScaleTransition(
             scale: _rotationScaleAnim,
             // 아이콘을 꾹 누르거나 S펜을 가까이 대면 뜨던 이름 말풍선을 모두 끔 (화면 낭독용 이름은 그대로)
-            child: TooltipVisibility(visible: false, child: content),
+            // 화면이 넓으면(태블릿 등) 기준 휴대폰과 같은 비율로 앱 화면 전체를 크게
+            child: TooltipVisibility(visible: false, child: UiScaleBox(child: content)),
           ),
         );
       },
@@ -447,8 +455,8 @@ class UserManualScreen extends StatelessWidget {
                 height: 24,
                 child: FavoriteRibbon(active: true, width: 12, height: 18, isDark: true),
               ),
-              title: _tr('즐겨찾기 (책갈피)', 'Favorite (Bookmark)', '收藏 (书签)', 'お気に入り (しおり)'),
-              desc: _tr('파일 왼쪽 위의 책갈피를 누르거나, 목록형에서 파일을 오른쪽으로 밀면 책갈피가 노랗게 내려오며 해당 그룹의 가장 상단에 위치합니다. 한 번 더 누르거나 밀면 해제됩니다.', 'Tap the bookmark at the top-left of a file, or swipe a file right in list view: the bookmark drops down in yellow and the file is pinned to the top of its group. Tap or swipe again to remove.', '点击文件左上角的书签，或在列表视图中向右滑动文件：书签变黄落下并置顶于当前分组。再次点击或滑动即可取消。', 'ファイル左上のしおりをタップ、またはリスト表示でファイルを右へスワイプすると、しおりが黄色く下りてグループの最上部に固定されます。もう一度で解除します。'),
+              title: _tr('북마크 (책갈피)', 'Bookmark', '书签', 'ブックマーク (しおり)'),
+              desc: _tr('파일 왼쪽 위의 책갈피를 누르거나, 목록형에서 파일을 오른쪽으로 밀면 북마크되어 책갈피가 노랗게 내려오며 해당 그룹의 가장 상단에 위치합니다. 그룹 막대의 책갈피 아이콘을 누르면 북마크한 파일만 볼 수 있고, 한 번 더 누르거나 밀면 해제됩니다.', 'Tap the bookmark at the top-left of a file, or swipe a file right in list view: the bookmark drops down in yellow and the file is pinned to the top of its group. Tap or swipe again to remove.', '点击文件左上角的书签，或在列表视图中向右滑动文件：书签变黄落下并置顶于当前分组。再次点击或滑动即可取消。', 'ファイル左上のしおりをタップ、またはリスト表示でファイルを右へスワイプすると、しおりが黄色く下りてグループの最上部に固定されます。もう一度で解除します。'),
             ),
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.more_horiz, color: Colors.white, size: 19),
@@ -778,6 +786,146 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Set<String> _favoritePaths = {};
   bool _hideFileExtension = false;
   bool _hideGroupName = false; // 파일 아래 [그룹 이름] 숨기기
+  bool _hideAddedDate = false; // 파일 아래 추가 날짜 숨기기
+  bool _hidePageCount = false; // 파일 아래 페이지 수 숨기기
+  Map<String, int> _addedDates = {}; // 파일 추가 날짜 (밀리초)
+  // 파일 정렬: 기준 'name'(이름) | 'date'(추가 날짜), 오름차순(이름 가→하 / 오래된 순)
+  String _sortBy = 'name';
+  bool _sortAsc = true;
+  bool _sortRemember = false;
+  bool _sortLoaded = false;
+
+  /// 파일 정렬 창: 정렬 기준(이름 / 추가 날짜) · 순서 · 정렬 기억하기. 고르면 바로 적용
+  Future<void> _showSortSheet() async {
+    Future<void> apply() async {
+      setState(() => _allBooks = List<File>.of(_allBooks)..sort((a, b) => _libCompare(a, b, _favoritePaths)));
+      await StorageService.setLibrarySort(_sortBy, _sortAsc, _sortRemember);
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final cs = Theme.of(ctx).colorScheme;
+          Widget label(String t) => Padding(
+                padding: const EdgeInsets.only(top: 18, bottom: 6),
+                child: Text(t, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: cs.onSurfaceVariant)),
+              );
+          Widget byRow(String value, String text) => InkWell(
+                onTap: () {
+                  setSheet(() => _sortBy = value);
+                  apply();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text(text, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600))),
+                      Icon(_sortBy == value ? Icons.check_circle : Icons.circle_outlined, size: 26, color: _sortBy == value ? cs.onSurface : cs.outline),
+                    ],
+                  ),
+                ),
+              );
+          final bool byName = _sortBy == 'name';
+          return SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 14),
+                      decoration: BoxDecoration(color: cs.onSurfaceVariant.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(2)),
+                    ),
+                  ),
+                  Text(_tr('정렬', 'Sort', '排序', '並べ替え'), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 4),
+                  Text(_tr('파일을 보여 줄 순서를 골라 주세요.', 'Choose how files are ordered.', '选择文件显示顺序。', 'ファイルの並び順を選んでください。'),
+                      style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
+                  label(_tr('정렬 기준', 'Sort by', '排序依据', '並べ替えの基準')),
+                  byRow('name', _tr('이름', 'Name', '名称', '名前')),
+                  Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.5)),
+                  byRow('date', _tr('파일 추가 날짜', 'Date added', '添加日期', '追加日')),
+                  label(_tr('순서', 'Order', '顺序', '順序')),
+                  SettingGroup(children: [
+                    SettingOption(
+                      label: Text(byName ? _tr('오름차순', 'Ascending', '升序', '昇順') : _tr('최신순', 'Newest', '最新', '新しい順')),
+                      selected: byName ? _sortAsc : !_sortAsc,
+                      onSelected: (_) {
+                        setSheet(() => _sortAsc = byName);
+                        apply();
+                      },
+                    ),
+                    SettingOption(
+                      label: Text(byName ? _tr('내림차순', 'Descending', '降序', '降順') : _tr('오래된 순', 'Oldest', '最早', '古い順')),
+                      selected: byName ? !_sortAsc : _sortAsc,
+                      onSelected: (_) {
+                        setSheet(() => _sortAsc = !byName);
+                        apply();
+                      },
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
+                  SettingToggle(
+                    label: Text(_tr('정렬 기억하기', 'Remember sort', '记住排序', '並べ替えを記憶')),
+                    selected: _sortRemember,
+                    onSelected: (v) {
+                      setSheet(() => _sortRemember = v);
+                      apply();
+                    },
+                  ),
+                  Text(_tr('다시 열어도 이 정렬을 유지해요.', 'Keeps this order next time.', '下次打开时保持此排序。', '次回もこの並び順を保ちます。'),
+                      style: TextStyle(fontSize: 13.5, color: cs.onSurfaceVariant)),
+                  SettingDoneButton(label: _tr('완료', 'Done', '完成', '完了'), onPressed: () => Navigator.of(ctx).pop()),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 북마크한 파일 먼저, 그다음 고른 정렬 (이름 / 추가 날짜)
+  int _libCompare(File a, File b, Set<String> favs) {
+    final aFav = favs.contains(a.path), bFav = favs.contains(b.path);
+    if (aFav != bFav) return aFav ? -1 : 1;
+    String nameOf(File f) => f.path.split(Platform.pathSeparator).last;
+    int c;
+    if (_sortBy == 'date') {
+      c = (_addedDates[a.path] ?? 0).compareTo(_addedDates[b.path] ?? 0);
+      if (c == 0) c = _naturalCompare(nameOf(a), nameOf(b));
+    } else {
+      c = _naturalCompare(nameOf(a), nameOf(b));
+    }
+    return _sortAsc ? c : -c;
+  }
+
+  /// 파일 아래 작은 글: [그룹] • 추가 날짜(26.11.11) • 마지막으로 읽은 쪽(6/983)
+  String _fileMetaText(String path, String grpDisplay, bool showGroup) {
+    final parts = <String>[];
+    if (showGroup) parts.add('[$grpDisplay]');
+    if (!_hideAddedDate) {
+      final ms = _addedDates[path];
+      if (ms != null) {
+        final d = DateTime.fromMillisecondsSinceEpoch(ms);
+        String two(int n) => n.toString().padLeft(2, '0');
+        parts.add('${two(d.year % 100)}.${two(d.month)}.${two(d.day)}');
+      }
+    }
+    if (!_hidePageCount) {
+      final p = _pageLabelText(path);
+      if (p.isNotEmpty) parts.add(p);
+    }
+    return parts.join('  •  ');
+  }
   bool _hideThumbnails = false; // 표지형: 표지 그림 끄기 (아이콘만)
   Map<String, String> _customCovers = {}; // 사용자가 고른 표지
   String _bookshelfViewMode = 'list'; // 기본값: 'list' (목록형)
@@ -1003,16 +1151,33 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final hideThumbs = await StorageService.getHideThumbnails();
     final covers = await StorageService.getCustomCovers();
     final viewMode = await StorageService.getBookshelfViewMode();
+    final hideDate = await StorageService.getHideAddedDate();
+    final hidePages = await StorageService.getHidePageCount();
+    // 파일 추가 날짜: 처음 보는 파일은 지금 파일 시각으로 정해 저장 (이후 그대로)
+    final dates = await StorageService.getAddedDates();
+    bool datesChanged = false;
+    for (final f in files) {
+      if (dates.containsKey(f.path)) continue;
+      int ms;
+      try {
+        ms = f.statSync().modified.millisecondsSinceEpoch;
+      } catch (_) {
+        ms = DateTime.now().millisecondsSinceEpoch;
+      }
+      dates[f.path] = ms;
+      datesChanged = true;
+    }
+    if (datesChanged) await StorageService.setAddedDates(dates);
+    _addedDates = dates;
+    if (!_sortLoaded) {
+      final (by, asc, remember) = await StorageService.getLibrarySort();
+      _sortBy = by;
+      _sortAsc = asc;
+      _sortRemember = remember;
+      _sortLoaded = true;
+    }
 
-    files.sort((a, b) {
-      final aFav = favs.contains(a.path);
-      final bFav = favs.contains(b.path);
-      if (aFav != bFav) return aFav ? -1 : 1;
-      return _naturalCompare(
-        a.path.split(Platform.pathSeparator).last,
-        b.path.split(Platform.pathSeparator).last,
-      );
-    });
+    files.sort((a, b) => _libCompare(a, b, favs));
 
     trashed.sort((a, b) => _naturalCompare(
           a.path.split(Platform.pathSeparator).last,
@@ -1098,6 +1263,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         _favoritePaths = favs;
         _hideFileExtension = hideExt;
         _hideGroupName = hideGroup;
+        _hideAddedDate = hideDate;
+        _hidePageCount = hidePages;
         _hideThumbnails = hideThumbs;
         _customCovers = covers;
         _bookshelfViewMode = viewMode;
@@ -2090,9 +2257,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           tooltip: _tr('돌아가기', 'Back', '返回', '戻る'),
           onPressed: () => setState(() => _favoritesOnly = false),
         ),
-        Icon(Icons.star_rounded, size: 17, color: Colors.amber.shade600),
-        const SizedBox(width: 6),
-        Text(_tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        const SizedBox(width: 14, height: 18, child: FavoriteRibbon(active: true, width: 12, height: 17, isDark: false)),
+        const SizedBox(width: 8),
+        Text(_tr('북마크', 'Bookmarks', '书签', 'ブックマーク'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(width: 8),
         Text('$count', style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
       ],
@@ -2135,8 +2302,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   children: [
                     // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
                     action('fab_add_plain', Icons.create_new_folder_outlined, _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
-                    action('fab_merge_pdf', Icons.picture_as_pdf_outlined, _tr('PDF 병합', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
-                    action('fab_merge_img', Icons.photo_library_outlined, _tr('이미지 병합', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
+                    action('fab_merge_pdf', Icons.picture_as_pdf_outlined, _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
+                    action('fab_merge_img', Icons.photo_library_outlined, _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
                   ],
                 )
               : const SizedBox(width: 0, height: 0),
@@ -2192,10 +2359,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       ),
     );
     // 즐겨찾기만 보기 (실제 그룹은 아님): 누르면 그룹 막대가 사라지고 즐겨찾기 파일만, 뒤로 가기로 돌아옴
+    // 북마크만 보기: 그룹 막대에는 책갈피 아이콘만
     final favChip = ChoiceChip(
-      avatar: Icon(Icons.star_rounded, size: 15, color: Colors.amber.shade600),
       showCheckmark: false,
-      label: Text(_tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り')),
+      tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+      label: const SizedBox(width: 14, height: 18, child: FavoriteRibbon(active: true, width: 12, height: 17, isDark: false)),
       selected: false,
       onSelected: (_) {
         _closeSearch();
@@ -2745,6 +2914,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             await StorageService.setHideGroupName(hide);
             if (mounted) setState(() => _hideGroupName = hide);
           },
+          hideAddedDate: _hideAddedDate,
+          onChangeHideAddedDate: (hide) async {
+            await StorageService.setHideAddedDate(hide);
+            if (mounted) setState(() => _hideAddedDate = hide);
+          },
+          hidePageCount: _hidePageCount,
+          onChangeHidePageCount: (hide) async {
+            await StorageService.setHidePageCount(hide);
+            if (mounted) setState(() => _hidePageCount = hide);
+          },
           onChangeLanguage: widget.onChangeLanguage,
           onChangeViewMode: (mode) async {
             await StorageService.setBookshelfViewMode(mode);
@@ -2808,15 +2987,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final path = file.path;
     final favs = Set<String>.of(_favoritePaths);
     if (!favs.remove(path)) favs.add(path);
-    String nameOf(File f) => f.path.split(Platform.pathSeparator).last;
     setState(() {
       _favoritePaths = favs;
       _allBooks = List<File>.of(_allBooks)
-        ..sort((a, b) {
-          final aFav = favs.contains(a.path), bFav = favs.contains(b.path);
-          if (aFav != bFav) return aFav ? -1 : 1;
-          return _naturalCompare(nameOf(a), nameOf(b));
-        });
+        ..sort((a, b) => _libCompare(a, b, favs));
       _favGrowAt[path] = DateTime.now();
     });
     unawaited(() async {
@@ -2833,13 +3007,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         : _allBooks.where((f) => (_bookGroupMap[f.path] ?? '미분류') == _selectedGroup).toList();
     final before = visible.indexWhere((f) => f.path == path);
     if (before < 0) return false;
-    String nameOf(File f) => f.path.split(Platform.pathSeparator).last;
     final after = List<File>.of(visible)
-      ..sort((a, b) {
-        final aFav = _favoritePaths.contains(a.path), bFav = _favoritePaths.contains(b.path);
-        if (aFav != bFav) return aFav ? -1 : 1;
-        return _naturalCompare(nameOf(a), nameOf(b));
-      });
+      ..sort((a, b) => _libCompare(a, b, _favoritePaths));
     return after.indexWhere((f) => f.path == path) != before;
   }
 
@@ -2869,7 +3038,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final isFavorite = _favoritePaths.contains(file.path);
     final lowerExt = rawFileName.split('.').last.toLowerCase();
     final thumbNotifier = _getThumbNotifier(file.path);
-    final pageText = _pageLabelText(file.path);
 
 
     return RepaintBoundary(
@@ -3070,9 +3238,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         const SizedBox(height: 1),
                         Text(
                           // 그룹 이름 오른쪽에 마지막으로 읽은 쪽 (특정 그룹 탭에서는 쪽만)
-                          showGroupLabel
-                              ? (pageText.isEmpty ? '[$grpDisplay]' : '[$grpDisplay]  •  $pageText')
-                              : pageText,
+                          _fileMetaText(file.path, grpDisplay, showGroupLabel),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -3205,6 +3371,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   },
                 ),
                 IconButton(
+                  icon: const Icon(Icons.sort_rounded),
+                  tooltip: _tr('정렬', 'Sort', '排序', '並べ替え'),
+                  onPressed: () {
+                    _closeSearch();
+                    _showSortSheet();
+                  },
+                ),
+                IconButton(
                   icon: const Icon(Icons.settings_outlined),
                   tooltip: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
                   onPressed: () {
@@ -3244,27 +3418,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           ),
                         ))
                   : filteredBooks.isEmpty
+                  // 빈 그룹(전체·북마크 포함): 합치기 버튼 없이 안내 글만
                   ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24.0),
-                        child: Wrap(
-                          spacing: 12,
-                          runSpacing: 10,
-                          alignment: WrapAlignment.center,
-                          children: [
-                            // 상단 아이콘과 같은 모양
-                            OutlinedButton.icon(
-                              icon: const Icon(Icons.picture_as_pdf_outlined),
-                              label: Text(_tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合')),
-                              onPressed: _showMergeExistingPdfsDialog,
-                            ),
-                            OutlinedButton.icon(
-                              icon: const Icon(Icons.photo_library_outlined),
-                              label: Text(_tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合')),
-                              onPressed: _showMergeExistingImagesDialog,
-                            ),
-                          ],
-                        ),
+                      child: Text(
+                        _favoritesOnly
+                            ? _tr('북마크한 파일이 없어요', 'No bookmarked files', '没有书签文件', 'ブックマークしたファイルはありません')
+                            : _tr('파일이 없어요', 'No files', '没有文件', 'ファイルがありません'),
+                        style: TextStyle(fontSize: 15, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                     )
                   : Row(
@@ -3374,8 +3534,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                 const SizedBox(width: 6),
                                 Text(
                                   isFavorite
-                                      ? _tr('즐겨찾기 해제', 'Remove Favorite', '取消收藏', 'お気に入り解除')
-                                      : _tr('즐겨찾기', 'Favorite', '收藏', 'お気に入り'),
+                                      ? _tr('북마크 해제', 'Remove Bookmark', '取消书签', 'ブックマーク解除')
+                                      : _tr('북마크', 'Bookmark', '书签', 'ブックマーク'),
                                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                                 ),
                               ],
@@ -3433,12 +3593,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             subtitle: Builder(
                               builder: (context) {
                                 final grpDisplay = _localizeGroupName(grp);
-                                final pageText = _pageLabelText(file.path);
                                 // 10. [전체]에서만 그룹 이름 표시, 특정 그룹 선택 시 그룹 이름 표시 제거
                                 // 그룹 이름 오른쪽: 마지막으로 읽은 쪽 (예: (6/983))
-                                final subText = _selectedGroup == '전체' && !_hideGroupName
-                                    ? (pageText.isEmpty ? '[$grpDisplay]' : '[$grpDisplay]  •  $pageText')
-                                    : pageText;
+                                final subText = _fileMetaText(file.path, grpDisplay, _selectedGroup == '전체' && !_hideGroupName);
                                 return Text(
                                   subText,
                                   style: const TextStyle(fontSize: 12),

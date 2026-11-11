@@ -271,6 +271,41 @@ class StorageService {
   }
 
   /// 파일 목록에서 [그룹 이름] 숨기기
+  // 파일 목록: 추가 날짜 숨기기 / 페이지 수 숨기기
+  static Future<bool> getHideAddedDate() async => (await SharedPreferences.getInstance()).getBool('hide_added_date_v90') ?? false;
+  static Future<void> setHideAddedDate(bool v) async => (await SharedPreferences.getInstance()).setBool('hide_added_date_v90', v);
+  static Future<bool> getHidePageCount() async => (await SharedPreferences.getInstance()).getBool('hide_page_count_v90') ?? false;
+  static Future<void> setHidePageCount(bool v) async => (await SharedPreferences.getInstance()).setBool('hide_page_count_v90', v);
+
+  /// 파일을 앱에 추가한 날짜 (밀리초). 저장해 둔 것이 없으면 null
+  static Future<Map<String, int>> getAddedDates() async {
+    final raw = (await SharedPreferences.getInstance()).getString('added_dates_v90');
+    if (raw == null) return {};
+    try {
+      return (jsonDecode(raw) as Map).map((k, v) => MapEntry('$k', (v as num).toInt()));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> setAddedDates(Map<String, int> m) async =>
+      (await SharedPreferences.getInstance()).setString('added_dates_v90', jsonEncode(m));
+
+  // 파일 정렬: 기준 'name' | 'date', 순서 asc(이름 오름차순·오래된 순) / desc, 정렬 기억하기
+  static Future<(String, bool, bool)> getLibrarySort() async {
+    final p = await SharedPreferences.getInstance();
+    final remember = p.getBool('lib_sort_remember_v90') ?? false;
+    if (!remember) return ('name', true, false);
+    return (p.getString('lib_sort_by_v90') ?? 'name', p.getBool('lib_sort_asc_v90') ?? true, true);
+  }
+
+  static Future<void> setLibrarySort(String by, bool asc, bool remember) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('lib_sort_remember_v90', remember);
+    await p.setString('lib_sort_by_v90', by);
+    await p.setBool('lib_sort_asc_v90', asc);
+  }
+
   static Future<void> setHideGroupName(bool hide) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('hide_group_name', hide);
@@ -388,8 +423,8 @@ class StorageService {
   }
 
   static Future<bool> getUseQuickNavTurn() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('use_quick_nav_turn') ?? false;
+    // '페이지 이동 버튼'은 없앰 (v90)
+    return false;
   }
 
   static Future<void> setUseSpenTurn(bool enabled) async {
@@ -480,7 +515,11 @@ class StorageService {
 
   static Future<String> getFooterInfoMode() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('footer_info_mode') ?? 'none';
+    // '진행률'·'진행률 및 페이지 번호'는 없앰 (v90): 예전 값은 가까운 것으로
+    final v = prefs.getString('footer_info_mode') ?? 'none';
+    if (v == 'both') return 'page';
+    if (v == 'progress') return 'none';
+    return v;
   }
 
   // 9. 진행바 UI 하단('bottom')을 기본값으로 설정
