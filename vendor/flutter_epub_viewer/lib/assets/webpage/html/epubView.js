@@ -2057,6 +2057,36 @@ function setupRenditionBlocking() {
   }
 }
 
+// FReader: 스크롤 보기에서 화면 맨 위 줄이 반쯤 잘려 보이지 않게, 그 줄(또는 짧은 문단·제목)의 위쪽에 맞춤
+function freaderSnapScrollToLine() {
+  try {
+    var c = rendition && rendition.manager && rendition.manager.container;
+    var frame = c && c.querySelector('iframe');
+    var doc = frame && frame.contentDocument;
+    if (!c || !doc || !doc.body) return;
+    var offset = frame.getBoundingClientRect().top - c.getBoundingClientRect().top + c.scrollTop;
+    var y = c.scrollTop - offset;
+    if (y <= 2) return;
+    var bodyRect = doc.body.getBoundingClientRect();
+    var x = Math.max(4, bodyRect.left + 8);
+    var el = doc.elementFromPoint(x, y + 2) || doc.elementFromPoint(bodyRect.left + bodyRect.width / 2, y + 2);
+    var block = el && el.closest ? el.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, figure, div') : null;
+    var target = null;
+    if (block && block !== doc.body) {
+      var r = block.getBoundingClientRect();
+      // 짧은 문단·제목은 통째로 보이게
+      if (r.top < y && y - r.top < c.clientHeight * 0.45) target = r.top;
+    }
+    if (target === null && doc.caretRangeFromPoint) {
+      var range = doc.caretRangeFromPoint(x, y + 2);
+      var rects = range ? range.getClientRects() : [];
+      var line = rects && rects.length ? rects[0] : null;
+      if (line && line.top < y) target = line.top - 2;
+    }
+    if (target !== null) c.scrollTop = Math.max(0, Math.floor(target + offset - 6));
+  } catch (e) {}
+}
+
 // FReader: 스크롤 보기(scrolled-doc)에서 장 끝/처음을 넘어 밀면 다음/앞 장으로
 function freaderAttachChapterScroll(r) {
   var startY = null, wasBottom = false, wasTop = false, busy = false;
@@ -2528,12 +2558,23 @@ function setFontSize(fontSize) {
     var loc = rendition.currentLocation();
     cfi = loc && loc.start && loc.start.cfi;
   } catch (e) {}
+  // FReader: 스크롤 보기에서 장 맨 위를 보고 있었으면 바뀐 뒤에도 맨 위에서
+  var scrolledTop = false;
+  try {
+    var box0 = rendition.manager && rendition.manager.container;
+    scrolledTop = isScrolledFlow() && box0 && box0.scrollTop <= 2;
+  } catch (e) {}
   rendition.themes.fontSize(`${fontSize}px`);
   if (fontRealignTimer) clearTimeout(fontRealignTimer);
   fontRealignTimer = setTimeout(function () {
     fontRealignTimer = null;
-    var shown = cfi ? rendition.display(cfi) : null;
+    var shown = cfi && !scrolledTop ? rendition.display(cfi) : null;
     Promise.resolve(shown).catch(function () {}).then(function () {
+      if (isScrolledFlow()) {
+        var box1 = rendition.manager && rendition.manager.container;
+        if (scrolledTop && box1) box1.scrollTop = 0;
+        else freaderSnapScrollToLine();
+      }
       try { rendition.reportLocation(); } catch (e) {}
     });
   }, 120);
@@ -3154,7 +3195,8 @@ function detectSwipe(el, func) {
       }
     } else {
       // Only prevent default if we're actually tracking a swipe
-      e.preventDefault();
+      // FReader: 스크롤 보기에서는 막지 않음 (막으면 손가락으로 내려 읽을 수 없음)
+      if (!isScrolledFlow()) e.preventDefault();
       var t = e.touches[0];
       swipe_det.eX = t.clientX;
       swipe_det.eY = t.clientY;
