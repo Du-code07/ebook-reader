@@ -228,6 +228,18 @@ function renderBook(data, opts, loadToken) {
   opening.catch(function (e) {
     if (loadToken === currentLoadToken) reportLoadError(e);
   });
+  // FReader: 오른쪽→왼쪽으로 넘기는 책(세로쓰기 일본 소설 등)은 이어 붙이는 보기(continuous)에서
+  // 다음 장으로 넘어갔다가 앞 장으로 되돌아가는 문제가 있어, 한 장씩 보여 주는 보기(default)로 연다.
+  // (rendition.start 보다 먼저 실행되도록 renderTo 전에 등록)
+  book.opened.then(function () {
+    try {
+      var md = (book.package && book.package.metadata) || {};
+      var rtl = md.direction === 'rtl' || (book.spine && book.spine.direction === 'rtl');
+      if (rtl && rendition && rendition.settings && rendition.settings.manager === 'continuous') {
+        rendition.settings.manager = 'default';
+      }
+    } catch (e) {}
+  });
   rendition = book.renderTo("viewer", {
     manager: manager,
     flow: flow,

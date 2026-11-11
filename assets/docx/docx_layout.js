@@ -407,8 +407,44 @@ export function applyDocxLayout(root, layout) {
       }
     }
   }
+  // FReader: Word 수식 — 쪽 나눔 위치(글자 수 기준)를 다 맞춘 뒤에 넣는다
+  for (const hint of layout.paragraphs) {
+    const p = matches.get(hint.index);
+    if (p && hint.math?.length) insertDocxMath(p, hint.math);
+  }
   root.querySelectorAll('.odr-page-inner').forEach(x => x.classList.add('docx-layout'));
   return true;
+}
+// FReader: 수식(OMML을 앱에서 MathML로 바꾼 것)을 문단의 제자리(글자 수 기준)에 넣는다
+function insertDocxMath(p, maths) {
+  const doc = p.ownerDocument;
+  const textNodes = () => {
+    const out = [], walker = doc.createTreeWalker(p, NodeFilter.SHOW_TEXT, {
+      acceptNode: n => n.parentElement?.closest('math, .odr-list-marker, sup.docx-note-ref') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) out.push(n);
+    return out;
+  };
+  // 뒤에서부터 넣어야 앞의 위치가 바뀌지 않음
+  for (const m of [...maths].sort((a, b) => b.offset - a.offset)) {
+    const parsed = new DOMParser().parseFromString(m.mathml, 'text/html').body.firstElementChild;
+    if (!parsed || parsed.localName !== 'math') continue;
+    const el = doc.importNode(parsed, true);
+    el.classList.add('docx-math');
+    let remaining = m.offset, placed = false;
+    for (const node of textNodes()) {
+      const data = node.data; let count = 0, i = 0;
+      for (; i < data.length; i++) { if (count === remaining) break; if (!/[\t\r\n\u200b]/.test(data[i])) count++; }
+      if (count === remaining && (i < data.length || remaining === 0)) {
+        if (i >= data.length) node.after(el); else if (i === 0) node.before(el); else node.splitText(i).before(el);
+        placed = true; break;
+      }
+      remaining -= count;
+    }
+    if (!placed) {
+      const marker = p.querySelector(':scope > .odr-list-marker');
+      if (m.offset === 0 && !textNodes().length) (marker ? marker.after(el) : p.prepend(el)); else p.append(el);
+    }
+  }
 }
 
 // Fit only content that exceeds its printable width. Font substitution can
@@ -486,6 +522,36 @@ export function fitDocxContent(inner, bodyWidth, bodyHeight) {
       img.style.position = 'static'; img.style.display = 'block';
     }
     frame.style.breakInside = 'avoid';
+  }
+  // FReader: 표 칸 안에 띄운 사진(지원서 증명사진·서명 등)
+  for (const frame of inner.querySelectorAll('[data-docx-anchor]')) {
+    let h; try { h = JSON.parse(frame.dataset.docxAnchor); } catch (_) { continue; }
+    const cell = frame.closest('td,th');
+    if (!cell || h.kind !== 'anchor' || h.wrap !== 'wrapNone') continue;
+    // 아래 줄 칸의 배경색이 사진을 덮지 않게
+    frame.style.zIndex = '3';
+    // 가운데·아래 정렬 칸에서도 Word처럼 칸 위쪽을 기준으로 (문단이 칸 가운데로 내려가도 사진은 위에서부터)
+    if (h.vertical?.relativeFrom === 'paragraph' && frame.parentElement !== cell &&
+        getComputedStyle(cell).verticalAlign !== 'top') {
+      const fr = frame.getBoundingClientRect(), cr = cell.getBoundingClientRect(), ccs = getComputedStyle(cell);
+      const left = fr.left - cr.left - (parseFloat(ccs.borderLeftWidth) || 0);
+      cell.prepend(frame);
+      frame.style.left = `${left}px`;
+      frame.style.top = `${number(h.vertical.offset) / 9525 + (parseFloat(ccs.paddingTop) || 0)}px`;
+    }
+  }
+  // FReader: 띄운 사진이 본문 오른쪽 끝을 넘으면 안쪽으로 당김 (넘은 부분이 잘리거나 빈 쪽이 생기지 않게)
+  {
+    const limit = inner.getBoundingClientRect().left + bodyWidth;
+    for (const frame of inner.querySelectorAll('[data-docx-anchor]')) {
+      if (getComputedStyle(frame).position !== 'absolute') continue;
+      const r = frame.getBoundingClientRect();
+      if (r.width > 0 && r.right > limit + 0.5) {
+        frame.style.left = `${frame.offsetLeft - Math.min(r.right - limit, Math.max(0, r.left - inner.getBoundingClientRect().left))}px`;
+        // 당겨서 글 위에 겹치게 된 서명 같은 사진: 흰 바탕이 글을 가리지 않게 (도장처럼 겹쳐 보이게)
+        frame.style.mixBlendMode = 'multiply';
+      }
+    }
   }
   // Browser multicolumn floats can detach a picture from its anchor and clip
   // part of a line. Materialize top/bottom pictures as flow blocks instead.

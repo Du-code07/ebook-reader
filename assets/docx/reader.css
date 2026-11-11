@@ -58,3 +58,7 @@ sup.docx-note-ref { font-size: 1em; vertical-align: baseline; line-height: 0; }
 /* FReader: 파일 내 단어 검색 형광펜 */
 ::highlight(freader-search) { background-color: rgba(255, 235, 59, 0.6); color: inherit; }
 ::highlight(freader-search-current) { background-color: rgba(255, 193, 7, 0.95); color: inherit; }
+/* FReader: Word 수식 (MathML) */
+math.docx-math { font-family: FReaderMath, math; font-size: 1.1em; }
+math.docx-math mtext { font-family: inherit; }
+math.docx-math[display="block"] { display: block math; margin: 0.3em 0; }
