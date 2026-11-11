@@ -90,6 +90,12 @@ function paragraphStyle(p, hint, theme, tab) {
   if (props.widowControl) p.style.orphans = p.style.widows = on(props.widowControl) ? '2' : '1';
   if (on(props.pageBreakBefore)) p.style.breakBefore = 'column';
   p.style.setProperty('--docx-tab', pt(tab));
+  // FReader: 한글 줄바꿈 단위. Word의 '한글 단어 잘림 허용' 끔(w:wordWrap=0)이면 어절 단위로 줄을 바꾼다
+  if (props.wordWrap) {
+    const keep = !on(props.wordWrap);
+    p.style.wordBreak = keep ? 'keep-all' : 'normal';
+    p.style.overflowWrap = keep ? 'anywhere' : '';
+  }
   if (props.spacing?.line != null) {
     const rule = props.spacing.lineRule || 'auto';
     if (rule === 'exact') p.style.lineHeight = pt(props.spacing.line);
