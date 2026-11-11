@@ -240,6 +240,12 @@ function renderBook(data, opts, loadToken) {
       }
     } catch (e) {}
   });
+  // FReader: 스크롤 보기는 장(챕터)마다 한 화면으로 세로로 내려 읽고(scrolled-doc),
+  // 장 끝에서 한 번 더 위로 밀면 다음 장, 장 처음에서 아래로 밀면 앞 장 끝으로 간다
+  if (flow === 'scrolled') {
+    flow = 'scrolled-doc';
+    manager = 'default';
+  }
   rendition = book.renderTo("viewer", {
     manager: manager,
     flow: flow,
@@ -250,6 +256,7 @@ function renderBook(data, opts, loadToken) {
     allowScriptedContent: allowScriptedContent,
     defaultDirection: direction
   });
+  if (flow === 'scrolled-doc') freaderAttachChapterScroll(rendition);
   // epub.js emits displayerror for chapter/iframe failures without rejecting
   // its pending display promise. Listening only to Promise.catch leaves a
   // permanently blank reader in that case.
@@ -2048,6 +2055,36 @@ function setupRenditionBlocking() {
       return originalDisplay(cfi);
     };
   }
+}
+
+// FReader: 스크롤 보기(scrolled-doc)에서 장 끝/처음을 넘어 밀면 다음/앞 장으로
+function freaderAttachChapterScroll(r) {
+  var startY = null, wasBottom = false, wasTop = false, busy = false;
+  function box() { return r && r.manager && r.manager.container; }
+  function atBottom(c) { return c.scrollTop + c.clientHeight >= c.scrollHeight - 4; }
+  function atTop(c) { return c.scrollTop <= 2; }
+  r.hooks.content.register(function (contents) {
+    var doc = contents && contents.document;
+    if (!doc) return;
+    doc.addEventListener('touchstart', function (e) {
+      var c = box(); if (!c || !e.touches || e.touches.length !== 1) { startY = null; return; }
+      startY = e.touches[0].clientY; wasBottom = atBottom(c); wasTop = atTop(c);
+    }, { passive: true });
+    doc.addEventListener('touchend', function (e) {
+      var c = box(); if (!c || startY === null || busy) return;
+      var t = e.changedTouches && e.changedTouches[0]; if (!t) return;
+      var dy = t.clientY - startY; startY = null;
+      if (dy < -70 && wasBottom && atBottom(c)) {
+        busy = true;
+        Promise.resolve(r.next()).then(function () { var cc = box(); if (cc) cc.scrollTop = 0; }).finally(function () { busy = false; });
+      } else if (dy > 70 && wasTop && atTop(c)) {
+        busy = true;
+        Promise.resolve(r.prev()).then(function () {
+          setTimeout(function () { var cc = box(); if (cc) cc.scrollTop = cc.scrollHeight; }, 60);
+        }).finally(function () { busy = false; });
+      }
+    }, { passive: true });
+  });
 }
 
 // FReader: 읽기 방향이 우→좌일 때 손가락으로 미는 방향을 반대로

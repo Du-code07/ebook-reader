@@ -55,7 +55,7 @@
     },
     "lib/assets/webpage/html/epubView.js": {
       "upstream_sha256": "0b19d487a5739e97c5ed8073b860e2c8b986d43dbf26c42a300fba8074e38cb1",
-      "vendored_sha256": "7298f2ba1f28d6434b2d8a31a38cf7647ae47f95afe26057dd8eb546fb6e7497"
+      "vendored_sha256": "8228d5e5c97eeb2df14e3d0666b5b8227367593855abc20f1b396f6ec276d761"
     },
     "lib/assets/webpage/html/swipe.html": {
       "upstream_sha256": "cbbacbfd24aa0b686091b751af9c4481a9ba63a5168679f1e7bf66b8ffd58b07",
