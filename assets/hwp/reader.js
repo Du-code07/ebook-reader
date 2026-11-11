@@ -55,16 +55,57 @@ function fontKind(name) {
   if (/equation|hwp.?eq|hancom.?eq|math|수식/i.test(name)) return 'math';
   return /바탕|명조|궁서|batang|myeong|serif|times|cambria/i.test(name) ? 'serif' : 'sans';
 }
+// 같은 크기(글자 폭)로 만든 무료 글꼴 (Arial·Times New Roman·Courier New·Calibri·Cambria 대신, 영문 부분만)
+const METRIC_FONTS = [
+  [/^(arial|helvetica|arimo|liberation sans)$/i, 'LiberationSans'],
+  [/^(times new roman|times|tinos|liberation serif)$/i, 'LiberationSerif'],
+  [/^(courier new|courier|cousine|liberation mono)$/i, 'LiberationMono'],
+  [/^(calibri|carlito)$/i, 'Carlito'],
+  [/^(cambria|caladea)$/i, 'Caladea'],
+];
+const LATIN_RANGE = 'U+0000-024F, U+2000-206F, U+20A0-20CF, U+2100-214F';
+function metricFont(name) {
+  const n = String(name).replace(/^DOCX /, '').trim();
+  for (const [re, base] of METRIC_FONTS) if (re.test(n)) return base;
+  return null;
+}
+// 사용자가 넣은 글꼴 중 이 이름의 것 (기기에 없는 원래 글꼴 대신 씀)
+function userFontFaces(name) {
+  const n = String(name).replace(/^DOCX /, '').trim().toLowerCase();
+  return (options.userFonts || []).filter(f => (f.n || []).some(x => String(x).trim().toLowerCase() === n));
+}
+async function addUserFaces(name, faces) {
+  await Promise.all(faces.map(async f => {
+    try {
+      const face = new FontFace(name, `url(/userfonts/${encodeURIComponent(f.f)})`, { weight: String(f.w || 400), style: f.i ? 'italic' : 'normal' });
+      await face.load(); document.fonts.add(face);
+    } catch (e) {}
+  }));
+}
 async function loadFontAliases(names) {
   await Promise.all([...new Set(names)].slice(0, 128).map(async raw => {
     const name = String(raw).trim();
     if (!name || name.length > 160 || fonts.has(name)) return;
+    const user = userFontFaces(name);
+    if (user.length) {
+      // 사용자 글꼴: 굵은 글꼴이 없으면 브라우저가 굵게 만들어 그림
+      const job = addUserFaces(name, user);
+      fonts.set(name, job);
+      await job;
+      return;
+    }
     const kind = fontKind(name);
     const basename = kind === 'math' ? 'LatinModernMath' : kind === 'serif' ? 'NotoSerifKR' : 'NotoSansKR';
+    const metric = kind === 'math' ? null : metricFont(name);
     const job = Promise.all((kind === 'math' ? [400] : [400, 700]).map(async weight => {
       const suffix = weight === 700 ? 'Bold' : 'Regular';
       const face = new FontFace(name, `url(fonts/${basename}-${suffix}.woff2)`, { weight: String(weight) });
       await face.load(); document.fonts.add(face);
+      if (metric) {
+        // 나중에 넣은 글꼴부터 쓰므로 영문은 같은 폭 글꼴, 한글은 본고딕/본명조
+        const latin = new FontFace(name, `url(../docx/fonts/metric/${metric}-${suffix}.woff2)`, { weight: String(weight), unicodeRange: LATIN_RANGE });
+        try { await latin.load(); document.fonts.add(latin); } catch (e) {}
+      }
     }));
     fonts.set(name, job);
     await job;
@@ -250,6 +291,15 @@ async function finishPage(serial, entries) {
       }
     } catch (_) {}
   }, 350);
+}
+// 지금 보이는 쪽(들)이 화면에서 차지하는 자리 (화면 크기 대비 0~1) — 스크롤 보기용 쪽 그림 자르기
+function pageRect() {
+  const frames = [...host.children]; if (!frames.length) return null;
+  let l = 1e9, t = 1e9, r = -1e9, b = -1e9;
+  for (const f of frames) { const q = f.getBoundingClientRect(); l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom); }
+  const W = window.innerWidth || 1, H = window.innerHeight || 1;
+  if (!(r > l && b > t)) return null;
+  return { x: Math.max(0, l / W), y: Math.max(0, t / H), w: Math.min(1, (r - l) / W), h: Math.min(1, (b - t) / H) };
 }
 function fitPages() {
   const frames = [...host.children];
@@ -443,7 +493,7 @@ async function headingCandidates(from = 0, to = 1e9) {
   return out.slice(0, 3000).map(c => ({ ...c, body }));
 }
 window.freaderHwp = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
-  search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes,
+  search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes, pageRect,
   getState: () => ({ ready: readyReported, page, count, cachedPages: cache.size, cachedBytes, received, spread: options.spread, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 
