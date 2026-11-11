@@ -4,6 +4,7 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
+import 'services/app_messenger.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -210,6 +211,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
 
   Widget _buildApp(BuildContext context) {
     return MaterialApp(
+      scaffoldMessengerKey: appMessengerKey,
       debugShowCheckedModeBanner: false,
       title: 'FReader',
       // 테마를 바꿀 때 색을 서서히 섞는 동안 화면 전체를 매번 다시 그려 느려짐 → 바로 바꿈
@@ -442,7 +444,7 @@ class UserManualScreen extends StatelessWidget {
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.settings_outlined, color: Colors.white, size: 19),
               title: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
-              desc: _tr('앱 언어(한국어/영어/중국어/일본어) 변경, 파일 이름 뒤 형식(확장자) 숨기기, 사용 설명서를 확인합니다.', 'Change app language (KO/EN/ZH/JA), hide file extensions, and open the User Manual.', '更改应用语言、隐藏文件扩展名及查看使用说明书。', '言語(韓/英/中/日)変更、拡張子非表示、取扱説明書を確認します。'),
+              desc: _tr('앱 언어(한국어/영어/중국어/일본어) 변경, 파일 형식 숨기기, 사용 설명서를 확인합니다.', 'Change app language (KO/EN/ZH/JA), hide file extensions, and open the User Manual.', '更改应用语言、隐藏文件扩展名及查看使用说明书。', '言語(韓/英/中/日)変更、拡張子非表示、取扱説明書を確認します。'),
             ),
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.add, color: Colors.amber, size: 21),
@@ -1140,6 +1142,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final hideExt = await StorageService.getHideFileExtension();
     final hideGroup = await StorageService.getHideGroupName();
     final hideThumbs = await StorageService.getHideThumbnails();
+    FavoriteRibbon.animationOff.value = await StorageService.getRibbonAnimationOff();
     final covers = await StorageService.getCustomCovers();
     final viewMode = await StorageService.getBookshelfViewMode();
     final hidePages = await StorageService.getHidePageCount();
@@ -1667,7 +1670,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: Text(_tr('만들기', 'Create', '创建', '作成')),
+              child: Text(_tr('합치기', 'Merge', '合并', '結合')),
             ),
           ],
         ),
@@ -1698,7 +1701,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           progressSetState = setDialogState;
           final double ratio = totalSteps > 0 ? (currentStep / totalSteps).clamp(0.0, 1.0).toDouble() : 0.0;
           return AlertDialog(
-            title: Text(_tr('이미지 병합 중', 'Merging Images', '正在合并图片', '画像結合中')),
+            title: Text(_tr('이미지 합치는 중', 'Merging Images', '正在合并图片', '画像結合中')),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1949,7 +1952,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           progressSetState = setDialogState;
           final double ratio = totalSteps > 0 ? (currentStep / totalSteps).clamp(0.0, 1.0).toDouble() : 0.0;
           return AlertDialog(
-            title: Text(_tr('PDF 병합 중', 'Merging PDFs', '正在合并 PDF', 'PDF結合中')),
+            title: Text(_tr('PDF 합치는 중', 'Merging PDFs', '正在合并 PDF', 'PDF結合中')),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -2371,7 +2374,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
       labelPadding: const EdgeInsets.symmetric(horizontal: 4),
       // 도구 모음의 북마크 아이콘과 같은 모양, 칩 가운데에
-      label: const SizedBox(width: 22, height: 22, child: Center(child: Icon(Icons.bookmarks, color: Colors.amber, size: 21))),
+      label: const SizedBox(width: 20, height: 20, child: Center(child: Icon(Icons.bookmarks, color: Colors.amber, size: 18))),
       selected: false,
       onSelected: (_) {
         _closeSearch();

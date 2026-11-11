@@ -247,7 +247,11 @@ class ContinuousPageList extends StatefulWidget {
     this.background = Colors.black,
     this.zoomable = true,
     this.gap = 0,
+    this.onLongPressPage,
   });
+
+  /// 길게 누른 쪽 번호 (글자 복사 창 등)
+  final ValueChanged<int>? onLongPressPage;
 
   final int count;
 
@@ -503,6 +507,17 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
             onScaleStart: _onScaleStart,
             onScaleUpdate: _onScaleUpdate,
             onScaleEnd: _onScaleEnd,
+            onLongPressStart: widget.onLongPressPage == null
+                ? null
+                : (d) {
+                    if (_tops.length < 2) return;
+                    final double y = (_oy + d.localPosition.dy - _padYFor(_scale)) / _scale;
+                    int p = 0;
+                    while (p < widget.count - 1 && _tops[p + 1] <= y) {
+                      p++;
+                    }
+                    widget.onLongPressPage!(p);
+                  },
             child: ClipRect(child: Stack(clipBehavior: Clip.hardEdge, children: children)),
           );
         },

@@ -9,7 +9,9 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import 'app_messenger.dart';
 import 'docx_layout_hints.dart';
+import 'storage_service.dart';
 import 'page_snapshot_service.dart';
 import 'user_fonts.dart';
 
@@ -70,7 +72,7 @@ class DocScrollPrep {
   static Future<Directory?> _dir(String path, String theme, int widthPx) async {
     final base = await PageSnapshotService.documentDir(path);
     if (base == null) return null;
-    final d = Directory('${base.path}/scroll4_${widthPx}_$theme');
+    final d = Directory('${base.path}/scroll5_${widthPx}_$theme');
     if (!d.existsSync()) d.createSync(recursive: true);
     return d;
   }
@@ -131,6 +133,12 @@ class DocScrollPrep {
         ok = false;
       }
       if (!ok) _failed.add(job.key);
+      // 뒤에서 새로 준비를 마쳤으면 알림 (이미 다 되어 있던 파일은 알리지 않음)
+      if (ok && job.rendered > 0) {
+        final name = job.path.split('/').last;
+        showAppNotice(AppI18n.t(StorageService.appLangNotifier.value,
+            ko: '스크롤 보기 준비 완료 · $name', en: 'Scroll view ready · $name', zh: '滚动视图已准备好 · $name', ja: 'スクロール表示の準備完了 · $name'));
+      }
       _running = null;
       changed.value++;
       _pump();
@@ -154,10 +162,12 @@ class DocScrollPrep {
     final bool isDocx = lower.endsWith('.docx');
     final bool isDoc = lower.endsWith('.doc');
     final bool isWord = isDocx || isDoc;
-    final String prefix = isDocx ? 'docx' : isDoc ? 'doc' : 'hwp';
+    final bool isPpt = lower.endsWith('.pptx') || lower.endsWith('.ppt');
+    final String prefix = isDocx ? 'docx' : isDoc ? 'doc' : isPpt ? (lower.endsWith('.ppt') ? 'ppt' : 'pptx') : 'hwp';
     // 주소 끝 표시로 앱(안드로이드)이 이 숨은 화면을 찾아 바로 그림으로 찍음
-    final String entry = '$_origin/assets/flutter_assets/assets/${isWord ? 'docx' : 'hwp'}/index.html?freaderScroll=1';
-    final String jsObject = isWord ? 'freaderDocx' : 'freaderHwp';
+    final String folder = isWord ? 'docx' : isPpt ? 'ppt' : 'hwp';
+    final String entry = '$_origin/assets/flutter_assets/assets/$folder/index.html?freaderScroll=1';
+    final String jsObject = isWord ? 'freaderDocx' : isPpt ? 'freaderPpt' : 'freaderHwp';
 
     final source = File(job.path);
     final int length = await source.length();
@@ -184,6 +194,7 @@ class DocScrollPrep {
       'position': '$prefix:${todo.first}',
       'progress': 0.0,
       if (isWord) 'format': isDoc ? 'doc' : 'docx',
+      if (isPpt) 'format': prefix,
       if (isDocx) 'docxLayout': docxLayout,
       if (cacheKey != null) 'cacheKey': cacheKey,
       if (userFonts.isNotEmpty) 'userFonts': userFonts,
@@ -306,6 +317,26 @@ class DocScrollPrep {
       meta['n'] = job.pageCount;
       for (final i in todo) {
         await _breathe();
+        // PPT: 슬라이드를 바로 그림으로 그려 받음 (화면 찍기 없이)
+        if (isPpt) {
+          final b64 = await call('slideImage', [i, (w * 2.5).round().clamp(900, 2400)]);
+          if (b64 is! String || b64.isEmpty) return false;
+          final bytes = base64Decode(b64);
+          final out = File('${dir.path}/p$i.jpg');
+          await out.writeAsBytes(bytes, flush: true);
+          final img = await decodeImageFromList(bytes);
+          meta['$i'] = img.width <= 0 ? 0.5625 : img.height / img.width;
+          img.dispose();
+          try {
+            File('${dir.path}/meta.json').writeAsStringSync(jsonEncode(meta));
+          } catch (_) {}
+          try {
+            PaintingBinding.instance.imageCache.evict(FileImage(out));
+          } catch (_) {}
+          job.rendered++;
+          report(++done);
+          continue;
+        }
         // 이 쪽을 그리고, 그림까지 다 채워지면 찍음
         if (lastReady != i) {
           readyWaiter = Completer<void>();
@@ -327,6 +358,8 @@ class DocScrollPrep {
           if (rect != null && v(rect['w']) > 0.05 && v(rect['h']) > 0.05) 'crop': [v(rect['x']), v(rect['y']), v(rect['w']), v(rect['h'])],
           'paper': paper,
           'pad': 0.035,
+          // 위 여백은 그대로 (쪽 넘김 보기와 같은 자리에서 글이 시작), 아래 빈 종이만 걷음
+          'trimTop': false,
         };
         List<Object?>? size;
         try {
@@ -354,6 +387,7 @@ class DocScrollPrep {
         try {
           PaintingBinding.instance.imageCache.evict(FileImage(out));
         } catch (_) {}
+        job.rendered++;
         report(++done);
       }
       return true;
@@ -375,4 +409,5 @@ class _Job {
   final int widthPx;
   final double logicalWidth;
   final int pageCount;
+  int rendered = 0; // 이번에 새로 그린 쪽 수
 }

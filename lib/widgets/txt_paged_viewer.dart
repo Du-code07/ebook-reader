@@ -21,6 +21,14 @@ class TxtPageController {
 
   /// 지금 화면에 보이는 쪽의 글 (글자 복사용)
   String get visibleText => _visible?.call() ?? '';
+
+  // 파일 내 단어 검색: 찾은 곳 수 / n번째로 이동 / 지우기
+  Future<int> Function(String)? _search;
+  Future<void> Function(int)? _showResult;
+  VoidCallback? _clear;
+  Future<int> search(String query) async => await _search?.call(query) ?? 0;
+  Future<void> showSearchResult(int index) async => _showResult?.call(index);
+  void clearSearch() => _clear?.call();
 }
 
 /// Keeps the existing ReaderScreen toolbar, gestures, bookmarks and memos.
@@ -74,8 +82,66 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
     super.initState();
     widget.controller._invoke = _navigate;
     widget.controller._visible = () => _visibleText.join('\n\n');
+    widget.controller._search = _search;
+    widget.controller._showResult = _showSearchResult;
+    widget.controller._clear = _clearSearch;
     unawaited(_load());
   }
+
+  // ── 파일 내 단어 검색 ──
+  String _query = '';
+  List<(int, int)> _hits = const []; // (쪽, 쪽 안 글자 위치)
+  int _current = -1;
+  int _searchGen = 0;
+
+  Future<int> _search(String query) async {
+    final doc = _document;
+    final q = query.trim();
+    if (doc == null || q.isEmpty) return 0;
+    final gen = ++_searchGen;
+    final lower = q.toLowerCase();
+    final hits = <(int, int)>[];
+    for (int i = 0; i < doc.pageCount && hits.length < 10000; i++) {
+      final text = (await doc.readPage(i)).toLowerCase();
+      if (_disposed || gen != _searchGen) return 0;
+      for (int at = text.indexOf(lower); at >= 0 && hits.length < 10000; at = text.indexOf(lower, at + lower.length)) {
+        hits.add((i, at));
+      }
+      if (i % 40 == 39) await Future<void>.delayed(Duration.zero);
+    }
+    if (!mounted) return 0;
+    setState(() {
+      _query = q;
+      _hits = hits;
+      _current = -1;
+    });
+    return hits.length;
+  }
+
+  Future<void> _showSearchResult(int index) async {
+    if (index < 0 || index >= _hits.length) return;
+    setState(() => _current = index);
+    final page = _hits[index].$1;
+    if (widget.scroll) {
+      widget.scrollController?.jumpToPage(page);
+    } else {
+      await _show(page);
+    }
+  }
+
+  void _clearSearch() {
+    _searchGen++;
+    if (!mounted) return;
+    setState(() {
+      _query = '';
+      _hits = const [];
+      _current = -1;
+    });
+  }
+
+  /// 이 쪽에서 찾은 곳들 (글자 위치), 지금 고른 곳
+  List<int> _hitsOn(int page) => [for (final h in _hits) if (h.$1 == page) h.$2];
+  int? _currentOn(int page) => _current >= 0 && _current < _hits.length && _hits[_current].$1 == page ? _hits[_current].$2 : null;
 
   Future<void> _load() async {
     try {
@@ -169,6 +235,9 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
   void dispose() {
     _disposed = true;
     widget.controller._invoke = null;
+    widget.controller._search = null;
+    widget.controller._showResult = null;
+    widget.controller._clear = null;
     final doc = _document;
     if (doc != null) unawaited(doc.dispose());
     super.dispose();
@@ -186,18 +255,21 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
         : widget.theme == 'sepia'
         ? const Color(0xff3b2f2f)
         : Colors.black;
-    Widget paper(String text) => FittedBox(
+    Widget paper(String text, int page) => FittedBox(
       fit: BoxFit.contain,
       alignment: Alignment.topCenter,
       child: SizedBox.fromSize(
         size: TxtPageDocument.paperSize,
-        child: CustomPaint(painter: _TxtPaperPainter(text, foreground)),
+        child: CustomPaint(
+          painter: _TxtPaperPainter(text, foreground,
+              query: _query, hits: _query.isEmpty ? const [] : _hitsOn(page), current: _currentOn(page)),
+        ),
       ),
     );
     if (widget.scroll && _document != null) return _buildScroll(background, foreground, paper);
-    final children = _visibleText
-        .map((text) => Expanded(child: paper(text)))
-        .toList();
+    final children = [
+      for (int i = 0; i < _visibleText.length; i++) Expanded(child: paper(_visibleText[i], _page + i)),
+    ];
     if (widget.spread && children.length == 1)
       children.add(const Expanded(child: SizedBox()));
     return ColoredBox(
@@ -216,7 +288,7 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
 
 extension on _TxtPagedViewerState {
   /// 스크롤 모드: 종이 쪽들을 세로로 이어 붙임 (보이는 쪽 근처만 그때그때 읽어 둠)
-  Widget _buildScroll(Color background, Color foreground, Widget Function(String) paper) {
+  Widget _buildScroll(Color background, Color foreground, Widget Function(String, int) paper) {
     final doc = _document!;
     final double aspect = TxtPageDocument.paperSize.height / TxtPageDocument.paperSize.width;
     return ContinuousPageList(
@@ -225,7 +297,8 @@ extension on _TxtPagedViewerState {
       aspectOf: (_) => aspect,
       initialPage: _page,
       background: background,
-      zoomable: false,
+      // 두 손가락으로 벌려 확대
+      zoomable: true,
       onPageChanged: (p) {
         _page = p;
         widget.onLocation(p, doc.pageCount, 'txt:$p', doc.pageCount <= 1 ? 0 : p / (doc.pageCount - 1));
@@ -234,7 +307,7 @@ extension on _TxtPagedViewerState {
         color: background,
         child: FutureBuilder<String>(
           future: _scrollText(i),
-          builder: (ctx, snap) => snap.hasData ? paper(snap.data!) : const SizedBox.expand(),
+          builder: (ctx, snap) => snap.hasData ? paper(snap.data!, i) : const SizedBox.expand(),
         ),
       ),
     );
@@ -252,19 +325,32 @@ extension on _TxtPagedViewerState {
 class _TxtPaperPainter extends CustomPainter {
   final String text;
   final Color color;
-  _TxtPaperPainter(this.text, this.color);
+  final String query;
+  final List<int> hits;
+  final int? current;
+  _TxtPaperPainter(this.text, this.color, {this.query = '', this.hits = const [], this.current});
 
   @override
   void paint(Canvas canvas, Size size) {
     final layout = TxtPageDocument.painter(text, color: color);
-    layout.paint(
-      canvas,
-      const Offset(TxtPageDocument.margin, TxtPageDocument.margin),
-    );
+    const origin = Offset(TxtPageDocument.margin, TxtPageDocument.margin);
+    // 찾은 단어 칠하기 (지금 고른 곳은 더 진하게)
+    if (query.isNotEmpty && hits.isNotEmpty) {
+      final normal = Paint()..color = const Color(0x66FFC107);
+      final strong = Paint()..color = const Color(0xCCFF9800);
+      for (final at in hits) {
+        final boxes = layout.getBoxesForSelection(TextSelection(baseOffset: at, extentOffset: at + query.length));
+        for (final b in boxes) {
+          canvas.drawRect(b.toRect().shift(origin).inflate(1), at == current ? strong : normal);
+        }
+      }
+    }
+    layout.paint(canvas, origin);
     layout.dispose();
   }
 
   @override
   bool shouldRepaint(covariant _TxtPaperPainter oldDelegate) =>
-      text != oldDelegate.text || color != oldDelegate.color;
+      text != oldDelegate.text || color != oldDelegate.color || query != oldDelegate.query ||
+      current != oldDelegate.current || hits.length != oldDelegate.hits.length;
 }

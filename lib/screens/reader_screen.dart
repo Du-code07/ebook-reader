@@ -398,7 +398,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 넘김 버튼'
-  /// 스크롤과 슬라이드는 함께 켤 수 없음 (하나를 켜면 다른 하나는 꺼짐). 그 외에는 함께 사용 가능
+  /// 스크롤은 탭·슬라이드와 함께 켤 수 없음 (스크롤을 켜면 둘 다 꺼짐). 탭과 슬라이드는 함께 사용 가능
   List<Widget> _pageModeSettings(StateSetter setModalState) {
     Future<void> apply(VoidCallback change) async {
       setState(change);
@@ -413,7 +413,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _settingsHeader(Icons.swipe_outlined, _tr('페이지 모드', 'Page Mode', '翻页模式', 'ページモード')),
       const SizedBox(height: 4),
       Text(
-        _tr('스크롤과 슬라이드는 함께 쓸 수 없어요.', 'Scroll and Slide cannot be used together.', '滚动和滑动不能同时使用。', 'スクロールとスライドは同時に使えません。'),
+        _tr('스크롤은 탭·슬라이드와 함께 쓸 수 없어요. 탭과 슬라이드는 함께 쓸 수 있어요.', 'Scroll cannot be combined with Tap or Slide. Tap and Slide can be used together.', '滚动不能与点击、滑动同时使用；点击和滑动可以同时使用。', 'スクロールはタップ・スライドと併用できません。タップとスライドは併用できます。'),
         style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
       const SizedBox(height: 6),
@@ -422,14 +422,20 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           SettingToggle(
             label: Text(_tr('탭', 'Tap', '点击', 'タップ')),
             selected: _pageModeTap,
-            onSelected: (val) => apply(() => _pageModeTap = val),
+            onSelected: (val) => apply(() {
+              _pageModeTap = val;
+              if (val) _pageModeScroll = false;
+            }),
           ),
           SettingToggle(
             label: Text(_tr('스크롤', 'Scroll', '滚动', 'スクロール')),
             selected: _pageModeScroll,
             onSelected: (val) => apply(() {
               _pageModeScroll = val;
-              if (val) _useSwipeTurn = false;
+              if (val) {
+                _useSwipeTurn = false;
+                _pageModeTap = false;
+              }
             }),
           ),
           SettingToggle(
@@ -733,11 +739,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _pageDisplay = pageDisplay;
       _toolbarStyle = toolbarStyle;
       _epubFont = epubFont;
-      _pageModeTap = pageModeTap;
-      _pageModeScroll = pageModeScroll;
-      _isMangaRtlMode = isRtl;
+      _pageModeTap = pageModeTap && !pageModeScroll; // 스크롤은 탭과 함께 쓰지 않음
+      _pageModeScroll = pageModeScroll && !_isSpreadsheet; // 엑셀은 뷰어 설정(쪽 넘김·스크롤) 없이 끌어서 이동
+      _isMangaRtlMode = isRtl && !_isTxt; // TXT는 읽기 방향 전환 없음
       // 기본값은 라이트. 종이색은 EPUB에서만 쓰므로 다른 문서에서는 라이트로 보여 준다.
-      _epubBgTheme = savedBg.isEmpty || (savedBg == 'sepia' && !_isEpub) || _isPresentation ? 'white' : savedBg; // PPT는 배경 색상을 적용하지 않음
+      _epubBgTheme = savedBg.isEmpty || (savedBg == 'sepia' && !_isEpub) || _isPresentation || _isSpreadsheet ? 'white' : savedBg; // PPT는 배경 색상을 적용하지 않음
       _footerInfoMode = footerMode;
       _progressBarPosSetting = barPos;
       _memoToolbarPos = memoBarPos;
@@ -746,7 +752,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _useVolumeComboLock = volComboLock;
       _useVolumeTurn = volTurn;
       _useQuickNavTurn = quickTurn;
-      _useSwipeTurn = swipeTurn;
+      _useSwipeTurn = swipeTurn && !pageModeScroll;
       _useSwipeUpTurn = swipeUpTurn;
       _eraserType = eraserType;
       _useSpenTurn = spenTurn;
@@ -1155,7 +1161,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       children: [
         // 스크롤 보기 그림이 다 덮고 있거나 목차를 여닫는 동안: 문서 화면(WebView)을 잠시 숨겨 움직임이 끊기지 않게
         Offstage(
-          offstage: _tocFreeze != null || (_pageModeScroll && _usesBackgroundScroll && _docScrollReadyNow),
+          offstage: _tocFreeze != null || (_pageModeScroll && _usesBackgroundScroll && _docScrollReadyNow && !_isExporting),
           child: HwpViewer(
           key: ValueKey('document:${widget.filePath}'),
           filePath: widget.filePath,
@@ -1186,7 +1192,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ),
           ),
         // 스크롤 모드: 쪽마다 한 번 그림으로 만들어 두고(다음부터는 바로), 간격 없이 세로로 이어 보여 줌
-        if (_pageModeScroll) Positioned.fill(child: _buildDocScroll()),
+        if (_pageModeScroll && !_isSpreadsheet) Positioned.fill(child: _buildDocScroll()),
       ],
     );
   }
@@ -1202,7 +1208,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   // ── 스크롤 보기 (한글·워드): 화면 밖 문서 화면에서 미리 그려 둔 쪽 그림 ──
   /// 한글·워드는 뒤에서 미리 준비 (PPT·TXT는 따로)
-  bool get _usesBackgroundScroll => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_isPresentation && !_legacyScroll;
+  bool get _usesBackgroundScroll => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_legacyScroll;
   bool _legacyScroll = false; // 미리 준비가 안 되는 문서(암호 등): 보던 화면으로 쪽을 넘기며 준비
   ScrollPageSet? _scrollSet;
   int _scrollSetSerial = 0;
@@ -1233,7 +1239,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     ScrollPageSet? set = await DocScrollPrep.load(widget.filePath, theme, px, n);
     if (set == null) {
       final cur = _scrollSet;
-      if (cur != null && (n == 0 || cur.files.length == n) && cur.files.isNotEmpty && cur.files.first.path.contains('/scroll4_${px}_')) {
+      if (cur != null && (n == 0 || cur.files.length == n) && cur.files.isNotEmpty && cur.files.first.path.contains('/scroll5_${px}_')) {
         set = cur; // 다른 배경색 그림으로 임시 표시 중
       } else {
         set = await DocScrollPrep.load(widget.filePath, theme == 'dark' ? 'white' : 'dark', px, n);
@@ -1244,7 +1250,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   void _onScrollPrepChanged() {
-    if (!mounted || !_isOfflineDocument || _isTxt || _isSpreadsheet || _isPresentation || _docPageCount <= 0) return;
+    if (!mounted || !_isOfflineDocument || _isTxt || _isSpreadsheet || _docPageCount <= 0) return;
     if (_legacyScroll) return;
     final px = _scrollRenderSize().px;
     if (DocScrollPrep.failed(widget.filePath, _scrollTheme, px)) {
@@ -1301,9 +1307,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_usesBackgroundScroll) {
       final sz = _scrollRenderSize();
       final set = _scrollSet;
-      if (set == null || (_docPageCount > 0 && set.files.length != _docPageCount) || !set.files.first.path.contains('/scroll4_${sz.px}_')) {
+      if (set == null || (_docPageCount > 0 && set.files.length != _docPageCount) || !set.files.first.path.contains('/scroll5_${sz.px}_')) {
         // 화면 너비가 바뀌었으면(회전) 그 너비로 다시 준비
-        if (_docPageCount > 0 && (set == null || !set.files.first.path.contains('/scroll4_${sz.px}_'))) {
+        if (_docPageCount > 0 && (set == null || !set.files.first.path.contains('/scroll5_${sz.px}_'))) {
           WidgetsBinding.instance.addPostFrameCallback((_) => _requestScrollPrep());
         }
         return _scrollLoading(DocScrollPrep.progressOf(widget.filePath, _scrollTheme, sz.px) ?? 0);
@@ -1317,6 +1323,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         initialPage: _docPage.clamp(0, set.files.length - 1).toInt(),
         background: _getBgColor(),
         gap: 10,
+        // 길게 누르면 그 쪽의 글을 복사 창으로 (그림으로 보여 주는 스크롤 보기에서도 글자 복사)
+        onLongPressPage: (p) async {
+          HapticFeedback.selectionClick();
+          try {
+            final texts = await _hwpController.pageText(p, p + 1);
+            final text = texts.isEmpty ? '' : texts.first;
+            if (mounted && text.trim().isNotEmpty) await showTextCopySheet(context, text: text, tr: _tr);
+          } catch (_) {}
+        },
         onPageChanged: (p) {
           final n = set.files.length;
           _onDocumentLocation(p, n, '$_documentPositionPrefix:$p', n <= 1 ? 1 : p / (n - 1));
@@ -1892,7 +1907,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 각 페이지에 직접 쓴 필기를 겹쳐서 PDF 한 파일로 저장 (다운로드/FReader 폴더).
   /// 끝나면 원래 읽던 위치로 돌아간다.
   /// 파일 내보내기는 워드·한글 문서만 (EPUB·TXT는 제외)
-  bool get _canExport => _isOfflineDocument && !_isTxt && !_isPresentation && !_isSpreadsheet; // 워드·한글만 (PPT는 내보내기 대상 아님)
+  bool get _canExport => _isOfflineDocument && !_isTxt && !_isSpreadsheet; // 워드·한글·PPT (필기·목차 포함 PDF)
 
   Future<void> _exportToPdf() async {
     if (!_canExport) return;
@@ -1925,6 +1940,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       String? lastCfi;
       for (int i = 0; i < 5000; i++) {
         if (progress.cancelled || !mounted) break;
+        // PPT: 슬라이드마다 애니메이션이 모두 끝난 모습으로 (다음 버튼은 애니메이션 단계를 넘기므로 쪽 번호로 이동)
+        if (_isPresentation) {
+          if (i >= _docPageCount) break;
+          _lastReadyPage = -1;
+          await _runAndWaitRelocate(() => _hwpController.display('$_documentPositionPrefix:$i:9999'), const Duration(milliseconds: 2500));
+          for (int w = 0; w < 120 && _lastReadyPage != i && mounted; w++) {
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+          }
+        }
         // 새 페이지가 다 그려지고 필기 정보가 바뀔 때까지 잠깐 기다림
         await Future<void>.delayed(const Duration(milliseconds: 350));
         // 워드·한글: 쪽 안 사진까지 다 채워질 때까지 기다림 (사진은 글자보다 늦게 채워짐)
@@ -1934,7 +1958,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           }
         }
         final String? cfi = _currentCfi;
-        if (i > 0 && cfi == lastCfi) break; // 더 이상 넘어가지 않음 = 마지막 페이지
+        if (!_isPresentation && i > 0 && cfi == lastCfi) break; // 더 이상 넘어가지 않음 = 마지막 페이지
         lastCfi = cfi;
 
         final shotPath = '${tmpDir.path}/shot_$i.png';
@@ -1954,8 +1978,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         } catch (_) {}
         // 보이지 않는 글자 층 (내보낸 PDF에서도 글 찾기가 되게)
         // 글 위치는 문서 화면(WebView) 기준이라, 내보낸 쪽 그림(본문 전체 영역) 기준으로 바꿔야 형광펜 자리가 맞음
+        List<Map<String, Object?>> boxes = const [];
+        try {
+          boxes = await _hwpController.visibleTextBoxes();
+        } catch (_) {}
         final texts = [
-          for (final t in await _hwpController.visibleTextBoxes())
+          for (final t in boxes)
             {
               ...t,
               'x': (viewRect.left + ((t['x'] as num?) ?? 0) * viewRect.width) / bodySize.width,
@@ -1971,7 +1999,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               '正在截取页面… 第${i + 1}页 (${(_progress * 100).toStringAsFixed(0)}%)', 'ページ取得中… ${i + 1}ページ (${(_progress * 100).toStringAsFixed(0)}%)'),
           _progress.clamp(0.0, 1.0).toDouble(),
         );
-        await _runAndWaitRelocate(() => _readerNext(), const Duration(milliseconds: 1500));
+        if (!_isPresentation) await _runAndWaitRelocate(() => _readerNext(), const Duration(milliseconds: 1500));
       }
 
       if (!progress.cancelled && pages.isNotEmpty) {
@@ -2202,11 +2230,20 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           child: SingleChildScrollView(
             controller: sheetScroll,
             physics: sheetPhysics,
-            padding: const EdgeInsets.fromLTRB(24, 18, 24, 12),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // 위쪽 가운데 회색 막대 (앱 설정 창처럼)
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
                 _settingsHeader(Icons.tune, _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'), isTitle: true),
                 const SizedBox(height: 12),
                 if (!_isOfflineDocument)
@@ -2640,7 +2677,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _findOpen = false;
 
   void _closeFind() {
-    unawaited(_hwpController.clearSearch());
+    if (_isTxt) {
+      _txtController.clearSearch();
+    } else {
+      unawaited(_hwpController.clearSearch());
+    }
     setState(() => _findOpen = false);
   }
 
@@ -3830,6 +3871,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         onTap: _pickPageDisplay,
         closeAfterTap: true,
       ),
+      // TXT는 읽기 방향 전환·북마크를 쓰지 않음
+      if (!_isTxt)
       QuickArcMenuItem(
         icon: _buildDualDirectionIcon(),
         tooltip: _isMangaRtlMode
@@ -3895,6 +3938,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         onTap: _openTextCopySheet,
         closeAfterTap: true,
       ),
+      if (!_isTxt)
       QuickArcMenuItem(
         icon: Icon(
           _isCurrentPageBookmarked ? Icons.bookmarks : Icons.bookmarks_outlined,
@@ -3968,24 +4012,23 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                           tooltip: _tr('파일 내 단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
                           onPressed: _docPageCount > 0 ? () => setState(() => _findOpen = true) : null,
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.tune, color: Colors.white, size: 20),
-                          tooltip: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
-                          onPressed: _showViewerSettingsSheet,
-                        ),
+                        // 엑셀은 끌어서 움직이면 되므로 뷰어 설정 없음
+                        const SizedBox(width: 4),
                       ]),
                     ),
                   ),
                 ),
-              SpreadsheetTabBar(
-                names: [for (final chapter in _chapters) chapter.title],
-                selectedIndex: _docPage,
-                onSelected: (index) => _hwpController.selectSheet(index),
-              ),
               Expanded(
                 child: AfterRouteTransition(
                   builder: (_) => UiUnscale(child: _buildDocumentViewer(isLandscape)),
                 ),
+              ),
+              // 시트 목록은 아래에 (엑셀 앱처럼)
+              SpreadsheetTabBar(
+                names: [for (final chapter in _chapters) chapter.title],
+                selectedIndex: _docPage,
+                onSelected: (index) => _hwpController.selectSheet(index),
+                atBottom: true,
               ),
               Material(
                 color: Theme.of(context).colorScheme.surface,
@@ -4074,7 +4117,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           });
         }
       },
-      drawer: Drawer(
+      // TXT는 목차 없음
+      drawer: _isTxt ? null : Drawer(
         child: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -4551,8 +4595,8 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                 left: 0,
                 right: 0,
                 child: FindInFileBar(
-                  onSearch: _hwpController.search,
-                  onGoto: _hwpController.showSearchResult,
+                  onSearch: _isTxt ? _txtController.search : _hwpController.search,
+                  onGoto: _isTxt ? _txtController.showSearchResult : _hwpController.showSearchResult,
                   onClose: _closeFind,
                   tr: _tr,
                 ),
@@ -4575,6 +4619,8 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                           const btnPadding = EdgeInsets.symmetric(horizontal: 6, vertical: 4);
 
                           final actionButtons = <Widget>[
+                            // TXT는 목차 없음
+                            if (!_isTxt)
                             IconButton(
                               visualDensity: VisualDensity.compact,
                               padding: btnPadding,
@@ -4583,8 +4629,8 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                               tooltip: _tr('목차', 'Contents', '目录', '目次'),
                               onPressed: _openToc,
                             ),
-                            // 파일 내 단어 검색 (한글·워드·PPT)
-                            if (_snapEligible || _isPresentation)
+                            // 파일 내 단어 검색 (한글·워드·PPT·TXT)
+                            if (_snapEligible || _isPresentation || _isTxt)
                               IconButton(
                                 visualDensity: VisualDensity.compact,
                                 padding: btnPadding,

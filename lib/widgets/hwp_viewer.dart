@@ -351,6 +351,14 @@ class _HwpViewerState extends State<HwpViewer> {
       case 'ready':
         unawaited(_transferDocument());
         break;
+      // 엑셀: 칸을 길게 눌러 고른 뒤 손을 떼면 그 글을 복사 창으로
+      case 'haptic':
+        HapticFeedback.selectionClick();
+        break;
+      case 'copyText':
+        final text = (event['text'] ?? '').toString();
+        if (text.trim().isNotEmpty) unawaited(showTextCopySheet(context, text: text, tr: _tr));
+        break;
       case 'loaded':
         setState(() => _loaded = true);
         _timeout?.cancel();
@@ -474,9 +482,10 @@ class _HwpViewerState extends State<HwpViewer> {
       children: [
         InAppWebView(
           // Excel owns two-dimensional pan and pinch; the outer reader still owns its toolbar.
+          // 한글·워드: 글을 길게 누르면 문서 화면이 바로 받아 글을 고를 수 있게 (EPUB과 같은 방식)
           gestureRecognizers: _isSpreadsheet
               ? {Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer())}
-              : null,
+              : {Factory<LongPressGestureRecognizer>(() => LongPressGestureRecognizer(duration: const Duration(milliseconds: 350)))},
           initialUrlRequest: URLRequest(url: WebUri(_entry)),
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,

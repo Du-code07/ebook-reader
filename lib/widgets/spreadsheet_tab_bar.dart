@@ -9,7 +9,11 @@ class SpreadsheetTabBar extends StatefulWidget {
     required this.names,
     required this.selectedIndex,
     required this.onSelected,
+    this.atBottom = false,
   });
+
+  /// 화면 아래에 둘 때: 고른 시트 표시 줄을 위쪽에 (엑셀 앱처럼)
+  final bool atBottom;
 
   final List<String> names;
   final int selectedIndex;
@@ -75,7 +79,11 @@ class _SpreadsheetTabBarState extends State<SpreadsheetTabBar> {
                         color: i == widget.selectedIndex ? Colors.amber.withValues(alpha: .16) : null,
                         border: Border(
                           right: BorderSide(color: colors.outlineVariant),
-                          bottom: BorderSide(
+                          top: !widget.atBottom ? BorderSide.none : BorderSide(
+                            color: i == widget.selectedIndex ? Colors.amber : colors.outlineVariant,
+                            width: i == widget.selectedIndex ? 3 : 1,
+                          ),
+                          bottom: widget.atBottom ? BorderSide.none : BorderSide(
                             color: i == widget.selectedIndex ? Colors.amber : colors.outlineVariant,
                             width: i == widget.selectedIndex ? 3 : 1,
                           ),

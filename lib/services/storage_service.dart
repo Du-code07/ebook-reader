@@ -248,6 +248,17 @@ class StorageService {
     return prefs.getBool('hide_thumbnails') ?? false;
   }
 
+  /// 표지형: 책갈피를 잡아당겨 북마크하는 움직임 끄기
+  static Future<void> setRibbonAnimationOff(bool off) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('ribbon_anim_off_v95', off);
+  }
+
+  static Future<bool> getRibbonAnimationOff() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('ribbon_anim_off_v95') ?? false;
+  }
+
   /// 사용자가 고른 표지 그림: 파일 경로 → 표지 그림 경로
   static Future<Map<String, String>> getCustomCovers() async {
     final prefs = await SharedPreferences.getInstance();

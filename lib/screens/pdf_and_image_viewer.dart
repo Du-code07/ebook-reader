@@ -371,7 +371,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 넘김 버튼'
-  /// 스크롤과 슬라이드는 함께 켤 수 없음 (하나를 켜면 다른 하나는 꺼짐). 그 외에는 함께 사용 가능
+  /// 스크롤은 탭·슬라이드와 함께 켤 수 없음 (스크롤을 켜면 둘 다 꺼짐). 탭과 슬라이드는 함께 사용 가능
   List<Widget> _pageModeSettings(StateSetter setModalState) {
     Future<void> apply(VoidCallback change) async {
       setState(change);
@@ -386,7 +386,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _settingsHeader(Icons.swipe_outlined, _tr('페이지 모드', 'Page Mode', '翻页模式', 'ページモード')),
       const SizedBox(height: 4),
       Text(
-        _tr('스크롤과 슬라이드는 함께 쓸 수 없어요.', 'Scroll and Slide cannot be used together.', '滚动和滑动不能同时使用。', 'スクロールとスライドは同時に使えません。'),
+        _tr('스크롤은 탭·슬라이드와 함께 쓸 수 없어요. 탭과 슬라이드는 함께 쓸 수 있어요.', 'Scroll cannot be combined with Tap or Slide. Tap and Slide can be used together.', '滚动不能与点击、滑动同时使用；点击和滑动可以同时使用。', 'スクロールはタップ・スライドと併用できません。タップとスライドは併用できます。'),
         style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
       const SizedBox(height: 6),
@@ -395,14 +395,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           SettingToggle(
             label: Text(_tr('탭', 'Tap', '点击', 'タップ')),
             selected: _pageModeTap,
-            onSelected: (val) => apply(() => _pageModeTap = val),
+            onSelected: (val) => apply(() {
+              _pageModeTap = val;
+              if (val) _pageModeScroll = false;
+            }),
           ),
           SettingToggle(
             label: Text(_tr('스크롤', 'Scroll', '滚动', 'スクロール')),
             selected: _pageModeScroll,
             onSelected: (val) => apply(() {
               _pageModeScroll = val;
-              if (val) _useSwipeTurn = false;
+              if (val) {
+                _useSwipeTurn = false;
+                _pageModeTap = false;
+              }
             }),
           ),
           SettingToggle(
@@ -678,12 +684,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _toolbarStyle = await StorageService.getToolbarStyle();
       _pageModeTap = await StorageService.getPageModeTap();
       _pageModeScroll = await StorageService.getPageModeScroll();
+      if (_pageModeScroll) _pageModeTap = false; // 스크롤은 탭과 함께 쓰지 않음
       _isMangaRtlMode = await StorageService.getBookReadingDirectionRtl(_bookKey);
       _useShakeLock = await StorageService.getUseShakeLock();
       _useVolumeComboLock = await StorageService.getUseVolumeComboLock();
       _useVolumeTurn = await StorageService.getUseVolumeTurn();
       _useQuickNavTurn = await StorageService.getUseQuickNavTurn();
-      _useSwipeTurn = await StorageService.getUseSwipeTurn();
+      _useSwipeTurn = await StorageService.getUseSwipeTurn() && !_pageModeScroll;
       _useSwipeUpTurn = await StorageService.getUseSwipeUpTurn();
       _eraserType = await StorageService.getMemoEraserType();
       _useSpenTurn = await StorageService.getUseSpenTurn();
@@ -1029,24 +1036,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   int _findCurrent = -1;
 
   Future<void> _openFind() async {
-    bool supported = false;
-    try {
-      supported = await _pdfChannel.invokeMethod<bool>('pdfSearchSupported') ?? false;
-    } catch (_) {}
+    // 글자 정보가 없는 PDF(스캔본 등)나 검색을 못 하는 기기도 쪽 그림에서 글자를 읽어 찾음
     if (!mounted) return;
-    if (!supported) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(_tr(
-          '이 기기에서는 PDF 단어 검색을 쓸 수 없습니다 (안드로이드 15 이상 또는 최신 시스템 업데이트 필요).',
-          'PDF search needs Android 15 or a recent system update on this device.',
-          '此设备不支持 PDF 搜索（需要 Android 15 或最新系统更新）。',
-          'この端末ではPDF検索を使えません（Android 15以上または最新のシステム更新が必要）。',
-        )),
-        duration: const Duration(seconds: 3),
-      ));
-      return;
-    }
     setState(() {
       _findOpen = true;
       _showControls = false;
@@ -1061,10 +1052,90 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     });
   }
 
+  // 쪽 그림에서 읽은 글자 (스캔본 검색용, 한 번 읽은 쪽은 기억)
+  final Map<int, List<Map>> _ocrCache = {};
+
+  /// 띄어쓰기·대소문자를 무시하고 줄들에서 찾기: 줄 {t, x0, x1, y, h} (0~1)
+  static List<Rect> _matchLines(List<Map> lines, String query) {
+    final q = query.replaceAll(RegExp(r'\s+'), '').toLowerCase();
+    final out = <Rect>[];
+    if (q.isEmpty) return out;
+    for (final l in lines) {
+      final t = '${l['t'] ?? ''}';
+      final x0 = (l['x0'] as num?)?.toDouble(), x1 = (l['x1'] as num?)?.toDouble();
+      final y = (l['y'] as num?)?.toDouble(), h = (l['h'] as num?)?.toDouble();
+      if (t.isEmpty || x0 == null || x1 == null || y == null || h == null) continue;
+      // 공백을 뺀 글과 원래 글자 위치 대응
+      final idx = <int>[];
+      final buf = StringBuffer();
+      for (int i = 0; i < t.length; i++) {
+        if (t[i].trim().isEmpty) continue;
+        idx.add(i);
+        buf.write(t[i].toLowerCase());
+      }
+      final norm = buf.toString();
+      for (int at = norm.indexOf(q); at >= 0; at = norm.indexOf(q, at + q.length)) {
+        final a = idx[at] / t.length, b = (idx[at + q.length - 1] + 1) / t.length;
+        out.add(Rect.fromLTRB(x0 + (x1 - x0) * a, y, x0 + (x1 - x0) * b, y + h));
+      }
+    }
+    return out;
+  }
+
+  /// PDF 글자 정보로 못 찾으면: 줄 단위(띄어쓰기 무시) → 글자 정보가 없는 쪽은 쪽 그림에서 글자를 읽어 찾음
+  Future<List<({int page, List<Rect> rects})>> _findFallback(String query) async {
+    final hits = <({int page, List<Rect> rects})>[];
+    final path = widget.files.first.path;
+    final noText = <int>[];
+    for (int from = 0; from < _totalPages; from += 20) {
+      final to = math.min(_totalPages, from + 20);
+      final pages = await _pdfLines(path, from, to, false);
+      for (int i = from; i < to; i++) {
+        final k = i - from;
+        final lines = k < pages.length ? pages[k].lines : const <Map<String, Object?>>[];
+        if (lines.isEmpty) {
+          noText.add(i);
+          continue;
+        }
+        for (final r in _matchLines(lines, query)) {
+          hits.add((page: i, rects: [r]));
+        }
+      }
+      if (!mounted || !_findOpen) return hits;
+    }
+    // 스캔본: 너무 오래 걸리지 않게 앞쪽 120쪽까지
+    for (final i in noText.take(120)) {
+      if (!mounted || !_findOpen || i >= _imagePages.length) break;
+      var lines = _ocrCache[i];
+      if (lines == null) {
+        try {
+          final raw = await _pdfChannel.invokeMethod<List<Object?>>('ocrLines', {'path': _imagePages[i].path}) ?? const [];
+          lines = [
+            for (final e in raw)
+              if (e is Map && e['x'] is num && e['w'] is num)
+                {'t': e['t'], 'x0': e['x'], 'x1': (e['x'] as num) + (e['w'] as num), 'y': e['y'], 'h': e['h']},
+          ];
+        } catch (_) {
+          lines = const [];
+        }
+        _ocrCache[i] = lines;
+      }
+      for (final r in _matchLines(lines, query)) {
+        hits.add((page: i, rects: [r]));
+      }
+    }
+    return hits;
+  }
+
   Future<int> _findSearch(String query) async {
     try {
-      final raw = await _pdfChannel.invokeMethod<List<dynamic>>('pdfSearch', {'path': widget.files.first.path, 'query': query});
-      final hits = <({int page, List<Rect> rects})>[];
+      List<dynamic>? raw;
+      try {
+        raw = await _pdfChannel.invokeMethod<List<dynamic>>('pdfSearch', {'path': widget.files.first.path, 'query': query});
+      } catch (_) {
+        raw = null;
+      }
+      var hits = <({int page, List<Rect> rects})>[];
       for (final item in raw ?? const []) {
         if (item is! Map) continue;
         final page = (item['page'] as num?)?.toInt();
@@ -1073,6 +1144,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         final rects = <Rect>[for (int i = 0; i + 3 < flat.length; i += 4) Rect.fromLTRB(flat[i], flat[i + 1], flat[i + 2], flat[i + 3])];
         hits.add((page: page, rects: rects));
       }
+      if (hits.isEmpty) hits = await _findFallback(query);
       if (mounted) {
         setState(() {
           _findHits = hits;
@@ -1710,11 +1782,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           child: SingleChildScrollView(
             controller: sheetScroll,
             physics: sheetPhysics,
-            padding: const EdgeInsets.fromLTRB(24, 18, 24, 12),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // 위쪽 가운데 회색 막대 (앱 설정 창처럼)
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
                 _settingsHeader(Icons.tune, _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'), isTitle: true),
                 const SizedBox(height: 12),
                 _settingsHeader(Icons.lock_open_outlined, _tr('화면 잠금 끄기 설정 (동시 사용 가능)', 'Screen Unlock Settings (Multiple allowed)', '解除屏幕锁定设置 (可同时启用)', '画面ロック解除設定 (同時使用可)')),

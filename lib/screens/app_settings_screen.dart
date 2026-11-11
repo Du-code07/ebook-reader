@@ -1,3 +1,4 @@
+import '../widgets/favorite_ribbon.dart';
 import '../widgets/file_type_icon.dart';
 import 'user_fonts_screen.dart';
 import 'package:flutter/material.dart';
@@ -120,7 +121,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     });
   }
 
-  /// 파일 표시 방식(표지형/목록형) + 파일 이름 뒤 형식 숨기기 + 그룹 이름 숨기기 — 누르면 바로 적용
+  /// 파일 표시 방식(표지형/목록형) + 파일 형식 숨기기 + 그룹 이름 숨기기 — 누르면 바로 적용
   Future<void> _pickViewMode() async {
     await showChoiceSheetWithToggle<String>(
       context: context,
@@ -132,7 +133,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       ],
       current: _viewMode,
       toggleIcon: Icons.visibility_off_outlined,
-      toggleLabel: _t('파일 이름 뒤 형식 숨기기', 'Hide file extension', '隐藏文件扩展名', 'ファイル名の形式を隠す'),
+      toggleLabel: _t('파일 형식 숨기기', 'Hide file type', '隐藏文件类型', 'ファイル形式を隠す'),
       toggleSubtitle: _t('.pdf, .epub 등', '.pdf, .epub, etc.', '.pdf、.epub 等', '.pdf、.epub など'),
       toggleValue: _hideExt,
       onChanged: (r) async {
@@ -158,6 +159,19 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             if (!mounted) return;
             setState(() => _hideThumbs = v);
             await widget.onChangeHideThumbnails?.call(v);
+          },
+        ),
+        // 표지형을 골랐을 때만: 책갈피를 잡아당겨 북마크하는 움직임 끄기
+        SheetToggle(
+          icon: Icons.bookmark_remove_outlined,
+          label: _t('책갈피 애니메이션 끄기', 'Turn off bookmark animation', '关闭书签动画', 'しおりのアニメーションをオフ'),
+          subtitle: _t('잡아당기지 않고 누르면 바로 북마크', 'Tap to bookmark instead of pulling', '点击即可添加书签，无需下拉', '引っ張らずにタップでブックマーク'),
+          value: FavoriteRibbon.animationOff.value,
+          onlyFor: 'grid',
+          onChanged: (v) async {
+            if (!mounted) return;
+            setState(() => FavoriteRibbon.animationOff.value = v);
+            await StorageService.setRibbonAnimationOff(v);
           },
         ),
         SheetToggle(

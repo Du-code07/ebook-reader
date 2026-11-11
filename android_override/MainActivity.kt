@@ -507,10 +507,11 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 val trim = call.argument<Boolean>("trim") ?: true
                 val paper = (call.argument<Number>("paper") ?: 0xFFFFFFFFL).toLong().toInt()
                 val pad = ((call.argument<Number>("pad") ?: 0.035).toFloat()).coerceIn(0f, 0.3f)
+                val trimTop = call.argument<Boolean>("trimTop") ?: true
                 Thread {
                     try {
                         val src = BitmapFactory.decodeFile(inPath) ?: throw IllegalStateException("decode")
-                        val size = cropTrimSave(src, crop, trim, paper, pad, outPath)
+                        val size = cropTrimSave(src, crop, trim, paper, pad, outPath, trimTop)
                         runOnUiThread { result.success(listOf(size[0], size[1])) }
                     } catch (e: Throwable) {
                         runOnUiThread { result.error("CROP_ERR", e.message, null) }
@@ -527,6 +528,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 val crop = call.argument<List<Number>>("crop")
                 val paper = (call.argument<Number>("paper") ?: 0xFFFFFFFFL).toLong().toInt()
                 val pad = ((call.argument<Number>("pad") ?: 0.035).toFloat()).coerceIn(0f, 0.3f)
+                val trimTop = call.argument<Boolean>("trimTop") ?: true
                 val webView = findScrollWebView(window.decorView)
                 if (webView == null || webView.width <= 0 || webView.height <= 0) {
                     result.error("NO_WEBVIEW", "scroll webview not found", null)
@@ -539,7 +541,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     webView.draw(canvas)
                     Thread {
                         try {
-                            val size = cropTrimSave(bitmap, crop, true, paper, pad, outPath)
+                            val size = cropTrimSave(bitmap, crop, true, paper, pad, outPath, trimTop)
                             runOnUiThread { result.success(listOf(size[0], size[1])) }
                         } catch (e: Throwable) {
                             runOnUiThread { result.error("CROP_ERR", e.message, null) }
@@ -1219,7 +1221,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     }
 
     /// 쪽 자리만 잘라(crop = [x, y, w, h], 0~1, 가장자리 몇 픽셀은 안쪽으로) 위아래 빈 종이를 걷고 JPEG로 저장
-    private fun cropTrimSave(src: Bitmap, crop: List<Number>?, trim: Boolean, paper: Int, pad: Float, outPath: String): IntArray {
+    private fun cropTrimSave(src: Bitmap, crop: List<Number>?, trim: Boolean, paper: Int, pad: Float, outPath: String, trimTop: Boolean = true): IntArray {
         val bw = src.width
         val bh = src.height
         var shot = src
@@ -1261,6 +1263,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             var bottom = h - 1
             while (bottom > top && !content(bottom)) bottom--
             val keep = (w * pad).toInt()
+            // 위쪽 여백은 그대로 두는 경우(쪽 넘김 보기와 같은 자리에서 글이 시작되게): 아래 빈 종이만 걷음
+            if (!trimTop && top < h) top = keep
             if (top >= h) {
                 val strip = maxOf(1, minOf(h, (w * 0.12f).toInt()))
                 val t = Bitmap.createBitmap(shot, 0, 0, w, strip)
