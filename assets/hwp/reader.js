@@ -70,9 +70,26 @@ function metricFont(name) {
   return null;
 }
 // 사용자가 넣은 글꼴 중 이 이름의 것 (기기에 없는 원래 글꼴 대신 씀)
+// 한컴바탕·한컴돋움이 없으면 사용자가 넣은 함초롬바탕·함초롬돋움으로 대신 보여 줌
+const USER_FONT_ALIASES = [
+  [/^(한컴\s?바탕|hancom\s?batang|haansoft\s?batang)$/i, ['함초롬바탕', 'hcr batang', '함초롬 바탕']],
+  [/^(한컴\s?돋움|hancom\s?dotum|haansoft\s?dotum)$/i, ['함초롬돋움', 'hcr dotum', '함초롬 돋움']],
+];
+function userFontFacesExact(n) {
+  return (options.userFonts || []).filter(f => (f.n || []).some(x => String(x).trim().toLowerCase() === n));
+}
 function userFontFaces(name) {
   const n = String(name).replace(/^DOCX /, '').trim().toLowerCase();
-  return (options.userFonts || []).filter(f => (f.n || []).some(x => String(x).trim().toLowerCase() === n));
+  const own = userFontFacesExact(n);
+  if (own.length) return own;
+  for (const [re, targets] of USER_FONT_ALIASES) {
+    if (!re.test(n)) continue;
+    for (const t of targets) {
+      const faces = userFontFacesExact(t);
+      if (faces.length) return faces;
+    }
+  }
+  return [];
 }
 async function addUserFaces(name, faces) {
   await Promise.all(faces.map(async f => {
