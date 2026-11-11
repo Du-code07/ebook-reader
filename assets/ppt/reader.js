@@ -6,6 +6,7 @@ import { chartEx } from './engine/chart-ex.js';
 import { threeD } from './engine/three-d.js';
 import { tiff } from './engine/tiff.js';
 import { AnimationSteps, hiddenAtStep } from './animation_steps.js';
+import { playStep, playTransition, stopMotion } from './slide_motion.js';
 
 const host = document.getElementById('slides');
 const MAX_BYTES = 256 * 1024 * 1024;
@@ -15,6 +16,8 @@ let disposed = false, loaded = false, opening = false, awaitingPassword = false;
 let paintRevision = 0, painting = null, paintedRevision = -1, paintedPage = -1, paintedStep = -1;
 let animationSteps, step = 0, stepCount = 0, navigation = Promise.resolve();
 let flushing = false, events = [], fontPromise;
+// FReader: '다음'으로 넘길 때만 애니메이션·전환을 보여 줌 { fromPage, fromStep }
+let pendingMotion = null;
 
 function emit(type, data = {}) { events.push({ type, ...data }); void flush(); retryBridge(); }
 async function flush() {
@@ -200,7 +203,33 @@ async function paint() {
       frame.appendChild(textLayer); fragment.appendChild(frame);
     }
     if (disposed || current !== generation || revision !== paintRevision) continue;
+    // FReader: 바뀌기 전 그림을 남겨 두었다가 애니메이션·전환으로 이어 줌
+    const motion = pendingMotion; pendingMotion = null;
+    stopMotion();
+    let oldCopy = null;
+    const oldCanvas = host.querySelector('section.slide canvas');
+    if (motion && count === 1 && !options.spread && oldCanvas?.width && motion.fromPage === paintedPage) {
+      oldCopy = document.createElement('canvas'); oldCopy.width = oldCanvas.width; oldCopy.height = oldCanvas.height;
+      oldCopy.getContext('2d').drawImage(oldCanvas, 0, 0);
+    }
     clearFrames(); host.appendChild(fragment); paintedRevision = revision; paintedPage = requestedPage;
+    const newCanvas = host.querySelector('section.slide canvas'), newFrame = host.querySelector('section.slide');
+    if (oldCopy && newCanvas && newCanvas.width === oldCopy.width && newCanvas.height === oldCopy.height) {
+      const plan = plans[0];
+      if (motion.fromPage === requestedPage && actualStep === motion.fromStep + 1 && plan.steps[actualStep - 1]?.length) {
+        const index = requestedPage;
+        const render = async hidden => {
+          const c = document.createElement('canvas');
+          await pres.renderSlide(c, index, { width, dpr, skipMediaControls: true, freaderHiddenShapeIds: hidden,
+            imageResources: { decodedByteBudget: 64 * 1024 * 1024, strategy: 'adaptive', resolution: 'display' } });
+          return c;
+        };
+        void playStep({ frame: newFrame, oldCanvas: oldCopy, newCanvas, effects: plan.steps[actualStep - 1], render,
+          prevHidden: hiddenAtStep(plan, actualStep - 1), newHidden: hiddenAtStep(plan, actualStep) });
+      } else if (motion.fromPage !== requestedPage && actualStep === 0) {
+        playTransition({ frame: newFrame, oldCanvas: oldCopy, newCanvas, transition: plan.transition });
+      }
+    }
     step = actualStep; stepCount = totalSteps; paintedStep = actualStep;
     reportLocation();
     if (searchState.query) applySearchHighlights();
@@ -251,6 +280,7 @@ function display(position) {
     const target = clampPage(saved ? Number(saved[1]) : Number(position));
     const maximum = await countSteps(target);
     if (current !== generation || disposed) return;
+    pendingMotion = null;
     page = target; stepCount = maximum;
     step = Math.min(maximum, saved ? Number(saved[2] || 0) : 0);
     await requestPaint();
@@ -260,6 +290,7 @@ function next() {
   return enqueueNavigation(async current => {
     const maximum = await countSteps(page);
     if (current !== generation || disposed) return;
+    pendingMotion = { fromPage: page, fromStep: step };
     if (step < maximum) step++;
     else if (page < presentation.slideCount - 1) { page = clampPage(page + (options.spread ? 2 : 1)); step = 0; }
     else return;
@@ -268,6 +299,7 @@ function next() {
 }
 function previous() {
   return enqueueNavigation(async current => {
+    pendingMotion = null;
     if (step > 0) step--;
     else if (page > 0) {
       const target = clampPage(page - (options.spread ? 2 : 1));

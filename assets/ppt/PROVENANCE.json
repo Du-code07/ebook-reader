@@ -280,12 +280,12 @@
   "integrationRevision": "54+freader-v65-bridge",
   "integrationArtifacts": {
     "reader.js": {
-      "bytes": 25306,
-      "sha256": "6d9dba032c7f1663b30422fc3f5b812195dccaec7190074abb0f7e8317b35523"
+      "bytes": 27352,
+      "sha256": "8a22578563c402a94df1ecf6edcf9a9694f3f0b5700ead24fe20bd600e30ee13"
     },
     "animation_steps.js": {
-      "bytes": 5923,
-      "sha256": "2019313f4579973e4686b020f2b0fb8ddb11ce4dd4837d1faa4fe537f082d2c2"
+      "bytes": 8362,
+      "sha256": "15f913ee8c74091b39ac3d2adf10046dab1e64142f22c2c31859b045893d7925"
     },
     "index.html": {
       "bytes": 679,
@@ -302,6 +302,10 @@
     "engine/FREADER_MODIFICATIONS.txt": {
       "bytes": 995,
       "sha256": "4bbf27ac1cb1203d18cbc9ae60c371e476b99335d926d86f43164e90f2b9545c"
+    },
+    "slide_motion.js": {
+      "bytes": 13414,
+      "sha256": "503b63ef3e8361a423aea7623c674ebea7935655fcd4b1e7d0fb8310f1ad11c4"
     }
   }
 }

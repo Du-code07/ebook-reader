@@ -48,7 +48,8 @@ export function parseAnimationSteps(xml, metadata) {
   let supported = true;
   for (const effect of effects) {
     const kind = effect.getAttribute('presetClass');
-    if (kind !== 'entr' && kind !== 'exit') { supported = false; continue; }
+    // FReader: 강조(emph)·이동 경로(path)도 단계로 (보이고 숨는 것은 바뀌지 않고 움직임만)
+    if (kind !== 'entr' && kind !== 'exit' && kind !== 'emph' && kind !== 'path') { supported = false; continue; }
     const targets = descendants(effect, 'spTgt');
     // Paragraph/word/chart-series builds need a different granularity. Keep
     // their content visible instead of incorrectly hiding the entire object.
@@ -59,7 +60,7 @@ export function parseAnimationSteps(xml, metadata) {
       for (const expanded of groups.get(id) || [id]) if (known.has(expanded)) ids.add(expanded);
     }
     if (!ids.size) continue;
-    for (const id of ids) if (!first.has(id)) {
+    if (kind === 'entr' || kind === 'exit') for (const id of ids) if (!first.has(id)) {
       first.add(id);
       if (kind === 'entr') initial.add(id);
     }
@@ -68,15 +69,51 @@ export function parseAnimationSteps(xml, metadata) {
     // "With previous" is simultaneous. Each subsequent/automatic effect is a
     // manual snapshot, so a later overlapping picture cannot skip its predecessor.
     if (trigger !== 'withEffect' || !steps.length) steps.push([]);
-    steps[steps.length - 1].push({ ids: [...ids], visible: kind === 'entr' });
+    steps[steps.length - 1].push({ ids: [...ids], visible: kind === 'entr' ? true : kind === 'exit' ? false : null, ...effectMotion(effect, kind) });
   }
   return { initial: [...initial], steps, supported };
+}
+
+// FReader: 효과의 종류·방향·길이 (앱이 움직임을 흉내 냄)
+function effectMotion(effect, kind) {
+  const preset = Number(effect.getAttribute('presetID') || 0), sub = Number(effect.getAttribute('presetSubtype') || 0);
+  let dur = 0;
+  for (const n of descendants(effect, 'cTn')) {
+    const d = Number(n.getAttribute('dur'));
+    const delay = Number(child(child(n, 'stCondLst'), 'cond')?.getAttribute('delay') || 0);
+    if (Number.isFinite(d) && d > 1) dur = Math.max(dur, d + (Number.isFinite(delay) ? delay : 0));
+  }
+  if (preset === 1 && kind === 'entr') dur = 0;
+  const motion = { cls: kind, preset, sub, dur: Math.min(5000, dur || 500) };
+  const path = descendants(effect, 'animMotion')[0]?.getAttribute('path');
+  if (path) motion.path = path;
+  const rot = descendants(effect, 'animRot')[0]?.getAttribute('by');
+  if (rot) motion.rotate = Number(rot) / 60000;
+  const scaleBy = child(descendants(effect, 'animScale')[0], 'by');
+  if (scaleBy) motion.scale = Math.max(Number(scaleBy.getAttribute('x') || 100000), Number(scaleBy.getAttribute('y') || 100000)) / 100000;
+  if (descendants(effect, 'cTn').some(n => n.getAttribute('autoRev') === '1')) motion.autoRev = true;
+  return motion;
+}
+
+// FReader: 슬라이드 전환 효과 {type, dir, dur}
+export function parseTransition(xml) {
+  try {
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    const t = descendants(doc.documentElement, 'transition')[0];
+    if (!t) return null;
+    const kind = Array.from(t.children).find(c => c.localName !== 'sndAc' && c.localName !== 'extLst');
+    const spd = t.getAttribute('spd');
+    const durAttr = Number(Array.from(t.attributes).find(a => a.localName === 'dur')?.value);
+    const dur = Number.isFinite(durAttr) && durAttr > 0 ? durAttr : spd === 'fast' ? 450 : spd === 'med' ? 700 : 1000;
+    return { type: kind?.localName || 'fade', dir: kind?.getAttribute('dir') || '', orient: kind?.getAttribute('orient') || '', dur: Math.min(3000, dur) };
+  } catch { return null; }
 }
 
 export function hiddenAtStep(plan, step) {
   const hidden = new Set(plan.initial);
   for (let i = 0; i < Math.min(Math.max(0, step), plan.steps.length); i++) {
     for (const effect of plan.steps[i]) for (const id of effect.ids) {
+      if (effect.visible === null || effect.visible === undefined) continue;
       if (effect.visible) hidden.delete(id); else hidden.add(id);
     }
   }
@@ -106,7 +143,8 @@ export class AnimationSteps {
       const data = await this.presentation.getImage(metadata.partName, 'application/xml');
       if (this.closed) return STATIC_PLAN;
       if (data.size > MAX_XML) return { ...STATIC_PLAN, supported: false };
-      return parseAnimationSteps(await data.text(), metadata);
+      const text = await data.text();
+      return { ...parseAnimationSteps(text, metadata), transition: parseTransition(text) };
     } catch (error) {
       // Parsing the document's optional timing must never blank a readable slide.
       if (!this.closed) console.warn('FReader: animation steps unavailable', String(error?.message || error).slice(0, 200));

@@ -269,13 +269,57 @@ function applyDesiredView() {
   })();
   return viewTask;
 }
+// FReader: 칸을 길게 누르면 그 칸이 골라지고, 손을 떼지 않고 끌면 범위가 늘어남.
+// 손을 떼면 고른 칸들의 글을 앱의 복사 창으로 (EPUB에서 글을 길게 눌러 복사하는 것과 같은 흐름)
+let press = null; // { id, x, y, timer, active, anchor }
+const colName = n => { let s = ''; for (n = n | 0; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + (n - 1) % 26) + s; return s; };
+function selectRange(a, b) {
+  const top = Math.min(a.row, b.row), bottom = Math.max(a.row, b.row), left = Math.min(a.col, b.col), right = Math.max(a.col, b.col);
+  try { viewer?.setSelection(`${colName(left)}${top}:${colName(right)}${bottom}`); } catch {}
+}
+function cancelPress() { if (press) clearTimeout(press.timer); press = null; }
+function selectedText() {
+  try {
+    const ctx = viewer?.getSelectionContext({ maxTextCharacters: 200000 });
+    const area = ctx?.selection?.areas?.[ctx.selection.activeAreaIndex || 0];
+    if (!ctx || !area) return '';
+    const byCell = new Map((ctx.cells || []).map(c => [`${c.address.row}:${c.address.col}`, c.displayText ?? '']));
+    const rows = [];
+    for (let r = area.top; r <= area.bottom && rows.length < 2000; r++) {
+      const cols = [];
+      for (let c = area.left; c <= area.right && cols.length < 200; c++) cols.push(String(byCell.get(`${r}:${c}`) ?? ''));
+      rows.push(cols.join('\t'));
+    }
+    return rows.join('\n').replace(/\s+$/, '');
+  } catch { return ''; }
+}
 host.addEventListener('pointerdown', event => {
   if (event.pointerType === 'mouse' || !loaded) return;
   event.preventDefault(); event.stopPropagation();
   host.setPointerCapture(event.pointerId);
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); rebaseGesture();
+  cancelPress();
+  if (pointers.size === 1) {
+    const x = event.clientX, y = event.clientY;
+    press = { id: event.pointerId, x, y, active: false, anchor: null, timer: setTimeout(() => {
+      if (!press || !viewer) return;
+      const cell = viewer.getCellAt(x, y);
+      if (!cell) { press = null; return; }
+      press.active = true; press.anchor = cell; selectRange(cell, cell);
+      emit('haptic', {});
+    }, 450) };
+  }
 }, true);
 host.addEventListener('pointermove', event => {
+  if (press && press.id === event.pointerId) {
+    if (press.active) {
+      event.preventDefault(); event.stopPropagation();
+      const cell = viewer?.getCellAt(event.clientX, event.clientY);
+      if (cell) selectRange(press.anchor, cell);
+      return;
+    }
+    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) cancelPress();
+  } else if (press) cancelPress();
   if (!pointers.has(event.pointerId) || !gesture || !viewer) return;
   event.preventDefault(); event.stopPropagation();
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -287,6 +331,18 @@ host.addEventListener('pointermove', event => {
   cancelAnimationFrame(frameRequest); frameRequest = requestAnimationFrame(() => { void applyDesiredView(); });
 }, true);
 function endPointer(event) {
+  if (press && press.id === event.pointerId) {
+    const wasActive = press.active;
+    cancelPress();
+    if (wasActive && event.type === 'pointerup') {
+      const text = selectedText();
+      if (text) emit('copyText', { text });
+      pointers.delete(event.pointerId);
+      if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId);
+      rebaseGesture();
+      return;
+    }
+  }
   if (!pointers.has(event.pointerId)) return;
   event.preventDefault(); event.stopPropagation(); pointers.delete(event.pointerId);
   if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId);
