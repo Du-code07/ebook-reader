@@ -1149,7 +1149,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   /// 화면을 한 번 눌렀을 때: 탭 모드면 위쪽은 메뉴, 아래 왼쪽·오른쪽은 이전·다음 쪽
   /// (메뉴가 떠 있거나 필기 중이면 메뉴만 닫음. 읽기 방향 우→좌면 왼쪽이 다음, 스크롤 모드는 원래 순서)
+  // 두 손가락(확대·축소) 동작 중이었는지: 그 끝에 손가락을 떼는 것은 탭이 아님
+  bool _pinchSeen = false;
+
   void _onViewerTap(Offset local) {
+    if (_pinchSeen) return;
     if (!_pageModeTap || _showControls || _isMemoMode) {
       _toggleControls();
       return;
@@ -2723,8 +2727,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 onPointerDown: (event) {
                   _vPageSwipe.down(event);
                   if (event.kind == PointerDeviceKind.touch) {
+                    if (_activeTouchPointerIds.isEmpty) _pinchSeen = false;
                     _activeTouchPointerIds.add(event.pointer);
                     if (_activeTouchPointerIds.length >= 2) {
+                      _pinchSeen = true;
                       setState(() {});
                     }
                   }

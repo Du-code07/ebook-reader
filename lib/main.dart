@@ -2246,7 +2246,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           tooltip: _tr('돌아가기', 'Back', '返回', '戻る'),
           onPressed: () => setState(() => _favoritesOnly = false),
         ),
-        const SizedBox(width: 14, height: 18, child: FavoriteRibbon(active: true, width: 12, height: 17, isDark: false)),
+        const SizedBox(width: 24, height: 24, child: Center(child: Icon(Icons.bookmarks, color: Colors.amber, size: 21))),
         const SizedBox(width: 8),
         Text(_tr('북마크', 'Bookmarks', '书签', 'ブックマーク'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(width: 8),

@@ -319,6 +319,9 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
   double get _maxX => math.max(0, _width * _scale - _width);
   double get _maxY => math.max(0, _contentHeight - _height);
 
+  /// 쪽이 화면보다 짧으면(1쪽짜리 등) 위아래 가운데에 (슬라이드 보기처럼)
+  double _padYFor(double scale) => math.max(0, (_height - (_tops.isEmpty ? 0 : _tops.last) * scale) / 2);
+
   void _clamp() {
     _ox = _ox.clamp(0.0, _maxX).toDouble();
     _oy = _oy.clamp(0.0, _maxY).toDouble();
@@ -436,7 +439,7 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
   void _onScaleStart(ScaleStartDetails d) {
     _stopSim();
     _startScale = _scale;
-    _startContent = Offset((_ox + d.localFocalPoint.dx) / _scale, (_oy + d.localFocalPoint.dy) / _scale);
+    _startContent = Offset((_ox + d.localFocalPoint.dx) / _scale, (_oy + d.localFocalPoint.dy - _padYFor(_scale)) / _scale);
     _pointers = d.pointerCount;
   }
 
@@ -445,12 +448,12 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
     if (d.pointerCount != _pointers) {
       _pointers = d.pointerCount;
       _startScale = _scale / (d.scale == 0 ? 1 : d.scale);
-      _startContent = Offset((_ox + d.localFocalPoint.dx) / _scale, (_oy + d.localFocalPoint.dy) / _scale);
+      _startContent = Offset((_ox + d.localFocalPoint.dx) / _scale, (_oy + d.localFocalPoint.dy - _padYFor(_scale)) / _scale);
     }
     final double ns = (_startScale * d.scale).clamp(1.0, _maxScale).toDouble();
     _scale = ns;
     _ox = _startContent.dx * ns - d.localFocalPoint.dx;
-    _oy = _startContent.dy * ns - d.localFocalPoint.dy;
+    _oy = _startContent.dy * ns - d.localFocalPoint.dy + _padYFor(ns);
     _moved();
   }
 
@@ -476,6 +479,7 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
           final children = <Widget>[];
           if (_tops.length > 1) {
             final double s = _scale;
+            final double padY = _padYFor(s);
             // 화면 앞뒤로 한 화면 반씩 더 그려 두어 움직일 때 비어 보이지 않게
             final double from = (_oy - _height * 1.5) / s, to = (_oy + _height * 2.5) / s;
             int i = _pageAt(math.max(0, _oy - _height * 1.5));
@@ -487,7 +491,7 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
               children.add(Positioned(
                 key: ValueKey(i),
                 left: -_ox,
-                top: _tops[i] * s - _oy,
+                top: _tops[i] * s - _oy + padY,
                 width: _width * s,
                 height: h,
                 child: RepaintBoundary(child: widget.pageBuilder(context, i)),

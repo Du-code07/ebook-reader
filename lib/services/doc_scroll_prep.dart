@@ -8,7 +8,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'docx_layout_hints.dart';
 import 'page_snapshot_service.dart';
@@ -43,6 +42,24 @@ class DocScrollPrep {
   /// 그림 너비(px)를 정함: 화면 너비 기준, 너무 크면 줄임
   static double renderWidth(double logicalWidth) => math.min(logicalWidth, 900).toDouble();
 
+  /// 사용자가 스크롤 보기를 기다리는 중이면 쉬지 않고, 아니면(쪽 넘김으로 읽는 중) 틈틈이 쉬어 가며
+  static bool urgent = false;
+  static DateTime _lastTouch = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 화면을 만지는 동안에는 잠시 멈춰 보던 화면이 버벅이지 않게
+  static void noteUserActivity() => _lastTouch = DateTime.now();
+
+  static Future<void> _breathe() async {
+    if (urgent) {
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    while (!urgent && DateTime.now().difference(_lastTouch).inMilliseconds < 1500) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+  }
+
   static String _key(String path, String theme, int widthPx) => '$path|$theme|$widthPx';
 
   /// 0~1 (아직 시작 전이면 0, 모르는 일이면 null)
@@ -53,7 +70,7 @@ class DocScrollPrep {
   static Future<Directory?> _dir(String path, String theme, int widthPx) async {
     final base = await PageSnapshotService.documentDir(path);
     if (base == null) return null;
-    final d = Directory('${base.path}/scroll3_${widthPx}_$theme');
+    final d = Directory('${base.path}/scroll4_${widthPx}_$theme');
     if (!d.existsSync()) d.createSync(recursive: true);
     return d;
   }
@@ -66,12 +83,14 @@ class DocScrollPrep {
     return {};
   }
 
-  /// 모든 쪽이 준비되어 있으면 그 묶음, 아니면 null
+  /// 모든 쪽이 준비되어 있으면 그 묶음, 아니면 null.
+  /// [pageCount]를 모르면(0) 저장해 둔 쪽 수로 (파일을 다 읽기 전에 스크롤 보기를 바로 띄울 때)
   static Future<ScrollPageSet?> load(String path, String theme, int widthPx, int pageCount) async {
-    if (pageCount <= 0) return null;
     final d = await _dir(path, theme, widthPx);
     if (d == null) return null;
     final meta = _readMeta(d);
+    if (pageCount <= 0) pageCount = (meta['n'] as num?)?.toInt() ?? 0;
+    if (pageCount <= 0) return null;
     final files = <File>[];
     final aspects = <double>[];
     for (int i = 0; i < pageCount; i++) {
@@ -136,7 +155,8 @@ class DocScrollPrep {
     final bool isDoc = lower.endsWith('.doc');
     final bool isWord = isDocx || isDoc;
     final String prefix = isDocx ? 'docx' : isDoc ? 'doc' : 'hwp';
-    final String entry = '$_origin/assets/flutter_assets/assets/${isWord ? 'docx' : 'hwp'}/index.html';
+    // 주소 끝 표시로 앱(안드로이드)이 이 숨은 화면을 찾아 바로 그림으로 찍음
+    final String entry = '$_origin/assets/flutter_assets/assets/${isWord ? 'docx' : 'hwp'}/index.html?freaderScroll=1';
     final String jsObject = isWord ? 'freaderDocx' : 'freaderHwp';
 
     final source = File(job.path);
@@ -273,8 +293,6 @@ class DocScrollPrep {
       },
     );
 
-    final tmpDir = await getTemporaryDirectory();
-    final tmp = File('${tmpDir.path}/scroll_shot_${DateTime.now().microsecondsSinceEpoch}.png');
     final int paper = job.theme == 'dark' ? 0xFF1E1E1E : 0xFFFFFFFF;
     try {
       await headless.run();
@@ -285,7 +303,9 @@ class DocScrollPrep {
       final count = await loaded.future.timeout(const Duration(minutes: 3), onTimeout: () => -1);
       if (count != job.pageCount) return false;
       int done = job.pageCount - todo.length;
+      meta['n'] = job.pageCount;
       for (final i in todo) {
+        await _breathe();
         // 이 쪽을 그리고, 그림까지 다 채워지면 찍음
         if (lastReady != i) {
           readyWaiter = Completer<void>();
@@ -300,21 +320,30 @@ class DocScrollPrep {
           final r = await call('pageRect', []);
           if (r is Map) rect = r;
         } catch (_) {}
-        final shot = await web?.takeScreenshot(
-          screenshotConfiguration: ScreenshotConfiguration(compressFormat: CompressFormat.PNG, quality: 100),
-        );
-        if (shot == null || shot.length < 64) return false;
-        await tmp.writeAsBytes(shot, flush: true);
         double v(Object? x) => (x as num?)?.toDouble() ?? 0;
         final out = File('${dir.path}/p$i.jpg');
-        final size = await _native.invokeMethod<List<Object?>>('cropTrimImage', {
-          'input': tmp.path,
+        final args = {
           'output': out.path,
           if (rect != null && v(rect['w']) > 0.05 && v(rect['h']) > 0.05) 'crop': [v(rect['x']), v(rect['y']), v(rect['w']), v(rect['h'])],
-          'trim': true,
           'paper': paper,
           'pad': 0.035,
-        });
+        };
+        List<Object?>? size;
+        try {
+          size = await _native.invokeMethod<List<Object?>>('captureScrollPage', args);
+        } catch (_) {
+          // 바로 찍기가 안 되는 기기: 화면 찍기 → 자르기
+          final shot = await web?.takeScreenshot(
+            screenshotConfiguration: ScreenshotConfiguration(compressFormat: CompressFormat.JPEG, quality: 95),
+          );
+          if (shot == null || shot.length < 64) return false;
+          final tmp = File('${dir.path}/shot.tmp');
+          await tmp.writeAsBytes(shot, flush: true);
+          size = await _native.invokeMethod<List<Object?>>('cropTrimImage', {...args, 'input': tmp.path, 'trim': true});
+          try {
+            tmp.deleteSync();
+          } catch (_) {}
+        }
         if (size == null || size.length < 2) return false;
         final double ow = v(size[0]), oh = v(size[1]);
         meta['$i'] = ow <= 0 ? 1.414 : (oh / ow).clamp(0.02, 8.0).toDouble();
@@ -331,9 +360,6 @@ class DocScrollPrep {
     } catch (_) {
       return false;
     } finally {
-      try {
-        if (tmp.existsSync()) tmp.deleteSync();
-      } catch (_) {}
       try {
         await headless.dispose();
       } catch (_) {}

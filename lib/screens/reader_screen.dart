@@ -485,6 +485,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _initialCfi = _currentCfi;
       _docScrollReady = false;
     });
+    DocScrollPrep.urgent = _pageModeScroll;
     if (_pageModeScroll && _isOfflineDocument && !_isTxt && !_isSpreadsheet) {
       if (_usesBackgroundScroll) {
         _requestScrollPrep();
@@ -754,12 +755,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _isLoading = false;
     });
     unawaited(_snapInit());
+    // 스크롤 보기로 열면: 미리 만들어 둔 쪽 그림이 있으면 파일을 다 읽기 전에 바로 보여 줌
+    if (_pageModeScroll && _usesBackgroundScroll) {
+      DocScrollPrep.urgent = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_refreshScrollSet()));
+    }
   }
 
   // ── 페이지 이동: EPUB이면 EPUB 뷰어, TXT·워드·한글이면 각 문서 뷰어로 보낸다 ──
   /// 스크롤 모드의 한글·워드·PPT·TXT: 쪽 그림 목록을 한 화면씩 움직임
   bool get _docScrollActive => _pageModeScroll && _isOfflineDocument && !_isSpreadsheet && (_isTxt || _docScrollReadyNow);
-  bool get _docScrollReadyNow => _usesBackgroundScroll ? (_docPageCount > 0 && _scrollSet?.files.length == _docPageCount) : _docScrollReady;
+  bool get _docScrollReadyNow => _usesBackgroundScroll
+      ? (_scrollSet != null && (_docPageCount == 0 || _scrollSet!.files.length == _docPageCount))
+      : _docScrollReady;
 
   void _readerNext() {
     if (_docScrollActive) {
@@ -1217,7 +1225,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// 지금 배경색의 그림이 다 있으면 그것을, 없으면 다른 배경색 그림을 색만 바꿔 바로 보여 줌
   Future<void> _refreshScrollSet() async {
-    if (!mounted || !_usesBackgroundScroll || _docPageCount <= 0) return;
+    if (!mounted || !_usesBackgroundScroll) return;
     final int serial = ++_scrollSetSerial;
     final px = _scrollRenderSize().px;
     final theme = _scrollTheme;
@@ -1225,7 +1233,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     ScrollPageSet? set = await DocScrollPrep.load(widget.filePath, theme, px, n);
     if (set == null) {
       final cur = _scrollSet;
-      if (cur != null && cur.files.length == n && cur.files.isNotEmpty && cur.files.first.path.contains('/scroll3_${px}_')) {
+      if (cur != null && (n == 0 || cur.files.length == n) && cur.files.isNotEmpty && cur.files.first.path.contains('/scroll4_${px}_')) {
         set = cur; // 다른 배경색 그림으로 임시 표시 중
       } else {
         set = await DocScrollPrep.load(widget.filePath, theme == 'dark' ? 'white' : 'dark', px, n);
@@ -1268,13 +1276,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   Widget _scrollLoading(double progress) {
     final bg = _getBgColor();
+    // 파일을 아직 읽는 중이면 '파일 여는 중', 그 뒤에 쪽 그림을 만드는 동안만 '스크롤 보기 준비 중'
+    final bool opening = _docPageCount <= 0;
     return ColoredBox(
       color: bg,
-      child: FileLoadingView(
-        label: _tr('스크롤 보기 준비 중', 'Preparing scroll view', '正在准备滚动视图', 'スクロール表示を準備中'),
-        progress: progress,
-        sublabel: _tr('한 번 준비하면 다음부터는 바로 열려요', 'Opens instantly next time', '准备一次后下次即可直接打开', '次回からはすぐに開きます'),
-        background: bg,
+      // 설정 창이 아래 절반을 덮어도 보이도록 화면 위쪽에
+      child: Align(
+        alignment: const Alignment(0, -0.45),
+        child: FileLoadingView(
+          label: opening
+              ? _tr('파일 여는 중', 'Opening file', '正在打开文件', 'ファイルを開いています')
+              : _tr('스크롤 보기 준비 중', 'Preparing scroll view', '正在准备滚动视图', 'スクロール表示を準備中'),
+          progress: opening ? null : progress,
+          sublabel: opening ? null : _tr('한 번 준비하면 다음부터는 빠르게 열려요', 'Opens faster next time', '准备一次后下次会更快打开', '次回からは速く開きます'),
+          background: bg,
+        ),
       ),
     );
   }
@@ -1285,9 +1301,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_usesBackgroundScroll) {
       final sz = _scrollRenderSize();
       final set = _scrollSet;
-      if (set == null || set.files.length != _docPageCount || _docPageCount <= 0 || !set.files.first.path.contains('/scroll3_${sz.px}_')) {
+      if (set == null || (_docPageCount > 0 && set.files.length != _docPageCount) || !set.files.first.path.contains('/scroll4_${sz.px}_')) {
         // 화면 너비가 바뀌었으면(회전) 그 너비로 다시 준비
-        if (_docPageCount > 0 && (set == null || !set.files.first.path.contains('/scroll3_${sz.px}_'))) {
+        if (_docPageCount > 0 && (set == null || !set.files.first.path.contains('/scroll4_${sz.px}_'))) {
           WidgetsBinding.instance.addPostFrameCallback((_) => _requestScrollPrep());
         }
         return _scrollLoading(DocScrollPrep.progressOf(widget.filePath, _scrollTheme, sz.px) ?? 0);
@@ -2422,6 +2438,61 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     disposeSheetControllerWhenDone(sheetCtrl);
   }
 
+  // EPUB 스크롤 보기: 지금 장의 처음/끝에 닿았는지
+  bool _chAtStart = false, _chAtEnd = false, _chFirst = true, _chLast = false;
+
+  /// 장 이동 버튼 높이: 아래 진행바·도구 모음 바·필기 도구 막대가 있으면 그 위에
+  double _chapterButtonsBottom(double bottomPadding) {
+    double b = math.max<double>(bottomPadding + 16.0, 20.0) + 8.0;
+    if ((_showControls && _progressBarPos == 'bottom') || _useQuickNavTurn) b += 44.0;
+    if (_isMemoMode && _memoToolbarPos == 'bottom') b += 60.0;
+    if (_showControls && _toolbarStyle == 'bar') b += 62.0;
+    return b;
+  }
+
+  Widget _buildChapterButtons() {
+    final bool dark = _getBgColor().computeLuminance() < 0.4;
+    final Color bg = dark ? const Color(0xFF111111) : const Color(0xFFF1F1F4);
+    final Color fg = dark ? Colors.white : const Color(0xFF222222);
+    final Color border = dark ? Colors.white24 : Colors.black12;
+    Widget button(String label, IconData icon, bool enabled, int dir) => Opacity(
+          opacity: enabled ? 1 : 0.35,
+          child: Material(
+            color: bg,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: border)),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: enabled
+                  ? () {
+                      HapticFeedback.selectionClick();
+                      setState(() {
+                        _chAtStart = false;
+                        _chAtEnd = false;
+                      });
+                      _epubController.goChapter(dir);
+                    }
+                  : null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(icon, size: 20, color: fg),
+                  const SizedBox(width: 8),
+                  Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: fg)),
+                ]),
+              ),
+            ),
+          ),
+        );
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        button(_tr('이전 챕터', 'Prev chapter', '上一章', '前の章'), Icons.keyboard_arrow_up_rounded, !_chFirst, -1),
+        const SizedBox(width: 12),
+        button(_tr('다음 챕터', 'Next chapter', '下一章', '次の章'), Icons.keyboard_arrow_down_rounded, !_chLast, 1),
+      ],
+    );
+  }
+
   /// 목차 열기: 책 화면을 그림으로 잠시 바꿔 두고 열어 움직임이 끊기지 않게
   Uint8List? _tocFreeze;
   Future<void> _openToc() async {
@@ -3188,11 +3259,20 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       }
       return;
     }
+    // 이미 다른 손가락이 닿아 있으면(두 손가락) 그 동작은 탭이 아님
+    if (_pointerDownPosition != null && _pointerDownTime != null && _tapPointers > 0) {
+      _swipeMultiTouch = true;
+    }
+    _tapPointers++;
     _pointerDownPosition = event.position;
     _pointerDownTime = DateTime.now();
   }
+  int _tapPointers = 0;
 
   void _handlePointerUp(PointerUpEvent event, Size screenSize) {
+    if (_tapPointers > 0) _tapPointers--;
+    // 두 손가락 중 하나를 먼저 뗀 경우: 나머지를 뗄 때까지 기다림 (탭으로 처리하지 않음)
+    if (_tapPointers > 0) return;
     if (_isStylusDown &&
         (event.kind == PointerDeviceKind.stylus ||
             event.kind == PointerDeviceKind.invertedStylus)) {
@@ -3216,7 +3296,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _pointerDownTime = null;
       return;
     }
-    if (distance < 24.0 && duration < 380) {
+    // 두 손가락(확대·축소)을 쓴 동작은 탭으로 보지 않음
+    final bool multiTouch = _swipeMultiTouch || _tapPointers > 0;
+    if (distance < 24.0 && duration < 380 && !multiTouch) {
       if (_hasTextSelection && !_isOfflineDocument) {
         // 글이 선택된 상태에서 화면을 누르면 선택 표시만 지움
         _clearEpubSelection();
@@ -3661,6 +3743,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   void dispose() {
     DocScrollPrep.changed.removeListener(_onScrollPrepChanged);
+    DocScrollPrep.urgent = false;
     SystemBars.leaveViewer();
     _snapHideTimer?.cancel();
     _slideShowExitTimer?.cancel();
@@ -4072,6 +4155,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   child: Listener(
                     behavior: HitTestBehavior.translucent,
                     onPointerDown: (event) {
+                      DocScrollPrep.noteUserActivity();
                       _vPageSwipe.down(event);
                       _vPeekOnDown(event);
                       _swipeTrackDown(event);
@@ -4095,6 +4179,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       _handlePointerUp(event, screenSize);
                     },
                     onPointerCancel: (event) {
+                      if (_tapPointers > 0) _tapPointers--;
+                      if (_tapPointers == 0) {
+                        _pointerDownPosition = null;
+                        _pointerDownTime = null;
+                      }
                       final gesture = _vGestureSeq;
                       _vPageSwipe.up(
                         event,
@@ -4140,14 +4229,20 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                           setState(() => _epubZoomScale = s);
                         }
                       },
-                      child: GestureDetector(
+                      child: RawGestureDetector(
                         behavior: HitTestBehavior.translucent,
-                        // 빠르게 튕기는 스와이프는 WebView보다 먼저 Flutter가 받아 직접 페이지를 넘긴다
-                        onHorizontalDragStart: _swipeFlutterOwned ? _onFlickStart : null,
-                        onHorizontalDragUpdate: !_isSpreadsheet && !_useSwipeTurn
-                            ? (_) {}
-                            : (_swipeFlutterOwned ? _onFlickUpdate : null),
-                        onHorizontalDragEnd: _swipeFlutterOwned ? _onFlickEnd : null,
+                        // 빠르게 튕기는 스와이프는 WebView보다 먼저 Flutter가 받아 직접 페이지를 넘긴다.
+                        // 손가락 한 개일 때만 (두 손가락이면 확대·축소가 가져가게), 스크롤 모드에서는 쓰지 않음
+                        gestures: {
+                          if (_swipeFlutterOwned && !_pageModeScroll)
+                            _OneFingerHorizontalDrag: GestureRecognizerFactoryWithHandlers<_OneFingerHorizontalDrag>(
+                              () => _OneFingerHorizontalDrag(),
+                              (r) => r
+                                ..onStart = _onFlickStart
+                                ..onUpdate = _onFlickUpdate
+                                ..onEnd = _onFlickEnd,
+                            ),
+                        },
                         child: AfterRouteTransition(builder: (_) => UiUnscale(child: _isOfflineDocument ? _buildDocumentViewer(isLandscape) : Stack(fit: StackFit.expand, children: [
 // 목차를 여닫는 동안에는 책 화면(WebView)을 잠시 그림으로 바꿔 끊김 없이
 Offstage(offstage: _tocFreeze != null, child: EpubViewer(
@@ -4224,6 +4319,17 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                     },
                     onDeselection: () {
                       _hasTextSelection = false;
+                    },
+                    onChapterEdge: (atStart, atEnd, first, last) {
+                      if (!mounted) return;
+                      if (atStart != _chAtStart || atEnd != _chAtEnd || first != _chFirst || last != _chLast) {
+                        setState(() {
+                          _chAtStart = atStart;
+                          _chAtEnd = atEnd;
+                          _chFirst = first;
+                          _chLast = last;
+                        });
+                      }
                     },
                     onRelocated: (value) async {
                       if (!_epubDisplayed && mounted) setState(() => _epubDisplayed = true);
@@ -4555,6 +4661,15 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
             if (_useQuickNavTurn && !_isTouchLocked && !_slideShow)
               _buildQuickNavButtons(bottomPadding),
 
+            // EPUB 스크롤 보기: 장의 끝(또는 처음)에 닿으면 '이전 챕터 / 다음 챕터'
+            if (_isEpub && _pageModeScroll && !_slideShow && !_isTouchLocked && (_chAtEnd || (_chAtStart && !_chFirst)))
+              Positioned(
+                left: 16.0 + _safeSides.left,
+                right: 16.0 + _safeSides.right,
+                bottom: _chapterButtonsBottom(bottomPadding),
+                child: _buildChapterButtons(),
+              ),
+
             // 도구 모음 버튼 + 활 모양 메뉴 (상단바/진행바와 함께 보였다 사라짐)
             // 평소엔 진행바 바로 위에 붙어 있고, 열리면 호가 진행바에 닿지 않을 만큼 올라간다
             // 도구 모음 '바' 형태: 화면 아래 가로 막대 (뷰어 설정 → 도구 모음 형태)
@@ -4589,5 +4704,32 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
         ),
       ),
     );
+  }
+}
+
+/// 손가락 한 개로 가로로 미는 동작만 받는 인식기 (두 번째 손가락이 닿으면 물러나 확대·축소가 이기게)
+class _OneFingerHorizontalDrag extends HorizontalDragGestureRecognizer {
+  int _down = 0;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    _down++;
+    if (_down > 1) {
+      resolve(GestureDisposition.rejected);
+      return;
+    }
+    super.addAllowedPointer(event);
+  }
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {
+    _down = 0;
+    super.didStopTrackingLastPointer(pointer);
+  }
+
+  @override
+  void rejectGesture(int pointer) {
+    _down = 0;
+    super.rejectGesture(pointer);
   }
 }
