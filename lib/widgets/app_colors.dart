@@ -23,13 +23,8 @@ class MorphIcon extends StatelessWidget {
       duration: kIconMotion,
       switchInCurve: kIconCurve,
       switchOutCurve: kIconCurve,
-      transitionBuilder: (child, anim) => FadeTransition(
-        opacity: anim,
-        child: RotationTransition(
-          turns: Tween<double>(begin: -0.125, end: 0).animate(anim),
-          child: ScaleTransition(scale: Tween<double>(begin: 0.7, end: 1).animate(anim), child: child),
-        ),
-      ),
+      // 모양이 아예 바뀔 때는 살짝 겹쳐 바뀌고, 새 아이콘은 스스로 조각이 미끄러지며 제자리로 (morph_icons.dart)
+      transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
       child: child,
     );
   }

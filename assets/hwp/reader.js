@@ -451,6 +451,14 @@ function vLayout(keep) {
     vTops.push(y); y += sh + V_GAP;
   }
   vTops.push(y);
+  // 쪽이 화면보다 짧으면(1쪽뿐인 문서 등) 위에 붙이지 않고 화면 가운데에
+  const total = y - V_GAP, viewH = vhost.clientHeight || innerHeight;
+  const pad = total < viewH ? Math.floor((viewH - total) / 2) : 0;
+  if (vSlots.length) {
+    vSlots[0].style.marginTop = pad ? `${pad}px` : '';
+    vSlots[vSlots.length - 1].style.marginBottom = pad ? '0px' : '';
+  }
+  if (pad) for (let i = 0; i < vTops.length; i++) vTops[i] += pad;
   vhost.scrollTop = vTops[anchor] + frac * (vTops[anchor + 1] - vTops[anchor]);
   vUpdate();
 }

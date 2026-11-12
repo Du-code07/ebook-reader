@@ -193,6 +193,8 @@ function convertDrawing(drawing) {
   head = head.replace(/<wp:cNvGraphicFramePr\s*\/>/, '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>');
   const picXml = setChildXfrm(main.xml, main.cx, main.cy);
   let out = `${head}<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">${picXml}</a:graphicData>${after}`;
+  // 한 장으로 못 합칠 때 쓰는 대체본: 사진만 (따로 얹은 테두리 상자가 기기에 따라 엉뚱한 자리에 크게 보이던 것 방지)
+  let picsOnly = out;
   // 한 장의 그림으로 합칠 준비 (사진 위에 테두리 상자 등을 그려 넣음 → 위치가 어긋날 일이 없음)
   const parts = children.filter(c => c.cx > 0 && c.cy > 0 && c.kind !== 'wpg:grpSp');
   let composite = null;
@@ -222,17 +224,20 @@ function convertDrawing(drawing) {
       let content;
       if (extra.kind === 'pic:pic') content = setChildXfrm(extra.xml, extra.cx, extra.cy);
       else {
+        if (composite) continue; // 합칠 그룹의 도형은 따로 그리지 않음 (합친 그림 안에 들어가거나, 못 합치면 빼고 사진만)
         const job = shapeJob(extra.xml, extra.cx, extra.cy);
         if (!job) continue;
         content = pictureFor(job);
       }
       h = h.replace(/<wp:cNvGraphicFramePr\s*\/>/, '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>');
-      out += `${h}<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">${content}</a:graphicData>${after}`;
+      const piece = `${h}<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">${content}</a:graphicData>${after}`;
+      out += piece;
+      if (extra.kind === 'pic:pic') picsOnly += piece;
     }
   }
   if (composite) {
     const job = groupJobs[groupJobs.length - 1];
-    job.fallback = out;
+    job.fallback = picsOnly;
     return `<!--FREADER_GROUP_${job.n}-->`;
   }
   return out;
@@ -247,7 +252,14 @@ async function renderComposite(job, mediaBytes) {
     const rid = /<a:blip\b[^>]*r:embed="([^"]+)"/.exec(part.xml)?.[1];
     const bytes = rid ? mediaBytes(rid) : null;
     if (!bytes) return null;
-    bitmaps.set(part, await createImageBitmap(new Blob([await bytes])));
+    const data = await bytes;
+    let bmp = null;
+    try { bmp = await createImageBitmap(new Blob([data])); } catch (_) {
+      // 종류를 알려 주면 읽히는 기기가 있음
+      const type = data[0] === 0x89 ? 'image/png' : data[0] === 0xFF ? 'image/jpeg' : data[0] === 0x47 ? 'image/gif' : 'image/bmp';
+      bmp = await createImageBitmap(new Blob([data], { type }));
+    }
+    bitmaps.set(part, bmp);
   }
   const mainBmp = bitmaps.get(job.main);
   if (!mainBmp) return null;

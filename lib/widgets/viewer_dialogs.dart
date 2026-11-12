@@ -247,7 +247,10 @@ class ContinuousPageController {
 /// 스크롤 보기 오른쪽의 회색 막대: 지금 위치를 보여 주고, 끌면 그 비율 위치로 바로 이동
 /// [ratio]: 0(처음)~1(끝), [viewFraction]: 화면에 보이는 부분 / 전체 (막대 길이)
 class ScrollThumbBar extends StatefulWidget {
-  const ScrollThumbBar({super.key, required this.ratio, required this.viewFraction, required this.onDragRatio, this.onDragStart, this.onDragEnd, this.left});
+  const ScrollThumbBar({super.key, required this.ratio, required this.viewFraction, required this.onDragRatio, this.onDragStart, this.onDragEnd, this.left, this.color});
+
+  /// 막대 색 (세피아처럼 회색이 잘 안 보이는 바탕에서 바꿈)
+  final Color? color;
 
   /// 왼손잡이: 막대를 왼쪽에 (null이면 앱 설정 [leftHanded]를 따름)
   final bool? left;
@@ -379,7 +382,7 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
                   margin: EdgeInsets.only(left: left ? 3 : 0, right: left ? 0 : 3),
                   width: _dragging ? 9 : 6,
                   decoration: BoxDecoration(
-                    color: Colors.grey.withValues(alpha: _dragging ? 0.9 : 0.65),
+                    color: (widget.color ?? Colors.grey).withValues(alpha: _dragging ? 0.95 : (widget.color == null ? 0.65 : 0.8)),
                     borderRadius: BorderRadius.circular(4),
                   ),
                 ),

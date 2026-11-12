@@ -29,7 +29,7 @@ import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
 import '../widgets/viewer_dialogs.dart';
 import '../widgets/app_colors.dart';
-import '../widgets/torn_paper_icon.dart';
+import '../widgets/morph_icons.dart';
 import '../widgets/word_selection_layer.dart';
 import '../widgets/ui_scale.dart';
 import '../widgets/sheet_pull_to_close.dart';
@@ -3621,6 +3621,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
     if (box == null || overlay == null) return;
     final Offset tl = box.localToGlobal(Offset(0, box.size.height), ancestor: overlay);
+    setState(() => _bgMenuOpen = true);
     final picked = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(tl.dx, tl.dy, overlay.size.width - tl.dx - box.size.width, 0),
@@ -3628,8 +3629,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         for (final (v, label, icon) in <(String, String, Widget)>[
           ('white', _tr('라이트', 'Light', '浅色', 'ライト'), const Icon(Icons.light_mode_outlined, size: 18)),
           ('dark', _tr('다크', 'Dark', '深色', 'ダーク'), const Icon(Icons.dark_mode_outlined, size: 18)),
-          // 종이색: 살짝 찢어진 종이 모양
-          ('sepia', _tr('종이색', 'Paper', '纸张色', '紙色'), const TornPaperIcon(size: 18)),
+          // 세피아: 양피지 모양
+          ('sepia', _tr('세피아', 'Sepia', '棕褐色', 'セピア'), const ParchmentIcon(size: 19)),
         ])
           PopupMenuItem<String>(
             value: v,
@@ -3642,8 +3643,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           ),
       ],
     );
+    if (mounted) setState(() => _bgMenuOpen = false);
     if (picked != null && picked != _epubBgTheme && mounted) await _setEpubThemeMode(picked);
   }
+
+  /// 배경 색상 메뉴가 열려 있는 동안 (아이콘 움직임)
+  bool _bgMenuOpen = false;
 
   Future<void> _setEpubThemeMode(String mode) async {
     await StorageService.setEpubBgTheme(mode);
@@ -4645,6 +4650,8 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                                   final double top = m[0], height = m[1], client = m[2];
                                   if (height <= client + 1 || client <= 0) return const SizedBox.shrink();
                                   return ScrollThumbBar(
+                                    // 세피아: 종이 질감 위에서도 잘 보이게 진한 갈색
+                                    color: _isPaperTheme ? const Color(0xFF6B4A22) : null,
                                     ratio: top / (height - client),
                                     viewFraction: client / height,
                                     onDragRatio: (r) {
@@ -4909,12 +4916,16 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                                   padding: btnPadding,
                                   constraints: btnConstraints,
                                   // 바뀔 때 [전체] 그룹 아이콘과 같은 느낌으로 움직임 (기본 움직임)
+                                  // 메뉴가 열려 있는 동안 달 그림자(또는 양피지)가 미끄러지듯 바뀜
                                   icon: MorphIcon(
                                     child: _epubBgTheme == 'sepia'
-                                        ? const TornPaperIcon(key: ValueKey('bg-sepia'), size: 18, color: Colors.white)
-                                        : Icon(_epubBgTheme == 'dark' ? Icons.dark_mode : Icons.dark_mode_outlined,
-                                            key: ValueKey('bg-${_epubBgTheme == 'dark'}'),
-                                            color: _epubBgTheme == 'dark' ? Colors.amber : Colors.white, size: 18),
+                                        ? ParchmentIcon(key: const ValueKey('bg-sepia'), size: 19, open: _bgMenuOpen)
+                                        : MoonMorphIcon(
+                                            key: const ValueKey('bg-moon'),
+                                            size: 19,
+                                            filled: _epubBgTheme == 'dark',
+                                            open: _bgMenuOpen,
+                                            color: Colors.white),
                                   ),
                                   tooltip: _tr('배경 색상', 'Background Color', '背景颜色', '背景色'),
                                   onPressed: () => _pickBgTheme(btnCtx),

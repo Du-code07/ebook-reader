@@ -19,6 +19,7 @@ import 'widgets/favorite_ribbon.dart';
 import 'widgets/group_stack_icon.dart';
 import 'widgets/group_jump_menu.dart';
 import 'widgets/group_dropdown.dart';
+import 'widgets/morph_icons.dart';
 import 'widgets/viewer_dialogs.dart';
 import 'widgets/ui_scale.dart';
 import 'widgets/app_colors.dart';
@@ -168,14 +169,15 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
 
   /// 앱 테마: 다크는 기본(남색 기운) / 완전 다크(검정) / 밝은 다크(회색) 세 가지
   /// 글씨·아이콘은 전체적으로 조금 작게 (아이콘 기본 21)
-  static TextTheme _boldTitles(TextTheme t) => t.copyWith(
-        headlineLarge: t.headlineLarge?.copyWith(fontWeight: FontWeight.w800),
-        headlineMedium: t.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
-        headlineSmall: t.headlineSmall?.copyWith(fontWeight: FontWeight.w800), // 대화창 제목
-        titleLarge: t.titleLarge?.copyWith(fontWeight: FontWeight.w800), // 상단바 제목
-        titleMedium: t.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-        titleSmall: t.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-      );
+  // 굵기만 정함 (글꼴은 비워 두어 앱 글꼴이 그대로 적용되게)
+  static const TextTheme _boldTitles = TextTheme(
+    headlineLarge: TextStyle(fontWeight: FontWeight.w800),
+    headlineMedium: TextStyle(fontWeight: FontWeight.w800),
+    headlineSmall: TextStyle(fontWeight: FontWeight.w800), // 대화창 제목
+    titleLarge: TextStyle(fontWeight: FontWeight.w800), // 상단바 제목
+    titleMedium: TextStyle(fontWeight: FontWeight.w700),
+    titleSmall: TextStyle(fontWeight: FontWeight.w700),
+  );
 
   ThemeData _appTheme(Brightness b, {String variant = 'dark'}) {
     final appFont = UserFonts.appFont.value;
@@ -226,7 +228,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
       // 상단바 아이콘: 테마 글자색 (다크·밝은 다크에서도 보이게)
       // 제목 느낌의 글씨는 모두 굵게 (상단바 제목·창 제목·항목 제목)
-      textTheme: _boldTitles(ThemeData(brightness: b, useMaterial3: true).textTheme),
+      textTheme: _boldTitles,
       appBarTheme: AppBarTheme(
         iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
         actionsIconTheme: IconThemeData(size: 21, color: scheme.onSurfaceVariant),
@@ -628,7 +630,7 @@ class UserManualScreen extends StatelessWidget {
             _buildIconGuideRow(
               iconWidget: const Icon(Icons.tune, color: Colors.white, size: 19),
               title: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
-              desc: _tr('글자 크기·배경색(라이트/다크/종이색 — 종이색은 EPUB만), 화면 잠금 방식(흔들기 / 음량 버튼 동시 입력), 페이지 모드(탭 / 스크롤 / 슬라이드), 페이지 넘김 버튼(음량 / 페이지 이동 / S펜), 진행도 UI 위치를 설정합니다.', 'Configure font size, background (light/dark/paper — paper for EPUB only), screen lock (shake / dual volume), page turn buttons, and progress bar position.', '设置字号、背景色（浅色/深色/纸张色）、屏幕锁定方式（摇晃/双音量键）、翻页按钮及进度条位置。', '文字サイズ・背景色(ライト/ダーク/紙色)、画面ロック方式(振る/音量同時押し)、ページ 전환、進行度バー位置を設定します。'),
+              desc: _tr('글자 크기·배경색(라이트/다크/세피아 — 세피아는 EPUB만), 화면 잠금 방식(흔들기 / 음량 버튼 동시 입력), 페이지 모드(탭 / 스크롤 / 슬라이드), 페이지 넘김 버튼(음량 / 페이지 이동 / S펜), 진행도 UI 위치를 설정합니다.', 'Configure font size, background (light/dark/sepia — sepia for EPUB only), screen lock (shake / dual volume), page turn buttons, and progress bar position.', '设置字号、背景色（浅色/深色/棕褐色）、屏幕锁定方式（摇晃/双音量键）、翻页按钮及进度条位置。', '文字サイズ・背景色(ライト/ダーク/セピア)、画面ロック方式(振る/音量同時押し)、ページ 전환、進行度バー位置を設定します。'),
             ),
 
             const Divider(height: 36),
@@ -2365,12 +2367,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             setState(() => _fabOpen = !_fabOpen);
           },
           // 아이콘 움직임: [전체] 그룹 아이콘과 같은 빠르기·느낌 (기본 움직임)
-          icon: AnimatedRotation(
-            turns: _fabOpen ? 0.125 : 0,
-            duration: kIconMotion,
-            curve: kIconCurve,
-            child: const Icon(Icons.add),
-          ),
+          icon: PlusCloseIcon(open: _fabOpen, size: 24),
           label: Text(_fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
               style: const TextStyle(fontWeight: FontWeight.w800)),
         ),
@@ -2395,46 +2392,27 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     return map[n];
   }
 
-  /// [☰ 그룹] 단추 하나: 지금 보는 그룹 이름(또는 즐겨찾기)을 보여 주고, 누르면 바로 아래로 그룹 목록이 펼쳐짐
+  /// [그룹] 단추 하나 (예전 [전체] 단추와 같은 크기·아이콘): 누르면 아이콘이 펼쳐지며 바로 아래로 그룹 목록
   Widget _buildGroupBar() {
     final cs = Theme.of(context).colorScheme;
-    final String label = _favoritesOnly ? _tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り') : _localizeGroupName(_selectedGroup);
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        child: Material(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: ChoiceChip(
           key: _allGroupChipKey,
-          color: cs.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-            // 목록이 펼쳐진 동안은 시그니처 연두 테두리
-            side: BorderSide(color: _groupMenuOpen ? AppColors.of(context) : cs.outlineVariant, width: _groupMenuOpen ? 2 : 1),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () {
-              if (_searchOpen) {
-                _closeSearch();
-                return;
-              }
-              if (_fabOpen) setState(() => _fabOpen = false);
-              _showGroupJumpMenu();
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.menu, size: 20, color: cs.onSurface),
-                const SizedBox(width: 8),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 220),
-                  child: Text(label,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: cs.onSurface)),
-                ),
-              ]),
-            ),
-          ),
+          avatar: GroupStackIcon(size: 17, spread: _groupMenuOpen, color: cs.onSecondaryContainer),
+          showCheckmark: false,
+          label: Text(_tr('그룹', 'Groups', '分组', 'グループ')),
+          selected: true,
+          onSelected: (_) {
+            if (_searchOpen) {
+              _closeSearch();
+              return;
+            }
+            if (_fabOpen) setState(() => _fabOpen = false);
+            _showGroupJumpMenu();
+          },
         ),
       ),
     );
