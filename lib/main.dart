@@ -3242,10 +3242,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                 Container(
                   padding: const EdgeInsets.fromLTRB(7, 4, 2, 5),
                   color: widget.isDarkMode ? const Color(0xFF0F172A) : Colors.white,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
+                  // 그룹 이름·쪽 표시가 없으면 이름 줄을 칸 가운데에 (높이는 그대로, 생기면 다시 위로)
+                  child: Builder(builder: (_) {
+                    final meta = _fileMetaText(file.path, grpDisplay, showGroupLabel);
+                    final Widget nameRow =
                       Row(
                         children: [
                           // 파일 이름 앞 형식 아이콘
@@ -3278,12 +3278,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                               ),
                             ),
                         ],
-                      ),
-                      ...[
+                      );
+                    final Widget column = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        nameRow,
                         const SizedBox(height: 1),
                         Text(
                           // 그룹 이름 오른쪽에 마지막으로 읽은 쪽 (특정 그룹 탭에서는 쪽만)
-                          _fileMetaText(file.path, grpDisplay, showGroupLabel),
+                          meta.isEmpty ? ' ' : meta,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -3292,8 +3296,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           ),
                         ),
                       ],
-                    ],
-                  ),
+                    );
+                    if (meta.isNotEmpty) return column;
+                    return Stack(
+                      children: [
+                        IgnorePointer(child: ExcludeSemantics(child: Opacity(opacity: 0, child: column))),
+                        Positioned.fill(child: Align(alignment: Alignment.centerLeft, child: nameRow)),
+                      ],
+                    );
+                  }),
                 ),
               ],
             ),
@@ -3638,20 +3649,21 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: Builder(
-                              builder: (context) {
-                                final grpDisplay = _localizeGroupName(grp);
-                                // 10. [전체]에서만 그룹 이름 표시, 특정 그룹 선택 시 그룹 이름 표시 제거
-                                // 그룹 이름 오른쪽: 마지막으로 읽은 쪽 (예: (6/983))
-                                final subText = _fileMetaText(file.path, grpDisplay, _selectedGroup == '전체' && !_hideGroupName);
-                                return Text(
-                                  subText,
-                                  style: const TextStyle(fontSize: 12),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                );
-                              },
-                            ),
+                            // 그룹 이름·쪽 표시가 없으면 이름만 줄 가운데에 (생기면 다시 위로)
+                            subtitle: () {
+                              // 10. [전체]에서만 그룹 이름 표시, 특정 그룹 선택 시 그룹 이름 표시 제거
+                              // 그룹 이름 오른쪽: 마지막으로 읽은 쪽 (예: (6/983))
+                              final subText = _fileMetaText(file.path, _localizeGroupName(grp), _selectedGroup == '전체' && !_hideGroupName);
+                              if (subText.isEmpty) return null;
+                              return Text(
+                                subText,
+                                style: const TextStyle(fontSize: 12),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              );
+                            }(),
+                            // 아래 줄이 없어도 줄 높이는 그대로
+                            minTileHeight: 72,
                             trailing: _isSelectionMode
                                 ? null
                                 // 가로 점 3개: 이름 변경 / 그룹 이동 (표지형 세로 점 3개 메뉴와 같은 모양)

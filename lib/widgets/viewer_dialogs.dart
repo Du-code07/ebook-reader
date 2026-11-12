@@ -236,6 +236,78 @@ class ContinuousPageController {
   void scrollByScreen(int dir) => _state?._scrollByScreen(dir);
 }
 
+/// 스크롤 보기 오른쪽의 회색 막대: 지금 위치를 보여 주고, 끌면 그 비율 위치로 바로 이동
+/// [ratio]: 0(처음)~1(끝), [viewFraction]: 화면에 보이는 부분 / 전체 (막대 길이)
+class ScrollThumbBar extends StatefulWidget {
+  const ScrollThumbBar({super.key, required this.ratio, required this.viewFraction, required this.onDragRatio, this.onDragStart, this.onDragEnd});
+  final double ratio;
+  final double viewFraction;
+  final ValueChanged<double> onDragRatio;
+  final VoidCallback? onDragStart;
+  final VoidCallback? onDragEnd;
+
+  @override
+  State<ScrollThumbBar> createState() => _ScrollThumbBarState();
+}
+
+class _ScrollThumbBarState extends State<ScrollThumbBar> {
+  bool _dragging = false;
+  double _dragRatio = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, c) {
+      final double h = c.maxHeight;
+      if (!h.isFinite || h <= 0) return const SizedBox.shrink();
+      final double thumb = (h * widget.viewFraction).clamp(44.0, math.max(44.0, h * 0.5)).toDouble();
+      final double track = math.max(1, h - thumb);
+      final double ratio = (_dragging ? _dragRatio : widget.ratio).clamp(0.0, 1.0).toDouble();
+      void end() {
+        if (!_dragging) return;
+        setState(() => _dragging = false);
+        widget.onDragEnd?.call();
+      }
+
+      return Stack(children: [
+        Positioned(
+          right: 0,
+          top: ratio * track,
+          width: 26, // 누르기 쉬운 범위 (보이는 막대는 가늘게)
+          height: thumb,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragStart: (_) {
+              widget.onDragStart?.call();
+              setState(() {
+                _dragging = true;
+                _dragRatio = widget.ratio.clamp(0.0, 1.0).toDouble();
+              });
+            },
+            onVerticalDragUpdate: (d) {
+              setState(() => _dragRatio = (_dragRatio + d.delta.dy / track).clamp(0.0, 1.0).toDouble());
+              widget.onDragRatio(_dragRatio);
+            },
+            onVerticalDragEnd: (_) => end(),
+            onVerticalDragCancel: end,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                margin: const EdgeInsets.only(right: 3),
+                width: _dragging ? 8 : 5,
+                decoration: BoxDecoration(
+                  color: Colors.grey.withValues(alpha: _dragging ? 0.9 : 0.6),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ]);
+    });
+  }
+}
+
 class ContinuousPageList extends StatefulWidget {
   const ContinuousPageList({
     super.key,
@@ -427,6 +499,20 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
     );
   }
 
+  // ── 오른쪽 회색 스크롤 막대: 끌면 문서 전체를 빠르게 이동 ──
+  Widget? _scrollBar() {
+    if (_tops.length < 2 || _maxY < 1 || _height <= 0 || _contentHeight <= 0) return null;
+    return ScrollThumbBar(
+      ratio: _oy / _maxY,
+      viewFraction: _height / _contentHeight,
+      onDragStart: _stopSim,
+      onDragRatio: (r) {
+        _oy = r * _maxY;
+        _moved();
+      },
+    );
+  }
+
   void _jumpTo(int page) {
     if (_tops.length < 2) return;
     _stopSim();
@@ -508,8 +594,9 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
             }
           }
           final mq = MediaQuery.of(context);
+          final Widget? bar = _scrollBar();
           // 끌기가 빨리 시작되게 (기본은 손가락이 꽤 움직여야 시작돼 화면이 끈적하게 느껴짐). 쪽 안의 다른 동작은 원래 값 그대로
-          return MediaQuery(
+          final Widget list = MediaQuery(
             data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: 6)),
             child: Listener(
             onPointerDown: (e) => _downLocal = e.localPosition,
@@ -533,6 +620,8 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
           ),
             ),
           );
+          if (bar == null) return list;
+          return Stack(fit: StackFit.expand, children: [list, bar]);
         },
       ),
     );

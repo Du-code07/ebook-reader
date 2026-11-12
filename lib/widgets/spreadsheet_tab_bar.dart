@@ -23,6 +23,9 @@ class SpreadsheetTabBar extends StatefulWidget {
   State<SpreadsheetTabBar> createState() => _SpreadsheetTabBarState();
 }
 
+/// 엑셀 아이콘 초록
+const Color excelGreen = Color(0xFF1E8E3E);
+
 class _SpreadsheetTabBarState extends State<SpreadsheetTabBar> {
   final List<GlobalKey> _keys = [];
   double? _width;
@@ -51,10 +54,9 @@ class _SpreadsheetTabBarState extends State<SpreadsheetTabBar> {
     while (_keys.length < widget.names.length) {
       _keys.add(GlobalKey());
     }
-    final colors = Theme.of(context).colorScheme;
-    // 앱의 그룹 칩과 같은 둥근 알약 모양 탭 (고른 시트는 채워서)
+    // 서재 위 그룹 칩과 같은 모양 (둥근 네모 테두리 + 아이콘, 고른 시트는 채움)
     return SizedBox(
-      height: 52,
+      height: 56,
       child: LayoutBuilder(builder: (context, constraints) {
         if (_width != constraints.maxWidth) {
           _width = constraints.maxWidth;
@@ -62,39 +64,18 @@ class _SpreadsheetTabBarState extends State<SpreadsheetTabBar> {
         }
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(children: [
             for (int i = 0; i < widget.names.length; i++)
               Padding(
                 key: _keys[i],
-                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 9),
-                child: Semantics(
-                  button: true,
+                padding: EdgeInsets.only(right: i == widget.names.length - 1 ? 0 : 8),
+                child: ChoiceChip(
+                  showCheckmark: false,
+                  avatar: const Icon(Icons.grid_on_rounded, size: 17, color: excelGreen),
+                  label: Text(widget.names[i], maxLines: 1),
                   selected: i == widget.selectedIndex,
-                  child: Material(
-                    color: i == widget.selectedIndex ? colors.secondaryContainer : Colors.transparent,
-                    shape: StadiumBorder(
-                      side: BorderSide(color: i == widget.selectedIndex ? Colors.transparent : colors.outlineVariant),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      onTap: () => widget.onSelected(i),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.grid_on_rounded, size: 15,
-                              color: i == widget.selectedIndex ? colors.onSecondaryContainer : colors.onSurfaceVariant),
-                          const SizedBox(width: 6),
-                          Text(widget.names[i], maxLines: 1,
-                              style: TextStyle(
-                                fontSize: 13.5,
-                                color: i == widget.selectedIndex ? colors.onSecondaryContainer : colors.onSurface,
-                                fontWeight: i == widget.selectedIndex ? FontWeight.w700 : FontWeight.w500,
-                              )),
-                        ]),
-                      ),
-                    ),
-                  ),
+                  onSelected: (_) => widget.onSelected(i),
                 ),
               ),
           ]),

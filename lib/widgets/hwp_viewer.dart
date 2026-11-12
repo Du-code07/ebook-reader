@@ -17,6 +17,9 @@ import '../services/docx_layout_hints.dart';
 class HwpReaderController {
   Future<void> Function(String, List<Object?>)? _invoke;
 
+  /// 엑셀: 칸을 길게 눌러 골라 둔 상태 (다음 한 번 누름은 고른 칸만 지우고 메뉴는 열지 않음)
+  bool cellSelected = false;
+
   Future<void> display(String position) async =>
       _invoke?.call('display', [position]);
   Future<void> next() async => _invoke?.call('next', []);
@@ -362,6 +365,10 @@ class _HwpViewerState extends State<HwpViewer> {
       // 엑셀: 칸을 길게 눌러 고른 뒤 손을 떼면 그 글을 복사 창으로
       case 'haptic':
         HapticFeedback.selectionClick();
+        if (_isSpreadsheet) widget.controller.cellSelected = true;
+        break;
+      case 'selectionCleared':
+        widget.controller.cellSelected = false;
         break;
       case 'copyText':
         final text = (event['text'] ?? '').toString();

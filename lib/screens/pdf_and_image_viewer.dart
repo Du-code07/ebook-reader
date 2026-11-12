@@ -375,6 +375,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   List<Widget> _pageModeSettings(StateSetter setModalState) {
     Future<void> apply(VoidCallback change) async {
       setState(change);
+      // 스크롤 보기에서는 메모를 쓰지 않음
+      if (_pageModeScroll && _isMemoMode) {
+        setState(() {
+          _isMemoMode = false;
+          _isEraserMode = false;
+          _allowFingerDrawing = false;
+        });
+      }
       setModalState(() {});
       await StorageService.setPageModeTap(_pageModeTap);
       await StorageService.setPageModeScroll(_pageModeScroll);
@@ -2710,6 +2718,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           }
         },
       ),
+      // 메모는 쪽 넘김(탭·슬라이드) 보기에서만 (스크롤 보기에서는 끔)
+      if (!_pageModeScroll)
       QuickArcMenuItem(
         icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
