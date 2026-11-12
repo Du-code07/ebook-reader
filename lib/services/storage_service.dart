@@ -272,6 +272,16 @@ class StorageService {
     return prefs.getBool('hide_thumbnails') ?? false;
   }
 
+  /// 목록형: 파일을 옆으로 밀어 즐겨찾기(오른쪽)·휴지통(왼쪽) 하는 동작 끄기
+  static final ValueNotifier<bool> listSwipeOff = ValueNotifier<bool>(false);
+  static Future<void> loadListSwipeOff() async {
+    listSwipeOff.value = (await SharedPreferences.getInstance()).getBool('list_swipe_off_v99') ?? false;
+  }
+  static Future<void> setListSwipeOff(bool off) async {
+    listSwipeOff.value = off;
+    await (await SharedPreferences.getInstance()).setBool('list_swipe_off_v99', off);
+  }
+
   /// 표지형: 책갈피를 잡아당겨 북마크하는 움직임 끄기
   static Future<void> setRibbonAnimationOff(bool off) async {
     final prefs = await SharedPreferences.getInstance();

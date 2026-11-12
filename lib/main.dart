@@ -168,7 +168,26 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   /// 글씨·아이콘은 전체적으로 조금 작게 (아이콘 기본 21)
   ThemeData _appTheme(Brightness b, {String variant = 'dark'}) {
     final appFont = UserFonts.appFont.value;
-    var scheme = ColorScheme.fromSeed(seedColor: Colors.indigo, brightness: b);
+    // 앱 대표 색: 연한 연두색 (고른 것·버튼·켜짐 표시)
+    var scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF8BC34A), brightness: b);
+    scheme = b == Brightness.light
+        ? scheme.copyWith(
+            primary: const Color(0xFF7CB342),
+            onPrimary: Colors.white,
+            primaryContainer: const Color(0xFFD4E9B8),
+            onPrimaryContainer: const Color(0xFF2F4A10),
+            secondary: const Color(0xFF6E8B4E),
+            secondaryContainer: const Color(0xFFDCEFC4),
+            onSecondaryContainer: const Color(0xFF2F4A10),
+          )
+        : scheme.copyWith(
+            primary: const Color(0xFFA5D46A),
+            onPrimary: const Color(0xFF1E3300),
+            primaryContainer: const Color(0xFF3F5E1C),
+            onPrimaryContainer: const Color(0xFFD4F0AE),
+            secondaryContainer: const Color(0xFF3A4D27),
+            onSecondaryContainer: const Color(0xFFDCEFC4),
+          );
     if (b == Brightness.dark && variant == 'black') {
       scheme = scheme.copyWith(
         surface: Colors.black,
@@ -832,7 +851,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               );
           Widget byRow(String value, String text) => InkWell(
                 onTap: () {
-                  setSheet(() => _sortBy = value);
+                  // 기준을 바꾸면 순서는 기본값으로: 이름은 오름차순, 추가 날짜는 최신순
+                  setSheet(() {
+                    if (_sortBy != value) _sortAsc = value == 'name';
+                    _sortBy = value;
+                  });
                   apply();
                 },
                 child: Padding(
@@ -1050,6 +1073,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   void initState() {
     super.initState();
     _loadLibrary();
+    StorageService.listSwipeOff.addListener(_onListSwipeSetting);
+  }
+
+  void _onListSwipeSetting() {
+    if (mounted) setState(() {});
   }
 
   ValueNotifier<ImageProvider?> _getThumbNotifier(String bookPath) {
@@ -1082,6 +1110,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   @override
   void dispose() {
+    StorageService.listSwipeOff.removeListener(_onListSwipeSetting);
     _searchCurve.dispose();
     _searchAnim.dispose();
     _searchCtrl.dispose();
@@ -1159,6 +1188,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final hideGroup = await StorageService.getHideGroupName();
     final hideThumbs = await StorageService.getHideThumbnails();
     FavoriteRibbon.animationOff.value = await StorageService.getRibbonAnimationOff();
+    await StorageService.loadListSwipeOff();
     final covers = await StorageService.getCustomCovers();
     final viewMode = await StorageService.getBookshelfViewMode();
     final hidePages = await StorageService.getHidePageCount();
@@ -2332,7 +2362,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             duration: const Duration(milliseconds: 180),
             child: const Icon(Icons.add),
           ),
-          label: Text(_fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加')),
+          label: Text(_fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
+              style: const TextStyle(fontWeight: FontWeight.w800)),
         ),
       ],
     );
@@ -2793,7 +2824,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   leading: const Icon(Icons.delete_outline),
                   title: Text(
                     '${_tr("휴지통", "Trash", "回收站", "ゴミ箱")} (${_trashedBooks.length})',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                   trailing: _trashedBooks.isNotEmpty
                       ? TextButton.icon(
@@ -2842,8 +2873,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           itemBuilder: (_, idx) {
                             final tf = _trashedBooks[idx];
                             final fileName = tf.path.split(Platform.pathSeparator).last;
+                            final trashExt = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
                             return ListTile(
-                              leading: const Icon(Icons.insert_drive_file_outlined),
+                              // 파일 이름 앞: 그 파일 형식 아이콘
+                              leading: FileTypeIcon(ext: trashExt, size: 24),
                               title: Text(_formatDisplayFileName(fileName), maxLines: 1, overflow: TextOverflow.ellipsis),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -3186,7 +3219,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: Colors.indigo.withValues(alpha: 0.12),
+                                      color: const Color(0xFF7CB342).withValues(alpha: 0.16),
                                       borderRadius: BorderRadius.circular(5),
                                     ),
                                     child: Text(
@@ -3194,7 +3227,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                       style: const TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.indigo,
+                                        color: Color(0xFF4E7A1E),
                                       ),
                                     ),
                                   ),
@@ -3407,7 +3440,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           : AppBar(
               title: Row(
                 children: [
-                  const Text('MY'),
+                  const Text('MY', style: TextStyle(fontWeight: FontWeight.w800)),
                   const SizedBox(width: 20),
                   Expanded(child: _buildSearchArea()),
                 ],
@@ -3596,7 +3629,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           key: ValueKey('${file.path}|$isFavorite'),
                           // 오른쪽으로 밀기: 즐겨찾기 켜기/끄기 (그대로 오른쪽으로 사라졌다가 새 자리에서 오른쪽부터 들어옴)
                           // 왼쪽으로 밀기: 휴지통
-                          direction: _isSelectionMode ? DismissDirection.none : DismissDirection.horizontal,
+                          // (앱 설정 → 파일 표시 방식 → 목록형 '밀어서 즐겨찾기·휴지통 끄기')
+                          direction: _isSelectionMode || StorageService.listSwipeOff.value ? DismissDirection.none : DismissDirection.horizontal,
                           resizeDuration: const Duration(milliseconds: 220),
                           background: Container(
                             color: Colors.amber.shade600,
@@ -3757,8 +3791,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   height: 42,
                   child: FloatingActionButton.extended(
                     heroTag: 'fab_batch_move_group',
-                    backgroundColor: Colors.indigo,
-                    foregroundColor: Colors.white,
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                     extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
                     extendedIconLabelSpacing: 6,
                     onPressed: _selectedFilePaths.isNotEmpty ? _moveSelectedFilesBatch : null,
@@ -3945,7 +3979,7 @@ class _FileMergeSelectDialogState extends State<_FileMergeSelectDialog> {
 
   Widget _orderBadge(int selIndex) => CircleAvatar(
         radius: 11,
-        backgroundColor: Colors.indigo,
+        backgroundColor: Theme.of(context).colorScheme.primary,
         child: Text(
           '${selIndex + 1}',
           style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),

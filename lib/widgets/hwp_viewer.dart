@@ -32,6 +32,9 @@ class HwpReaderController {
   Future<void> zoomSheet(double factor) async => _invoke?.call('zoomBy', [factor]);
   Future<void> resetSheetZoom() async => _invoke?.call('resetZoom', []);
 
+  /// 한글·워드 스크롤 보기: 전체 중 비율 위치(0~1)로 바로 이동 (오른쪽 회색 막대)
+  Future<void> scrollToRatio(double ratio) async => _invoke?.call('scrollToRatio', [ratio]);
+
   // ── 파일 내 단어 검색 ──
   Future<Object?> Function(String, List<Object?>)? _query;
 
@@ -157,6 +160,12 @@ class HwpViewer extends StatefulWidget {
   final ValueChanged<int>? onStepsLeft;
   final ValueChanged<List<String>>? onSheetNames;
 
+  /// 한글·워드 스크롤 보기: 쪽을 세로로 늘어놓고 문서 화면 안에서 굴림
+  final bool vertical;
+
+  /// 스크롤 보기에서 지금 위치·전체 길이·보이는 높이 (오른쪽 회색 막대)
+  final void Function(double top, double height, double client)? onScrollMetrics;
+
   const HwpViewer({
     super.key,
     required this.filePath,
@@ -173,6 +182,8 @@ class HwpViewer extends StatefulWidget {
     this.onPageReady,
     this.onStepsLeft,
     this.onSheetNames,
+    this.vertical = false,
+    this.onScrollMetrics,
   });
 
   @override
@@ -184,6 +195,7 @@ class _HwpViewerState extends State<HwpViewer> {
   bool get _isDocx => widget.filePath.toLowerCase().endsWith('.docx');
   bool get _isDoc => widget.filePath.toLowerCase().endsWith('.doc');
   bool get _isWord => _isDocx || _isDoc;
+  bool get _isHwp => RegExp(r'\.hwpx?$', caseSensitive: false).hasMatch(widget.filePath);
   // 파워포인트(.ppt/.pptx)도 같은 문서 화면에서 연다
   bool get _isPresentation => RegExp(r'\.pptx?$', caseSensitive: false).hasMatch(widget.filePath);
   bool get _isSpreadsheet => RegExp(r'\.xls[xm]?$', caseSensitive: false).hasMatch(widget.filePath);
@@ -235,6 +247,7 @@ class _HwpViewerState extends State<HwpViewer> {
     'rtl': widget.rtl,
     'position': widget.initialPosition,
     'progress': widget.initialProgress,
+    if (_isWord || _isHwp) 'vertical': widget.vertical,
     if (_isWord) 'format': _isDoc ? 'doc' : 'docx',
     if (_isPresentation) 'format': _presentationFormat,
     if (_isSpreadsheet) 'format': _spreadsheetFormat,
@@ -388,6 +401,10 @@ class _HwpViewerState extends State<HwpViewer> {
       case 'selectionCleared':
         widget.controller.cellSelected = false;
         break;
+      case 'scrollMetrics':
+        double n(Object? v) => v is num ? v.toDouble() : 0;
+        widget.onScrollMetrics?.call(n(event['top']), n(event['height']), n(event['client']));
+        break;
       case 'copyText':
         final text = (event['text'] ?? '').toString();
         if (text.trim().isNotEmpty) unawaited(showTextCopySheet(context, text: text, tr: _tr));
@@ -481,8 +498,13 @@ class _HwpViewerState extends State<HwpViewer> {
     if (_loaded &&
         (oldWidget.theme != widget.theme ||
             oldWidget.spread != widget.spread ||
-            oldWidget.rtl != widget.rtl)) {
+            oldWidget.rtl != widget.rtl ||
+            oldWidget.vertical != widget.vertical)) {
       unawaited(_invoke('configure', [_options]));
+    }
+    // 스크롤 보기: 문서 화면 안에서 위아래로 굴릴 수 있게
+    if (oldWidget.vertical != widget.vertical) {
+      unawaited(_web?.setSettings(settings: InAppWebViewSettings(disableVerticalScroll: false, disableHorizontalScroll: !_isSpreadsheet && !widget.vertical)));
     }
   }
 
@@ -518,7 +540,11 @@ class _HwpViewerState extends State<HwpViewer> {
           // 한글·워드: 글을 길게 누르면 문서 화면이 바로 받아 글을 고를 수 있게 (EPUB과 같은 방식)
           gestureRecognizers: _isSpreadsheet
               ? {Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer())}
-              : {Factory<LongPressGestureRecognizer>(() => LongPressGestureRecognizer(duration: const Duration(milliseconds: 350)))},
+              : {
+                  Factory<LongPressGestureRecognizer>(() => LongPressGestureRecognizer(duration: const Duration(milliseconds: 350))),
+                  // 스크롤 보기: 위아래로 미는 것은 문서 화면이 받아 굴림
+                  if (widget.vertical) Factory<VerticalDragGestureRecognizer>(() => VerticalDragGestureRecognizer()),
+                },
           initialUrlRequest: URLRequest(url: WebUri(_entry)),
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,
@@ -527,8 +553,8 @@ class _HwpViewerState extends State<HwpViewer> {
             // Android consumes ACTION_MOVE when both flags are true. That
             // prevents the canvas from receiving either drag or pinch events.
             // Excel controls its own viewport; CSS prevents page scrolling.
-            disableHorizontalScroll: !_isSpreadsheet,
-            disableVerticalScroll: !_isSpreadsheet,
+            disableHorizontalScroll: !_isSpreadsheet && !widget.vertical,
+            disableVerticalScroll: !_isSpreadsheet && !widget.vertical,
             horizontalScrollBarEnabled: false,
             verticalScrollBarEnabled: false,
             allowFileAccess: false,

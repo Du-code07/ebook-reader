@@ -62,3 +62,10 @@ sup.docx-note-ref { font-size: 1em; vertical-align: baseline; line-height: 0; }
 math.docx-math { font-family: FReaderMath, math; font-size: 1.1em; }
 math.docx-math mtext { font-family: inherit; }
 math.docx-math[display="block"] { display: block math; margin: 0.3em 0; }
+
+/* FReader 스크롤 보기: 쪽을 세로로, 쪽 사이는 살짝 띄움 */
+#vpages { position: fixed; inset: 0; overflow-y: auto; overflow-x: hidden; background: #e2e2e6; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+body[data-theme="sepia"] #vpages { background: #e3d4b4; }
+body[data-theme="dark"] #vpages { background: #0d0d0d; }
+#vpages .vslot { position: relative; margin: 0 0 12px 0; background: white; overflow: hidden; }
+body[data-theme="dark"] #vpages .vslot { background: #1e1e1e; }

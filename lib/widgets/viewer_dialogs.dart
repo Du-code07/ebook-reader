@@ -918,7 +918,7 @@ class FileLoadingView extends StatelessWidget {
             child: CircularProgressIndicator(
               strokeWidth: 4.5,
               strokeCap: StrokeCap.round,
-              color: bg != null ? (onDark ? const Color(0xFF9FA8FF) : const Color(0xFF3F51B5)) : (dark ? Colors.amber : cs.primary),
+              color: bg != null ? (onDark ? const Color(0xFFA5D46A) : const Color(0xFF7CB342)) : (dark ? Colors.amber : cs.primary),
               backgroundColor: fg.withValues(alpha: 0.12),
             ),
           ),

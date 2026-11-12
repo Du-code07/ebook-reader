@@ -174,7 +174,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
         icon: _busy
             ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
             : const Icon(Icons.add),
-        label: Text(_t('글꼴 추가', 'Add Font', '添加字体', 'フォント追加')),
+        label: Text(_t('글꼴 추가', 'Add Font', '添加字体', 'フォント追加'), style: const TextStyle(fontWeight: FontWeight.w800)),
       ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 96),

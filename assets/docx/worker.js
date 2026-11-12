@@ -2,6 +2,7 @@
 import { Odr } from './engine/index.js';
 import { prepareRtfPictures } from './rtf_images.js';
 import { parseRtfLayout } from './rtf_layout.js';
+import { flattenDrawingGroups } from './docx_groups.js';
 let document, session = 0, resourcePaths = new Set(), rtfPictures = new Map();
 let preparedRtf;
 let rtfLayout;
@@ -66,6 +67,10 @@ async function perform({ action, bytes, password, path, session: requestedSessio
   }
   if (action === 'open') {
     closeDocument(); session++;
+    // FReader: 그림 묶음(그룹) 안의 사진도 보이게 (엔진이 그룹을 그리지 못함)
+    if (format !== 'doc') {
+      try { const flat = await flattenDrawingGroups(bytes); if (flat) { bytes.fill(0); bytes = flat; } } catch (_) {}
+    }
     try {
       preparedRtf = prepareRtfPictures(bytes, { includePageFurniture: true });
       document = odr.open(preparedRtf.bytes, {

@@ -55,6 +55,10 @@ function request(action, data = {}, transfer = []) {
 }
 function clearPages() {
   renderSerial++;
+  if (vertical) {
+    vertical = false; vResize.disconnect(); vMounted.clear(); vOwner.clear();
+    vhost?.remove(); vhost = null; vSlots = []; vTops = []; host.style.display = '';
+  }
   for (const item of imageCache.values()) URL.revokeObjectURL(item.url);
   imageCache.clear(); imageJobs.clear(); brokenImages.clear();
   resourceIndex.clear(); originalSources.clear(); activeImagePaths.clear(); imageCacheBytes = 0;
@@ -99,7 +103,8 @@ async function openDocument(password = null) {
     if (disposed || current !== generation) return false;
     const saved = /^(?:docx|doc):(\d+)$/.exec(options.position || '');
     page = clampPage(saved ? Number(saved[1]) : Math.round(Number(options.progress || 0) * (pages.length - 1)));
-    await render(); emit('loaded', { pageCount: pages.length, unavailableImages }); reportLocation();
+    if (options.vertical) setVertical(true); else await render();
+    emit('loaded', { pageCount: pages.length, unavailableImages }); reportLocation();
     return true;
   } catch (error) { return fail(error); }
   finally { password = null; }
@@ -457,23 +462,7 @@ function missingImage(img, reason) {
   notice.className = 'freader-missing-image'; notice.dataset.resource = key; if (reason) notice.dataset.reason = String(reason); notice.style.cssText = img.style.cssText;
   notice.textContent = '이 그림은 표시할 수 없습니다.'; img.replaceWith(notice);
 }
-async function render() {
-  if (!pages.length || disposed) return;
-  const serial = ++renderSerial;
-  // Reuse the original layout tree in single-page mode. A spread only needs
-  // one extra tree when both displayed pages belong to the same section.
-  for (const frame of host.children) {
-    for (const img of frame.querySelectorAll('img[data-resource]')) img.removeAttribute('src');
-    const source = frame.firstElementChild;
-    if (originalSources.has(source)) measure.appendChild(source);
-  }
-  const fragment = document.createDocumentFragment(), used = new Set();
-  for (let index = page; index < Math.min(pages.length, page + (options.spread ? 2 : 1)); index++) {
-    const entry = pages[index], frame = document.createElement('section');
-    frame.className = 'page'; frame.dataset.page = String(index);
-    frame.dataset.width = String(entry.width); frame.dataset.height = String(entry.height);
-    frame.setAttribute('aria-label', `${index + 1} / ${pages.length}`);
-    const source = used.has(entry.source) ? entry.source.cloneNode(true) : entry.source; used.add(entry.source);
+function preparePageSource(source, entry, index) {
     source.querySelector('.freader-columns').style.transform = `translateX(${-entry.column * entry.columnStride}px)`;
     if (source.classList.contains('rtf-paper')) {
       const start = Number(source.dataset.rtfStart), number = start > 0 ? start + entry.column : index + 1;
@@ -489,6 +478,26 @@ async function render() {
         for (const story of furniture.children) story.style.display = story === selected ? 'block' : 'none';
       }
     }
+}
+async function render() {
+  if (!pages.length || disposed) return;
+  if (vertical) return;
+  const serial = ++renderSerial;
+  // Reuse the original layout tree in single-page mode. A spread only needs
+  // one extra tree when both displayed pages belong to the same section.
+  for (const frame of host.children) {
+    for (const img of frame.querySelectorAll('img[data-resource]')) img.removeAttribute('src');
+    const source = frame.firstElementChild;
+    if (originalSources.has(source)) measure.appendChild(source);
+  }
+  const fragment = document.createDocumentFragment(), used = new Set();
+  for (let index = page; index < Math.min(pages.length, page + (options.spread ? 2 : 1)); index++) {
+    const entry = pages[index], frame = document.createElement('section');
+    frame.className = 'page'; frame.dataset.page = String(index);
+    frame.dataset.width = String(entry.width); frame.dataset.height = String(entry.height);
+    frame.setAttribute('aria-label', `${index + 1} / ${pages.length}`);
+    const source = used.has(entry.source) ? entry.source.cloneNode(true) : entry.source; used.add(entry.source);
+    preparePageSource(source, entry, index);
     frame.appendChild(source); fragment.appendChild(frame);
   }
   host.replaceChildren(fragment); fitPages();
@@ -551,9 +560,9 @@ async function prefetchNearby(serial) {
   }
 }
 // FReader: 이 쪽에 보이는 각주 번호의 본문을 쪽 아래에 표시 (Word처럼 본문 아래, 자리가 없으면 아래 여백)
-function renderNoteAreas() {
+function renderNoteAreas(frames = [...host.children]) {
   const notes = options.docxLayout?.notes;
-  for (const frame of host.children) {
+  for (const frame of frames) {
     const source = frame.firstElementChild; if (!source) continue;
     for (const old of source.querySelectorAll(':scope > .docx-note-area')) old.remove();
     if (!notes) continue;
@@ -615,6 +624,8 @@ function configure(next = {}) {
   const oldSpread = options.spread; options = { ...options, ...next };
   document.body.dataset.theme = ['white', 'sepia', 'dark'].includes(options.theme) ? options.theme : 'white';
   host.classList.toggle('rtl', !!options.rtl);
+  if (pages.length && 'vertical' in next && !!next.vertical !== vertical) return setVertical(!!next.vertical);
+  if (vertical) return;
   if (oldSpread !== options.spread) return render();
   fitPages();
 }
@@ -622,15 +633,16 @@ async function display(position) {
   if (!pages.length) return;
   const saved = /^(?:docx|doc):(\d+)$/.exec(String(position));
   page = clampPage(saved ? Number(saved[1]) : Number(position));
+  if (vertical) { vGoto(page); reportLocation(); return; }
   await render(); reportLocation();
 }
-function next() { return display(page + (options.spread ? 2 : 1)); }
-function previous() { return display(page - (options.spread ? 2 : 1)); }
+function next() { if (vertical) return vScrollBy(1); return display(page + (options.spread ? 2 : 1)); }
+function previous() { if (vertical) return vScrollBy(-1); return display(page - (options.spread ? 2 : 1)); }
 function progress(value) { return display(Math.round(Math.max(0, Math.min(1, Number(value))) * (pages.length - 1))); }
 function highlightSelection() {
   const selection = window.getSelection();
   if (!selection?.rangeCount || selection.isCollapsed) return;
-  for (const frame of host.children) {
+  for (const frame of pageFrames()) {
     const bounds = frame.getBoundingClientRect();
     for (const rect of selection.getRangeAt(0).getClientRects()) {
       if (rect.width < 1 || rect.height < 1 || rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1) continue;
@@ -648,6 +660,160 @@ function destroy() {
   clearPages(); pendingEvents = [];
 }
 const resizeObserver = new ResizeObserver(fitPages); resizeObserver.observe(host);
+// ── FReader: 스크롤 보기 — 쪽을 그대로 세로로 늘어놓고 쪽 사이를 살짝 띄움 (보이는 쪽 근처만 그림) ──
+let vertical = false, vhost = null, vSlots = [], vTops = [], vRaf = 0, vMetricsTimer = 0, vSerial = 0;
+const vMounted = new Map(); // 쪽 번호 → { frame, source, original, entry }
+const vOwner = new Map(); // 원래 글 덩어리 → 그것을 쓰고 있는 쪽 번호 (다른 쪽은 복사본)
+const V_GAP = 12;
+function pageFrames() { return vertical ? [...vMounted.values()].map(m => m.frame) : [...host.children]; }
+const vResize = new ResizeObserver(() => { if (vertical) vLayout(true); });
+function setVertical(on) {
+  on = !!on;
+  if (on === vertical) return;
+  if (on) {
+    vertical = true;
+    renderSerial++;
+    for (const frame of host.children) {
+      for (const img of frame.querySelectorAll('img[data-resource]')) img.removeAttribute('src');
+      const source = frame.firstElementChild;
+      if (originalSources.has(source)) measure.appendChild(source);
+    }
+    host.replaceChildren(); host.style.display = 'none';
+    vhost = document.createElement('div'); vhost.id = 'vpages';
+    document.body.appendChild(vhost);
+    vhost.addEventListener('scroll', vSchedule, { passive: true });
+    vResize.observe(vhost);
+    vLayout(false);
+    vGoto(page);
+  } else {
+    vertical = false;
+    vResize.disconnect();
+    for (const index of [...vMounted.keys()]) vUnmount(index);
+    vhost?.remove(); vhost = null; vSlots = []; vTops = [];
+    host.style.display = '';
+    void render().then(reportLocation);
+  }
+}
+function vLayout(keep) {
+  if (!vhost || !pages.length) return;
+  const W = vhost.clientWidth || innerWidth;
+  let anchor = page, frac = 0;
+  if (keep && vTops.length) {
+    const st = vhost.scrollTop;
+    anchor = vIndexAt(st);
+    frac = (st - vTops[anchor]) / Math.max(1, vTops[anchor + 1] - vTops[anchor]);
+  }
+  for (const index of [...vMounted.keys()]) vUnmount(index);
+  if (vSlots.length !== pages.length) {
+    vhost.replaceChildren();
+    vSlots = [];
+    for (let i = 0; i < pages.length; i++) {
+      const slot = document.createElement('div'); slot.className = 'vslot'; slot.dataset.page = String(i);
+      vhost.appendChild(slot); vSlots.push(slot);
+    }
+  }
+  vTops = []; let y = 0;
+  pages.forEach((entry, i) => {
+    const sh = entry.width > 0 ? W * entry.height / entry.width : W * 1.414;
+    vSlots[i].style.width = `${W}px`; vSlots[i].style.height = `${sh}px`;
+    vTops.push(y); y += sh + V_GAP;
+  });
+  vTops.push(y);
+  vhost.scrollTop = vTops[anchor] + frac * (vTops[anchor + 1] - vTops[anchor]);
+  vUpdate();
+}
+function vIndexAt(y) {
+  let lo = 0, hi = pages.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (vTops[mid] <= y) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+function vGoto(index) {
+  if (!vhost || !vTops.length) return;
+  vhost.scrollTop = vTops[clampPage(index)];
+  vUpdate();
+}
+function vScrollBy(dir) { vhost?.scrollBy({ top: dir * vhost.clientHeight * 0.9, behavior: 'smooth' }); }
+function vScrollToRatio(t) {
+  if (!vhost) return;
+  vhost.scrollTop = Math.max(0, Math.min(1, Number(t) || 0)) * Math.max(0, vhost.scrollHeight - vhost.clientHeight);
+}
+function vSchedule() {
+  if (!vRaf) vRaf = requestAnimationFrame(() => { vRaf = 0; vUpdate(); });
+  if (!vMetricsTimer) vMetricsTimer = setTimeout(() => { vMetricsTimer = 0; vReportMetrics(); }, 70);
+}
+function vReportMetrics() {
+  if (vhost) emit('scrollMetrics', { top: vhost.scrollTop, height: vhost.scrollHeight, client: vhost.clientHeight });
+}
+function vMount(index) {
+  if (vMounted.has(index) || !pages[index]) return;
+  const entry = pages[index];
+  const original = !vOwner.has(entry.source);
+  const source = original ? entry.source : entry.source.cloneNode(true);
+  if (original) vOwner.set(entry.source, index);
+  preparePageSource(source, entry, index);
+  const slot = vSlots[index], W = parseFloat(slot.style.width) || vhost.clientWidth, scale = W / entry.width;
+  const frame = document.createElement('section');
+  frame.className = 'page'; frame.dataset.page = String(index);
+  frame.dataset.width = String(entry.width); frame.dataset.height = String(entry.height);
+  frame.style.width = `${entry.width * scale}px`; frame.style.height = `${entry.height * scale}px`;
+  source.style.transform = `scale(${scale})`;
+  frame.appendChild(source); slot.appendChild(frame);
+  vMounted.set(index, { frame, source, original, entry });
+  renderNoteAreas([frame]);
+  void vLoadImages(frame, vSerial);
+}
+function vUnmount(index) {
+  const m = vMounted.get(index); if (!m) return;
+  for (const img of m.frame.querySelectorAll('img[data-resource]')) img.removeAttribute('src');
+  if (m.original) { measure.appendChild(m.source); vOwner.delete(m.entry.source); }
+  m.frame.remove(); vMounted.delete(index);
+}
+/** 이 쪽이 원래 글 덩어리를 쓰게 (찾은 낱말 형광펜은 원래 글에만 칠해짐) */
+function vEnsureOriginal(index) {
+  const m = vMounted.get(index); if (!m || m.original) return;
+  const owner = vOwner.get(m.entry.source);
+  if (owner != null) vUnmount(owner);
+  vUnmount(index); vMount(index);
+  if (owner != null) vMount(owner);
+}
+async function vLoadImages(frame, serial) {
+  const imgs = [...frame.querySelectorAll('img[data-resource]')].filter(img => {
+    const clip = (img.closest('.freader-content') || img.closest('.page')).getBoundingClientRect();
+    return [...img.getClientRects()].some(r => r.width > 0 && r.height > 0 && r.right > clip.left + .1 && r.left < clip.right - .1 && r.bottom > clip.top + .1 && r.top < clip.bottom - .1);
+  });
+  for (const img of imgs) activeImagePaths.add(img.dataset.resource);
+  for (const img of imgs) {
+    if (!frame.isConnected || serial !== vSerial || disposed) return;
+    try {
+      const item = await imageFor(img.dataset.resource);
+      if (!frame.isConnected) return;
+      img.loading = 'eager'; img.src = item.url;
+    } catch (error) { if (frame.isConnected) missingImage(img, error); }
+  }
+}
+function vUpdate() {
+  if (!vhost || !vTops.length || disposed) return;
+  const st = vhost.scrollTop, H = vhost.clientHeight || innerHeight;
+  const first = vIndexAt(st), last = vIndexAt(st + H);
+  const current = vIndexAt(st + H * 0.33);
+  if (current !== page) { page = current; reportLocation(); }
+  let removed = false;
+  for (const index of [...vMounted.keys()]) if (index < first - 3 || index > last + 3) { vUnmount(index); removed = true; }
+  if (removed) {
+    activeImagePaths = new Set();
+    for (const m of vMounted.values()) for (const img of m.frame.querySelectorAll('img[data-resource][src]')) activeImagePaths.add(img.dataset.resource);
+    trimImages();
+  }
+  const want = [];
+  for (let i = Math.max(0, first - 1); i <= Math.min(pages.length - 1, last + 1); i++) if (!vMounted.has(i)) want.push(i);
+  want.sort((a, b) => (a >= first && a <= last ? 0 : 1) - (b >= first && b <= last ? 0 : 1));
+  let made = 0;
+  for (const i of want) {
+    if (made >= 2) { vSchedule(); break; }
+    try { vMount(i); made++; } catch (error) { console.warn(error); }
+  }
+  if (made) applySearchHighlights();
+}
 // ── 파일 내 단어 검색: 찾은 곳은 노란 형광펜(CSS Highlight), 지금 보는 결과는 조금 진하게 ──
 let searchState = { query: '', results: [], current: -1 };
 function searchNorm(text) { return text.replace(/\u00a0/g, ' ').toLowerCase(); }
@@ -715,6 +881,7 @@ async function search(query) {
 async function showSearchResult(index) {
   const r = searchState.results[index]; if (!r) return;
   searchState.current = index;
+  if (vertical) { page = r.page; vGoto(r.page); vEnsureOriginal(r.page); applySearchHighlights(); reportLocation(); return; }
   const shown = [...host.children].some(frame => Number(frame.dataset.page) === r.page);
   if (shown) { applySearchHighlights(); return; }
   await display(r.page);
@@ -724,10 +891,11 @@ function applySearchHighlights() {
   if (typeof CSS === 'undefined' || !CSS.highlights || typeof Highlight === 'undefined') return;
   CSS.highlights.delete('freader-search'); CSS.highlights.delete('freader-search-current');
   if (!searchState.results.length) return;
-  const visible = new Set([...host.children].map(frame => Number(frame.dataset.page)));
+  const container = vertical && vhost ? vhost : host;
+  const visible = new Set(pageFrames().map(frame => Number(frame.dataset.page)));
   const all = [], current = [];
   searchState.results.forEach((r, i) => {
-    if (!visible.has(r.page) || !r.start.node.isConnected || !host.contains(r.start.node)) return;
+    if (!visible.has(r.page) || !r.start.node.isConnected || !container.contains(r.start.node)) return;
     const range = document.createRange();
     try { range.setStart(r.start.node, r.start.offset); range.setEnd(r.end.node, r.end.offset); } catch (_) { return; }
     (i === searchState.current ? current : all).push(range);
@@ -827,7 +995,7 @@ function headingCandidates() {
   return outlineBlockCache.filter(b => !b.cell && (b.head || b.text).length <= 100 && (NUMBERED_START.test(b.head || b.text) || b.boldRatio >= 0.5))
     .slice(0, 3000).map(b => ({ title: b.head || b.text, page: b.page, bold: b.bold, boldRatio: b.boldRatio, centered: b.centered, fs: b.fs, body }));
 }
-window.freaderDocx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
+window.freaderDocx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy, setVertical, scrollToRatio: vScrollToRatio,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes, pageRect, pageSizes,
   getState: () => ({ ready, page, count: pages.length, received, spread: options.spread, awaitingPassword, unavailableImages, imageCacheBytes, cachedImages: imageCache.size, visibleImages: activeImagePaths.size, maxBytes: MAX_BYTES, format: detectedFormat }) };
 window.addEventListener('pagehide', destroy, { once: true });

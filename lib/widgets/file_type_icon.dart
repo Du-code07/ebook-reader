@@ -39,7 +39,7 @@ class FileTypeIcon extends StatelessWidget {
     return null;
   }
 
-  static const Color imageGreen = Color(0xFF2E9E4F);
+  static const Color imageGreen = Color(0xFF6A9F22); // 사진(jpg·png 등): 진한 연두색
   static const Color epubBrown = Color(0xFF795548); // EPUB: 갈색
 
   @override

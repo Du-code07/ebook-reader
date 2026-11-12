@@ -170,6 +170,8 @@ function configure(next = {}) {
   options = { ...options, ...next };
   document.body.dataset.theme = ['white', 'sepia', 'dark'].includes(options.theme) ? options.theme : 'white';
   host.classList.toggle('rtl', !!options.rtl);
+  if (doc && 'vertical' in next && !!next.vertical !== vertical) return setVertical(!!next.vertical);
+  if (vertical) return;
   if (doc && previousSpread !== options.spread) return render();
   fitPages();
 }
@@ -204,7 +206,7 @@ async function openDocument(password = null) {
     const saved = /^hwp:(\d+)$/.exec(options.position || '');
     page = clampPage(saved ? Number(saved[1]) : Math.round(Number(options.progress || 0) * (count - 1)));
     incoming.fill(0); incoming = null; received = 0;
-    await render();
+    if (options.vertical) setVertical(true); else await render();
     if (disposed) return false;
     emit('loaded', { pageCount: count });
     reportLocation();
@@ -227,10 +229,11 @@ async function display(position) {
   const match = /^hwp:(\d+)$/.exec(String(position));
   const target = clampPage(match ? Number(match[1]) : Number(position));
   page = target;
+  if (vertical) { vGoto(page); reportLocation(); return; }
   try { await render(); reportLocation(); } catch (error) { fail(error); }
 }
-function next() { return display(page + (options.spread ? 2 : 1)); }
-function previous() { return display(page - (options.spread ? 2 : 1)); }
+function next() { if (vertical) return vScrollBy(1); return display(page + (options.spread ? 2 : 1)); }
+function previous() { if (vertical) return vScrollBy(-1); return display(page - (options.spread ? 2 : 1)); }
 function progress(value) { return display(Math.round(Math.max(0, Math.min(1, Number(value))) * (count - 1))); }
 function releaseEntry(entry) {
   for (const url of entry.urls) URL.revokeObjectURL(url);
@@ -362,7 +365,7 @@ function highlightSelection() {
   const selection = window.getSelection();
   if (!selection?.rangeCount || selection.isCollapsed) return;
   const rects = [...selection.getRangeAt(0).getClientRects()];
-  for (const frame of host.children) {
+  for (const frame of pageFrames()) {
     const svg = frame.firstElementChild, bounds = svg.getBoundingClientRect();
     const scale = Number(frame.dataset.width) / bounds.width;
     for (const box of rects) {
@@ -376,6 +379,10 @@ function highlightSelection() {
 }
 function releaseDocument() {
   renderSerial++;
+  if (vertical) {
+    vertical = false; vResize.disconnect(); vMounted.clear();
+    vhost?.remove(); vhost = null; vSlots = []; vTops = []; host.style.display = '';
+  }
   if (doc) { doc.free(); doc = null; }
   layoutCache.clear(); searchState = { query: '', results: [], current: -1 };
   if (incoming) incoming.fill(0);
@@ -387,6 +394,131 @@ function destroy() {
   disposed = true; clearInterval(bridgeTimer); resizeObserver.disconnect(); releaseDocument(); pendingEvents = [];
 }
 const resizeObserver = new ResizeObserver(fitPages); resizeObserver.observe(host);
+// ── FReader: 스크롤 보기 — 쪽을 그대로 세로로 늘어놓고 쪽 사이를 살짝 띄움 (보이는 쪽 근처만 그림) ──
+let vertical = false, vhost = null, vSlots = [], vTops = [], vRaf = 0, vMetricsTimer = 0;
+const vMounted = new Map(); // 쪽 번호 → { frame, entry }
+const V_GAP = 12;
+function pageFrames() { return vertical ? [...vMounted.values()].map(m => m.frame) : [...host.children]; }
+const vResize = new ResizeObserver(() => { if (vertical) vLayout(true); });
+function setVertical(on) {
+  on = !!on;
+  if (on === vertical) return;
+  if (on) {
+    vertical = true;
+    renderSerial++;
+    host.replaceChildren(); host.style.display = 'none';
+    const old = activeEntries; activeEntries = new Set();
+    for (const entry of old) releaseIfUnused(entry);
+    vhost = document.createElement('div'); vhost.id = 'vpages';
+    document.body.appendChild(vhost);
+    vhost.addEventListener('scroll', vSchedule, { passive: true });
+    vResize.observe(vhost);
+    vLayout(false);
+    vGoto(page);
+  } else {
+    vertical = false;
+    vResize.disconnect();
+    for (const index of [...vMounted.keys()]) vUnmount(index);
+    vhost?.remove(); vhost = null; vSlots = []; vTops = [];
+    host.style.display = '';
+    void render().then(reportLocation).catch(fail);
+  }
+}
+function vLayout(keep) {
+  if (!vhost || !doc) return;
+  const W = vhost.clientWidth || innerWidth;
+  let anchor = page, frac = 0;
+  if (keep && vTops.length) {
+    const st = vhost.scrollTop;
+    anchor = vIndexAt(st);
+    frac = (st - vTops[anchor]) / Math.max(1, vTops[anchor + 1] - vTops[anchor]);
+  }
+  if (vSlots.length !== count) {
+    for (const index of [...vMounted.keys()]) vUnmount(index);
+    vhost.replaceChildren();
+    vSlots = [];
+    for (let i = 0; i < count; i++) {
+      const slot = document.createElement('div'); slot.className = 'vslot'; slot.dataset.page = String(i);
+      vhost.appendChild(slot); vSlots.push(slot);
+    }
+  }
+  const sizes = pageSizes();
+  vTops = []; let y = 0;
+  for (let i = 0; i < count; i++) {
+    const [w, h] = sizes[i] || [0, 0];
+    const sh = w > 0 && h > 0 ? W * h / w : W * 1.414;
+    vSlots[i].style.width = `${W}px`; vSlots[i].style.height = `${sh}px`;
+    vTops.push(y); y += sh + V_GAP;
+  }
+  vTops.push(y);
+  vhost.scrollTop = vTops[anchor] + frac * (vTops[anchor + 1] - vTops[anchor]);
+  vUpdate();
+}
+function vIndexAt(y) {
+  let lo = 0, hi = count - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (vTops[mid] <= y) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+function vGoto(index) {
+  if (!vhost || !vTops.length) return;
+  vhost.scrollTop = vTops[clampPage(index)];
+  vUpdate();
+}
+function vScrollBy(dir) {
+  if (!vhost) return;
+  vhost.scrollBy({ top: dir * vhost.clientHeight * 0.9, behavior: 'smooth' });
+}
+function vScrollToRatio(t) {
+  if (!vhost) return;
+  vhost.scrollTop = Math.max(0, Math.min(1, Number(t) || 0)) * Math.max(0, vhost.scrollHeight - vhost.clientHeight);
+}
+function vSchedule() {
+  if (vRaf) return;
+  vRaf = requestAnimationFrame(() => { vRaf = 0; vUpdate(); });
+  if (!vMetricsTimer) vMetricsTimer = setTimeout(() => { vMetricsTimer = 0; vReportMetrics(); }, 70);
+}
+function vReportMetrics() {
+  if (!vhost) return;
+  emit('scrollMetrics', { top: vhost.scrollTop, height: vhost.scrollHeight, client: vhost.clientHeight });
+}
+function vMount(index) {
+  if (vMounted.has(index) || !doc) return;
+  const entry = svgForPage(index);
+  const svg = entry.template.cloneNode(true);
+  const box = svg.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
+  const frame = document.createElement('section');
+  frame.className = 'page'; frame.dataset.page = String(index);
+  frame.dataset.width = String(box?.[2] || parseFloat(svg.getAttribute('width')) || 1);
+  frame.dataset.height = String(box?.[3] || parseFloat(svg.getAttribute('height')) || 1);
+  frame.appendChild(svg);
+  vSlots[index].appendChild(frame);
+  activeEntries.add(entry);
+  vMounted.set(index, { frame, entry });
+}
+function vUnmount(index) {
+  const m = vMounted.get(index); if (!m) return;
+  m.frame.remove(); vMounted.delete(index);
+  if (![...vMounted.values()].some(o => o.entry === m.entry)) { activeEntries.delete(m.entry); releaseIfUnused(m.entry); }
+}
+function vUpdate() {
+  if (!vhost || !vTops.length || disposed) return;
+  const st = vhost.scrollTop, H = vhost.clientHeight || innerHeight;
+  const first = vIndexAt(st), last = vIndexAt(st + H);
+  // 지금 쪽: 화면 위에서 3분의 1 지점에 걸친 쪽
+  const current = vIndexAt(st + H * 0.33);
+  if (current !== page) { page = current; reportLocation(); }
+  for (const index of [...vMounted.keys()]) if (index < first - 3 || index > last + 3) vUnmount(index);
+  // 보이는 쪽부터, 한 번에 두 쪽까지만 새로 그림 (빨리 넘길 때도 끊기지 않게)
+  const want = [];
+  for (let i = Math.max(0, first - 1); i <= Math.min(count - 1, last + 1); i++) if (!vMounted.has(i)) want.push(i);
+  want.sort((a, b) => (a >= first && a <= last ? 0 : 1) - (b >= first && b <= last ? 0 : 1));
+  let made = 0;
+  for (const i of want) {
+    if (made >= 2) { vSchedule(); break; }
+    try { vMount(i); made++; } catch (error) { console.warn(error); }
+  }
+  if (made) applySearchHighlights();
+}
 // ── 파일 내 단어 검색: 엔진이 알려 주는 쪽별 글자 위치로 노란 형광펜을 그린다 ──
 let searchState = { query: '', results: [], current: -1 };
 const layoutCache = new Map();
@@ -436,16 +568,17 @@ async function search(query) {
 async function showSearchResult(index) {
   const r = searchState.results[index]; if (!r) return;
   searchState.current = index;
+  if (vertical) { page = r.page; vGoto(r.page); applySearchHighlights(); reportLocation(); return; }
   const shown = [...host.children].some(frame => Number(frame.dataset.page) === r.page);
   if (shown) { applySearchHighlights(); return; }
   await display(r.page);
 }
 function clearSearch() { searchState = { query: '', results: [], current: -1 }; applySearchHighlights(); }
 function applySearchHighlights() {
-  for (const old of host.querySelectorAll('.freader-search-mark')) old.remove();
+  for (const old of document.querySelectorAll('.freader-search-mark')) old.remove();
   if (!searchState.query || !searchState.results.length || !doc) return;
   const current = searchState.results[searchState.current];
-  for (const frame of host.children) {
+  for (const frame of pageFrames()) {
     const index = Number(frame.dataset.page), svg = frame.firstElementChild;
     if (!svg || !searchState.results.some(r => r.page === index)) continue;
     const found = pageMatches(index, searchState.query);
@@ -547,7 +680,7 @@ function pageSizes() {
   }
   return out;
 }
-window.freaderHwp = { beginDocument, pageSizes, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
+window.freaderHwp = { beginDocument, pageSizes, setVertical, scrollToRatio: vScrollToRatio, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes, pageRect,
   getState: () => ({ ready: readyReported, page, count, cachedPages: cache.size, cachedBytes, received, spread: options.spread, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });

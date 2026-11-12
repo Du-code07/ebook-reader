@@ -1208,6 +1208,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           theme: _epubBgTheme,
           spread: _spreadFor(isLandscape),
           rtl: _isMangaRtlMode,
+          // 한글·워드 스크롤 보기: 쪽을 세로로 늘어놓음 (내보내는 동안은 쪽 넘김 화면으로)
+          vertical: _docVertical && !_isExporting,
+          onScrollMetrics: (top, height, client) => _docScrollMetrics.value = [top, height, client],
           onLoaded: _onDocumentLoaded,
           onLocation: _onDocumentLocation,
           onPageReady: _onDocumentPageReady,
@@ -1229,7 +1232,26 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ),
           ),
         // 스크롤 모드: 쪽마다 한 번 그림으로 만들어 두고(다음부터는 바로), 간격 없이 세로로 이어 보여 줌
-        if (_pageModeScroll && !_isSpreadsheet) Positioned.fill(child: _buildDocScroll()),
+        if (_pageModeScroll && !_isSpreadsheet && !_isWordOrHwp) Positioned.fill(child: _buildDocScroll()),
+        // 한글·워드 스크롤 보기: 오른쪽 회색 막대 (끌면 바로 그 자리로)
+        if (_docVertical && _tocFreeze == null)
+          Positioned.fill(
+            child: ValueListenableBuilder<List<double>>(
+              valueListenable: _docScrollMetrics,
+              builder: (context, m, _) {
+                final double top = m[0], height = m[1], client = m[2];
+                if (height <= client + 1 || client <= 0) return const SizedBox.shrink();
+                return ScrollThumbBar(
+                  ratio: top / (height - client),
+                  viewFraction: client / height,
+                  onDragRatio: (r) {
+                    _docScrollMetrics.value = [r * (height - client), height, client];
+                    _hwpController.scrollToRatio(r);
+                  },
+                );
+              },
+            ),
+          ),
       ],
     );
   }
@@ -1245,7 +1267,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   // ── 스크롤 보기 (한글·워드): 화면 밖 문서 화면에서 미리 그려 둔 쪽 그림 ──
   /// 한글·워드는 뒤에서 미리 준비 (PPT·TXT는 따로)
-  bool get _usesBackgroundScroll => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_isPresentation && !_legacyScroll;
+  // 한글·워드 스크롤 보기는 문서 화면(WebView) 안에서 쪽을 세로로 늘어놓아 바로 보여 줌 (따로 준비하지 않음)
+  bool get _usesBackgroundScroll => false;
+  bool get _isWordOrHwp => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_isPresentation;
+  bool get _docVertical => _pageModeScroll && _isWordOrHwp;
+  // 문서 화면 안 스크롤 위치 [지금 위치, 전체 길이, 보이는 높이] (오른쪽 회색 막대)
+  final ValueNotifier<List<double>> _docScrollMetrics = ValueNotifier(const [0, 0, 0]);
   bool _legacyScroll = false; // 미리 준비가 안 되는 문서(암호 등): 보던 화면으로 쪽을 넘기며 준비
   ScrollPageSet? _scrollSet; // 지금 배경색의 쪽 그림 (일부만 있을 수 있음)
   ScrollPageSet? _scrollAlt; // 다른 배경색으로 그려 둔 쪽 그림 (지금 색 그림이 아직 없을 때 색만 바꿔 보여 줌)
@@ -1444,6 +1471,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// 쪽을 하나씩 화면에 그려 그림으로 저장 (다음부터는 저장한 그림을 바로 씀)
   Future<void> _prepareDocScroll() async {
+    if (_isWordOrHwp) return; // 한글·워드: 문서 화면 안에서 세로로 늘어놓음
     final int gen = ++_docScrollGen;
     final int n = _docPageCount;
     if (!mounted || n <= 0 || !_pageModeScroll || _isSpreadsheet) return;
@@ -2318,11 +2346,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 ),
                 _settingsHeader(Icons.tune, _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'), isTitle: true),
                 const SizedBox(height: 12),
+                // 글자 크기 (EPUB): 구역 이름 띠는 남은 너비만큼 (예전에는 띠가 끝없이 넓어지려 해 줄 전체가 안 보였음)
                 if (!_isOfflineDocument)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _settingsHeader(Icons.format_size, _tr('글자 크기', 'Font Size', '字体大小', '文字サイズ')),
+                    Expanded(child: _settingsHeader(Icons.format_size, _tr('글자 크기', 'Font Size', '字体大小', '文字サイズ'))),
+                    const SizedBox(width: 8),
                     Row(
                       children: [
                         IconButton(
@@ -4291,8 +4321,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           });
         }
       },
-      // TXT는 목차 없음
-      drawer: _isTxt ? null : Drawer(
+      // TXT·PPT는 목차 없음. 화면 왼쪽 끝을 밀어 목차가 열리지 않게 (목차는 위 단추로만)
+      drawerEnableOpenDragGesture: false,
+      drawer: _isTxt || _isPresentation ? null : Drawer(
         child: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -4422,7 +4453,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       child: InteractiveViewer(
                       transformationController: _epubZoomController,
                       // 문서 스크롤 보기는 목록이 직접 확대·이동을 맡음 (겹치면 확대가 잘 안 됨)
-                      panEnabled: !_isSpreadsheet && !(_pageModeScroll && _isOfflineDocument) && !_isMemoMode && _epubZoomScale > 1.03,
+                      panEnabled: !_isSpreadsheet && !(_pageModeScroll && _isOfflineDocument && !_isWordOrHwp) && !_isMemoMode && _epubZoomScale > 1.03,
                       scaleEnabled: !_isSpreadsheet && !(_pageModeScroll && _isOfflineDocument) && !_isTouchLocked && (!_isMemoMode || !_allowFingerDrawing),
                       minScale: 1.0,
                       maxScale: 4.5,
@@ -4813,8 +4844,8 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                           const btnPadding = EdgeInsets.symmetric(horizontal: 6, vertical: 4);
 
                           final actionButtons = <Widget>[
-                            // TXT는 목차 없음
-                            if (!_isTxt)
+                            // TXT·PPT는 목차 없음
+                            if (!_isTxt && !_isPresentation)
                             IconButton(
                               visualDensity: VisualDensity.compact,
                               padding: btnPadding,

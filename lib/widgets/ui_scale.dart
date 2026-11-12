@@ -37,12 +37,11 @@ Widget _scaleBox(BuildContext context, double f, Widget child, MediaQueryData da
       return Transform.scale(
         scale: f,
         alignment: Alignment.topLeft,
-        child: OverflowBox(
-          alignment: Alignment.topLeft,
-          minWidth: w / f,
-          maxWidth: w / f,
-          minHeight: h / f,
-          maxHeight: h / f,
+        // 줄여 보일 때(f < 1) 안쪽 화면이 바깥 상자보다 커서, 예전에는 오른쪽·아래 끝부분이 손가락에 반응하지 않았음
+        // (태블릿: 오른쪽 스크롤 막대가 안 잡히고 오른쪽 끝에서 끌기가 잘 안 되던 원인). 안쪽 화면 전체가 반응하게
+        child: _BigChildBox(
+          width: w / f,
+          height: h / f,
           child: MediaQuery(data: data, child: child),
         ),
       );
@@ -139,4 +138,50 @@ class _RenderUiScaleDragFix extends RenderProxyBox {
 
   @override
   bool hitTestChildren(BoxHitTestResult result, {required Offset position}) => false;
+}
+
+/// 바깥 상자 크기는 그대로 두고, 안쪽 화면은 [width]×[height]로 그리며 그 범위 전체가 손가락에 반응
+class _BigChildBox extends SingleChildRenderObjectWidget {
+  const _BigChildBox({required this.width, required this.height, super.child});
+  final double width;
+  final double height;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderBigChildBox(width, height);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderBigChildBox r) {
+    if (r.width != width || r.height != height) {
+      r
+        ..width = width
+        ..height = height
+        ..markNeedsLayout();
+    }
+  }
+}
+
+class _RenderBigChildBox extends RenderProxyBox {
+  _RenderBigChildBox(this.width, this.height);
+  double width;
+  double height;
+
+  @override
+  void performLayout() {
+    child?.layout(BoxConstraints.tightFor(width: width, height: height));
+    size = constraints.biggest.isFinite ? constraints.biggest : constraints.constrain(Size(width, height));
+  }
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) =>
+      constraints.biggest.isFinite ? constraints.biggest : constraints.constrain(Size(width, height));
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    if (position.dx < 0 || position.dy < 0 || position.dx >= width || position.dy >= height) return false;
+    if (hitTestChildren(result, position: position) || hitTestSelf(position)) {
+      result.add(BoxHitTestEntry(this, position));
+      return true;
+    }
+    return false;
+  }
 }

@@ -69,24 +69,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   late bool _hideThumbs = widget.hideThumbnails;
   late bool _hidePages = widget.hidePageCount;
   bool _rememberPage = StorageService.rememberPage;
-  bool _autoPrep = StorageService.autoScrollPrep;
-  bool _notify = StorageService.prepNotify;
-  bool _vibrate = StorageService.prepNotifyVibrate;
-
-  Future<void> _setAutoPrep(bool v) async {
-    setState(() => _autoPrep = v);
-    await StorageService.setAutoScrollPrep(v);
-  }
-
-  Future<void> _setNotify(bool v) async {
-    setState(() => _notify = v);
-    await StorageService.setPrepNotify(v);
-  }
-
-  Future<void> _setVibrate(bool v) async {
-    setState(() => _vibrate = v);
-    await StorageService.setPrepNotifyVibrate(v);
-  }
 
   Future<void> _setRememberPage(bool v) async {
     setState(() => _rememberPage = v);
@@ -166,6 +148,19 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         if (hideChanged) await widget.onChangeHideExtension(hide);
       },
       moreToggles: [
+        // 목록형을 골랐을 때만: 파일을 옆으로 밀어 즐겨찾기·휴지통 하는 동작 끄기
+        SheetToggle(
+          icon: Icons.swipe_outlined,
+          label: _t('밀어서 즐겨찾기·삭제 끄기', 'Turn off swipe actions', '关闭滑动收藏·删除', 'スワイプでお気に入り・削除をオフ'),
+          subtitle: _t('파일을 옆으로 밀어도 즐겨찾기·휴지통 이동을 하지 않아요', 'Swiping a file no longer bookmarks or trashes it', '左右滑动文件不再收藏或移至回收站', 'ファイルを横にスワイプしてもお気に入り・ゴミ箱移動をしません'),
+          value: StorageService.listSwipeOff.value,
+          onlyFor: 'list',
+          onChanged: (v) async {
+            if (!mounted) return;
+            setState(() {});
+            await StorageService.setListSwipeOff(v);
+          },
+        ),
         // 표지형을 골랐을 때만: 표지 그림 끄기 (TXT처럼 가운데 아이콘만)
         SheetToggle(
           icon: Icons.hide_image_outlined,
@@ -267,7 +262,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             : null,
         title: Padding(
           padding: EdgeInsets.only(top: widget.asSheet ? 8 : 0),
-          child: Text(_t('앱 설정', 'App Settings', '应用设置', 'アプリ設定')),
+          child: Text(_t('앱 설정', 'App Settings', '应用设置', 'アプリ設定'), style: const TextStyle(fontWeight: FontWeight.w800)),
         ),
         // 위에서 아래로 끌어 닫을 수 있다는 손잡이 줄
         flexibleSpace: widget.asSheet
@@ -325,32 +320,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               onTap: () => _setRememberPage(!_rememberPage),
               trailing: Switch(value: _rememberPage, onChanged: _setRememberPage),
             ),
-            _item(
-              icon: Icons.view_day_outlined,
-              title: _t('파일 열람 시 자동으로 스크롤 모드 준비하기', 'Prepare scroll view when opening files', '打开文件时自动准备滚动视图', 'ファイルを開くとき自動でスクロール表示を準備'),
-              subtitle: _autoPrep
-                  ? _t('한글·워드 파일을 열면 스크롤 보기를 뒤에서 미리 준비해요', 'HWP·Word files get their scroll view ready in the background', '打开HWP·Word文件时在后台提前准备滚动视图', 'HWP・Wordファイルを開くとスクロール表示を裏で準備します')
-                  : _t('스크롤 모드로 볼 때만 준비해요', 'Prepares only when you use scroll mode', '仅在使用滚动模式时准备', 'スクロールモードで見るときだけ準備します'),
-              onTap: () => _setAutoPrep(!_autoPrep),
-              trailing: Switch(value: _autoPrep, onChanged: _setAutoPrep),
-            ),
-            _section(_t('알림', 'Notifications', '通知', '通知')),
-            _item(
-              icon: Icons.notifications_outlined,
-              title: _t('스크롤 준비 완료 알림', 'Scroll view ready notification', '滚动视图准备完成通知', 'スクロール表示の準備完了通知'),
-              subtitle: _notify
-                  ? _t('준비가 끝나면 휴대폰 알림으로 알려 줘요', 'Notifies you on the phone when it is ready', '准备完成后通过手机通知告诉您', '準備ができたらスマホの通知でお知らせします')
-                  : _t('알림을 보내지 않아요', 'No notification', '不发送通知', '通知しません'),
-              onTap: () => _setNotify(!_notify),
-              trailing: Switch(value: _notify, onChanged: _setNotify),
-            ),
-            _item(
-              icon: Icons.vibration,
-              title: _t('알림 진동', 'Vibrate with notification', '通知振动', '通知のバイブ'),
-              subtitle: _t('알림이 올 때 진동해요', 'Vibrates when the notification arrives', '通知到达时振动', '通知が届くと振動します'),
-              onTap: _notify ? () => _setVibrate(!_vibrate) : null,
-              trailing: Switch(value: _notify && _vibrate, onChanged: _notify ? _setVibrate : null),
-            ),
+            // (스크롤 보기는 이제 문서 화면 안에서 바로 보여 주므로 미리 준비·준비 완료 알림 설정이 필요 없음)
             _section(_t('글꼴', 'Fonts', '字体', 'フォント')),
             _item(
               icon: Icons.description_outlined,
