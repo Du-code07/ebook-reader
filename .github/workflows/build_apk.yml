@@ -145,6 +145,17 @@ jobs:
             if ! grep -q 'android.permission.VIBRATE' "$MANIFEST"; then
               sed -i '/<application/i\    <uses-permission android:name="android.permission.VIBRATE"/>' "$MANIFEST"
             fi
+            # 글꼴 찾기: 기기 저장소의 글꼴 파일 읽기 (안드로이드 12 이하) / 모든 파일 접근 (안드로이드 11 이상, 설정 화면에서 허용)
+            if ! grep -q 'android.permission.READ_EXTERNAL_STORAGE' "$MANIFEST"; then
+              sed -i '/<application/i\    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>' "$MANIFEST"
+            fi
+            if ! grep -q 'android.permission.MANAGE_EXTERNAL_STORAGE' "$MANIFEST"; then
+              sed -i '/<application/i\    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>' "$MANIFEST"
+            fi
+            # 글꼴 찾기: 설치된 글꼴 앱(삼성 글꼴 스타일·FlipFont) 안의 글꼴을 읽으려면 설치된 앱을 볼 수 있어야 함
+            if ! grep -q 'android.permission.QUERY_ALL_PACKAGES' "$MANIFEST"; then
+              sed -i '/<application/i\    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>' "$MANIFEST"
+            fi
             if ! grep -q "com.samsung.android.support.REMOTE_ACTION" "$MANIFEST"; then
               sed -i 's/<\/activity>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true"\/><property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
               sed -i 's/<\/application>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true"\/><property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><\/application>/' "$MANIFEST"
