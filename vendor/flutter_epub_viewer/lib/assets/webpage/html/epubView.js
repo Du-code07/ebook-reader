@@ -2107,13 +2107,27 @@ function freaderAttachChapterScroll(r) {
   }
   var edgeTimer = null;
   function scheduleEdge() { if (edgeTimer) return; edgeTimer = setTimeout(function () { edgeTimer = null; reportEdge(); }, 120); }
+  // 앱 오른쪽 회색 스크롤 막대용: 지금 위치·전체 길이 (자주 보내지 않게 70ms마다 한 번)
+  var metricsTimer = null;
+  function reportMetrics() {
+    var c = box(); if (!c) return;
+    try { window.flutter_inappwebview.callHandler('scrollMetrics', { top: c.scrollTop, height: c.scrollHeight, client: c.clientHeight }); } catch (e) {}
+  }
+  function scheduleMetrics() { if (metricsTimer) return; metricsTimer = setTimeout(function () { metricsTimer = null; reportMetrics(); }, 70); }
   var watched = null;
   r.on('rendered', function () {
     var c = box();
-    if (c && watched !== c) { watched = c; c.addEventListener('scroll', scheduleEdge, { passive: true }); }
+    if (c && watched !== c) {
+      watched = c;
+      c.addEventListener('scroll', scheduleEdge, { passive: true });
+      c.addEventListener('scroll', scheduleMetrics, { passive: true });
+    }
     lastEdge = '';
     setTimeout(reportEdge, 200);
+    setTimeout(reportMetrics, 220);
+    setTimeout(reportMetrics, 900);
   });
+  window.freaderReportScrollMetrics = reportMetrics;
   r.on('relocated', scheduleEdge);
   r.hooks.content.register(function (contents) {
     var doc = contents && contents.document;
@@ -2163,6 +2177,13 @@ function freaderGoChapter(dir) {
   });
 }
 window.freaderGoChapter = freaderGoChapter;
+// FReader: 오른쪽 스크롤 막대를 끌 때 (0 = 장의 처음, 1 = 끝)
+function freaderScrollToRatio(t) {
+  var c = rendition && rendition.manager && rendition.manager.container;
+  if (!c) return;
+  c.scrollTop = Math.max(0, Math.min(1, +t || 0)) * Math.max(0, c.scrollHeight - c.clientHeight);
+}
+window.freaderScrollToRatio = freaderScrollToRatio;
 
 // FReader: 읽기 방향이 우→좌일 때 손가락으로 미는 방향을 반대로
 var freaderSwipeReversed = false;
@@ -2317,10 +2338,27 @@ function locationPayload(location) {
 }
 
 // Sends a location to Flutter's onRelocated.
-function sendRelocated(location) {
+function sendRelocatedNow(location) {
   locationPayload(location).then(function (payload) {
     window.flutter_inappwebview.callHandler('relocated', payload);
   });
+}
+// FReader: 스크롤 보기에서는 굴리는 동안 위치 계산(무거움)을 미뤘다가 멈추면 한 번만 보냄
+// (굴리는 중에 계산이 끼어들면 손가락 움직임이 늦게 처리돼 스크롤이 씹힘)
+var freaderRelocTimer = null, freaderRelocLatest = null;
+function sendRelocated(location) {
+  if (!isScrolledFlow()) {
+    if (freaderRelocTimer) { clearTimeout(freaderRelocTimer); freaderRelocTimer = null; }
+    sendRelocatedNow(location);
+    return;
+  }
+  freaderRelocLatest = location;
+  if (freaderRelocTimer) clearTimeout(freaderRelocTimer);
+  freaderRelocTimer = setTimeout(function () {
+    freaderRelocTimer = null;
+    var loc = freaderRelocLatest; freaderRelocLatest = null;
+    if (loc) sendRelocatedNow(loc);
+  }, 280);
 }
 
 // Resolves `href` relative to the file at `basePath`. Both are relative to

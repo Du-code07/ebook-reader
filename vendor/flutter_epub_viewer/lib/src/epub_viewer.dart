@@ -50,6 +50,7 @@ class EpubViewer extends StatefulWidget {
     this.onTouchUp,
     this.onFootnoteTapped,
     this.onChapterEdge,
+    this.onScrollMetrics,
     this.onLoadError,
     this.initialLocations,
     this.onLocationsGenerated,
@@ -233,6 +234,9 @@ class EpubViewer extends StatefulWidget {
 
   /// FReader: 스크롤 보기에서 장의 처음/끝에 닿았는지 (atStart, atEnd, 첫 장인가, 마지막 장인가)
   final void Function(bool atStart, bool atEnd, bool firstChapter, bool lastChapter)? onChapterEdge;
+
+  /// FReader: 스크롤 보기에서 지금 위치·장 전체 길이·보이는 높이 (오른쪽 스크롤 막대)
+  final void Function(double top, double height, double client)? onScrollMetrics;
 
   /// Callback fired when the book cannot be opened, with an
   /// [EpubLoadException]: the source failed to load (missing file or asset,
@@ -537,6 +541,14 @@ class _EpubViewerState extends State<EpubViewer> {
       try {
         final m = Utils.asStringMap(data[0]);
         widget.onChapterEdge?.call(m['atStart'] == true, m['atEnd'] == true, m['first'] == true, m['last'] == true);
+      } catch (_) {}
+    });
+
+    controller.addHandler("scrollMetrics", (data) {
+      try {
+        final m = Utils.asStringMap(data[0]);
+        double n(Object? v) => v is num ? v.toDouble() : 0;
+        widget.onScrollMetrics?.call(n(m['top']), n(m['height']), n(m['client']));
       } catch (_) {}
     });
 

@@ -140,6 +140,11 @@ class EpubController {
     webViewController?.callMethod('freaderGoChapter', [dir]);
   }
 
+  /// FReader: 스크롤 보기에서 장 안의 비율 위치(0~1)로 바로 이동 (오른쪽 스크롤 막대)
+  void scrollToRatio(double ratio) {
+    webViewController?.callMethod('freaderScrollToRatio', [ratio]);
+  }
+
   /// FReader: 화면을 밀어서 쪽을 넘길지 (페이지 모드의 '슬라이드')
   void setSwipeEnabled(bool enabled) {
     webViewController?.callMethod('setSwipeEnabled', [enabled]);
