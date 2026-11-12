@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'pdf_outline_service.dart';
 import 'storage_service.dart';
+import '../widgets/pop_dialog.dart';
 
 typedef ExportTr = String Function(String ko, String en, String zh, String ja);
 
@@ -108,7 +109,7 @@ class ExportProgressController {
 /// 진행 창을 띄운다. [cancelable]이면 '취소' 버튼이 생긴다.
 ExportProgressController showExportProgress(BuildContext context, ExportTr tr, {bool cancelable = false}) {
   final ctrl = ExportProgressController();
-  showDialog<void>(
+  showPopDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) {

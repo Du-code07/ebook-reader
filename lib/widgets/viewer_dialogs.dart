@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart' show DeviceGestureSettings, EagerGestureRecognizer;
 import 'package:flutter/scheduler.dart';
 import 'app_colors.dart';
+import 'pop_dialog.dart';
 
 typedef ViewerTr = String Function(String ko, String en, String zh, String ja);
 
@@ -27,12 +28,10 @@ Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) 
     barrierDismissible: true,
     barrierLabel: 'close',
     barrierColor: Colors.black54,
-    transitionDuration: const Duration(milliseconds: 160),
+    transitionDuration: const Duration(milliseconds: 300),
     pageBuilder: (ctx, _, __) => SafeArea(child: Center(child: builder(ctx))),
-    transitionBuilder: (ctx, anim, _, child) => FadeTransition(
-      opacity: anim,
-      child: ScaleTransition(scale: Tween<double>(begin: 0.96, end: 1).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)), child: child),
-    ),
+    // 꾹 눌러 뜨는 메뉴와 같은 움직임: 누른 자리에서 커져 나옴
+    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child),
   );
 }
 
@@ -407,10 +406,14 @@ class ContinuousPageList extends StatefulWidget {
     required this.onPageChanged,
     this.controller,
     this.background = Colors.black,
+    this.gapColor,
     this.zoomable = true,
     this.gap = 0,
     this.onLongPressPage,
   });
+
+  /// 쪽 사이 간격 줄 색 (없으면 바탕색 그대로). 바탕은 앱 테마 색, 간격 줄은 따로 고정된 색
+  final Color? gapColor;
 
   /// 길게 누른 쪽 번호 (글자 복사 창 등)
   final ValueChanged<int>? onLongPressPage;
@@ -690,6 +693,17 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
                 height: h,
                 child: RepaintBoundary(child: widget.pageBuilder(context, i)),
               ));
+              // 쪽 사이 간격 줄 (화면 너비 전체)
+              if (widget.gapColor != null && widget.gap > 0 && i < widget.count - 1) {
+                children.add(Positioned(
+                  key: ValueKey('gap$i'),
+                  left: 0,
+                  right: 0,
+                  top: _tops[i] * s - _oy + padY + h,
+                  height: widget.gap * s,
+                  child: ColoredBox(color: widget.gapColor!),
+                ));
+              }
             }
           }
           final mq = MediaQuery.of(context);

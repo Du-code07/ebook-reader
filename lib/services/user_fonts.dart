@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -65,6 +66,34 @@ class UserFonts {
   /// 앱 화면에 쓸 글꼴이 바뀌면 알림 (null이면 기본 글꼴)
   static final ValueNotifier<UserFontEntry?> appFont = ValueNotifier<UserFontEntry?>(null);
 
+  /// 앱 화면에 실제로 쓰는 글꼴 이름: 내가 넣은 글꼴 > 휴대폰에서 고른 글꼴 > null(시스템 기본)
+  /// (파일 내용 화면에는 쓰지 않음)
+  static final ValueNotifier<String?> appFontName = ValueNotifier<String?>(null);
+  static const String _deviceFamily = 'FReaderDeviceFont';
+  static bool _deviceTried = false;
+  static bool _deviceLoaded = false;
+
+  /// 휴대폰 설정에서 고른 글꼴(삼성 글꼴 스타일 등)을 찾아 등록. 못 찾으면 시스템 기본 그대로
+  static Future<void> _loadDeviceFont() async {
+    if (_deviceLoaded) {
+      if (appFont.value == null) appFontName.value = _deviceFamily;
+      return;
+    }
+    if (_deviceTried || !Platform.isAndroid) return;
+    _deviceTried = true;
+    try {
+      final files = await const MethodChannel('ebook_reader/pdf_renderer').invokeListMethod<String>('deviceFontFiles') ?? const [];
+      if (files.isEmpty) return;
+      final loader = FontLoader(_deviceFamily);
+      for (final f in files) {
+        loader.addFont(File(f).readAsBytes().then((b) => ByteData.sublistView(b)));
+      }
+      await loader.load();
+      _deviceLoaded = true;
+      if (appFont.value == null) appFontName.value = _deviceFamily;
+    } catch (_) {}
+  }
+
   /// 앱 화면 글꼴 이름 (Flutter에 등록한 이름). 같은 글꼴의 보통·굵게 파일은 한 이름으로 묶음
   static String appFontFamily(UserFontEntry e) => 'FReaderApp_${familyOf(e).hashCode.toUnsigned(32)}_${e.file.split('.').first}';
 
@@ -109,6 +138,9 @@ class UserFonts {
       final faces = await activeFaces('app');
       if (faces.isEmpty) {
         appFont.value = null;
+        appFontName.value = _deviceLoaded ? _deviceFamily : null;
+        // 앱이 켜지는 것을 기다리게 하지 않고 뒤에서 찾음
+        unawaited(_loadDeviceFont());
         return;
       }
       final e = faces.first;
@@ -119,8 +151,10 @@ class UserFonts {
       }
       await loader.load();
       appFont.value = e;
+      appFontName.value = appFontFamily(e);
     } catch (_) {
       appFont.value = null;
+      appFontName.value = _deviceLoaded ? _deviceFamily : null;
     }
   }
 

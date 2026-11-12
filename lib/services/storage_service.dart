@@ -96,30 +96,6 @@ class StorageService {
   static Future<void> loadRememberPage() async {
     final prefs = await SharedPreferences.getInstance();
     rememberPage = prefs.getBool('remember_page_v89') ?? true;
-    autoScrollPrep = prefs.getBool('auto_scroll_prep_v98') ?? true;
-    prepNotify = prefs.getBool('prep_notify_v98') ?? true;
-    prepNotifyVibrate = prefs.getBool('prep_notify_vibrate_v98') ?? true;
-  }
-
-  // 파일을 열 때(쪽 넘김으로 열어도) 스크롤 보기를 뒤에서 미리 준비 (기본 켜짐)
-  static bool autoScrollPrep = true;
-  // 스크롤 보기 준비가 끝나면 알림 / 그 알림에 진동 (기본 둘 다 켜짐)
-  static bool prepNotify = true;
-  static bool prepNotifyVibrate = true;
-
-  static Future<void> setAutoScrollPrep(bool on) async {
-    autoScrollPrep = on;
-    await (await SharedPreferences.getInstance()).setBool('auto_scroll_prep_v98', on);
-  }
-
-  static Future<void> setPrepNotify(bool on) async {
-    prepNotify = on;
-    await (await SharedPreferences.getInstance()).setBool('prep_notify_v98', on);
-  }
-
-  static Future<void> setPrepNotifyVibrate(bool on) async {
-    prepNotifyVibrate = on;
-    await (await SharedPreferences.getInstance()).setBool('prep_notify_vibrate_v98', on);
   }
 
   static Future<void> setRememberPage(bool on) async {

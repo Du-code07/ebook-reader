@@ -18,6 +18,7 @@ import '../widgets/text_copy_sheet.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
 import '../widgets/viewer_dialogs.dart';
+import '../widgets/app_colors.dart';
 import '../widgets/ui_scale.dart';
 import '../widgets/sheet_pull_to_close.dart';
 import '../services/pdf_export_service.dart';
@@ -26,6 +27,7 @@ import '../widgets/vertical_page_swipe.dart';
 import '../widgets/direction_arrow_icon.dart';
 import '../widgets/find_in_file_bar.dart';
 import 'reader_screen.dart';
+import '../widgets/pop_dialog.dart';
 
 /// 1. S펜 전용 즉시 승리 제스처 인식기 (Eager Stylus Gesture Recognizer):
 /// S펜(stylus / invertedStylus)이 화면에 닿는 순간(PointerDown) 즉시 GestureArena에서 승리(accepted)를 선언하여
@@ -206,6 +208,43 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
 
   List<File> _imagePages = [];
+
+  /// PDF 쪽 자체의 배경색 (쪽 가장자리가 한 가지 색이면). 앱 테마 색보다 먼저 씀
+  Color? _fileBackdrop;
+  Color _backdrop(BuildContext context) => _fileBackdrop ?? viewerBackdrop(context);
+
+  /// 첫 쪽 가장자리 색을 살펴 문서 배경색을 찾음 (흰 바탕이면 앱 테마 색 그대로)
+  Future<void> _detectPageBackdrop() async {
+    if (!_isPdfFile || _imagePages.isEmpty) return;
+    try {
+      final codec = await ui.instantiateImageCodec(await _imagePages.first.readAsBytes(), targetWidth: 24);
+      final img = (await codec.getNextFrame()).image;
+      final data = await img.toByteData(format: ui.ImageByteFormat.rawRgba);
+      final int w = img.width, h = img.height;
+      img.dispose();
+      if (data == null || w < 4 || h < 4) return;
+      final px = <List<int>>[];
+      for (int x = 0; x < w; x++) {
+        for (final y in [0, 1, h - 2, h - 1]) {
+          final o = (y * w + x) * 4;
+          px.add([data.getUint8(o), data.getUint8(o + 1), data.getUint8(o + 2)]);
+        }
+      }
+      for (int y = 2; y < h - 2; y++) {
+        for (final x in [0, 1, w - 2, w - 1]) {
+          final o = (y * w + x) * 4;
+          px.add([data.getUint8(o), data.getUint8(o + 1), data.getUint8(o + 2)]);
+        }
+      }
+      final avg = List.generate(3, (c) => px.map((p) => p[c]).reduce((a, b) => a + b) / px.length);
+      final double spread = px.map((p) => [0, 1, 2].map((c) => (p[c] - avg[c]).abs()).reduce(math.max)).reduce(math.max);
+      final bool white = avg.every((v) => v > 240);
+      // 가장자리가 고르게 한 가지 색이고 흰색이 아닐 때만 문서 배경색으로 봄
+      if (spread < 40 && !white && mounted) {
+        setState(() => _fileBackdrop = Color.fromARGB(255, avg[0].round(), avg[1].round(), avg[2].round()));
+      }
+    } catch (_) {}
+  }
   final Map<int, Size> _pageImageSizes = {};
   bool _isPreparingPages = true;
   int _currentPage = 0;
@@ -771,6 +810,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       }
 
       _totalPages = _imagePages.isNotEmpty ? _imagePages.length : 1;
+      unawaited(_detectPageBackdrop());
 
       final savedPos = await StorageService.getLastPosition(_bookKey);
       if (savedPos != null) {
@@ -1313,7 +1353,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       initialPage: _currentPage,
       // 쪽 그대로 세로로 늘어놓고 쪽 사이는 살짝 띄움 (슬라이드 보기의 쪽을 세로로)
       gap: 12,
-      background: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0D0D0D) : const Color(0xFFE2E2E6),
+      // 쪽 뒤 바탕은 앱 테마(또는 PDF 자체 배경색), 쪽 사이 간격 줄은 고정 색
+      background: _backdrop(context),
+      gapColor: viewerGapColor(Theme.of(context).brightness == Brightness.dark),
       onPageChanged: (p) {
         setState(() => _currentPage = p);
         StorageService.saveLastPosition(_bookKey, p.toString());
@@ -1767,7 +1809,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final currentNote = _memoNotesByPage[_currentPage] ?? '';
     final ctrl = TextEditingController(text: currentNote);
 
-    await showDialog(
+    await showPopDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('${_currentPage + 1}페이지 메모'),
@@ -2069,7 +2111,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           Transform.translate(
             offset: Offset(0, off + (dir > 0 ? h : -h)),
             child: IgnorePointer(
-              child: ColoredBox(color: Colors.black, child: _buildViewPageContent(target, isSpread)),
+              child: ColoredBox(color: _backdrop(context), child: _buildViewPageContent(target, isSpread)),
             ),
           ),
         );
@@ -2374,7 +2416,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final ctrl = TextEditingController(text: '${_currentPage + 1}');
     ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
 
-    final targetPageOneBased = await showDialog<int>(
+    final targetPageOneBased = await showPopDialog<int>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
@@ -2826,8 +2868,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     _syncShakeListening();
     if (_isPreparingPages || _pageController == null) {
       return Scaffold(
-        backgroundColor: Colors.black,
-        body: FileLoadingView(label: _tr('파일 여는 중', 'Opening file', '正在打开文件', 'ファイルを開いています'), dark: true),
+        backgroundColor: _backdrop(context),
+        body: FileLoadingView(label: _tr('파일 여는 중', 'Opening file', '正在打开文件', 'ファイルを開いています'), dark: Theme.of(context).brightness == Brightness.dark),
       );
     }
 
@@ -2862,7 +2904,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       drawerEnableOpenDragGesture: false,
       // 페이지 이동 창의 키보드가 올라와도 뒤의 책 화면은 줄이지 않는다 (줄어드는 동안 버벅임)
       resizeToAvoidBottomInset: false,
-      backgroundColor: Colors.black,
+      backgroundColor: _backdrop(context),
       body: Stack(
         fit: StackFit.expand,
         children: [

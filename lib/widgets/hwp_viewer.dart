@@ -12,6 +12,7 @@ import 'text_copy_sheet.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../services/docx_layout_hints.dart';
+import 'pop_dialog.dart';
 
 /// Navigation adapter; the surrounding ReaderScreen owns the existing UI.
 class HwpReaderController {
@@ -243,6 +244,8 @@ class _HwpViewerState extends State<HwpViewer> {
 
   Map<String, Object?> get _options => {
     'theme': widget.theme,
+    // 쪽 뒤 바탕: 앱 테마가 밝으면 흰색, 어두우면 검은색 (문서 자체 배경색이 있으면 그 색이 먼저)
+    if (!_isSpreadsheet && !_isPresentation) 'backdrop': Theme.of(context).brightness == Brightness.dark ? '#000000' : '#ffffff',
     'spread': widget.spread,
     'rtl': widget.rtl,
     'position': widget.initialPosition,
@@ -446,7 +449,7 @@ class _HwpViewerState extends State<HwpViewer> {
     _passwordOpen = true;
     _timeout?.cancel();
     final input = TextEditingController();
-    final password = await showDialog<String>(
+    final password = await showPopDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('문서 비밀번호'),
@@ -508,6 +511,25 @@ class _HwpViewerState extends State<HwpViewer> {
     }
   }
 
+  Orientation? _orientation;
+  Brightness? _brightness;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 화면을 돌렸을 때: 스크롤 보기 설정을 다시 맞춤 (가로 화면에서도 위아래로 굴러가게)
+    final o = MediaQuery.orientationOf(context);
+    if (_orientation != null && o != _orientation && _loaded && widget.vertical) {
+      unawaited(_web?.setSettings(settings: InAppWebViewSettings(disableVerticalScroll: false, disableHorizontalScroll: false)));
+      unawaited(_invoke('configure', [_options]));
+    }
+    _orientation = o;
+    // 앱 테마(밝음/어두움)가 바뀌면 쪽 뒤 바탕도 바꿈
+    final b = Theme.of(context).brightness;
+    if (_brightness != null && b != _brightness && _loaded) unawaited(_invoke('configure', [_options]));
+    _brightness = b;
+  }
+
   @override
   void dispose() {
     _disposed = true;
@@ -538,12 +560,13 @@ class _HwpViewerState extends State<HwpViewer> {
         InAppWebView(
           // Excel owns two-dimensional pan and pinch; the outer reader still owns its toolbar.
           // 한글·워드: 글을 길게 누르면 문서 화면이 바로 받아 글을 고를 수 있게 (EPUB과 같은 방식)
-          gestureRecognizers: _isSpreadsheet
+          // 엑셀·한글/워드 스크롤 보기: 손가락이 닿자마자 문서 화면이 받아 직접 굴림
+          // (Flutter가 세로 밀기인지 판단할 때까지 터치를 붙잡아 두면 가로 화면·화면 가장자리에서 스크롤이 잘 안 됐음.
+          //  화면 누르기(메뉴)는 바깥 Listener가 따로 받음)
+          gestureRecognizers: _isSpreadsheet || widget.vertical
               ? {Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer())}
               : {
                   Factory<LongPressGestureRecognizer>(() => LongPressGestureRecognizer(duration: const Duration(milliseconds: 350))),
-                  // 스크롤 보기: 위아래로 미는 것은 문서 화면이 받아 굴림
-                  if (widget.vertical) Factory<VerticalDragGestureRecognizer>(() => VerticalDragGestureRecognizer()),
                 },
           initialUrlRequest: URLRequest(url: WebUri(_entry)),
           initialSettings: InAppWebViewSettings(

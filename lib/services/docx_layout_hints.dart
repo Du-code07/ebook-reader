@@ -14,6 +14,16 @@ class DocxLayoutHints {
   static const _m = 'http://schemas.openxmlformats.org/officeDocument/2006/math';
   static const _r = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
+  /// mc:AlternateContent 안의 사진 묶음(그룹) 그림 (wpg:wgp / 그룹 도형)
+  static XmlElement? _groupDrawing(XmlElement alternate) {
+    final choice = alternate.children.whereType<XmlElement>().where((e) => e.name.local == 'Choice').firstOrNull;
+    final drawing = choice?.findAllElements('drawing', namespace: _w).firstOrNull;
+    if (drawing == null) return null;
+    final bool group = drawing.descendants.whereType<XmlElement>().any((e) => e.name.local == 'wgp' || e.name.local == 'grpSp');
+    final bool hasPicture = drawing.findAllElements('blip', namespace: _a).isNotEmpty;
+    return group && hasPicture ? drawing : null;
+  }
+
   /// 글상자가 아닌 단순 도형(네모·둥근 네모·동그라미)만: 위치·크기·선·채우기
   static Map<String, Object>? _shape(XmlElement alternate) {
     final choice = alternate.children.whereType<XmlElement>().where((e) => e.name.local == 'Choice').firstOrNull;
@@ -370,6 +380,21 @@ class DocxLayoutHints {
           for (final n in run.children.whereType<XmlElement>()) {
             // 사진 위에 그린 네모·동그라미 같은 도형 (Word는 mc:AlternateContent 안에 넣는다)
             if (n.name.local == 'AlternateContent') {
+              // 사진+도형 묶음(그룹): 앱이 열 때 한 장의 그림으로 합치므로(docx_groups.js) 그림 하나로 센다.
+              // 도형(네모)으로 따로 그리면 그룹 전체 크기의 큰 빨간 네모가 엉뚱하게 겹쳐 보였음
+              final group = _groupDrawing(n);
+              if (group != null) {
+                final drawing = _drawing(group, drawingCount)
+                  ..remove('crop')
+                  ..remove('rotation')
+                  ..remove('flipH')
+                  ..remove('flipV');
+                drawings.add(drawing);
+                // 앱이 이 그림을 문단 글 뒤로 옮기므로(위아래 배치 그림) 문단 앞의 쪽 나눔을 그림에 붙이지 않음
+                // (붙이면 제목만 남고 사진이 다음 쪽으로 넘어감)
+                drawingCount++;
+                continue;
+              }
               final shape = _shape(n);
               if (shape != null) shapes.add(shape);
               continue;
@@ -523,8 +548,11 @@ class DocxLayoutHints {
           'props': _props(s),
         });
       }
+      // 문서 자체 쪽 배경색 (Word '페이지 색'). 앱 테마보다 먼저 씀
+      final String? pageBg = doc.rootElement.getElement('background', namespace: _w)?.getAttribute('color', namespace: _w);
       return {
         'version': 1,
+        if (pageBg != null && RegExp(r'^[0-9A-Fa-f]{6}$').hasMatch(pageBg) && pageBg.toUpperCase() != 'FFFFFF') 'pageBackground': '#$pageBg',
         'paragraphs': paragraphs,
         if (notes.isNotEmpty) 'notes': notes,
         'tables': tables,

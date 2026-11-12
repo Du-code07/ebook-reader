@@ -117,6 +117,7 @@ class _GroupDropdownPanel extends StatefulWidget {
 class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
   late List<String> _groups = List.of(widget.route.groups);
   Offset _grab = Offset.zero;
+  final Map<String, GlobalKey> _nameKeys = {};
 
   GroupDropdownRoute get r => widget.route;
 
@@ -150,9 +151,14 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
               SizedBox(width: 24, child: Center(child: leading)),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(label,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 15, color: fg, fontWeight: sel ? FontWeight.w700 : FontWeight.w500)),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  // 꾹 누르면 이 이름 바로 오른쪽에 편집 메뉴가 뜸
+                  child: Text(label,
+                      key: _nameKeys.putIfAbsent(value, GlobalKey.new),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 15, color: fg, fontWeight: sel ? FontWeight.w700 : FontWeight.w500)),
+                ),
               ),
               if (sel) const Padding(padding: EdgeInsets.only(left: 6), child: Icon(Icons.check, size: 18, color: Colors.white)),
               const SizedBox(width: 14),
@@ -165,10 +171,11 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
 
   Future<void> _groupMenu(BuildContext rowContext, String g) async {
     HapticFeedback.selectionClick();
-    final action = await showScaleMenu<String>(rowContext, [
+    final nameCtx = _nameKeys[g]?.currentContext ?? rowContext;
+    final action = await showScaleMenu<String>(nameCtx, [
       ('rename', r.renameLabel, Icons.edit_outlined, null),
       ('delete', r.deleteLabel, Icons.delete_outline, Colors.redAccent),
-    ]);
+    ], beside: true);
     if (!mounted || action == null) return;
     if (action == 'rename') {
       final name = await r.onRename(g);

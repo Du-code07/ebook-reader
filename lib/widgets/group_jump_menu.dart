@@ -2,13 +2,21 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'app_colors.dart';
+
 /// 메뉴 한 줄: (값, 보이는 이름, 아이콘, 글자·아이콘 색(없으면 기본))
 typedef ScaleMenuItem<T> = (T, String, IconData, Color?);
 
 /// 누른 아이콘(칩)에서 빠져나오며 커지고, 닫힐 때는 다시 작아지며 그 안으로 들어가는 메뉴.
 /// [전체] 그룹 목록, 파일의 점 3개 메뉴가 같이 쓴다.
 class GroupJumpMenuRoute<T> extends PopupRoute<T> {
-  GroupJumpMenuRoute({required this.anchor, required this.items, this.barrierLabel, this.leadingFor});
+  GroupJumpMenuRoute({required this.anchor, required this.items, this.barrierLabel, this.leadingFor, this.beside = false, this.selected});
+
+  /// 지금 고른 값 (줄 끝에 체크 표시)
+  final T? selected;
+
+  /// true면 누른 것(예: 그룹 이름)의 바로 오른쪽, 위쪽을 맞춰 펼침
+  final bool beside;
 
   /// 줄 앞 그림을 따로 줄 때 (예: 그룹 이름이 파일 형식이면 그 형식 아이콘). null이면 기본 아이콘
   final Widget? Function(T value)? leadingFor;
@@ -39,13 +47,17 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
     const double menuWidth = 220, rowHeight = 46;
     final double menuHeight = math.min(screen.height * 0.6, items.length * rowHeight + 12);
     // 화면 오른쪽에 있는 아이콘이면 메뉴 오른쪽 끝을 맞추고, 아래 공간이 모자라면 위로 펼침
-    final bool alignRight = anchor.center.dx > screen.width / 2;
-    final bool above = anchor.bottom + 6 + menuHeight > screen.height - pad.bottom - 8 && anchor.top - 6 - menuHeight > pad.top;
-    final double edgeX = alignRight ? math.min(screen.width - 8, anchor.right) : math.max(8.0, anchor.left);
+    final bool alignRight = !beside && anchor.center.dx > screen.width / 2;
+    final bool above = !beside && anchor.bottom + 6 + menuHeight > screen.height - pad.bottom - 8 && anchor.top - 6 - menuHeight > pad.top;
+    final double edgeX = beside
+        ? math.min(anchor.right + 12, screen.width - 8 - 140)
+        : alignRight ? math.min(screen.width - 8, anchor.right) : math.max(8.0, anchor.left);
     // 위아래 어디로도 다 들어가지 않으면 화면 안에 들어오도록 올려서 펼침
-    final double edgeY = above
-        ? anchor.top - 6
-        : math.max(pad.top + 8, math.min(anchor.bottom + 6, screen.height - pad.bottom - 8 - menuHeight));
+    final double edgeY = beside
+        ? math.max(pad.top + 8, math.min(anchor.top, screen.height - pad.bottom - 8 - menuHeight))
+        : above
+            ? anchor.top - 6
+            : math.max(pad.top + 8, math.min(anchor.bottom + 6, screen.height - pad.bottom - 8 - menuHeight));
     final Alignment corner = above ? (alignRight ? Alignment.bottomRight : Alignment.bottomLeft) : (alignRight ? Alignment.topRight : Alignment.topLeft);
     // 누른 아이콘 가운데에서 커져 나오도록 (메뉴 모서리 기준)
     final Offset origin = Offset(anchor.center.dx - edgeX, anchor.center.dy - edgeY);
@@ -58,7 +70,8 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
-        constraints: BoxConstraints(minWidth: 150, maxWidth: menuWidth, maxHeight: screen.height * 0.6),
+        // 글자 길이만큼만 (오른쪽 빈 공간 없이)
+        constraints: BoxConstraints(minWidth: beside ? 0 : 150, maxWidth: menuWidth, maxHeight: screen.height * 0.6),
         child: IntrinsicWidth(
           // ListView는 내용 너비를 잴 수 없어 Column + 스크롤로
           child: SingleChildScrollView(
@@ -77,6 +90,10 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
                         leadingFor?.call(value) ?? Icon(icon, size: 16, color: color ?? cs.onSurfaceVariant),
                         const SizedBox(width: 10),
                         Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, color: color))),
+                        if (selected != null && selected == value) ...[
+                          const SizedBox(width: 12),
+                          Icon(Icons.check, size: 18, color: AppColors.of(context)),
+                        ],
                       ],
                     ),
                   ),
@@ -114,15 +131,18 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
 }
 
 /// [anchorContext] 위치에서 커져 나오는 메뉴를 띄우고 고른 값을 돌려줌 (닫으면 null)
-Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> items) {
+Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> items, {bool beside = false}) {
   final box = anchorContext.findRenderObject() as RenderBox?;
   if (box == null || !box.hasSize) return Future.value(null);
-  final Offset topLeft = box.localToGlobal(Offset.zero);
+  // 메뉴가 놓이는 화면 기준 좌표 (태블릿처럼 앱을 크게 보여 줄 때도 누른 자리에 맞게)
+  final RenderObject? overlayBox = Navigator.of(anchorContext).overlay?.context.findRenderObject();
+  final Offset topLeft = box.localToGlobal(Offset.zero, ancestor: overlayBox);
   return Navigator.of(anchorContext).push<T>(
     GroupJumpMenuRoute<T>(
       anchor: topLeft & box.size,
       barrierLabel: MaterialLocalizations.of(anchorContext).modalBarrierDismissLabel,
       items: items,
+      beside: beside,
     ),
   );
 }

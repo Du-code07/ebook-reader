@@ -9,6 +9,13 @@ class AppColors {
 }
 
 /// 아이콘이 바뀌는 움직임의 기본값 ([전체] 그룹 아이콘과 같은 빠르기·느낌)
+/// 파일 뒤 바탕: 앱 테마가 밝으면 흰색, 어두우면(밝은 다크 포함) 검은색
+Color viewerBackdrop(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark ? Colors.black : Colors.white;
+
+/// 쪽 사이 간격 줄 (고정)
+Color viewerGapColor(bool dark) => dark ? const Color(0xFF0D0D0D) : const Color(0xFFE2E2E6);
+
 const Duration kIconMotion = Duration(milliseconds: 240);
 const Curve kIconCurve = Curves.easeOutCubic;
 

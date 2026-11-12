@@ -620,9 +620,18 @@ function fitPages() {
     frame.firstElementChild.style.transform = `scale(${scale})`;
   }
 }
+// FReader: 쪽 뒤 바탕 = 문서 자체 배경색(있으면) > 앱 테마 색(흰색/검은색). 쪽 사이 간격 줄은 고정 색
+function applyBackdrop() {
+  const root = document.documentElement.style;
+  const fileBg = options.docxLayout?.pageBackground;
+  if (fileBg) root.setProperty('--file-page', fileBg); else root.removeProperty('--file-page');
+  const backdrop = fileBg || options.backdrop;
+  if (backdrop) root.setProperty('--backdrop', backdrop); else root.removeProperty('--backdrop');
+}
 function configure(next = {}) {
   const oldSpread = options.spread; options = { ...options, ...next };
   document.body.dataset.theme = ['white', 'sepia', 'dark'].includes(options.theme) ? options.theme : 'white';
+  applyBackdrop();
   host.classList.toggle('rtl', !!options.rtl);
   if (pages.length && 'vertical' in next && !!next.vertical !== vertical) return setVertical(!!next.vertical);
   if (vertical) return;

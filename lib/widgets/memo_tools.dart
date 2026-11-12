@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../services/storage_service.dart';
+import 'pop_dialog.dart';
 
 typedef MemoTr = String Function(String ko, String en, String zh, String ja);
 
@@ -267,8 +268,9 @@ Future<String?> showEraserTypeMenu(BuildContext buttonContext, String current, M
     barrierDismissible: true,
     barrierLabel: tr('닫기', 'Close', '关闭', '閉じる'),
     barrierColor: Colors.transparent,
-    transitionDuration: const Duration(milliseconds: 120),
-    transitionBuilder: (ctx, anim, _, child) => FadeTransition(opacity: anim, child: child),
+    transitionDuration: const Duration(milliseconds: 300),
+    // 누른 단추 자리에서 커져 나옴 (꾹 눌러 뜨는 메뉴와 같은 움직임)
+    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child),
     pageBuilder: (ctx, _, __) => Stack(
       children: [
         Positioned(
@@ -335,7 +337,7 @@ Future<void> showPenSettingsPanel({
   required ValueChanged<double> onWidthChanged,
   required MemoTr tr,
 }) {
-  return showDialog<void>(
+  return showPopDialog<void>(
     context: context,
     barrierColor: Colors.black26,
     builder: (ctx) => _PenSettingsPanel(

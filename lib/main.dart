@@ -27,6 +27,7 @@ import 'services/storage_service.dart';
 import 'services/user_fonts.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart' show EpubBookServer;
 import 'services/doc_thumbnail_service.dart';
+import 'widgets/pop_dialog.dart';
 
 /// 상태표시줄 본래 높이(기기 픽셀). 태블릿에서 상단바를 이 높이에 맞춰 항상 내려 둔다
 final ValueNotifier<int> statusBarHeightPx = ValueNotifier<int>(0);
@@ -180,7 +181,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   );
 
   ThemeData _appTheme(Brightness b, {String variant = 'dark'}) {
-    final appFont = UserFonts.appFont.value;
+    final String? appFont = UserFonts.appFontName.value;
     // 앱 대표 색: 연두색 — 고른 것·켜짐·버튼 '바탕'에만 (글씨·아이콘은 기본 색), 연두 바탕 위 글씨는 흰색
     final Color sig = b == Brightness.light ? AppColors.signature : AppColors.signatureDark;
     var scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF8BC34A), brightness: b);
@@ -224,7 +225,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
-      fontFamily: appFont == null ? null : UserFonts.appFontFamily(appFont),
+      fontFamily: appFont,
       iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
       // 상단바 아이콘: 테마 글자색 (다크·밝은 다크에서도 보이게)
       // 제목 느낌의 글씨는 모두 굵게 (상단바 제목·창 제목·항목 제목)
@@ -255,8 +256,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<UserFontEntry?>(
-      valueListenable: UserFonts.appFont,
+    return ValueListenableBuilder<String?>(
+      valueListenable: UserFonts.appFontName,
       builder: (context, _, __) => _buildApp(context),
     );
   }
@@ -312,9 +313,10 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
             child: TooltipVisibility(
               visible: false,
               child: UiScaleBox(
-                child: UserFonts.appFont.value == null
+                // 누른 자리 기억 (창이 그 자리에서 커져 나오게)
+                child: TapOrigin.track(UserFonts.appFontName.value == null
                     ? content
-                    : DefaultTextStyle.merge(style: TextStyle(fontFamily: UserFonts.appFontFamily(UserFonts.appFont.value!)), child: content),
+                    : DefaultTextStyle.merge(style: TextStyle(fontFamily: UserFonts.appFontName.value), child: content)),
               ),
             ),
           ),
@@ -728,7 +730,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   List<File> _allBooks = [];
   List<File> _trashedBooks = [];
   List<String> _groups = List<String>.of(StorageService.defaultGroups);
-  bool _groupEditMode = false; // 그룹을 꾹 눌러 순서 바꾸기·삭제하는 중
   bool _groupMenuOpen = false; // [전체]에서 그룹 목록을 펼친 중 (아이콘 엇갈림)
 
   // ── 파일 검색 (상단 돋보기) ──
@@ -746,7 +747,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     setState(() {
       _searchOpen = true;
       _searchQuery = '';
-      _groupEditMode = false;
     });
     _searchCtrl.clear();
     _searchAnim.forward();
@@ -1499,7 +1499,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         onFileLoading: (status) {
           if (status == FilePickerStatus.picking && !shown && mounted) {
             shown = true;
-            showDialog<void>(
+            showPopDialog<void>(
               context: context,
               barrierDismissible: false,
               useRootNavigator: true,
@@ -1580,7 +1580,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }).toList();
 
     if (pdfPicked.length >= 2 && pdfPicked.length == validPicked.length && mounted) {
-      final action = await showDialog<String>(
+      final action = await showPopDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(_tr('PDF ${pdfPicked.length}개 추가 방식 선택', 'Import ${pdfPicked.length} PDFs', '选择导入 ${pdfPicked.length} 个 PDF 的方式', 'PDF ${pdfPicked.length}個の追加方法を選択')),
@@ -1619,7 +1619,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }).toList();
 
     if (imagePicked.length >= 2 && imagePicked.length == validPicked.length && mounted) {
-      final action = await showDialog<String>(
+      final action = await showPopDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(_tr('이미지 추가 방식 선택', 'Image Import Option', '选择图片导入方式', '画像の追加方法を選択')),
@@ -1690,7 +1690,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     bool deleteOriginals = deleteSourceAfter;
     bool sortByName = true;
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showPopDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
@@ -1771,7 +1771,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     String progressStatus = _tr('이미지 준비 중...', 'Preparing images...', '正在准备图片...', '画像を準備中...');
     StateSetter? progressSetState;
 
-    showDialog(
+    showPopDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
@@ -1878,7 +1878,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       return;
     }
 
-    final result = await showDialog<Object?>(
+    final result = await showPopDialog<Object?>(
       context: context,
       builder: (ctx) => _FileMergeSelectDialog(
         files: existingImages,
@@ -1922,7 +1922,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     bool deleteOriginals = deleteSourceAfter;
     bool sortByName = true;
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showPopDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => AlertDialog(
@@ -2021,7 +2021,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       return null;
     });
 
-    showDialog(
+    showPopDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
@@ -2122,7 +2122,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       return;
     }
 
-    final result = await showDialog<Object?>(
+    final result = await showPopDialog<Object?>(
       context: context,
       builder: (ctx) => _FileMergeSelectDialog(
         files: existingPdfs,
@@ -2165,7 +2165,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
     final ctrl = TextEditingController(text: baseName);
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showPopDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_tr('이름 변경', 'Rename File', '重命名文件', 'ファイル名変更')),
@@ -2275,13 +2275,33 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     } catch (_) {}
     SystemChrome.setPreferredOrientations([]);
 
-    _loadLibrary();
+    // 파일 화면이 닫히는 움직임이 끝난 뒤에 목록을 새로 읽음 (닫히는 도중에 목록을 다시 그리면 버벅임)
+    await Future<void>.delayed(const Duration(milliseconds: 360));
+    if (mounted) _loadLibrary();
+  }
+
+  /// 설정 창에서 켜고 끌 때: 스위치가 움직이는 동안은 뒤의 파일 목록을 다시 그리지 않고, 끝난 뒤에 한 번
+  Timer? _toggleTimer;
+  final List<VoidCallback> _toggleQueue = [];
+  void _afterToggle(VoidCallback change) {
+    _toggleQueue.add(change);
+    _toggleTimer?.cancel();
+    _toggleTimer = Timer(const Duration(milliseconds: 260), () {
+      if (!mounted) return;
+      final pending = List.of(_toggleQueue);
+      _toggleQueue.clear();
+      setState(() {
+        for (final c in pending) {
+          c();
+        }
+      });
+    });
   }
 
   Future<String?> _createNewGroupDialog() async {
     final controller = TextEditingController();
     String? created;
-    await showDialog(
+    await showPopDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_tr('새 그룹 만들기', 'Create New Group', '新建分组', '新規グループ作成')),
@@ -2540,7 +2560,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   /// 그룹 이름 수정 (새 이름을 돌려줌, 취소하면 null)
   Future<String?> _renameGroupDialog(String group) async {
     final controller = TextEditingController(text: group);
-    final name = await showDialog<String>(
+    final name = await showPopDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_tr('이름 수정', 'Rename Group', '重命名分组', 'グループ名を変更'), style: const TextStyle(fontWeight: FontWeight.w800)),
@@ -2584,7 +2604,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       return false;
     }
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showPopDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_tr('"$groupName" 그룹 삭제', 'Delete "$groupName"', '删除 "$groupName"', '「$groupName」グループ削除')),
@@ -2686,7 +2706,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     if (_selectedFilePaths.isEmpty) return;
     final count = _selectedFilePaths.length;
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showPopDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_tr('선택한 파일 삭제', 'Delete Selected Files', '删除所选文件', '選択したファイルを削除')),
@@ -2748,7 +2768,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           icon: const Icon(Icons.delete_forever, color: Colors.redAccent, size: 16),
                           label: Text(_tr('휴지통 비우기', 'Empty Trash', '清空回收站', 'ゴミ箱を空にする'), style: const TextStyle(color: Colors.redAccent)),
                           onPressed: () async {
-                            final confirmEmpty = await showDialog<bool>(
+                            final confirmEmpty = await showPopDialog<bool>(
                               context: ctx,
                               builder: (dCtx) => AlertDialog(
                                 title: Text(_tr('휴지통 비우기', 'Empty Trash', '清空回收站', 'ゴミ箱を空にする')),
@@ -2816,7 +2836,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                     icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
                                     tooltip: _tr('영구 삭제', 'Delete Forever', '永久删除', '完全削除'),
                                     onPressed: () async {
-                                      final confirmDelete = await showDialog<bool>(
+                                      final confirmDelete = await showPopDialog<bool>(
                                         context: ctx,
                                         builder: (dCtx) => AlertDialog(
                                           title: Text(_tr('영구 삭제', 'Delete Forever', '永久删除', '完全削除')),
@@ -2923,21 +2943,21 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           hideThumbnails: _hideThumbnails,
           onChangeHideThumbnails: (hide) async {
             await StorageService.setHideThumbnails(hide);
-            if (mounted) setState(() => _hideThumbnails = hide);
+            _afterToggle(() => _hideThumbnails = hide);
           },
           onChangeHideGroupName: (hide) async {
             await StorageService.setHideGroupName(hide);
-            if (mounted) setState(() => _hideGroupName = hide);
+            _afterToggle(() => _hideGroupName = hide);
           },
           hidePageCount: _hidePageCount,
           onChangeHidePageCount: (hide) async {
             await StorageService.setHidePageCount(hide);
-            if (mounted) setState(() => _hidePageCount = hide);
+            _afterToggle(() => _hidePageCount = hide);
           },
           onChangeLanguage: widget.onChangeLanguage,
           onChangeViewMode: (mode) async {
             await StorageService.setBookshelfViewMode(mode);
-            if (mounted) setState(() => _bookshelfViewMode = mode);
+            _afterToggle(() => _bookshelfViewMode = mode);
             // 표지형으로 바꾸면 아직 표지가 없는 한글·워드 문서의 첫 페이지를 만든다
             if (mode == 'grid') {
               for (final f in _allBooks) {
@@ -2947,7 +2967,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           },
           onChangeHideExtension: (hide) async {
             await StorageService.setHideFileExtension(hide);
-            if (mounted) setState(() => _hideFileExtension = hide);
+            _afterToggle(() => _hideFileExtension = hide);
           },
           onOpenManual: (lang) => Navigator.push(
             context,
@@ -3296,7 +3316,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             : _allBooks.where((f) => (_bookGroupMap[f.path] ?? '미분류') == _selectedGroup).toList();
 
     return PopScope(
-      canPop: !_isSelectionMode && !_groupEditMode && !_searchOpen && !_favoritesOnly,
+      canPop: !_isSelectionMode && !_searchOpen && !_favoritesOnly,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _searchOpen) {
           _closeSearch();
@@ -3304,10 +3324,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         }
         if (!didPop && _favoritesOnly && !_isSelectionMode) {
           setState(() => _favoritesOnly = false);
-          return;
-        }
-        if (!didPop && _groupEditMode) {
-          setState(() => _groupEditMode = false);
           return;
         }
         if (!didPop && _isSelectionMode) {
@@ -3456,7 +3472,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                       // 선택: 파일을 꾹 누른 채 드래그 / 그냥 드래그: 목록 스크롤
                       // (꾹 누름이 인식되면 목록 스크롤은 자동으로 멈추고 선택만 진행됨)
                       onPointerDown: (event) {
-                        if (_groupEditMode) setState(() => _groupEditMode = false);
                         _activeBookshelfPointers[event.pointer] = event.position;
                         if (_activeBookshelfPointers.length >= 2 && _isDragSelecting) {
                           setState(() => _isDragSelecting = false);
@@ -3486,10 +3501,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           _lastDragTouchedPath = null;
                         }
                       },
-                      child: AbsorbPointer(
-                        // 그룹 편집 중에 목록을 누르면 편집만 끝나고 파일은 열리지 않게
-                        absorbing: _groupEditMode,
-                        child: _bookshelfViewMode == 'grid'
+                      child: _bookshelfViewMode == 'grid'
                           ? LayoutBuilder(
                               builder: (context, constraints) {
                                 // 3. 휴대폰 기준 한 페이지에 9개(가로 3개 × 세로 3개)가 들어갈 정도로 크기 자동 조절
@@ -3690,7 +3702,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           ),
                         ), slide: true);
                       },
-                    )),
+                    ),
                           ),
                         ),
                       ],

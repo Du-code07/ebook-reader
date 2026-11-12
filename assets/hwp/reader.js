@@ -169,6 +169,9 @@ function configure(next = {}) {
   const previousSpread = options.spread;
   options = { ...options, ...next };
   document.body.dataset.theme = ['white', 'sepia', 'dark'].includes(options.theme) ? options.theme : 'white';
+  // FReader: 쪽 뒤 바탕 = 앱 테마 색 (흰색/검은색). 쪽 사이 간격 줄은 고정 색
+  if (options.backdrop) document.documentElement.style.setProperty('--backdrop', options.backdrop);
+  else document.documentElement.style.removeProperty('--backdrop');
   host.classList.toggle('rtl', !!options.rtl);
   if (doc && 'vertical' in next && !!next.vertical !== vertical) return setVertical(!!next.vertical);
   if (vertical) return;

@@ -59,6 +59,49 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private val EVENT_CHANNEL = "ebook_reader/volume_events"
     private val PDF_CHANNEL = "ebook_reader/pdf_renderer"
 
+    /// 휴대폰에서 고른 글꼴 파일 (삼성 FlipFont 등). 기본 시스템 글꼴이면 빈 목록 (Flutter가 이미 시스템 글꼴을 씀)
+    private fun deviceFontFiles(): List<String> {
+        val out = ArrayList<String>()
+        fun addFontFile(f: java.io.File) {
+            if (!f.canRead()) return
+            val n = f.name.lowercase()
+            if (n.endsWith(".ttf") || n.endsWith(".otf") || n.endsWith(".ttc")) out.add(f.absolutePath)
+            else if (n.endsWith(".apk")) {
+                // 글꼴 앱(apk) 안의 assets/fonts/*.ttf를 꺼내 둠
+                try {
+                    val dir = java.io.File(cacheDir, "devicefont").apply { mkdirs() }
+                    java.util.zip.ZipFile(f).use { zip ->
+                        for (e in zip.entries()) {
+                            val en = e.name.lowercase()
+                            if (!e.isDirectory && en.startsWith("assets/") && (en.endsWith(".ttf") || en.endsWith(".otf"))) {
+                                val dst = java.io.File(dir, e.name.substringAfterLast('/'))
+                                if (!dst.exists() || dst.length() != e.size) zip.getInputStream(e).use { inp -> dst.outputStream().use { inp.copyTo(it) } }
+                                out.add(dst.absolutePath)
+                            }
+                        }
+                    }
+                } catch (_: Throwable) {}
+            } else if (f.isDirectory) {
+                f.listFiles()?.forEach { c -> if (c.isFile) addFontFile(c) }
+            }
+        }
+        // 삼성: 설정 > 글꼴 스타일에서 고른 글꼴 (숨은 기능이라 없는 기기도 있음)
+        for (name in listOf("getFontPathFlipFont")) {
+            try {
+                val m = android.graphics.Typeface::class.java.getDeclaredMethod(name, Context::class.java, Int::class.javaPrimitiveType)
+                m.isAccessible = true
+                for (idx in 1..2) {
+                    val p = m.invoke(null, this, idx) as? String ?: continue
+                    if (p.isEmpty() || p.contains("default", ignoreCase = true)) continue
+                    addFontFile(java.io.File(p))
+                    if (out.isNotEmpty()) break
+                }
+            } catch (_: Throwable) {}
+            if (out.isNotEmpty()) return out.distinct()
+        }
+        return out.distinct()
+    }
+
     private var isVolumeInterceptEnabled = false
     private var eventSink: EventChannel.EventSink? = null
     private var pdfMethodChannel: MethodChannel? = null
@@ -307,7 +350,13 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         val pChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
         pdfMethodChannel = pChannel
         pChannel.setMethodCallHandler { call, result ->
-            if (call.method == "pdfSearchSupported") {
+            if (call.method == "deviceFontFiles") {
+                // 앱 글꼴 '기본': 휴대폰 설정에서 고른 글꼴(삼성 글꼴 스타일 등) 파일 경로. 못 찾으면 빈 목록
+                thumbExecutor.execute {
+                    val files = try { deviceFontFiles() } catch (e: Throwable) { emptyList<String>() }
+                    runOnUiThread { result.success(files) }
+                }
+            } else if (call.method == "pdfSearchSupported") {
                 result.success(pdfSearchSupported())
             } else if (call.method == "pdfSearch") {
                 // 파일 내 단어 검색: 쪽마다 찾은 곳의 사각형(쪽 크기 대비 0~1)을 돌려 준다
