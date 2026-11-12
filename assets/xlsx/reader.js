@@ -334,6 +334,12 @@ function endPointer(event) {
   if (press && press.id === event.pointerId) {
     const wasActive = press.active;
     cancelPress();
+    // 짧게 한 번 누르면 길게 눌러 골라 둔 칸(파란 테두리)을 지움
+    if (!wasActive && event.type === 'pointerup' && pointers.size === 1) {
+      try {
+        if (viewer?.selectionState) { viewer.setSelection(null); emit('selectionCleared', {}); }
+      } catch {}
+    }
     if (wasActive && event.type === 'pointerup') {
       const text = selectedText();
       if (text) emit('copyText', { text });
