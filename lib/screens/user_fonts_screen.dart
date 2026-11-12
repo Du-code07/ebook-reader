@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../widgets/app_colors.dart';
 
 import '../services/user_fonts.dart';
 
@@ -141,7 +142,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
 
   Widget _sectionLabel(ColorScheme cs, String text) => Padding(
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
-        child: Text(text, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: cs.onSurfaceVariant)),
+        child: Text(text, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: cs.onSurfaceVariant)),
       );
 
   /// 앱·EPUB 글꼴 한 줄: 누르면 그 글꼴로 바꿈 (지금 쓰는 글꼴은 체크 표시)
@@ -149,7 +150,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
     final bool on = _active == family;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
-      leading: Icon(on ? Icons.radio_button_checked : Icons.radio_button_off, color: on ? cs.primary : cs.onSurfaceVariant),
+      leading: Icon(on ? Icons.radio_button_checked : Icons.radio_button_off, color: on ? AppColors.of(context) : cs.onSurfaceVariant),
       title: Text(title, style: TextStyle(fontWeight: on ? FontWeight.w800 : FontWeight.w600)),
       subtitle: subtitle.isEmpty ? null : Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
       selected: on,
@@ -192,7 +193,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
               ListTile(
                 dense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                leading: Icon(Icons.check_circle_outline, color: cs.primary, size: 20),
+                leading: Icon(Icons.check_circle_outline, color: AppColors.of(context), size: 20),
                 title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(note),
               ),

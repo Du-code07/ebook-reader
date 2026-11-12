@@ -27,7 +27,7 @@ Future<void> showTextCopySheet(
                   children: [
                     Expanded(
                       child: Text(tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                     ),
                     if (cleaned.isNotEmpty)
                       FilledButton.tonalIcon(

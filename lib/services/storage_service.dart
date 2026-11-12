@@ -272,6 +272,10 @@ class StorageService {
     return prefs.getBool('hide_thumbnails') ?? false;
   }
 
+  /// 스크롤 보기의 회색 스크롤 막대 끄기
+  static Future<bool> getScrollBarOff() async => (await SharedPreferences.getInstance()).getBool('scroll_bar_off_v100') ?? false;
+  static Future<void> setScrollBarOff(bool off) async => (await SharedPreferences.getInstance()).setBool('scroll_bar_off_v100', off);
+
   /// 목록형: 파일을 옆으로 밀어 즐겨찾기(오른쪽)·휴지통(왼쪽) 하는 동작 끄기
   static final ValueNotifier<bool> listSwipeOff = ValueNotifier<bool>(false);
   static Future<void> loadListSwipeOff() async {
@@ -672,9 +676,12 @@ class StorageService {
     );
   }
 
+  static const List<String> defaultGroups = ['전체', 'pdf', 'ppt', 'cbz', 'png', 'xlsx', 'hwpx', 'docx', 'epub', 'txt'];
+
   static Future<List<String>> getGroups() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList('book_groups_v2') ?? ['전체', 'PDF/문서'];
+    // 처음 켤 때: 파일 형식별 그룹을 미리 만들어 둠
+    return prefs.getStringList('book_groups_v2') ?? List<String>.of(defaultGroups);
   }
 
   static Future<void> addGroup(String groupName) async {
@@ -704,6 +711,23 @@ class StorageService {
         await prefs.setString(key, '미분류');
       }
     }
+  }
+
+  /// 그룹 이름 바꾸기 (그 그룹에 있던 파일도 새 이름으로 따라감)
+  static Future<bool> renameGroup(String oldName, String newName) async {
+    if (oldName == '전체' || newName.isEmpty || oldName == newName) return false;
+    final prefs = await SharedPreferences.getInstance();
+    final groups = await getGroups();
+    final i = groups.indexOf(oldName);
+    if (i < 0 || groups.contains(newName)) return false;
+    groups[i] = newName;
+    await prefs.setStringList('book_groups_v2', groups);
+    for (final key in prefs.getKeys().toList()) {
+      if (key.startsWith('grp_') && prefs.getString(key) == oldName) {
+        await prefs.setString(key, newName);
+      }
+    }
+    return true;
   }
 
   static Future<void> setBookGroup(String bookPath, String groupName) async {

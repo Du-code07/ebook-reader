@@ -87,7 +87,7 @@ class _LanguageSelectScreenState extends State<LanguageSelectScreen> {
                       children: [
                         Text(
                           t('앱에서 사용할 언어를 선택하세요', 'Choose the app language', '请选择应用语言', 'アプリの言語を選んでください'),
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                         ),
                         const SizedBox(height: 2),
                         Text(
@@ -115,8 +115,8 @@ class _LanguageSelectScreenState extends State<LanguageSelectScreen> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         leading: CircleAvatar(
                           radius: 18,
-                          backgroundColor: code == _selected ? cs.primary : cs.surfaceContainerHighest,
-                          foregroundColor: code == _selected ? cs.onPrimary : cs.onSurfaceVariant,
+                          backgroundColor: code == _selected ? Colors.white.withValues(alpha: 0.28) : cs.surfaceContainerHighest,
+                          foregroundColor: code == _selected ? Colors.white : cs.onSurfaceVariant,
                           child: code == 'system'
                               ? const Icon(Icons.phone_android, size: 17)
                               : Text(_badge(code), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
@@ -126,7 +126,7 @@ class _LanguageSelectScreenState extends State<LanguageSelectScreen> {
                         subtitle: code == 'system' ? Text(languageOptionLabel(StorageService.resolveSystemLanguage())) : null,
                         trailing: Icon(
                           code == _selected ? Icons.check_circle : Icons.radio_button_unchecked,
-                          color: code == _selected ? cs.primary : cs.outline,
+                          color: code == _selected ? Colors.white : cs.outline,
                         ),
                         onTap: () => setState(() => _selected = code),
                       ),

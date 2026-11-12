@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart' show DeviceGestureSettings, EagerGestureRecognizer;
 import 'package:flutter/scheduler.dart';
+import 'app_colors.dart';
 
 typedef ViewerTr = String Function(String ko, String en, String zh, String ja);
 
@@ -67,7 +69,7 @@ Future<void> showPageDisplayDialog(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(tr('페이지 표시', 'Page Display', '页面显示', 'ページ表示'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+              Text(tr('페이지 표시', 'Page Display', '页面显示', 'ページ表示'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
               const SizedBox(height: 10),
               Padding(
                 padding: const EdgeInsets.only(right: 8),
@@ -99,7 +101,7 @@ Future<void> showPageDisplayDialog(
                         Icon(
                           selected == value ? Icons.radio_button_checked : Icons.radio_button_unchecked,
                           size: 23,
-                          color: selected == value ? cs.onSurface : cs.outline,
+                          color: selected == value ? AppColors.of(context) : cs.outline,
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -147,7 +149,7 @@ Future<String?> showRotationDialog(BuildContext context, {required String curren
             children: [
               Padding(
                 padding: const EdgeInsets.only(left: 4, bottom: 14),
-                child: Text(tr('화면 회전', 'Screen Rotation', '屏幕旋转', '画面回転'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+                child: Text(tr('화면 회전', 'Screen Rotation', '屏幕旋转', '画面回転'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
               ),
               for (final value in const ['auto', 'portrait', 'landscape'])
                 Padding(
@@ -252,6 +254,9 @@ class ScrollThumbBar extends StatefulWidget {
 
   /// 뷰어 설정의 '왼손잡이' (스크롤 막대·도구 모음을 왼쪽에)
   static final ValueNotifier<bool> leftHanded = ValueNotifier<bool>(false);
+
+  /// 뷰어 설정의 '스크롤바 끄기'
+  static final ValueNotifier<bool> off = ValueNotifier<bool>(false);
   final double ratio;
   final double viewFraction;
   final ValueChanged<double> onDragRatio;
@@ -266,13 +271,40 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
   bool _dragging = false;
   double _dragRatio = 0;
   int? _dragPointer;
+  // 화면이 굴러가는 동안은 막대를 숨기고(손가락 끌기와 부딪히지 않게), 멈추면 다시 보임
+  bool _moving = false;
+  Timer? _idle;
+
+  @override
+  void didUpdateWidget(covariant ScrollThumbBar old) {
+    super.didUpdateWidget(old);
+    if (!_dragging && (old.ratio - widget.ratio).abs() > 0.0005) {
+      _moving = true;
+      _idle?.cancel();
+      _idle = Timer(const Duration(milliseconds: 450), () {
+        if (mounted) setState(() => _moving = false);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _idle?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.left != null) return _build(context, widget.left!);
     return ValueListenableBuilder<bool>(
-      valueListenable: ScrollThumbBar.leftHanded,
-      builder: (context, left, _) => _build(context, left),
+      valueListenable: ScrollThumbBar.off,
+      builder: (context, off, _) {
+        if (off) return const SizedBox.shrink();
+        if (widget.left != null) return _build(context, widget.left!);
+        return ValueListenableBuilder<bool>(
+          valueListenable: ScrollThumbBar.leftHanded,
+          builder: (context, left, _) => _build(context, left),
+        );
+      },
     );
   }
 
@@ -289,14 +321,18 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
         widget.onDragEnd?.call();
       }
 
+      final bool hidden = _moving && !_dragging;
       return Stack(children: [
         Positioned(
           left: left ? 0 : null,
           right: left ? null : 0,
           top: ratio * track,
-          width: 36, // 누르기 쉬운 범위 (보이는 막대는 가늘게)
+          width: 28, // 누르기 쉬운 범위 (보이는 막대는 가늘게)
           height: thumb,
           // 손가락이 닿자마자 이 막대가 잡음 (아래 화면의 끌기·확대 동작이 가로채지 못하게)
+          // 막대가 숨어 있는 동안(화면이 굴러가는 중)은 손가락을 가로채지 않음
+          child: IgnorePointer(
+          ignoring: hidden,
           child: RawGestureDetector(
             behavior: HitTestBehavior.opaque,
             gestures: <Type, GestureRecognizerFactory>{
@@ -331,9 +367,14 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
                 _dragPointer = null;
                 end();
               },
-              child: Align(
+              child: AnimatedOpacity(
+                // 화면이 굴러가는 동안은 사라졌다가 멈추면 다시 나타남
+                opacity: hidden ? 0 : 1,
+                duration: Duration(milliseconds: hidden ? 90 : 220),
+                child: Align(
                 alignment: left ? Alignment.centerLeft : Alignment.centerRight,
                 child: AnimatedContainer(
+                  key: const ValueKey('thumb'),
                   duration: const Duration(milliseconds: 120),
                   margin: EdgeInsets.only(left: left ? 3 : 0, right: left ? 0 : 3),
                   width: _dragging ? 9 : 6,
@@ -343,7 +384,9 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
                   ),
                 ),
               ),
+              ),
             ),
+          ),
           ),
         ),
       ]);
@@ -772,11 +815,13 @@ class SettingOption extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    // 고른 상자: 연두색 바탕에 흰 글씨
+    final Color sig = AppColors.of(context);
     return Material(
-      color: Colors.transparent,
+      color: selected ? sig : Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: selected ? cs.onSurface : cs.outlineVariant, width: selected ? 2.2 : 1),
+        side: BorderSide(color: selected ? sig : cs.outlineVariant, width: selected ? 1.5 : 1),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
@@ -791,7 +836,7 @@ class SettingOption extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
-                  color: selected ? cs.onSurface : cs.onSurfaceVariant,
+                  color: selected ? Colors.white : cs.onSurfaceVariant,
                 ),
                 child: label,
               ),
@@ -918,7 +963,7 @@ class FileLoadingView extends StatelessWidget {
             child: CircularProgressIndicator(
               strokeWidth: 4.5,
               strokeCap: StrokeCap.round,
-              color: bg != null ? (onDark ? const Color(0xFFA5D46A) : const Color(0xFF7CB342)) : (dark ? Colors.amber : cs.primary),
+              color: AppColors.signature,
               backgroundColor: fg.withValues(alpha: 0.12),
             ),
           ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_colors.dart';
 
 /// 고르기 창의 선택지
 class ChoiceOption<T> {
@@ -150,7 +151,7 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 22, 24, 14),
-            child: Text(widget.title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+            child: Text(widget.title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
           ),
           Flexible(
             child: SingleChildScrollView(
@@ -173,7 +174,7 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                           child: Row(
                             children: [
                               if (opt.icon != null) ...[
-                                Icon(opt.icon, size: 19, color: opt.value == _selected ? cs.primary : cs.onSurfaceVariant),
+                                Icon(opt.icon, size: 19, color: opt.value == _selected ? cs.onSurface : cs.onSurfaceVariant),
                                 const SizedBox(width: 14),
                               ],
                               Expanded(
@@ -190,7 +191,7 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                               Icon(
                                 opt.value == _selected ? Icons.check_circle : Icons.circle_outlined,
                                 size: 23,
-                                color: opt.value == _selected ? cs.onSurface : cs.outline,
+                                color: opt.value == _selected ? AppColors.of(context) : cs.outline,
                               ),
                             ],
                           ),

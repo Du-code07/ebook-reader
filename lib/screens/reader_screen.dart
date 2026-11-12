@@ -28,6 +28,8 @@ import '../widgets/txt_paged_viewer.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_arc_menu.dart';
 import '../widgets/viewer_dialogs.dart';
+import '../widgets/app_colors.dart';
+import '../widgets/torn_paper_icon.dart';
 import '../widgets/word_selection_layer.dart';
 import '../widgets/ui_scale.dart';
 import '../widgets/sheet_pull_to_close.dart';
@@ -447,6 +449,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               }
             }),
           ),
+          // 스크롤을 고르면 바로 밑에: 오른쪽(왼손잡이는 왼쪽) 회색 스크롤 막대 끄기
+          if (_pageModeScroll)
+            SettingToggle(
+              label: Text(_tr('스크롤바 끄기', 'Hide scroll bar', '隐藏滚动条', 'スクロールバーを隠す')),
+              selected: ScrollThumbBar.off.value,
+              onSelected: (val) => apply(() {
+                ScrollThumbBar.off.value = val;
+                StorageService.setScrollBarOff(val);
+              }),
+            ),
           SettingToggle(
             label: Text(_tr('슬라이드', 'Slide', '滑动', 'スライド')),
             selected: _useSwipeTurn,
@@ -747,6 +759,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final loadedBookmarks = await StorageService.getBookmarks(widget.filePath);
 
     _bindHardwareButtons();
+    ScrollThumbBar.off.value = await StorageService.getScrollBarOff();
 
     if (!mounted) return;
     setState(() {
@@ -2302,12 +2315,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(color: cs.secondaryContainer.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: cs.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: cs.onSecondaryContainer),
+          Icon(icon, size: 18, color: cs.onSurface),
           const SizedBox(width: 8),
-          Expanded(child: Text(text, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: cs.onSecondaryContainer))),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: cs.onSurface))),
         ],
       ),
     );
@@ -2677,7 +2690,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              title: Text(_tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(_tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.w800)),
               trailing: ElevatedButton.icon(
                 icon: const Icon(Icons.bookmark_add, size: 16),
                 label: Text(_tr('현재 페이지 북마크', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),
@@ -3612,18 +3625,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       context: context,
       position: RelativeRect.fromLTRB(tl.dx, tl.dy, overlay.size.width - tl.dx - box.size.width, 0),
       items: [
-        for (final (v, label, icon) in <(String, String, IconData)>[
-          ('white', _tr('라이트', 'Light', '浅色', 'ライト'), Icons.light_mode_outlined),
-          ('dark', _tr('다크', 'Dark', '深色', 'ダーク'), Icons.dark_mode_outlined),
-          ('sepia', _tr('종이색', 'Paper', '纸张色', '紙色'), Icons.description_outlined),
+        for (final (v, label, icon) in <(String, String, Widget)>[
+          ('white', _tr('라이트', 'Light', '浅色', 'ライト'), const Icon(Icons.light_mode_outlined, size: 18)),
+          ('dark', _tr('다크', 'Dark', '深色', 'ダーク'), const Icon(Icons.dark_mode_outlined, size: 18)),
+          // 종이색: 살짝 찢어진 종이 모양
+          ('sepia', _tr('종이색', 'Paper', '纸张色', '紙色'), const TornPaperIcon(size: 18)),
         ])
           PopupMenuItem<String>(
             value: v,
             child: Row(children: [
-              Icon(icon, size: 18),
+              icon,
               const SizedBox(width: 10),
               Expanded(child: Text(label)),
-              if (_epubBgTheme == v) const Icon(Icons.check, size: 18),
+              if (_epubBgTheme == v) Icon(Icons.check, size: 18, color: AppColors.of(context)),
             ]),
           ),
       ],
@@ -4330,7 +4344,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             children: [
               Padding(
                 padding: const EdgeInsets.all(16.0),
-                child: Text(_tr('목차', 'Contents', '目录', '目次'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                child: Text(_tr('목차', 'Contents', '目录', '目次'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
               ),
               const Divider(height: 1),
               Expanded(
@@ -4645,8 +4659,9 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                           if (!_epubDisplayed)
                             Positioned.fill(
                               child: IgnorePointer(
+                                // 종이색: 단색으로 덮지 않고 뒤의 종이 질감이 그대로 보이게
                                 child: ColoredBox(
-                                  color: _getBgColor(),
+                                  color: _isPaperTheme ? Colors.transparent : _getBgColor(),
                                   child: FileLoadingView(label: _tr('파일 여는 중', 'Opening file', '正在打开文件', 'ファイルを開いています'), background: _getBgColor()),
                                 ),
                               ),
@@ -4893,8 +4908,14 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                                   visualDensity: VisualDensity.compact,
                                   padding: btnPadding,
                                   constraints: btnConstraints,
-                                  icon: Icon(_epubBgTheme == 'dark' ? Icons.dark_mode : Icons.dark_mode_outlined,
-                                      color: _epubBgTheme == 'dark' ? Colors.amber : Colors.white, size: 18),
+                                  // 바뀔 때 [전체] 그룹 아이콘과 같은 느낌으로 움직임 (기본 움직임)
+                                  icon: MorphIcon(
+                                    child: _epubBgTheme == 'sepia'
+                                        ? const TornPaperIcon(key: ValueKey('bg-sepia'), size: 18, color: Colors.white)
+                                        : Icon(_epubBgTheme == 'dark' ? Icons.dark_mode : Icons.dark_mode_outlined,
+                                            key: ValueKey('bg-${_epubBgTheme == 'dark'}'),
+                                            color: _epubBgTheme == 'dark' ? Colors.amber : Colors.white, size: 18),
+                                  ),
                                   tooltip: _tr('배경 색상', 'Background Color', '背景颜色', '背景色'),
                                   onPressed: () => _pickBgTheme(btnCtx),
                                 ),

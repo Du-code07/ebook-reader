@@ -419,6 +419,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               }
             }),
           ),
+          // 스크롤을 고르면 바로 밑에: 오른쪽(왼손잡이는 왼쪽) 회색 스크롤 막대 끄기
+          if (_pageModeScroll)
+            SettingToggle(
+              label: Text(_tr('스크롤바 끄기', 'Hide scroll bar', '隐藏滚动条', 'スクロールバーを隠す')),
+              selected: ScrollThumbBar.off.value,
+              onSelected: (val) => apply(() {
+                ScrollThumbBar.off.value = val;
+                StorageService.setScrollBarOff(val);
+              }),
+            ),
           SettingToggle(
             label: Text(_tr('슬라이드', 'Slide', '滑动', 'スライド')),
             selected: _useSwipeTurn,
@@ -707,6 +717,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _memoToolbarPos = await StorageService.getMemoToolbarPosition();
       _quickMenuSide = await StorageService.getQuickMenuSide();
       ScrollThumbBar.leftHanded.value = _quickMenuSide == 'left';
+      ScrollThumbBar.off.value = await StorageService.getScrollBarOff();
       _bookmarks = await StorageService.getBookmarks(_bookKey);
 
       final tempDir = await getTemporaryDirectory();
@@ -1002,7 +1013,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           children: [
             Padding(
               padding: const EdgeInsets.all(16.0),
-              child: Text(_tr('목차', 'Contents', '目录', '目次'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              child: Text(_tr('목차', 'Contents', '目录', '目次'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
             ),
             const Divider(height: 1),
             Expanded(
@@ -1811,12 +1822,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(color: cs.secondaryContainer.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: cs.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: cs.onSecondaryContainer),
+          Icon(icon, size: 18, color: cs.onSurface),
           const SizedBox(width: 8),
-          Expanded(child: Text(text, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: cs.onSecondaryContainer))),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: cs.onSurface))),
         ],
       ),
     );
@@ -2278,7 +2289,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              title: Text(_tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(_tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.w800)),
               trailing: ElevatedButton.icon(
                 icon: const Icon(Icons.bookmark_add, size: 16),
                 label: Text(_tr('현재 페이지 북마크 추가', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),

@@ -218,7 +218,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 6),
       child: Text(
         text,
-        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     );
   }
@@ -235,7 +235,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
       leading: leading ?? Icon(icon, size: 23, color: cs.onSurface),
-      title: Text(title, style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w600)),
+      title: Text(title, style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w700)),
       subtitle: subtitle == null ? null : Text(subtitle, style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
       trailing: trailing ?? Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
       onTap: onTap,

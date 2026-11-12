@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_colors.dart';
 
 /// [전체] 그룹 아이콘: 평소에는 작대기 3개가 나란히 있다가,
 /// 그룹 목록을 펼치면([spread]) 한 칸씩 비켜 엇갈리게 바뀐다.
@@ -14,8 +15,8 @@ class GroupStackIcon extends StatelessWidget {
     final Color c = color ?? IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(end: spread ? 1.0 : 0.0),
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOutCubic,
+      duration: kIconMotion,
+      curve: kIconCurve,
       builder: (context, t, _) => SizedBox.square(dimension: size, child: CustomPaint(painter: _GroupStackPainter(c, t))),
     );
   }

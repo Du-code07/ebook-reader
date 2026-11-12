@@ -18,8 +18,10 @@ import 'widgets/memo_tools.dart';
 import 'widgets/favorite_ribbon.dart';
 import 'widgets/group_stack_icon.dart';
 import 'widgets/group_jump_menu.dart';
+import 'widgets/group_dropdown.dart';
 import 'widgets/viewer_dialogs.dart';
 import 'widgets/ui_scale.dart';
+import 'widgets/app_colors.dart';
 import 'services/storage_service.dart';
 import 'services/user_fonts.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart' show EpubBookServer;
@@ -166,27 +168,37 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
 
   /// 앱 테마: 다크는 기본(남색 기운) / 완전 다크(검정) / 밝은 다크(회색) 세 가지
   /// 글씨·아이콘은 전체적으로 조금 작게 (아이콘 기본 21)
+  static TextTheme _boldTitles(TextTheme t) => t.copyWith(
+        headlineLarge: t.headlineLarge?.copyWith(fontWeight: FontWeight.w800),
+        headlineMedium: t.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
+        headlineSmall: t.headlineSmall?.copyWith(fontWeight: FontWeight.w800), // 대화창 제목
+        titleLarge: t.titleLarge?.copyWith(fontWeight: FontWeight.w800), // 상단바 제목
+        titleMedium: t.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+        titleSmall: t.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+      );
+
   ThemeData _appTheme(Brightness b, {String variant = 'dark'}) {
     final appFont = UserFonts.appFont.value;
-    // 앱 대표 색: 연한 연두색 (고른 것·버튼·켜짐 표시)
+    // 앱 대표 색: 연두색 — 고른 것·켜짐·버튼 '바탕'에만 (글씨·아이콘은 기본 색), 연두 바탕 위 글씨는 흰색
+    final Color sig = b == Brightness.light ? AppColors.signature : AppColors.signatureDark;
     var scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF8BC34A), brightness: b);
     scheme = b == Brightness.light
         ? scheme.copyWith(
-            primary: const Color(0xFF7CB342),
+            primary: const Color(0xFF33382E),
             onPrimary: Colors.white,
-            primaryContainer: const Color(0xFFD4E9B8),
-            onPrimaryContainer: const Color(0xFF2F4A10),
-            secondary: const Color(0xFF6E8B4E),
-            secondaryContainer: const Color(0xFFDCEFC4),
-            onSecondaryContainer: const Color(0xFF2F4A10),
+            primaryContainer: sig,
+            onPrimaryContainer: Colors.white,
+            secondary: const Color(0xFF5E6458),
+            secondaryContainer: sig,
+            onSecondaryContainer: Colors.white,
           )
         : scheme.copyWith(
-            primary: const Color(0xFFA5D46A),
-            onPrimary: const Color(0xFF1E3300),
-            primaryContainer: const Color(0xFF3F5E1C),
-            onPrimaryContainer: const Color(0xFFD4F0AE),
-            secondaryContainer: const Color(0xFF3A4D27),
-            onSecondaryContainer: const Color(0xFFDCEFC4),
+            primary: const Color(0xFFE4E8DE),
+            onPrimary: const Color(0xFF1A1C18),
+            primaryContainer: sig,
+            onPrimaryContainer: Colors.white,
+            secondaryContainer: sig,
+            onSecondaryContainer: Colors.white,
           );
     if (b == Brightness.dark && variant == 'black') {
       scheme = scheme.copyWith(
@@ -213,10 +225,23 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       fontFamily: appFont == null ? null : UserFonts.appFontFamily(appFont),
       iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
       // 상단바 아이콘: 테마 글자색 (다크·밝은 다크에서도 보이게)
+      // 제목 느낌의 글씨는 모두 굵게 (상단바 제목·창 제목·항목 제목)
+      textTheme: _boldTitles(ThemeData(brightness: b, useMaterial3: true).textTheme),
       appBarTheme: AppBarTheme(
         iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
         actionsIconTheme: IconThemeData(size: 21, color: scheme.onSurfaceVariant),
       ),
+      // 켜짐 스위치·체크 상자: 연두색 바탕 + 흰 손잡이/체크
+      switchTheme: SwitchThemeData(
+        trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null),
+        thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Colors.white : null),
+        trackOutlineColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null),
+      ),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null),
+        checkColor: const WidgetStatePropertyAll(Colors.white),
+      ),
+      radioTheme: RadioThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null)),
       // 아래에서 올라오는 모든 창: 위쪽 가운데 회색 막대
       bottomSheetTheme: BottomSheetThemeData(
         showDragHandle: true,
@@ -359,7 +384,7 @@ class UserManualScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 3),
                 Text(desc, style: const TextStyle(fontSize: 12.5, height: 1.4)),
               ],
@@ -383,7 +408,7 @@ class UserManualScreen extends StatelessWidget {
             // 1. 서재(MY) 화면 상단 및 파일 아이콘 안내
             Text(
               _tr('1. 서재(MY) 화면 아이콘 안내', '1. Bookshelf (MY) Screen Icons', '1. 书架 (MY) 界面图标说明', '1. 書斎(MY)画面のアイコン説明'),
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 10),
             // 실제 서재 상단 바 미리보기
@@ -509,7 +534,7 @@ class UserManualScreen extends StatelessWidget {
             // 2. 파일 열람 시 나오는 상단 UI 아이콘 안내
             Text(
               _tr('2. 파일 열람 시 상단 UI 아이콘 안내', '2. Viewer Top Bar Icons', '2. 阅读界面顶部栏图标说明', '2. ファイル閲覧時の上部UIアイコン説明'),
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 10),
             // 실제 뷰어 상단 바 미리보기
@@ -611,7 +636,7 @@ class UserManualScreen extends StatelessWidget {
             // 3. S펜 툴바 & 하단 진행도 UI & 페이지 이동 버튼 안내
             Text(
               _tr('3. S펜 필기 툴바 및 하단 이동 아이콘 안내', '3. S Pen Toolbar & Bottom Navigation Icons', '3. S Pen 工具栏与底部导航图标', '3. Sペンツールバーと下部移動アイコン'),
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 12),
             _buildIconGuideRow(
@@ -700,9 +725,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   List<File> _allBooks = [];
   List<File> _trashedBooks = [];
-  List<String> _groups = ['전체', 'PDF/문서'];
+  List<String> _groups = List<String>.of(StorageService.defaultGroups);
   bool _groupEditMode = false; // 그룹을 꾹 눌러 순서 바꾸기·삭제하는 중
-  Offset _groupDragGrab = Offset.zero; // 끄는 그룹 칩 안에서 손가락이 닿은 자리
   bool _groupMenuOpen = false; // [전체]에서 그룹 목록을 펼친 중 (아이콘 엇갈림)
 
   // ── 파일 검색 (상단 돋보기) ──
@@ -847,7 +871,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           final cs = Theme.of(ctx).colorScheme;
           Widget label(String t) => Padding(
                 padding: const EdgeInsets.only(top: 18, bottom: 6),
-                child: Text(t, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: cs.onSurfaceVariant)),
+                child: Text(t, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, letterSpacing: 0.5, color: cs.onSurfaceVariant)),
               );
           Widget byRow(String value, String text) => InkWell(
                 onTap: () {
@@ -863,7 +887,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   child: Row(
                     children: [
                       Expanded(child: Text(text, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600))),
-                      Icon(_sortBy == value ? Icons.check_circle : Icons.circle_outlined, size: 26, color: _sortBy == value ? cs.onSurface : cs.outline),
+                      Icon(_sortBy == value ? Icons.check_circle : Icons.circle_outlined, size: 26, color: _sortBy == value ? AppColors.of(ctx) : cs.outline),
                     ],
                   ),
                 ),
@@ -2252,8 +2276,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     _loadLibrary();
   }
 
-  Future<void> _createNewGroupDialog() async {
+  Future<String?> _createNewGroupDialog() async {
     final controller = TextEditingController();
+    String? created;
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2273,8 +2298,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               final text = controller.text.trim();
               if (text.isNotEmpty) {
                 await StorageService.addGroup(text);
+                created = text;
                 if (ctx.mounted) Navigator.pop(ctx);
-                _loadLibrary();
+                await _loadLibrary();
               }
             },
             child: Text(_tr('추가', 'Add', '添加', '追加')),
@@ -2282,32 +2308,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         ],
       ),
     );
+    return created;
   }
 
   /// 그룹 막대: [전체](고정) + 순서를 바꿀 수 있는 그룹들 + 새 그룹 추가
   /// - 그룹을 꾹 누르면 편집 상태(우상단 빨간 - 버튼)가 되고, 그대로 끌어 순서를 바꿀 수 있다
   /// - 편집 상태에서는 바로 끌어 순서를 바꾸고, - 를 누르면 그룹 삭제
   bool _favoritesOnly = false; // 즐겨찾기만 보는 중
-
-  /// 즐겨찾기만 볼 때 그룹 막대 대신 보이는 줄 (← 즐겨찾기 n)
-  Widget _buildFavoritesHeader(int count) {
-    final cs = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        const SizedBox(width: 4),
-        IconButton(
-          icon: const Icon(Icons.arrow_back),
-          tooltip: _tr('돌아가기', 'Back', '返回', '戻る'),
-          onPressed: () => setState(() => _favoritesOnly = false),
-        ),
-        const SizedBox(width: 24, height: 24, child: Center(child: Icon(Icons.bookmarks, color: Colors.amber, size: 21))),
-        const SizedBox(width: 8),
-        Text(_tr('북마크', 'Bookmarks', '书签', 'ブックマーク'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-        const SizedBox(width: 8),
-        Text('$count', style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
-      ],
-    );
-  }
 
   bool _fabOpen = false; // 파일 추가 버튼을 눌러 세 가지 메뉴가 펼쳐진 상태
 
@@ -2357,9 +2364,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             _closeSearch();
             setState(() => _fabOpen = !_fabOpen);
           },
+          // 아이콘 움직임: [전체] 그룹 아이콘과 같은 빠르기·느낌 (기본 움직임)
           icon: AnimatedRotation(
             turns: _fabOpen ? 0.125 : 0,
-            duration: const Duration(milliseconds: 180),
+            duration: kIconMotion,
+            curve: kIconCurve,
             child: const Icon(Icons.add),
           ),
           label: Text(_fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
@@ -2386,183 +2395,48 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     return map[n];
   }
 
+  /// [☰ 그룹] 단추 하나: 지금 보는 그룹 이름(또는 즐겨찾기)을 보여 주고, 누르면 바로 아래로 그룹 목록이 펼쳐짐
   Widget _buildGroupBar() {
-    final movable = _groups.where((g) => g != '전체').toList();
-    final allSelected = _selectedGroup == '전체';
-    final allChip = GestureDetector(
-      onLongPress: movable.isEmpty ? null : () => setState(() => _groupEditMode = true),
-      child: ChoiceChip(
-        key: _allGroupChipKey,
-        avatar: GroupStackIcon(
-          size: 17,
-          spread: _groupMenuOpen,
-          color: allSelected ? Theme.of(context).colorScheme.onSecondaryContainer : Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-        showCheckmark: false,
-        label: Text(_localizeGroupName('전체')),
-        selected: allSelected,
-        onSelected: (_) {
-          if (_searchOpen) {
-            _closeSearch();
-            return;
-          }
-          if (_groupEditMode) {
-            setState(() => _groupEditMode = false);
-            return;
-          }
-          // [전체]를 고른 상태에서 한 번 더 누르면 그룹 목록을 펼쳐 바로 이동
-          if (allSelected) {
-            _showGroupJumpMenu();
-          } else {
-            setState(() => _selectedGroup = '전체');
-          }
-        },
-      ),
-    );
-    // 즐겨찾기만 보기 (실제 그룹은 아님): 누르면 그룹 막대가 사라지고 즐겨찾기 파일만, 뒤로 가기로 돌아옴
-    // 북마크만 보기: 그룹 막대에는 책갈피 아이콘만
-    final favChip = ChoiceChip(
-      showCheckmark: false,
-      tooltip: _tr('북마크', 'Bookmarks', '书签', 'ブックマーク'),
-      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-      // 도구 모음의 북마크 아이콘과 같은 모양, 칩 가운데에
-      // 글자 줄 안에 아이콘을 넣어, 다른 그룹(글자) 칩과 높이가 똑같게
-      label: const Text.rich(TextSpan(children: [
-        WidgetSpan(alignment: PlaceholderAlignment.middle, child: Icon(Icons.bookmarks, color: Colors.amber, size: 16)),
-      ])),
-      selected: false,
-      onSelected: (_) {
-        _closeSearch();
-        setState(() {
-          _groupEditMode = false;
-          _favoritesOnly = true;
-        });
-      },
-    );
-    return ReorderableListView.builder(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      buildDefaultDragHandles: false,
-      header: Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [allChip, const SizedBox(width: 8), favChip]),
-      ),
-      footer: ActionChip(
-        label: Icon(
-          Icons.add,
-          size: 16,
-          color: Theme.of(context).colorScheme.primary,
-        ),
-        labelPadding: const EdgeInsets.symmetric(horizontal: 2),
-        tooltip: _tr('새 그룹 추가', 'Add Group', '新建分组', 'グループ追加'),
-        onPressed: () {
-          _closeSearch();
-          if (_groupEditMode) setState(() => _groupEditMode = false);
-          _createNewGroupDialog();
-        },
-      ),
-      itemCount: movable.length,
-      onReorderStart: (_) {
-        HapticFeedback.selectionClick();
-        if (!_groupEditMode) setState(() => _groupEditMode = true);
-      },
-      onReorder: (oldIndex, newIndex) {
-        if (newIndex > oldIndex) newIndex -= 1;
-        if (newIndex == oldIndex) return;
-        final next = List<String>.of(movable);
-        next.insert(newIndex, next.removeAt(oldIndex));
-        setState(() => _groups = ['전체', ...next]);
-        StorageService.setGroupOrder(next);
-      },
-      proxyDecorator: (child, index, animation) {
-        final double uiScale = UiScale.of(context);
-        return Material(
-          type: MaterialType.transparency,
-          // 태블릿(앱 전체를 크게)에서도 끄는 칩이 손가락 밑에 있게
-          child: AnimatedBuilder(
-            animation: animation,
-            builder: (_, c) => UiScaleDragFix(
-              scale: uiScale,
-              grab: _groupDragGrab,
-              dropT: animation.status == AnimationStatus.reverse ? animation.value : null,
-              child: c!,
-            ),
-            child: ScaleTransition(scale: Tween<double>(begin: 1.0, end: 1.06).animate(animation), child: child),
+    final cs = Theme.of(context).colorScheme;
+    final String label = _favoritesOnly ? _tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り') : _localizeGroupName(_selectedGroup);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        child: Material(
+          key: _allGroupChipKey,
+          color: cs.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            // 목록이 펼쳐진 동안은 시그니처 연두 테두리
+            side: BorderSide(color: _groupMenuOpen ? AppColors.of(context) : cs.outlineVariant, width: _groupMenuOpen ? 2 : 1),
           ),
-        );
-      },
-      itemBuilder: (context, index) {
-        final grp = movable[index];
-        final formatExt = _groupFormatExt(grp);
-        final chip = ChoiceChip(
-          // 그룹 이름이 파일 형식이면(PDF, EPUB, 워드 등) 그 형식 아이콘을 앞에
-          avatar: formatExt == null ? null : FileTypeIcon(ext: formatExt, size: 18),
-          showCheckmark: formatExt == null,
-          label: Text(_localizeGroupName(grp)),
-          selected: grp == _selectedGroup,
-          onSelected: (_) {
-            _closeSearch();
-            setState(() {
-              _groupEditMode = false;
-              _selectedGroup = grp;
-            });
-          },
-        );
-        final Widget item = _groupEditMode
-            ? Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  chip,
-                  // 우상단 끝 빨간 - 버튼 (누르는 범위는 칩 모서리 안쪽까지 넉넉하게)
-                  Positioned(
-                    top: 0,
-                    right: 0,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => _confirmDeleteGroup(grp),
-                      child: SizedBox(
-                        width: 26,
-                        height: 22,
-                        child: Align(
-                          alignment: Alignment.topRight,
-                          child: Transform.translate(
-                            offset: const Offset(6, -5),
-                            child: Container(
-                              width: 17,
-                              height: 17,
-                              decoration: BoxDecoration(
-                                color: Colors.redAccent,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 1.4),
-                              ),
-                              child: const Icon(Icons.remove, size: 13, color: Colors.white),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            : chip;
-        return Padding(
-          key: ValueKey('group:$grp'),
-          padding: const EdgeInsets.only(right: 8),
-          // 칩 안에서 손가락이 닿은 자리 (끄는 칩을 손가락 밑에 두는 데 씀)
-          child: Builder(
-            builder: (itemCtx) => Listener(
-              onPointerDown: (e) {
-                final box = itemCtx.findRenderObject();
-                if (box is RenderBox && box.hasSize) _groupDragGrab = box.globalToLocal(e.position);
-              },
-              // 평소: 꾹 눌러 끌기 / 편집 중: 바로 끌기
-              child: _groupEditMode
-                  ? ReorderableDragStartListener(index: index, child: item)
-                  : ReorderableDelayedDragStartListener(index: index, child: item),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () {
+              if (_searchOpen) {
+                _closeSearch();
+                return;
+              }
+              if (_fabOpen) setState(() => _fabOpen = false);
+              _showGroupJumpMenu();
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.menu, size: 20, color: cs.onSurface),
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 220),
+                  child: Text(label,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: cs.onSurface)),
+                ),
+              ]),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -2636,36 +2510,100 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     _ensureBookThumbnail(file);
   }
 
-  /// [전체]를 한 번 더 눌렀을 때: 그룹 이름 목록을 펼쳐 누르면 그 그룹으로 이동
+  /// [☰ 그룹] 단추를 눌렀을 때: 바로 아래로 그룹 목록 (고르기·끌어 순서 바꾸기·꾹 눌러 이름 수정/삭제·추가)
   Future<void> _showGroupJumpMenu() async {
-    final groups = _groups.where((g) => g != '전체').toList();
-    if (groups.isEmpty) return;
     final box = _allGroupChipKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
-    final Offset topLeft = box.localToGlobal(Offset.zero);
+    // 앱 전체를 크게 보는 태블릿에서도 단추 바로 아래에 오도록 (메뉴가 놓이는 화면 기준 좌표)
+    final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
+    final Offset topLeft = box.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final Rect anchor = topLeft & box.size;
     setState(() => _groupMenuOpen = true);
     final picked = await Navigator.of(context).push<String>(
-      GroupJumpMenuRoute<String>(
-        anchor: topLeft & box.size,
+      GroupDropdownRoute(
+        anchor: anchor,
         barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-        items: [for (final g in groups) (g, _localizeGroupName(g), Icons.folder_outlined, null)],
-        // 그룹 이름이 파일 형식이면 그 형식 아이콘
-        leadingFor: (g) {
+        groups: _groups.where((g) => g != '전체').toList(),
+        selected: _favoritesOnly ? kFavoritesGroupKey : _selectedGroup,
+        labelOf: _localizeGroupName,
+        leadingOf: (g) {
           final ext = _groupFormatExt(g);
-          return ext == null ? null : FileTypeIcon(ext: ext, size: 18);
+          return ext == null ? Icon(Icons.folder_outlined, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant) : FileTypeIcon(ext: ext, size: 20);
         },
+        allLeading: GroupStackIcon(size: 18, spread: true, color: _favoritesOnly || _selectedGroup != '전체' ? Theme.of(context).colorScheme.onSurfaceVariant : Colors.white),
+        allLabel: _localizeGroupName('전체'),
+        favLabel: _tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り'),
+        addLabel: _tr('그룹 추가', 'Add Group', '添加分组', 'グループ追加'),
+        renameLabel: _tr('이름 수정', 'Rename', '重命名', '名前を変更'),
+        deleteLabel: _tr('그룹 삭제', 'Delete Group', '删除分组', 'グループ削除'),
+        onReorder: (order) {
+          setState(() => _groups = ['전체', ...order]);
+          StorageService.setGroupOrder(order);
+        },
+        onRename: _renameGroupDialog,
+        onDelete: _confirmDeleteGroup,
+        onAdd: _createNewGroupDialog,
       ),
     );
-    if (mounted) setState(() => _groupMenuOpen = false);
-    if (picked != null && mounted) setState(() => _selectedGroup = picked);
+    if (!mounted) return;
+    setState(() {
+      _groupMenuOpen = false;
+      if (picked == null) return;
+      _closeSearch();
+      if (picked == kFavoritesGroupKey) {
+        _favoritesOnly = true;
+      } else {
+        _favoritesOnly = false;
+        _selectedGroup = picked;
+      }
+    });
   }
 
-  Future<void> _confirmDeleteGroup(String groupName) async {
+  /// 그룹 이름 수정 (새 이름을 돌려줌, 취소하면 null)
+  Future<String?> _renameGroupDialog(String group) async {
+    final controller = TextEditingController(text: group);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_tr('이름 수정', 'Rename Group', '重命名分组', 'グループ名を変更'), style: const TextStyle(fontWeight: FontWeight.w800)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: _tr('그룹 이름 입력', 'Enter group name', '输入分组名称', 'グループ名を入力'),
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: Text(_tr('저장', 'Save', '保存', '保存')),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || name == group || !mounted) return null;
+    if (name == '전체' || name == '미분류' || _groups.contains(name)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_tr('같은 이름의 그룹이 있어요.', 'A group with that name already exists.', '已有同名分组。', '同じ名前のグループがあります。'))),
+      );
+      return null;
+    }
+    final ok = await StorageService.renameGroup(group, name);
+    if (!ok) return null;
+    if (_selectedGroup == group) _selectedGroup = name;
+    await _loadLibrary();
+    return name;
+  }
+
+  Future<bool> _confirmDeleteGroup(String groupName) async {
     if (groupName == '전체') {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(_tr('"전체" 기본 보기는 삭제할 수 없습니다.', '"All" group cannot be deleted.', '无法删除“全部”默认分组。', '「すべて」は削除できません。'))),
       );
-      return;
+      return false;
     }
 
     final confirmed = await showDialog<bool>(
@@ -2674,10 +2612,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         title: Text(_tr('"$groupName" 그룹 삭제', 'Delete "$groupName"', '删除 "$groupName"', '「$groupName」グループ削除')),
         content: Text(
           _tr(
-            '"$groupName" 그룹을 삭제할까요?\n(그룹 안의 파일들은 유지됩니다)',
-            'Delete group "$groupName"?\n(Files inside will be kept)',
-            '确定删除 "$groupName" 分组吗？\n（组内文件将保留）',
-            '「$groupName」を削除しますか？\n(中のファイルはそのまま残ります)',
+            '"$groupName" 그룹을 삭제할까요?\n그룹 안의 파일은 지워지지 않고 미분류로 옮겨져 [전체]에서 볼 수 있어요.',
+            'Delete group "$groupName"?\nFiles inside are kept, moved to Uncategorized and shown in [All].',
+            '确定删除 "$groupName" 分组吗？\n组内文件不会删除，将移至未分类，可在[全部]中查看。',
+            '「$groupName」を削除しますか？\n中のファイルは削除されず、未分類に移り[すべて]で見られます。',
           ),
         ),
         actions: [
@@ -2697,8 +2635,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         _selectedGroup = '전체';
       }
       await _loadLibrary();
-      if (mounted && _groups.where((g) => g != '전체').isEmpty) setState(() => _groupEditMode = false);
+      return true;
     }
+    return false;
   }
 
   Future<void> _moveFileToTrash(File file, {bool reloadAfter = true}) async {
@@ -2736,7 +2675,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     '移动所选 ${_selectedFilePaths.length} 个文件',
                     '選択した${_selectedFilePaths.length}個のファイルを移動',
                   ),
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),
               const Divider(height: 1),
@@ -2958,7 +2897,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                title: Text(_tr('파일 그룹 이동', 'Move to Group', '移动分组', 'グループ移動'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                title: Text(_tr('파일 그룹 이동', 'Move to Group', '移动分组', 'グループ移動'), style: const TextStyle(fontWeight: FontWeight.w800)),
               ),
               const Divider(height: 1),
               ...candidateGroups.map((g) => ListTile(
@@ -3497,7 +3436,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           children: [
             SizedBox(
               height: 54,
-              child: _favoritesOnly ? _buildFavoritesHeader(filteredBooks.length) : _buildGroupBar(),
+              child: _buildGroupBar(),
             ),
             const Divider(height: 1),
             Expanded(
@@ -3791,8 +3730,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   height: 42,
                   child: FloatingActionButton.extended(
                     heroTag: 'fab_batch_move_group',
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                    backgroundColor: AppColors.of(context),
+                    foregroundColor: Colors.white,
                     extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
                     extendedIconLabelSpacing: 6,
                     onPressed: _selectedFilePaths.isNotEmpty ? _moveSelectedFilesBatch : null,
@@ -3979,7 +3918,7 @@ class _FileMergeSelectDialogState extends State<_FileMergeSelectDialog> {
 
   Widget _orderBadge(int selIndex) => CircleAvatar(
         radius: 11,
-        backgroundColor: Theme.of(context).colorScheme.primary,
+        backgroundColor: AppColors.of(context),
         child: Text(
           '${selIndex + 1}',
           style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
@@ -4027,7 +3966,7 @@ class _FileMergeSelectDialogState extends State<_FileMergeSelectDialog> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('${tr("선택됨", "Selected", "已选", "選択中")}: ${_selected.length}',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                    style: const TextStyle(fontWeight: FontWeight.w800)),
                 TextButton.icon(
                   icon: const Icon(Icons.folder_open, size: 14),
                   label: Text(tr('기기에서 선택', 'Browse Device', '从设备选择', '端末から選択')),
