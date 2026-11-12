@@ -2129,28 +2129,7 @@ function freaderAttachChapterScroll(r) {
   });
   window.freaderReportScrollMetrics = reportMetrics;
   r.on('relocated', scheduleEdge);
-  r.hooks.content.register(function (contents) {
-    var doc = contents && contents.document;
-    if (!doc) return;
-    doc.addEventListener('touchstart', function (e) {
-      var c = box(); if (!c || !e.touches || e.touches.length !== 1) { startY = null; return; }
-      startY = e.touches[0].clientY; wasBottom = atBottom(c); wasTop = atTop(c);
-    }, { passive: true });
-    doc.addEventListener('touchend', function (e) {
-      var c = box(); if (!c || startY === null || busy) return;
-      var t = e.changedTouches && e.changedTouches[0]; if (!t) return;
-      var dy = t.clientY - startY; startY = null;
-      if (dy < -70 && wasBottom && atBottom(c)) {
-        busy = true;
-        Promise.resolve(r.next()).then(function () { var cc = box(); if (cc) cc.scrollTop = 0; }).finally(function () { busy = false; });
-      } else if (dy > 70 && wasTop && atTop(c)) {
-        busy = true;
-        Promise.resolve(r.prev()).then(function () {
-          setTimeout(function () { var cc = box(); if (cc) cc.scrollTop = cc.scrollHeight; }, 60);
-        }).finally(function () { busy = false; });
-      }
-    }, { passive: true });
-  });
+  // 끝까지 굴려도 다음/이전 장으로 넘어가지 않음 (장 이동은 아래 '이전 챕터 / 다음 챕터' 단추로만)
 }
 
 // FReader: 지금 보고 있는 장(spine 항목)

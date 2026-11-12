@@ -529,7 +529,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 val title = call.argument<String>("title") ?: "FReader"
                 val text = call.argument<String>("text") ?: ""
                 val id = (call.argument<Number>("id") ?: 1).toInt()
-                result.success(postStatusNotification(title, text, id))
+                val vibrate = call.argument<Boolean>("vibrate") ?: true
+                result.success(postStatusNotification(title, text, id, vibrate))
             } else if (call.method == "captureScrollPage") {
                 // 스크롤 보기 준비용 숨은 문서 화면(주소에 freaderScroll=1)을 바로 그림으로:
                 // 화면(UI) 스레드에서는 그리기만 하고, 자르기·여백 걷기·저장은 다른 스레드에서 (화면이 버벅이지 않게)
@@ -542,6 +543,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 val paper = (call.argument<Number>("paper") ?: 0xFFFFFFFFL).toLong().toInt()
                 val pad = ((call.argument<Number>("pad") ?: 0.035).toFloat()).coerceIn(0f, 0.3f)
                 val trimTop = call.argument<Boolean>("trimTop") ?: true
+                val trim = call.argument<Boolean>("trim") ?: true
                 val tag = call.argument<String>("tag")
                 val webView = findScrollWebView(window.decorView, tag)
                 if (webView == null || webView.width <= 0 || webView.height <= 0) {
@@ -555,7 +557,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     webView.draw(canvas)
                     Thread {
                         try {
-                            val size = cropTrimSave(bitmap, crop, true, paper, pad, outPath, trimTop)
+                            val size = cropTrimSave(bitmap, crop, trim, paper, pad, outPath, trimTop)
                             runOnUiThread { result.success(listOf(size[0], size[1])) }
                         } catch (e: Throwable) {
                             runOnUiThread { result.error("CROP_ERR", e.message, null) }
@@ -1219,16 +1221,21 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     // ── PDF 내보내기 ──────────────────────────────────────────────────────────
 
     /** 화면에 보이는 WebView 중 가장 큰 것 (EPUB 본문) */
-    private fun postStatusNotification(title: String, text: String, id: Int): Boolean {
+    private fun postStatusNotification(title: String, text: String, id: Int, vibrate: Boolean): Boolean {
         return try {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             if (Build.VERSION.SDK_INT >= 24 && !nm.areNotificationsEnabled()) return false
-            val channelId = "freader_prep"
-            if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(channelId) == null) {
-                val ch = android.app.NotificationChannel(channelId, "스크롤 보기 준비", android.app.NotificationManager.IMPORTANCE_DEFAULT)
-                ch.description = "스크롤 보기 준비가 끝나면 알려 줘요"
-                ch.setSound(null, null)
-                nm.createNotificationChannel(ch)
+            // 알림 자체는 소리·진동 없이, 진동은 앱이 직접 (앱 설정 '알림 진동'을 따르고, 무음 모드에서도 느낄 수 있게)
+            val channelId = "freader_prep_v2"
+            if (Build.VERSION.SDK_INT >= 26) {
+                try { nm.deleteNotificationChannel("freader_prep") } catch (_: Throwable) {}
+                if (nm.getNotificationChannel(channelId) == null) {
+                    val ch = android.app.NotificationChannel(channelId, "스크롤 보기 준비", android.app.NotificationManager.IMPORTANCE_DEFAULT)
+                    ch.description = "스크롤 보기 준비가 끝나면 알려 줘요"
+                    ch.setSound(null, null)
+                    ch.enableVibration(false)
+                    nm.createNotificationChannel(ch)
+                }
             }
             val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
                 addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
@@ -1247,10 +1254,28 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 .setShowWhen(true)
             if (pi != null) b.setContentIntent(pi)
             nm.notify(id, b.build())
+            if (vibrate) vibrateOnce()
             true
         } catch (_: Throwable) {
             false
         }
+    }
+
+    private fun vibrateOnce() {
+        try {
+            val pattern = longArrayOf(0, 180, 110, 180)
+            val v: android.os.Vibrator? = if (Build.VERSION.SDK_INT >= 31) {
+                (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION") getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            }
+            if (v == null || !v.hasVibrator()) return
+            if (Build.VERSION.SDK_INT >= 26) {
+                v.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
+            } else {
+                @Suppress("DEPRECATION") v.vibrate(pattern, -1)
+            }
+        } catch (_: Throwable) {}
     }
 
     private fun findScrollWebView(root: View, tag: String? = null): WebView? {

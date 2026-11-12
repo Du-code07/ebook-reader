@@ -60,6 +60,24 @@ class HwpReaderController {
   }
 
   /// 지금 보이는 쪽이 화면에서 차지하는 자리 (0~1 비율). 모르면 null
+  /// 모든 쪽의 높이/너비 (스크롤 보기에서 쪽 자리를 먼저 잡아 둘 때). 모르면 null
+  Future<List<double>?> pageAspects() async {
+    try {
+      final r = await _query?.call('pageSizes', []);
+      if (r is! List || r.isEmpty) return null;
+      final out = <double>[];
+      for (final e in r) {
+        if (e is! List || e.length < 2) return null;
+        final double w = (e[0] as num?)?.toDouble() ?? 0, h = (e[1] as num?)?.toDouble() ?? 0;
+        if (w <= 0 || h <= 0) return null;
+        out.add(h / w);
+      }
+      return out;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Rect?> pageRect() async {
     final r = await _query?.call('pageRect', []);
     if (r is! Map) return null;

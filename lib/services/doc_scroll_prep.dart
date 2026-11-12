@@ -15,12 +15,20 @@ import 'storage_service.dart';
 import 'page_snapshot_service.dart';
 import 'user_fonts.dart';
 
-/// 스크롤 보기용 쪽 그림 묶음 (쪽마다 그림 파일 + 높이/너비)
+/// 스크롤 보기용 쪽 그림 묶음: 모든 쪽의 높이/너비(자리)와, 지금까지 그려 둔 쪽 그림.
+/// 쪽 자리를 먼저 잡아 바로 보여 주고, 그림은 보고 있는 쪽 가까이부터 차례로 채워진다.
 class ScrollPageSet {
-  ScrollPageSet(this.files, this.aspects, this.theme);
-  final List<File> files;
+  ScrollPageSet(this.dirPath, this.aspects, this.theme, this.done);
+  final String dirPath;
   final List<double> aspects;
   final String theme;
+
+  /// 그림이 있는 쪽 (준비가 진행되면 늘어남)
+  final Set<int> done;
+  int get count => aspects.length;
+  bool has(int i) => done.contains(i);
+  bool get complete => done.length >= aspects.length;
+  File file(int i) => File('$dirPath/p$i.jpg');
 }
 
 /// 한글·워드 문서의 스크롤 보기 준비.
@@ -37,6 +45,23 @@ class DocScrollPrep {
   static final ValueNotifier<int> changed = ValueNotifier<int>(0);
 
   static final Map<String, double> _progress = {};
+  // 파일별 모든 쪽의 높이/너비 (보던 화면이 먼저 알려 주거나 준비 중에 알게 됨)
+  static final Map<String, List<double>> _sizes = {};
+  // 그림이 준비된 쪽 (같은 묶음을 보는 화면과 함께 씀)
+  static final Map<String, Set<int>> _doneSets = {};
+  // 지금 보고 있는 쪽 (그 근처부터 그림을 만듦)
+  static final Map<String, int> _focus = {};
+  static final Set<String> _cleaned = {};
+
+  /// 보던 화면이 이미 아는 쪽 크기를 알려 줌 (그러면 스크롤 보기를 바로 띄울 수 있음)
+  static void provideSizes(String path, List<double> aspects) {
+    if (aspects.isEmpty) return;
+    _sizes[path] = List<double>.of(aspects);
+    changed.value++;
+  }
+
+  /// 스크롤 보기에서 지금 보고 있는 쪽
+  static void focus(String path, int page) => _focus[path] = page;
   static final Set<String> _failed = {};
   static final List<_Job> _queue = [];
   static final List<_Job> _running = [];
@@ -76,7 +101,19 @@ class DocScrollPrep {
   static Future<Directory?> _dir(String path, String theme, int widthPx) async {
     final base = await PageSnapshotService.documentDir(path);
     if (base == null) return null;
-    final d = Directory('${base.path}/scroll6_${widthPx}_$theme');
+    // scroll7: 쪽을 잘라 붙이지 않고 쪽 그대로 (슬라이드 보기의 쪽을 세로로 늘어놓은 모습)
+    final d = Directory('${base.path}/scroll7_${widthPx}_$theme');
+    // 예전 방식(여백을 걷어 이어 붙인 그림)은 지움
+    if (_cleaned.add(base.path)) {
+      try {
+        for (final e in base.listSync()) {
+          final name = e.path.split('/').last;
+          if (e is Directory && RegExp(r'^scroll[2-6]_').hasMatch(name)) {
+            e.delete(recursive: true).catchError((_) => e);
+          }
+        }
+      } catch (_) {}
+    }
     if (!d.existsSync()) d.createSync(recursive: true);
     return d;
   }
@@ -89,24 +126,28 @@ class DocScrollPrep {
     return {};
   }
 
-  /// 모든 쪽이 준비되어 있으면 그 묶음, 아니면 null.
+  /// 쪽 자리(모든 쪽 크기)를 알면 그 묶음 (그림은 일부만 있을 수 있음), 모르면 null.
   /// [pageCount]를 모르면(0) 저장해 둔 쪽 수로 (파일을 다 읽기 전에 스크롤 보기를 바로 띄울 때)
   static Future<ScrollPageSet?> load(String path, String theme, int widthPx, int pageCount) async {
     final d = await _dir(path, theme, widthPx);
     if (d == null) return null;
     final meta = _readMeta(d);
-    if (pageCount <= 0) pageCount = (meta['n'] as num?)?.toInt() ?? 0;
+    if (pageCount <= 0) pageCount = (meta['n'] as num?)?.toInt() ?? _sizes[path]?.length ?? 0;
     if (pageCount <= 0) return null;
-    final files = <File>[];
-    final aspects = <double>[];
-    for (int i = 0; i < pageCount; i++) {
-      final a = meta['$i'];
-      final f = File('${d.path}/p$i.jpg');
-      if (a is! num || !f.existsSync()) return null;
-      files.add(f);
-      aspects.add(a.toDouble());
+    List<double>? aspects;
+    final a = meta['a'];
+    if (a is List && a.length == pageCount && a.every((e) => e is num && e > 0)) {
+      aspects = [for (final e in a) (e as num).toDouble()];
+    } else if (_sizes[path]?.length == pageCount) {
+      aspects = List<double>.of(_sizes[path]!);
     }
-    return ScrollPageSet(files, aspects, theme);
+    if (aspects == null) return null;
+    final key = _key(path, theme, widthPx);
+    final done = _doneSets.putIfAbsent(key, () => <int>{});
+    for (int i = 0; i < pageCount; i++) {
+      if (!done.contains(i) && File('${d.path}/p$i.jpg').existsSync()) done.add(i);
+    }
+    return ScrollPageSet(d.path, aspects, theme, done);
   }
 
   /// 준비 요청 (이미 다 되어 있거나 진행 중이면 아무것도 안 함). 가장 최근 요청부터 처리
@@ -123,7 +164,7 @@ class DocScrollPrep {
     _progress[key] = _progress[key] ?? 0;
     _queue.insert(0, _Job(key, path, theme, widthPx, logicalWidth, pageCount));
     // 준비가 끝나면 상태 표시줄로 알려 주므로, 처음 한 번 알림 허용을 물음 (안드로이드 13 이상)
-    if (!_askedNotify) {
+    if (!_askedNotify && StorageService.prepNotify) {
       _askedNotify = true;
       _native.invokeMethod('requestNotificationPermission').catchError((_) => null);
     }
@@ -149,7 +190,7 @@ class DocScrollPrep {
       }
       if (!ok) _failed.add(job.key);
       // 뒤에서 새로 준비를 마쳤으면 알림 (이미 다 되어 있던 파일은 알리지 않음)
-      if (ok && job.rendered > 0) {
+      if (ok && job.rendered > 0 && StorageService.prepNotify) {
         final name = job.path.split('/').last;
         final lang = StorageService.appLangNotifier.value;
         final title = AppI18n.t(lang, ko: '스크롤 보기 준비 완료', en: 'Scroll view ready', zh: '滚动视图已准备好', ja: 'スクロール表示の準備完了');
@@ -160,10 +201,14 @@ class DocScrollPrep {
                 'title': title,
                 'text': name,
                 'id': 7000 + (job.path.hashCode & 0x3FFF),
+                'vibrate': StorageService.prepNotifyVibrate,
               }) ??
               false;
         } catch (_) {}
-        if (!shown) showAppNotice('$title · $name');
+        if (!shown) {
+          if (StorageService.prepNotifyVibrate) HapticFeedback.mediumImpact();
+          showAppNotice('$title · $name');
+        }
       }
       _running.remove(job);
       changed.value++;
@@ -341,7 +386,40 @@ class DocScrollPrep {
       if (count != job.pageCount) return false;
       int done = job.pageCount - todo.length;
       meta['n'] = job.pageCount;
-      for (final i in todo) {
+      // 모든 쪽의 크기를 먼저 저장 (스크롤 보기가 쪽 자리를 바로 잡고, 그림은 차례로 채움)
+      if (!isPpt) {
+        try {
+          final r = await call('pageSizes', []);
+          if (r is List && r.length == job.pageCount) {
+            final asp = <double>[];
+            for (final e in r) {
+              final double pw = e is List && e.length > 1 ? ((e[0] as num?)?.toDouble() ?? 0) : 0;
+              final double ph = e is List && e.length > 1 ? ((e[1] as num?)?.toDouble() ?? 0) : 0;
+              asp.add(pw > 0 && ph > 0 ? ph / pw : 1.414);
+            }
+            meta['a'] = asp;
+            _sizes[job.path] = asp;
+            File('${dir.path}/meta.json').writeAsStringSync(jsonEncode(meta));
+            changed.value++;
+          }
+        } catch (_) {}
+      }
+      final doneSet = _doneSets.putIfAbsent(job.key, () => <int>{});
+      final remaining = List<int>.of(todo);
+      while (remaining.isNotEmpty) {
+        // 보고 있는 쪽에서 가까운 쪽부터 (아래쪽을 조금 먼저)
+        final int f = _focus[job.path] ?? remaining.first;
+        int pickIdx = 0;
+        double best = double.infinity;
+        for (int k = 0; k < remaining.length; k++) {
+          final int d = remaining[k] - f;
+          final double cost = d >= 0 ? d.toDouble() : -d * 1.5;
+          if (cost < best) {
+            best = cost;
+            pickIdx = k;
+          }
+        }
+        final int i = remaining.removeAt(pickIdx);
         await _breathe();
         // PPT: 슬라이드를 바로 그림으로 그려 받음 (화면 찍기 없이)
         if (isPpt) {
@@ -360,6 +438,7 @@ class DocScrollPrep {
             PaintingBinding.instance.imageCache.evict(FileImage(out));
           } catch (_) {}
           job.rendered++;
+          doneSet.add(i);
           report(++done);
           continue;
         }
@@ -384,7 +463,8 @@ class DocScrollPrep {
           if (rect != null && v(rect['w']) > 0.05 && v(rect['h']) > 0.05) 'crop': [v(rect['x']), v(rect['y']), v(rect['w']), v(rect['h'])],
           'paper': paper,
           'pad': 0.035,
-          // 위 여백은 그대로 (쪽 넘김 보기와 같은 자리에서 글이 시작), 아래 빈 종이만 걷음
+          // 쪽을 그대로 (여백을 걷어 내 이어 붙이지 않음)
+          'trim': false,
           'trimTop': false,
           'tag': job.tag,
         };
@@ -399,7 +479,7 @@ class DocScrollPrep {
           if (shot == null || shot.length < 64) return false;
           final tmp = File('${dir.path}/shot.tmp');
           await tmp.writeAsBytes(shot, flush: true);
-          size = await _native.invokeMethod<List<Object?>>('cropTrimImage', {...args, 'input': tmp.path, 'trim': true});
+          size = await _native.invokeMethod<List<Object?>>('cropTrimImage', {...args, 'input': tmp.path, 'trim': false});
           try {
             tmp.deleteSync();
           } catch (_) {}
@@ -434,6 +514,7 @@ class DocScrollPrep {
           PaintingBinding.instance.imageCache.evict(FileImage(out));
         } catch (_) {}
         job.rendered++;
+        doneSet.add(i);
         report(++done);
       }
       return true;

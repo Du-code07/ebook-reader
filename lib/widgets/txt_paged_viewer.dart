@@ -280,9 +280,10 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
         : widget.theme == 'sepia'
         ? const Color(0xff3b2f2f)
         : Colors.black;
+    // 슬라이드(쪽 넘김) 보기: 종이를 화면 가운데에 (위아래 빈 곳이 같게)
     Widget paper(String text, int page) => FittedBox(
       fit: BoxFit.contain,
-      alignment: Alignment.topCenter,
+      alignment: Alignment.center,
       child: SizedBox.fromSize(
         size: TxtPageDocument.paperSize,
         // EPUB처럼 글을 길게 눌러 골라 복사
@@ -318,7 +319,7 @@ class _TxtPagedViewerState extends State<TxtPagedViewer> {
 }
 
 extension on _TxtPagedViewerState {
-  /// 스크롤 모드: 종이 쪽들을 세로로 이어 붙임 (보이는 쪽 근처만 그때그때 읽어 둠)
+  /// 스크롤 모드: 종이 쪽들을 세로로 늘어놓음 (보이는 쪽 근처만 그때그때 읽어 둠)
   Widget _buildScroll(Color background, Color foreground, Widget Function(String, int) paper) {
     final doc = _document!;
     final double aspect = TxtPageDocument.paperSize.height / TxtPageDocument.paperSize.width;
@@ -327,7 +328,9 @@ extension on _TxtPagedViewerState {
       count: doc.pageCount,
       aspectOf: (_) => aspect,
       initialPage: _page,
-      background: background,
+      // 쪽 그대로 세로로 늘어놓고 쪽 사이는 살짝 띄움 (슬라이드 보기의 쪽을 세로로)
+      gap: 12,
+      background: widget.theme == 'dark' ? const Color(0xFF0D0D0D) : widget.theme == 'sepia' ? const Color(0xFFE3D4B4) : const Color(0xFFE2E2E6),
       // 두 손가락으로 벌려 확대
       zoomable: true,
       onPageChanged: (p) {

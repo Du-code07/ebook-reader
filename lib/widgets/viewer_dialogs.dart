@@ -2,7 +2,7 @@ import 'dart:math' as math;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart' show DeviceGestureSettings;
+import 'package:flutter/gestures.dart' show DeviceGestureSettings, EagerGestureRecognizer;
 import 'package:flutter/scheduler.dart';
 
 typedef ViewerTr = String Function(String ko, String en, String zh, String ja);
@@ -234,12 +234,24 @@ class ContinuousPageController {
 
   /// 한 화면만큼 아래(+1)/위(-1)로 부드럽게
   void scrollByScreen(int dir) => _state?._scrollByScreen(dir);
+
+  /// 확대돼 있는지
+  bool get zoomed => (_state?._scale ?? 1) > 1.03;
+
+  /// 확대를 처음(1배)으로 (보던 자리는 그대로)
+  void resetZoom() => _state?._resetZoom();
 }
 
 /// 스크롤 보기 오른쪽의 회색 막대: 지금 위치를 보여 주고, 끌면 그 비율 위치로 바로 이동
 /// [ratio]: 0(처음)~1(끝), [viewFraction]: 화면에 보이는 부분 / 전체 (막대 길이)
 class ScrollThumbBar extends StatefulWidget {
-  const ScrollThumbBar({super.key, required this.ratio, required this.viewFraction, required this.onDragRatio, this.onDragStart, this.onDragEnd});
+  const ScrollThumbBar({super.key, required this.ratio, required this.viewFraction, required this.onDragRatio, this.onDragStart, this.onDragEnd, this.left});
+
+  /// 왼손잡이: 막대를 왼쪽에 (null이면 앱 설정 [leftHanded]를 따름)
+  final bool? left;
+
+  /// 뷰어 설정의 '왼손잡이' (스크롤 막대·도구 모음을 왼쪽에)
+  static final ValueNotifier<bool> leftHanded = ValueNotifier<bool>(false);
   final double ratio;
   final double viewFraction;
   final ValueChanged<double> onDragRatio;
@@ -253,9 +265,18 @@ class ScrollThumbBar extends StatefulWidget {
 class _ScrollThumbBarState extends State<ScrollThumbBar> {
   bool _dragging = false;
   double _dragRatio = 0;
+  int? _dragPointer;
 
   @override
   Widget build(BuildContext context) {
+    if (widget.left != null) return _build(context, widget.left!);
+    return ValueListenableBuilder<bool>(
+      valueListenable: ScrollThumbBar.leftHanded,
+      builder: (context, left, _) => _build(context, left),
+    );
+  }
+
+  Widget _build(BuildContext context, bool left) {
     return LayoutBuilder(builder: (context, c) {
       final double h = c.maxHeight;
       if (!h.isFinite || h <= 0) return const SizedBox.shrink();
@@ -270,34 +291,56 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
 
       return Stack(children: [
         Positioned(
-          right: 0,
+          left: left ? 0 : null,
+          right: left ? null : 0,
           top: ratio * track,
-          width: 26, // 누르기 쉬운 범위 (보이는 막대는 가늘게)
+          width: 36, // 누르기 쉬운 범위 (보이는 막대는 가늘게)
           height: thumb,
-          child: GestureDetector(
+          // 손가락이 닿자마자 이 막대가 잡음 (아래 화면의 끌기·확대 동작이 가로채지 못하게)
+          child: RawGestureDetector(
             behavior: HitTestBehavior.opaque,
-            onVerticalDragStart: (_) {
-              widget.onDragStart?.call();
-              setState(() {
-                _dragging = true;
-                _dragRatio = widget.ratio.clamp(0.0, 1.0).toDouble();
-              });
+            gestures: <Type, GestureRecognizerFactory>{
+              EagerGestureRecognizer: GestureRecognizerFactoryWithHandlers<EagerGestureRecognizer>(
+                EagerGestureRecognizer.new,
+                (_) {},
+              ),
             },
-            onVerticalDragUpdate: (d) {
-              setState(() => _dragRatio = (_dragRatio + d.delta.dy / track).clamp(0.0, 1.0).toDouble());
-              widget.onDragRatio(_dragRatio);
-            },
-            onVerticalDragEnd: (_) => end(),
-            onVerticalDragCancel: end,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 120),
-                margin: const EdgeInsets.only(right: 3),
-                width: _dragging ? 8 : 5,
-                decoration: BoxDecoration(
-                  color: Colors.grey.withValues(alpha: _dragging ? 0.9 : 0.6),
-                  borderRadius: BorderRadius.circular(4),
+            child: Listener(
+              behavior: HitTestBehavior.opaque,
+              onPointerDown: (e) {
+                if (_dragPointer != null) return;
+                _dragPointer = e.pointer;
+                widget.onDragStart?.call();
+                setState(() {
+                  _dragging = true;
+                  _dragRatio = widget.ratio.clamp(0.0, 1.0).toDouble();
+                });
+              },
+              onPointerMove: (e) {
+                if (e.pointer != _dragPointer) return;
+                setState(() => _dragRatio = (_dragRatio + e.delta.dy / track).clamp(0.0, 1.0).toDouble());
+                widget.onDragRatio(_dragRatio);
+              },
+              onPointerUp: (e) {
+                if (e.pointer != _dragPointer) return;
+                _dragPointer = null;
+                end();
+              },
+              onPointerCancel: (e) {
+                if (e.pointer != _dragPointer) return;
+                _dragPointer = null;
+                end();
+              },
+              child: Align(
+                alignment: left ? Alignment.centerLeft : Alignment.centerRight,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  margin: EdgeInsets.only(left: left ? 3 : 0, right: left ? 0 : 3),
+                  width: _dragging ? 9 : 6,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: _dragging ? 0.9 : 0.65),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                 ),
               ),
             ),
@@ -528,6 +571,16 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
   }
 
   Offset? _downLocal; // 손가락이 처음 닿은 자리
+
+  void _resetZoom() {
+    if (_scale <= 1.0001 || _height <= 0) return;
+    _stopSim();
+    final double cy = (_oy + _height / 2 - _padYFor(_scale)) / _scale;
+    _scale = 1;
+    _ox = 0;
+    _oy = cy - _height / 2 + _padYFor(1);
+    _moved();
+  }
 
   void _onScaleStart(ScaleStartDetails d) {
     _stopSim();

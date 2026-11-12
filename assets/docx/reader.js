@@ -140,9 +140,26 @@ async function addFreeFaces(name, free, dir) {
     } catch (e) {}
   }));
 }
+// 한컴바탕·한컴돋움이 없으면 사용자가 넣은 함초롬바탕·함초롬돋움으로 대신 보여 줌
+const USER_FONT_ALIASES = [
+  [/^(한컴\s?바탕|hancom\s?batang|haansoft\s?batang)$/i, ['함초롬바탕', 'hcr batang', '함초롬 바탕']],
+  [/^(한컴\s?돋움|hancom\s?dotum|haansoft\s?dotum)$/i, ['함초롬돋움', 'hcr dotum', '함초롬 돋움']],
+];
+function userFontFacesExact(n) {
+  return (options.userFonts || []).filter(f => (f.n || []).some(x => String(x).trim().toLowerCase() === n));
+}
 function userFontFaces(name) {
   const n = String(name).trim().toLowerCase();
-  return (options.userFonts || []).filter(f => (f.n || []).some(x => String(x).trim().toLowerCase() === n));
+  const own = userFontFacesExact(n);
+  if (own.length) return own;
+  for (const [re, targets] of USER_FONT_ALIASES) {
+    if (!re.test(n)) continue;
+    for (const t of targets) {
+      const faces = userFontFacesExact(t);
+      if (faces.length) return faces;
+    }
+  }
+  return [];
 }
 function fontKind(name) {
   if (/math|equation|수식/i.test(name)) return 'math';
@@ -581,6 +598,8 @@ function pageRect() {
   if (!(r > l && b > t)) return null;
   return { x: Math.max(0, l / W), y: Math.max(0, t / H), w: Math.min(1, (r - l) / W), h: Math.min(1, (b - t) / H) };
 }
+// FReader: 모든 쪽의 크기 [너비, 높이] (스크롤 보기에서 쪽 자리를 먼저 잡아 두고 그림은 차례로 채움)
+function pageSizes() { return pages.map(p => [Number(p.width) || 0, Number(p.height) || 0]); }
 function fitPages() {
   const frames = [...host.children]; if (!frames.length) return;
   const totalWidth = frames.reduce((sum, f) => sum + Number(f.dataset.width), 0);
@@ -754,7 +773,15 @@ function outlineBlocks() {
       if (page == null) continue;
       let centered = false;
       try { centered = block.key instanceof Element && getComputedStyle(block.key).textAlign === 'center'; } catch (_) {}
-      blocks.push({ text, page, chars, fs, bold: bold >= chars * 0.9, boldRatio: bold / chars, centered, cell: !!block.key.closest?.('td, th') });
+      // 한 문단 안에서 줄을 바꿔(Shift+Enter) 붙인 부제목은 목차 제목에서 뺌: 첫 줄만
+      let head = text;
+      const br = block.key instanceof Element ? block.key.querySelector('br') : null;
+      if (br) {
+        const first = block.nodes.filter(({ node }) => node.compareDocumentPosition(br) & Node.DOCUMENT_POSITION_FOLLOWING)
+          .map(({ node }) => node.data).join('').replace(/\s+/g, ' ').trim();
+        if (first) head = marker && !first.startsWith(marker) ? `${marker} ${first}` : first;
+      }
+      blocks.push({ text, head, page, chars, fs, bold: bold >= chars * 0.9, boldRatio: bold / chars, centered, cell: !!block.key.closest?.('td, th') });
     }
   }
   return blocks;
@@ -797,10 +824,10 @@ function headingCandidates() {
   for (const b of outlineBlockCache) if (b.fs > 0) sizeChars.set(b.fs, (sizeChars.get(b.fs) || 0) + b.chars);
   let body = 0, most = -1;
   for (const [k, n] of sizeChars) if (n > most) { most = n; body = k; }
-  return outlineBlockCache.filter(b => !b.cell && b.text.length <= 100 && (NUMBERED_START.test(b.text) || b.boldRatio >= 0.5))
-    .slice(0, 3000).map(b => ({ title: b.text, page: b.page, bold: b.bold, boldRatio: b.boldRatio, centered: b.centered, fs: b.fs, body }));
+  return outlineBlockCache.filter(b => !b.cell && (b.head || b.text).length <= 100 && (NUMBERED_START.test(b.head || b.text) || b.boldRatio >= 0.5))
+    .slice(0, 3000).map(b => ({ title: b.head || b.text, page: b.page, bold: b.bold, boldRatio: b.boldRatio, centered: b.centered, fs: b.fs, body }));
 }
 window.freaderDocx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
-  search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes, pageRect,
+  search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes, pageRect, pageSizes,
   getState: () => ({ ready, page, count: pages.length, received, spread: options.spread, awaitingPassword, unavailableImages, imageCacheBytes, cachedImages: imageCache.size, visibleImages: activeImagePaths.size, maxBytes: MAX_BYTES, format: detectedFormat }) };
 window.addEventListener('pagehide', destroy, { once: true });

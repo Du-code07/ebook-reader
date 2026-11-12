@@ -198,6 +198,12 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
         actionsIconTheme: IconThemeData(size: 21, color: scheme.onSurfaceVariant),
       ),
+      // 아래에서 올라오는 모든 창: 위쪽 가운데 회색 막대
+      bottomSheetTheme: BottomSheetThemeData(
+        showDragHandle: true,
+        dragHandleColor: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+        dragHandleSize: const Size(40, 4),
+      ),
     );
   }
 
@@ -256,7 +262,15 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
             scale: _rotationScaleAnim,
             // 아이콘을 꾹 누르거나 S펜을 가까이 대면 뜨던 이름 말풍선을 모두 끔 (화면 낭독용 이름은 그대로)
             // 화면이 넓으면(태블릿 등) 기준 휴대폰과 같은 비율로 앱 화면 전체를 크게
-            child: TooltipVisibility(visible: false, child: UiScaleBox(child: content)),
+            // 앱 글꼴: 테마 밖(창 위에 바로 그려지는 글 등)까지 모든 글자에
+            child: TooltipVisibility(
+              visible: false,
+              child: UiScaleBox(
+                child: UserFonts.appFont.value == null
+                    ? content
+                    : DefaultTextStyle.merge(style: TextStyle(fontFamily: UserFonts.appFontFamily(UserFonts.appFont.value!)), child: content),
+              ),
+            ),
           ),
         );
       },
@@ -808,6 +822,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      showDragHandle: false, // 창 안에 회색 막대가 이미 있음
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
           final cs = Theme.of(ctx).colorScheme;

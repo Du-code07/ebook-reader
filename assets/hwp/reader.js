@@ -537,7 +537,17 @@ async function headingCandidates(from = 0, to = 1e9) {
   for (const [k, n] of sizeChars) if (n > most) { most = n; body = k; }
   return out.slice(0, 3000).map(c => ({ ...c, body }));
 }
-window.freaderHwp = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
+// FReader: 모든 쪽의 크기 [너비, 높이] (스크롤 보기에서 쪽 자리를 먼저 잡아 두고 그림은 차례로 채움)
+function pageSizes() {
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    let w = 0, h = 0;
+    try { const info = JSON.parse(doc.getPageInfo(i)); w = Number(info.width) || 0; h = Number(info.height) || 0; } catch (e) {}
+    out.push([w, h]);
+  }
+  return out;
+}
+window.freaderHwp = { beginDocument, pageSizes, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes, pageRect,
   getState: () => ({ ready: readyReported, page, count, cachedPages: cache.size, cachedBytes, received, spread: options.spread, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });

@@ -65,21 +65,58 @@ class UserFonts {
   /// 앱 화면에 쓸 글꼴이 바뀌면 알림 (null이면 기본 글꼴)
   static final ValueNotifier<UserFontEntry?> appFont = ValueNotifier<UserFontEntry?>(null);
 
-  /// 앱 화면 글꼴 이름 (Flutter에 등록한 이름)
-  static String appFontFamily(UserFontEntry e) => 'FReaderApp_${e.file.split('.').first}';
+  /// 앱 화면 글꼴 이름 (Flutter에 등록한 이름). 같은 글꼴의 보통·굵게 파일은 한 이름으로 묶음
+  static String appFontFamily(UserFontEntry e) => 'FReaderApp_${familyOf(e).hashCode.toUnsigned(32)}_${e.file.split('.').first}';
 
-  /// 앱을 켤 때·앱 글꼴을 바꿀 때: 고른 글꼴을 Flutter에 등록
+  static String _activeKey(String category) => 'user_font_active_$category';
+
+  /// 같은 글꼴(보통·굵게 등)을 하나로 묶는 이름: 글꼴 이름들 중 가장 짧은 것
+  static String familyOf(UserFontEntry e) {
+    if (e.names.isEmpty) return e.label;
+    final sorted = [...e.names]..sort((a, b) => a.length != b.length ? a.length - b.length : a.compareTo(b));
+    return sorted.first;
+  }
+
+  /// 앱·EPUB 글꼴: 지금 쓰는 글꼴(묶음 이름). '' = 기본 글꼴
+  static Future<String> activeLabel(String category) async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_activeKey(category));
+    if (v != null) return v;
+    // 예전 판: 넣은 글꼴이 하나뿐이고 그것을 썼음
+    final all = await listOf(category);
+    return all.isEmpty ? '' : familyOf(all.first);
+  }
+
+  static Future<void> setActive(String category, String label) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_activeKey(category), label);
+  }
+
+  /// 지금 쓰는 글꼴의 파일들 (보통 굵기가 앞). 기본 글꼴이면 빈 목록
+  static Future<List<UserFontEntry>> activeFaces(String category) async {
+    final label = await activeLabel(category);
+    if (label.isEmpty) return const [];
+    final faces = [for (final e in await listOf(category)) if (familyOf(e) == label) e];
+    faces.sort((a, b) => (a.weight - 400).abs().compareTo((b.weight - 400).abs()) != 0
+        ? (a.weight - 400).abs().compareTo((b.weight - 400).abs())
+        : (a.italic ? 1 : 0) - (b.italic ? 1 : 0));
+    return faces;
+  }
+
+  /// 앱을 켤 때·앱 글꼴을 바꿀 때: 고른 글꼴(보통·굵게 등 모든 파일)을 Flutter에 등록
   static Future<void> loadAppFont() async {
     try {
-      final all = await listOf('app');
-      if (all.isEmpty) {
+      final faces = await activeFaces('app');
+      if (faces.isEmpty) {
         appFont.value = null;
         return;
       }
-      final e = all.first;
+      final e = faces.first;
       final loader = FontLoader(appFontFamily(e));
-      final f = File('${(await dir()).path}/${e.file}');
-      loader.addFont(f.readAsBytes().then((b) => ByteData.sublistView(b)));
+      final d = (await dir()).path;
+      for (final f in faces) {
+        loader.addFont(File('$d/${f.file}').readAsBytes().then((b) => ByteData.sublistView(b)));
+      }
       await loader.load();
       appFont.value = e;
     } catch (_) {
@@ -89,8 +126,8 @@ class UserFonts {
 
   /// EPUB 본문 글꼴 (없으면 null)
   static Future<UserFontEntry?> epubFont() async {
-    final all = await listOf('epub');
-    return all.isEmpty ? null : all.first;
+    final faces = await activeFaces('epub');
+    return faces.isEmpty ? null : faces.first;
   }
 
   static Future<List<UserFontEntry>> list() async {
@@ -115,19 +152,14 @@ class UserFonts {
   /// 글꼴 파일을 추가. 돌려주는 값: 추가된 글꼴 수 (글꼴이 아닌 파일은 건너뜀)
   static Future<int> add(List<String> paths, {String category = 'doc'}) async {
     final all = await list();
-    // 앱·EPUB 글꼴은 하나만 (새로 고르면 바꿔 넣음)
+    // 앱·EPUB 글꼴도 여러 개 넣어 두고 눌러서 바꿔 씀 (예전 판에서 하나만 쓰던 것은 그대로 남김)
     if (category != 'doc') {
-      final d0 = await dir();
-      for (final e in all.where((e) => e.category == category).toList()) {
-        all.remove(e);
-        try {
-          await File('${d0.path}/${e.file}').delete();
-        } catch (_) {}
-      }
-      if (paths.length > 1) paths = paths.take(1).toList();
+      final prefs = await SharedPreferences.getInstance();
+      if (!prefs.containsKey(_activeKey(category))) await setActive(category, await activeLabel(category));
     }
     final d = await dir();
     int added = 0;
+    String? lastLabel;
     // 글꼴 모음(.ttc, 예: 굴림·돋움이 함께 든 gulim.ttc)은 글꼴마다 따로 떼어 모두 넣음
     final pieces = <(String, Uint8List)>[];
     for (final p in paths) {
@@ -143,7 +175,6 @@ class UserFonts {
         }
       } catch (_) {}
     }
-    if (category != 'doc' && pieces.length > 1) pieces.removeRange(1, pieces.length);
     for (final (p, bytes) in pieces) {
       try {
         final info = FontNameReader.read(bytes);
@@ -161,10 +192,21 @@ class UserFonts {
         }
         all.add(UserFontEntry(file: file, names: info.names, weight: info.weight, italic: info.italic, label: info.label, category: category));
         added++;
+        lastLabel = familyOf(all.last);
       } catch (_) {}
     }
     await _save(all);
+    // 새로 넣은 앱·EPUB 글꼴은 바로 그 글꼴로 바꿈
+    if (category != 'doc' && lastLabel != null) await setActive(category, lastLabel);
     return added;
+  }
+
+  /// 같은 글꼴(묶음)의 파일을 모두 지움
+  static Future<void> removeFamily(String category, String label) async {
+    for (final e in [for (final e in await listOf(category)) if (familyOf(e) == label) e]) {
+      await remove(e);
+    }
+    if (await activeLabel(category) == label) await setActive(category, '');
   }
 
   static Future<void> remove(UserFontEntry entry) async {

@@ -706,6 +706,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _progressBarPosSetting = await StorageService.getProgressBarPosition();
       _memoToolbarPos = await StorageService.getMemoToolbarPosition();
       _quickMenuSide = await StorageService.getQuickMenuSide();
+      ScrollThumbBar.leftHanded.value = _quickMenuSide == 'left';
       _bookmarks = await StorageService.getBookmarks(_bookKey);
 
       final tempDir = await getTemporaryDirectory();
@@ -1232,8 +1233,41 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   // 두 손가락(확대·축소) 동작 중이었는지: 그 끝에 손가락을 떼는 것은 탭이 아님
   bool _pinchSeen = false;
 
+  // 확대한 화면을 빠르게 두 번 누르면 확대를 처음으로 (확대돼 있을 때만 한 번 누름을 잠깐 기다려 봄)
+  Timer? _tapTimer;
+  DateTime? _lastTapAt;
+  Offset _lastTapPos = Offset.zero;
+
   void _onViewerTap(Offset local) {
     if (_pinchSeen) return;
+    final bool zoomed = _currentZoomScale > 1.03 || (_pageModeScroll && _scrollCtrl.zoomed);
+    final now = DateTime.now();
+    if (_tapTimer != null && _lastTapAt != null && now.difference(_lastTapAt!).inMilliseconds < 320 && (local - _lastTapPos).distance < 60) {
+      _tapTimer!.cancel();
+      _tapTimer = null;
+      _lastTapAt = null;
+      HapticFeedback.selectionClick();
+      if (_currentZoomScale > 1.0001) {
+        _zoomController.value = Matrix4.identity();
+        setState(() => _currentZoomScale = 1.0);
+      }
+      _scrollCtrl.resetZoom();
+      return;
+    }
+    if (zoomed) {
+      _lastTapAt = now;
+      _lastTapPos = local;
+      _tapTimer?.cancel();
+      _tapTimer = Timer(const Duration(milliseconds: 300), () {
+        _tapTimer = null;
+        if (mounted) _onViewerTapNow(local);
+      });
+      return;
+    }
+    _onViewerTapNow(local);
+  }
+
+  void _onViewerTapNow(Offset local) {
     if (!_pageModeTap || _showControls || _isMemoMode) {
       _toggleControls();
       return;
@@ -1256,7 +1290,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     _stepPage(_isMangaRtlMode ? -dir : dir);
   }
 
-  /// 스크롤 모드: 모든 쪽을 간격 없이 세로로 이어 붙여 보여 줌 (쪽 그림은 이미 다 만들어 둔 것)
+  /// 스크롤 모드: 모든 쪽을 세로로 늘어놓고 쪽 사이를 살짝 띄워 보여 줌 (쪽 그림은 이미 다 만들어 둔 것)
   Widget _buildScrollPages() {
     if (_scrollSizes.length < _imagePages.length) _prepareScrollSizes();
     final double dpr = MediaQuery.devicePixelRatioOf(context);
@@ -1266,6 +1300,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       count: _imagePages.length,
       aspectOf: _scrollAspect,
       initialPage: _currentPage,
+      // 쪽 그대로 세로로 늘어놓고 쪽 사이는 살짝 띄움 (슬라이드 보기의 쪽을 세로로)
+      gap: 12,
+      background: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0D0D0D) : const Color(0xFFE2E2E6),
       onPageChanged: (p) {
         setState(() => _currentPage = p);
         StorageService.saveLastPosition(_bookKey, p.toString());
@@ -1931,29 +1968,25 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   ],
                 ),
                 const SizedBox(height: 26),
-                // 도구 모음 위치는 반원일 때만 (바로 바꾸면 숨김, 고른 위치는 기억)
-                if (_toolbarStyle == 'arc') ...[
-                  _settingsHeader(Icons.grid_view_rounded, _tr('도구 모음 위치', 'Toolbox Position', '工具箱位置', 'ツールボックスの位置')),
-                  const SizedBox(height: 8),
-                  SettingGroup(
-                    children: [
-                      for (final opt in <(String, String)>[
-                        ('right', _tr('오른쪽', 'Right', '右侧', '右')),
-                        ('left', _tr('왼쪽', 'Left', '左侧', '左')),
-                      ])
-                        SettingOption(
-                          label: Text(opt.$2),
-                          selected: _quickMenuSide == opt.$1,
-                          onSelected: (_) async {
-                            await StorageService.setQuickMenuSide(opt.$1);
-                            setState(() => _quickMenuSide = opt.$1);
-                            setModalState(() {});
-                          },
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 26),
-                ],
+                // 왼손잡이: 스크롤 막대·도구 모음을 왼쪽에 (끄면 오른쪽)
+                _settingsHeader(Icons.back_hand_outlined, _tr('왼손잡이', 'Left-handed', '左手模式', '左利き')),
+                const SizedBox(height: 8),
+                SettingGroup(
+                  children: [
+                    SettingToggle(
+                      label: Text(_tr('스크롤 막대·도구 모음을 왼쪽에', 'Scroll bar & toolbox on the left', '滚动条和工具箱放在左侧', 'スクロールバー・ツールボックスを左に')),
+                      selected: _quickMenuSide == 'left',
+                      onSelected: (val) async {
+                        final side = val ? 'left' : 'right';
+                        await StorageService.setQuickMenuSide(side);
+                        ScrollThumbBar.leftHanded.value = val;
+                        setState(() => _quickMenuSide = side);
+                        setModalState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 26),
                 _settingsHeader(Icons.info_outline, _tr('하단 정보 표시', 'Footer Info Display', '底部信息显示', '下部情報表示')),
                 const SizedBox(height: 8),
                 SettingGroup(

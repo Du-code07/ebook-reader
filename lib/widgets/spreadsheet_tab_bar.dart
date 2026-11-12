@@ -23,9 +23,6 @@ class SpreadsheetTabBar extends StatefulWidget {
   State<SpreadsheetTabBar> createState() => _SpreadsheetTabBarState();
 }
 
-/// 엑셀 아이콘 초록
-const Color excelGreen = Color(0xFF1E8E3E);
-
 class _SpreadsheetTabBarState extends State<SpreadsheetTabBar> {
   final List<GlobalKey> _keys = [];
   double? _width;
@@ -72,7 +69,6 @@ class _SpreadsheetTabBarState extends State<SpreadsheetTabBar> {
                 padding: EdgeInsets.only(right: i == widget.names.length - 1 ? 0 : 8),
                 child: ChoiceChip(
                   showCheckmark: false,
-                  avatar: const Icon(Icons.grid_on_rounded, size: 17, color: excelGreen),
                   label: Text(widget.names[i], maxLines: 1),
                   selected: i == widget.selectedIndex,
                   onSelected: (_) => widget.onSelected(i),

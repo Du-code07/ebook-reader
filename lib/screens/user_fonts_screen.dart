@@ -21,6 +21,8 @@ class UserFontsScreen extends StatefulWidget {
 class _UserFontsScreenState extends State<UserFontsScreen> {
   List<UserFontEntry> _fonts = const [];
   bool _busy = false;
+  String _active = ''; // 앱·EPUB: 지금 쓰는 글꼴 ('' = 기본 글꼴)
+  bool get _pickable => widget.category != 'doc';
 
   FontsTr get _t => widget.t;
 
@@ -33,12 +35,30 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
   Future<void> _reload() async {
     final all = await UserFonts.listOf(widget.category);
     all.sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
-    if (mounted) setState(() => _fonts = all);
+    final active = _pickable ? await UserFonts.activeLabel(widget.category) : '';
+    if (mounted) {
+      setState(() {
+        _fonts = all;
+        _active = active;
+      });
+    }
+  }
+
+  /// 앱·EPUB: 넣어 둔 글꼴을 눌러 그 글꼴로 바꿈 ('' = 기본 글꼴)
+  Future<void> _use(String family) async {
+    if (family == _active) return;
+    await UserFonts.setActive(widget.category, family);
+    if (widget.category == 'app') await UserFonts.loadAppFont();
+    await _reload();
+    if (!mounted) return;
+    _snack(widget.category == 'epub'
+        ? _t('EPUB 글꼴을 바꿨어요. 책을 다시 열면 적용돼요.', 'EPUB font changed. Reopen books to apply.', '已更换EPUB字体，重新打开书籍后生效。', 'EPUBのフォントを変更しました。本を開き直すと反映されます。')
+        : _t('앱 글꼴을 바꿨어요.', 'App font changed.', '已更换应用字体。', 'アプリのフォントを変更しました。'));
   }
 
   Future<void> _add() async {
     if (_busy) return;
-    final res = await FilePicker.platform.pickFiles(allowMultiple: widget.category == 'doc', type: FileType.any);
+    final res = await FilePicker.platform.pickFiles(allowMultiple: true, type: FileType.any);
     final paths = [
       for (final f in res?.files ?? const <PlatformFile>[])
         if (f.path != null && RegExp(r'\.(ttf|otf|ttc)$', caseSensitive: false).hasMatch(f.name)) f.path!,
@@ -69,6 +89,22 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
     await _reload();
   }
 
+  Future<void> _removeFamily(String family) async {
+    await UserFonts.removeFamily(widget.category, family);
+    if (widget.category == 'app') await UserFonts.loadAppFont();
+    await _reload();
+  }
+
+  /// 한글·워드: 따로 넣지 않아도 앱에 들어 있어 바로 보이는 글꼴
+  List<(String, String)> get _builtIn => [
+        ('나눔고딕 · 나눔명조 · 나눔고딕코딩', _t('원래 글꼴 그대로', 'Shown as the original font', '按原字体显示', '元のフォントのまま')),
+        ('고운바탕 · 고운돋움', _t('원래 글꼴 그대로', 'Shown as the original font', '按原字体显示', '元のフォントのまま')),
+        ('Arial · Times New Roman · Courier New', _t('글자 폭이 같은 무료 글꼴로', 'Replaced by free fonts of the same widths', '换成字宽相同的免费字体', '文字幅が同じ無料フォントで')),
+        ('Calibri · Cambria', _t('글자 폭이 같은 무료 글꼴로', 'Replaced by free fonts of the same widths', '换成字宽相同的免费字体', '文字幅が同じ無料フォントで')),
+        (_t('그 밖의 한글 글꼴 (맑은 고딕, 바탕, 굴림, 돋움 등)', 'Other Korean fonts (Malgun Gothic, Batang, Gulim, Dotum, …)', '其他韩文字体（Malgun Gothic、Batang、Gulim、Dotum 等）', 'その他の韓国語フォント（Malgun Gothic・Batang・Gulim・Dotum など）'),
+            _t('본고딕·본명조로 대신 보여 줘요 (글꼴을 넣으면 그 글꼴로)', 'Shown in Noto Sans/Serif KR (or the font you add)', '用 Noto Sans/Serif KR 代替显示（添加字体后使用该字体）', 'Noto Sans/Serif KR で代わりに表示（追加するとそのフォントで）')),
+      ];
+
   void _snack(String text) {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -82,14 +118,14 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
       };
 
   String get _description => switch (widget.category) {
-        'app' => _t('앱의 메뉴·목록·설정 화면에 쓸 글꼴 파일(.ttf, .otf)을 고르면 그 글꼴로 보여 줘요. 지우면 기본 글꼴로 돌아가요.',
-            'Choose a font file (.ttf, .otf) to use for the app\'s menus, lists and settings. Delete it to return to the default font.',
-            '选择字体文件（.ttf、.otf）用于应用菜单、列表和设置。删除后恢复默认字体。',
-            'アプリのメニュー・一覧・設定に使うフォントファイル（.ttf・.otf）を選びます。削除すると既定のフォントに戻ります。'),
-        'epub' => _t('EPUB 책 본문을 고른 글꼴로 보여 줘요. 지우면 책에 들어 있는 원래 글꼴로 보여 줘요.',
-            'Shows EPUB book text in the chosen font. Delete it to use the book\'s own fonts.',
-            '用所选字体显示EPUB正文。删除后使用书中自带的字体。',
-            'EPUB本文を選んだフォントで表示します。削除すると本に含まれる元のフォントで表示します。'),
+        'app' => _t('글꼴 파일(.ttf, .otf)을 여러 개 넣어 두고, 누르면 앱의 메뉴·목록·설정 화면이 그 글꼴로 바뀌어요. 같은 글꼴의 보통·굵게 파일을 함께 넣으면 굵은 글씨도 그 글꼴로 보여 줘요.',
+            'Add several font files (.ttf, .otf) and tap one to use it for the app\'s menus, lists and settings. Add the regular and bold files of a font together to show bold text in it too.',
+            '可添加多个字体文件（.ttf、.otf），点击即可用于应用菜单、列表和设置。同时添加常规和粗体文件，粗体文字也会使用该字体。',
+            'フォントファイル（.ttf・.otf）を複数追加し、タップするとアプリのメニュー・一覧・設定がそのフォントになります。標準と太字のファイルを一緒に追加すると太字もそのフォントで表示します。'),
+        'epub' => _t('글꼴 파일을 여러 개 넣어 두고, 누르면 EPUB 책 본문이 그 글꼴로 바뀌어요. \'기본 글꼴\'은 책에 들어 있는 원래 글꼴이에요.',
+            'Add several font files and tap one to show EPUB book text in it. \'Default font\' uses the book\'s own fonts.',
+            '可添加多个字体文件，点击即可用该字体显示EPUB正文。“默认字体”使用书中自带的字体。',
+            'フォントファイルを複数追加し、タップするとEPUB本文がそのフォントになります。「既定のフォント」は本に含まれる元のフォントです。'),
         _ => _t(
             '한글·워드 문서에 쓰인 글꼴(예: 맑은 고딕, 함초롬바탕)이 휴대폰에 없으면 다른 글꼴로 바뀌어 글과 사진 배치가 밀릴 수 있어요. '
                 '가지고 있는 글꼴 파일을 넣으면 같은 이름의 글꼴 대신 그 파일로 보여 줘요. 넣은 글꼴은 이 기기 안에서만 쓰여요.\n'
@@ -103,6 +139,31 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
                 'Arial・Times New Roman・Courier New・Calibri・Cambria は文字幅が同じ無料フォントに自動で置き換えます。'),
       };
 
+  Widget _sectionLabel(ColorScheme cs, String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
+        child: Text(text, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: cs.onSurfaceVariant)),
+      );
+
+  /// 앱·EPUB 글꼴 한 줄: 누르면 그 글꼴로 바꿈 (지금 쓰는 글꼴은 체크 표시)
+  Widget _fontChoice(ColorScheme cs, String family, String title, String subtitle, {VoidCallback? onDelete}) {
+    final bool on = _active == family;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
+      leading: Icon(on ? Icons.radio_button_checked : Icons.radio_button_off, color: on ? cs.primary : cs.onSurfaceVariant),
+      title: Text(title, style: TextStyle(fontWeight: on ? FontWeight.w800 : FontWeight.w600)),
+      subtitle: subtitle.isEmpty ? null : Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+      selected: on,
+      onTap: () => _use(family),
+      trailing: onDelete == null
+          ? null
+          : IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: _t('삭제', 'Delete', '删除', '削除'),
+              onPressed: onDelete,
+            ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -113,7 +174,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
         icon: _busy
             ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
             : const Icon(Icons.add),
-        label: Text(widget.category == 'doc' ? _t('글꼴 추가', 'Add Font', '添加字体', 'フォント追加') : _t('글꼴 고르기', 'Choose Font', '选择字体', 'フォントを選ぶ')),
+        label: Text(_t('글꼴 추가', 'Add Font', '添加字体', 'フォント追加')),
       ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 96),
@@ -125,6 +186,37 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
               style: TextStyle(fontSize: 14, height: 1.45, color: cs.onSurfaceVariant),
             ),
           ),
+          if (widget.category == 'doc') ...[
+            _sectionLabel(cs, _t('지금 볼 수 있는 글꼴', 'Fonts available now', '目前可显示的字体', '今表示できるフォント')),
+            for (final (name, note) in _builtIn)
+              ListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                leading: Icon(Icons.check_circle_outline, color: cs.primary, size: 20),
+                title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text(note),
+              ),
+            _sectionLabel(cs, _t('내가 넣은 글꼴', 'Fonts you added', '我添加的字体', '追加したフォント')),
+          ],
+          if (_pickable) ...[
+            // 앱·EPUB: 눌러서 바로 그 글꼴로
+            _fontChoice(cs, '', _t('기본 글꼴', 'Default font', '默认字体', '既定のフォント'),
+                widget.category == 'epub'
+                    ? _t('책에 들어 있는 원래 글꼴', 'The book\'s own fonts', '书中自带的字体', '本に含まれる元のフォント')
+                    : _t('휴대폰 기본 글꼴', 'The phone\'s default font', '手机默认字体', '端末の既定フォント')),
+            for (final family in {for (final e in _fonts) UserFonts.familyOf(e)})
+              _fontChoice(
+                cs,
+                family,
+                family,
+                [
+                  for (final e in _fonts)
+                    if (UserFonts.familyOf(e) == family)
+                      [e.weight >= 700 ? _t('굵게', 'Bold', '粗体', '太字') : _t('보통', 'Regular', '常规', '標準'), if (e.italic) _t('기울임', 'Italic', '斜体', '斜体')].join(' '),
+                ].join(' · '),
+                onDelete: () => _removeFamily(family),
+              ),
+          ] else ...[
           if (_fonts.isEmpty)
             Padding(
               padding: const EdgeInsets.all(32),
@@ -153,6 +245,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
                 onPressed: () => _remove(e),
               ),
             ),
+          ],
         ],
       ),
     );
