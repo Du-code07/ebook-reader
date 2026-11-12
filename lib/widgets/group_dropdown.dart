@@ -68,11 +68,12 @@ class GroupDropdownRoute extends PopupRoute<String> {
   @override
   bool get barrierDismissible => true;
 
+  // 예전(99판) [전체] 그룹 메뉴와 같은 움직임: 누른 단추에서 커져 나오고, 닫힐 때는 다시 작아지며 단추 안으로 들어감
   @override
-  Duration get transitionDuration => kIconMotion;
+  Duration get transitionDuration => const Duration(milliseconds: 300);
 
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 160);
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 200);
 
   @override
   Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) {
@@ -81,19 +82,23 @@ class GroupDropdownRoute extends PopupRoute<String> {
     final double left = math.max(8.0, anchor.left);
     final double top = anchor.bottom + 6;
     final double maxH = math.max(160.0, screen.height - pad.bottom - 12 - top);
-    final curved = CurvedAnimation(parent: animation, curve: kIconCurve, reverseCurve: Curves.easeInCubic);
+    final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutBack, reverseCurve: Curves.easeInCubic);
+    final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.5), reverseCurve: const Interval(0.4, 1));
+    // 단추 가운데에서 커져 나오도록 (목록 왼쪽 위 모서리 기준)
+    final Offset origin = Offset(anchor.center.dx - left, anchor.center.dy - top);
     return Stack(children: [
       Positioned(
         left: left,
         top: top,
         child: AnimatedBuilder(
-          animation: curved,
+          animation: animation,
           builder: (context, child) => Opacity(
-            opacity: curved.value.clamp(0.0, 1.0),
-            child: Align(
+            opacity: fade.value.clamp(0.0, 1.0),
+            child: Transform.scale(
+              scale: 0.12 + 0.88 * curved.value,
               alignment: Alignment.topLeft,
-              heightFactor: 0.6 + 0.4 * curved.value,
-              child: Transform.translate(offset: Offset(0, -8 * (1 - curved.value)), child: child),
+              origin: origin,
+              child: child,
             ),
           ),
           child: ConstrainedBox(

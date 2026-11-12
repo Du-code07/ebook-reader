@@ -59,48 +59,59 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private val EVENT_CHANNEL = "ebook_reader/volume_events"
     private val PDF_CHANNEL = "ebook_reader/pdf_renderer"
 
-    /// 휴대폰에서 고른 글꼴 파일 (삼성 FlipFont 등). 기본 시스템 글꼴이면 빈 목록 (Flutter가 이미 시스템 글꼴을 씀)
-    private fun deviceFontFiles(): List<String> {
-        val out = ArrayList<String>()
-        fun addFontFile(f: java.io.File) {
-            if (!f.canRead()) return
-            val n = f.name.lowercase()
-            if (n.endsWith(".ttf") || n.endsWith(".otf") || n.endsWith(".ttc")) out.add(f.absolutePath)
-            else if (n.endsWith(".apk")) {
-                // 글꼴 앱(apk) 안의 assets/fonts/*.ttf를 꺼내 둠
+    private fun fontScanAllowed(): Boolean =
+        if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
+        else checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /// 글꼴 찾기: 기기 저장소의 글꼴 파일(.ttf·.otf·.ttc)과 설치된 글꼴 앱(삼성 글꼴 스타일·FlipFont) 안의 글꼴
+    private fun scanFontFiles(): List<String> {
+        val out = LinkedHashSet<String>()
+        fun isFont(n: String) = n.endsWith(".ttf") || n.endsWith(".otf") || n.endsWith(".ttc")
+        if (fontScanAllowed()) {
+            val root = Environment.getExternalStorageDirectory()
+            val stack = ArrayDeque<Pair<java.io.File, Int>>()
+            stack.add(root to 0)
+            var visited = 0
+            while (stack.isNotEmpty() && visited < 30000) {
+                val (dir, depth) = stack.removeLast()
+                visited++
+                val kids = dir.listFiles() ?: continue
+                for (f in kids) {
+                    val name = f.name
+                    if (f.isDirectory) {
+                        // 숨은 폴더·앱 전용 폴더(Android/data 등)는 건너뜀
+                        if (name.startsWith(".") || (depth == 0 && name == "Android")) continue
+                        if (depth < 12) stack.add(f to depth + 1)
+                    } else if (isFont(name.lowercase()) && f.length() in 1024L..(80L shl 20)) {
+                        out.add(f.absolutePath)
+                    }
+                }
+            }
+        }
+        // 설치된 글꼴 앱: 앱 파일(apk) 안 assets 폴더의 글꼴을 꺼내 둠 (권한 없이도 읽힘)
+        try {
+            val base = java.io.File(cacheDir, "fontapps").apply { mkdirs() }
+            for (app in packageManager.getInstalledApplications(0)) {
+                val pkg = app.packageName
+                if (!pkg.startsWith("com.monotype.android.font.") || pkg.endsWith(".foundation")) continue
+                val apk = java.io.File(app.sourceDir ?: continue)
+                if (!apk.canRead()) continue
                 try {
-                    val dir = java.io.File(cacheDir, "devicefont").apply { mkdirs() }
-                    java.util.zip.ZipFile(f).use { zip ->
+                    java.util.zip.ZipFile(apk).use { zip ->
                         for (e in zip.entries()) {
                             val en = e.name.lowercase()
-                            if (!e.isDirectory && en.startsWith("assets/") && (en.endsWith(".ttf") || en.endsWith(".otf"))) {
-                                val dst = java.io.File(dir, e.name.substringAfterLast('/'))
-                                if (!dst.exists() || dst.length() != e.size) zip.getInputStream(e).use { inp -> dst.outputStream().use { inp.copyTo(it) } }
-                                out.add(dst.absolutePath)
-                            }
+                            if (e.isDirectory || !en.startsWith("assets/") || !isFont(en)) continue
+                            val dst = java.io.File(base, pkg + "_" + e.name.substringAfterLast('/'))
+                            if (!dst.exists() || dst.length() != e.size) zip.getInputStream(e).use { inp -> dst.outputStream().use { inp.copyTo(it) } }
+                            out.add(dst.absolutePath)
                         }
                     }
                 } catch (_: Throwable) {}
-            } else if (f.isDirectory) {
-                f.listFiles()?.forEach { c -> if (c.isFile) addFontFile(c) }
             }
-        }
-        // 삼성: 설정 > 글꼴 스타일에서 고른 글꼴 (숨은 기능이라 없는 기기도 있음)
-        for (name in listOf("getFontPathFlipFont")) {
-            try {
-                val m = android.graphics.Typeface::class.java.getDeclaredMethod(name, Context::class.java, Int::class.javaPrimitiveType)
-                m.isAccessible = true
-                for (idx in 1..2) {
-                    val p = m.invoke(null, this, idx) as? String ?: continue
-                    if (p.isEmpty() || p.contains("default", ignoreCase = true)) continue
-                    addFontFile(java.io.File(p))
-                    if (out.isNotEmpty()) break
-                }
-            } catch (_: Throwable) {}
-            if (out.isNotEmpty()) return out.distinct()
-        }
-        return out.distinct()
+        } catch (_: Throwable) {}
+        return out.toList()
     }
+
 
     private var isVolumeInterceptEnabled = false
     private var eventSink: EventChannel.EventSink? = null
@@ -350,10 +361,26 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         val pChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
         pdfMethodChannel = pChannel
         pChannel.setMethodCallHandler { call, result ->
-            if (call.method == "deviceFontFiles") {
-                // 앱 글꼴 '기본': 휴대폰 설정에서 고른 글꼴(삼성 글꼴 스타일 등) 파일 경로. 못 찾으면 빈 목록
+            if (call.method == "fontScanAllowed") {
+                // 글꼴 찾기: 기기 저장소의 글꼴 파일을 읽어도 되는지
+                result.success(fontScanAllowed())
+            } else if (call.method == "requestFontScan") {
+                // 안드로이드 11 이상: '모든 파일 접근' 허용 화면 / 그 아래: 저장소 읽기 권한 묻기
+                try {
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        val i = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            android.net.Uri.parse("package:$packageName"))
+                        try { startActivity(i) } catch (_: Throwable) {
+                            startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                        }
+                    } else {
+                        requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), 4711)
+                    }
+                    result.success(true)
+                } catch (e: Throwable) { result.success(false) }
+            } else if (call.method == "scanFontFiles") {
                 thumbExecutor.execute {
-                    val files = try { deviceFontFiles() } catch (e: Throwable) { emptyList<String>() }
+                    val files = try { scanFontFiles() } catch (e: Throwable) { emptyList<String>() }
                     runOnUiThread { result.success(files) }
                 }
             } else if (call.method == "pdfSearchSupported") {

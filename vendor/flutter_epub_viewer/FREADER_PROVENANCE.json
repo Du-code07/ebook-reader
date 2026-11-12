@@ -59,7 +59,7 @@
     },
     "lib/assets/webpage/html/swipe.html": {
       "upstream_sha256": "cbbacbfd24aa0b686091b751af9c4481a9ba63a5168679f1e7bf66b8ffd58b07",
-      "vendored_sha256": "93815dbcec2176590e1ea7349b9a5c7bbaaa40e58de4348d60df1bf9c990df05"
+      "vendored_sha256": "84eb0466b80ffaddf1096760b9aea98f27e26a344eae3188329f1b387369647f"
     },
     "lib/assets/webpage/html/epub_cfi_utils.js": {
       "upstream_sha256": "9a30c52c1feeff7ad883f85605a6863ed97b1b8a891737f90c74a0b85350aa7b",

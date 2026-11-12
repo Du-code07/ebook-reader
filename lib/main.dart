@@ -2363,22 +2363,37 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.bottomRight,
-          child: _fabOpen
-              ? Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
-                    action('fab_add_plain', Icons.create_new_folder_outlined, _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
-                    action('fab_merge_pdf', Icons.picture_as_pdf_outlined, _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
-                    action('fab_merge_img', Icons.photo_library_outlined, _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
-                  ],
-                )
-              : const SizedBox(width: 0, height: 0),
+        // 예전 [전체] 그룹 메뉴와 같은 움직임: 파일 추가 버튼에서 튀어나오고, 닫을 때는 버튼 안으로 들어감
+        TweenAnimationBuilder<double>(
+          tween: Tween<double>(end: _fabOpen ? 1.0 : 0.0),
+          duration: Duration(milliseconds: _fabOpen ? 300 : 200),
+          curve: _fabOpen ? Curves.easeOutBack : Curves.easeInCubic,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
+              action('fab_add_plain', Icons.create_new_folder_outlined, _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
+              action('fab_merge_pdf', Icons.picture_as_pdf_outlined, _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
+              action('fab_merge_img', Icons.photo_library_outlined, _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
+            ],
+          ),
+          builder: (context, t, menu) {
+            if (t <= 0.001) return const SizedBox.shrink();
+            return IgnorePointer(
+              ignoring: !_fabOpen,
+              child: Opacity(
+                opacity: (t * 2).clamp(0.0, 1.0),
+                child: Transform.scale(
+                  scale: 0.12 + 0.88 * t,
+                  // 아래 파일 추가 버튼의 + 아이콘 쪽에서 커져 나옴
+                  alignment: Alignment.bottomRight,
+                  origin: const Offset(-70, 40),
+                  child: menu,
+                ),
+              ),
+            );
+          },
         ),
         FloatingActionButton.extended(
           heroTag: 'fab_add_files',

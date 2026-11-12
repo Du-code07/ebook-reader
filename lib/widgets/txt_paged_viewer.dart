@@ -331,9 +331,9 @@ extension on _TxtPagedViewerState {
       initialPage: _page,
       // 쪽 그대로 세로로 늘어놓고 쪽 사이는 살짝 띄움 (슬라이드 보기의 쪽을 세로로)
       gap: 12,
-      // 쪽 뒤 바탕은 앱 테마 색(흰색/검은색), 쪽 사이 간격 줄은 고정 색
-      background: viewerBackdrop(context),
-      gapColor: widget.theme == 'dark' ? const Color(0xFF0D0D0D) : widget.theme == 'sepia' ? const Color(0xFFE3D4B4) : const Color(0xFFE2E2E6),
+      // 쪽 뒤 바탕은 뷰어 배경 설정(라이트=흰색, 다크=검은색), 쪽 사이 간격 줄은 밝은 회색 고정
+      background: viewerThemeBackdrop(widget.theme),
+      gapColor: kViewerGapColor,
       // 두 손가락으로 벌려 확대
       zoomable: true,
       onPageChanged: (p) {

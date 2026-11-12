@@ -244,8 +244,8 @@ class _HwpViewerState extends State<HwpViewer> {
 
   Map<String, Object?> get _options => {
     'theme': widget.theme,
-    // 쪽 뒤 바탕: 앱 테마가 밝으면 흰색, 어두우면 검은색 (문서 자체 배경색이 있으면 그 색이 먼저)
-    if (!_isSpreadsheet && !_isPresentation) 'backdrop': Theme.of(context).brightness == Brightness.dark ? '#000000' : '#ffffff',
+    // 쪽 뒤 바탕: 한글·워드는 뷰어 배경 설정(라이트=흰색, 다크=검은색)을 따름 (문서 자체 배경색이 있으면 그 색이 먼저)
+    if (_isWord || _isHwp) 'backdrop': widget.theme == 'dark' ? '#000000' : '#ffffff',
     'spread': widget.spread,
     'rtl': widget.rtl,
     'position': widget.initialPosition,
@@ -512,7 +512,6 @@ class _HwpViewerState extends State<HwpViewer> {
   }
 
   Orientation? _orientation;
-  Brightness? _brightness;
 
   @override
   void didChangeDependencies() {
@@ -524,10 +523,6 @@ class _HwpViewerState extends State<HwpViewer> {
       unawaited(_invoke('configure', [_options]));
     }
     _orientation = o;
-    // 앱 테마(밝음/어두움)가 바뀌면 쪽 뒤 바탕도 바꿈
-    final b = Theme.of(context).brightness;
-    if (_brightness != null && b != _brightness && _loaded) unawaited(_invoke('configure', [_options]));
-    _brightness = b;
   }
 
   @override

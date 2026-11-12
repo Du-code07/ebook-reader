@@ -18,8 +18,10 @@ body { font-family: FReaderSans, sans-serif; -webkit-text-size-adjust: 100%; }
 .freader-columns x-p { orphans: 2; widows: 2; }
 .freader-columns tr { break-inside: avoid; }
 .freader-missing-image { display: flex; align-items: center; justify-content: center; box-sizing: border-box; border: 1px dashed #888; color: #666; font: 10pt FReaderSans, sans-serif; }
-body[data-theme="sepia"] .page { filter: sepia(0.23); }
-body[data-theme="dark"] .page { filter: invert(0.88) hue-rotate(180deg); }
+body[data-theme="sepia"] .page > * { filter: sepia(0.23); }
+/* 다크: 쪽 내용만 뒤집음 (쪽 사이 회색 간격은 그대로) */
+body[data-theme="dark"] .page { background: #1f1f1f; }
+body[data-theme="dark"] .page > * { filter: invert(0.88) hue-rotate(180deg); }
 body[data-theme="dark"] .page img { filter: invert(1) hue-rotate(180deg); }
 ::selection { background: rgba(255, 193, 7, 0.4); }
 .rtf-paper { position: relative; color: #000; background: #fff; }
@@ -67,9 +69,13 @@ math.docx-math[display="block"] { display: block math; margin: 0.3em 0; }
 
 /* FReader 스크롤 보기: 쪽을 세로로, 쪽 사이는 살짝 띄움 */
 /* 쪽 뒤 바탕(--backdrop)은 문서 배경색 > 앱 테마 색(흰색/검은색). 쪽 사이 간격 줄(--gap)은 고정 색 */
+/* 쪽 사이 간격(스크롤 보기·두 쪽 보기)은 테마와 상관없이 밝은 회색 */
 body { --gap: #e2e2e6; }
-body[data-theme="sepia"] { --gap: #e3d4b4; }
-body[data-theme="dark"] { --gap: #0d0d0d; }
+#pages > .page + .page { box-shadow: -8px 0 0 0 var(--gap); }
+#pages.rtl > .page + .page { box-shadow: 8px 0 0 0 var(--gap); }
+/* 스크롤 보기: 문서 화면 자체 스크롤바는 숨김 (앱의 회색 막대만 보이게) */
+#vpages { scrollbar-width: none; }
+#vpages::-webkit-scrollbar { display: none; width: 0; height: 0; }
 #vpages { position: fixed; inset: 0; overflow-y: auto; overflow-x: hidden; background: var(--backdrop, var(--gap)); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 #vpages .vslot { position: relative; margin: 0 0 12px 0; background: var(--file-page, white); overflow: hidden; box-shadow: 0 12px 0 0 var(--gap); }
 #vpages .vslot:last-child { box-shadow: none; }

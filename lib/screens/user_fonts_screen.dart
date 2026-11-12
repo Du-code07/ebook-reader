@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import '../widgets/app_colors.dart';
+import '../widgets/pop_dialog.dart';
 
 import '../services/user_fonts.dart';
 
@@ -82,6 +86,56 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
                 ? _t('EPUB 글꼴을 바꿨어요. 책을 다시 열면 적용돼요.', 'EPUB font changed. Reopen books to apply.', '已更换EPUB字体，重新打开书籍后生效。', 'EPUBのフォントを変更しました。本を開き直すと反映されます。')
                 : _t('글꼴 $n개를 넣었어요. 문서를 다시 열면 적용돼요.', 'Added $n font(s). Reopen documents to apply.', '已添加 $n 个字体。重新打开文档后生效。', '$n 個のフォントを追加しました。文書を開き直すと反映されます。'))
         : _t('글꼴을 읽지 못했어요.', 'Could not read the font.', '无法读取字体。', 'フォントを読み込めませんでした。'));
+  }
+
+  static const MethodChannel _ch = MethodChannel('ebook_reader/pdf_renderer');
+
+  /// 글꼴 찾기: 기기 저장소의 글꼴 파일과 설치된 글꼴 앱(삼성 글꼴 스타일 등)의 글꼴을 찾아 자동으로 넣음
+  Future<void> _scan() async {
+    if (_busy) return;
+    bool allowed = await _ch.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
+    if (!allowed && mounted) {
+      final go = await showPopDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(_t('파일 접근 허용', 'Allow file access', '允许访问文件', 'ファイルへのアクセスを許可')),
+          content: Text(_t(
+              '기기에 저장된 글꼴 파일을 찾으려면 파일 접근 권한이 필요해요. 다음 화면에서 FReader를 허용해 주세요.\n(허용하지 않아도 설치된 글꼴 앱의 글꼴은 찾아요)',
+              'To find font files on this device, FReader needs file access. Please allow it on the next screen.\n(Fonts from installed font apps are found either way.)',
+              '要查找设备中的字体文件，需要文件访问权限。请在下一个页面允许 FReader。\n（不允许也会查找已安装字体应用中的字体）',
+              '端末内のフォントファイルを探すにはファイルへのアクセス権限が必要です。次の画面で FReader を許可してください。\n（許可しなくてもインストール済みのフォントアプリのフォントは探します）')),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('그냥 찾기', 'Search anyway', '直接查找', 'そのまま探す'))),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_t('허용하러 가기', 'Allow', '去允许', '許可する'))),
+          ],
+        ),
+      );
+      if (go == null || !mounted) return;
+      if (go) {
+        // 허용 화면에서 돌아올 때까지 기다림
+        final back = Completer<void>();
+        final listener = AppLifecycleListener(onResume: () {
+          if (!back.isCompleted) back.complete();
+        });
+        await _ch.invokeMethod('requestFontScan').catchError((_) => null);
+        await back.future.timeout(const Duration(minutes: 3), onTimeout: () {});
+        listener.dispose();
+        allowed = await _ch.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
+        if (!mounted) return;
+      }
+    }
+    setState(() => _busy = true);
+    _snack(_t('기기에서 글꼴을 찾는 중이에요…', 'Searching for fonts…', '正在查找字体…', 'フォントを探しています…'));
+    final paths = await _ch.invokeListMethod<String>('scanFontFiles').catchError((_) => <String>[]) ?? const <String>[];
+    final n = paths.isEmpty ? 0 : await UserFonts.add(paths, category: widget.category, activate: false, skipExisting: true);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await _reload();
+    _snack(n > 0
+        ? _t('글꼴 $n개를 찾아 넣었어요.', 'Found and added $n font(s).', '已找到并添加 $n 个字体。', '$n 個のフォントを見つけて追加しました。')
+        : paths.isEmpty && !allowed
+            ? _t('파일 접근이 허용되지 않아 저장소의 글꼴은 찾지 못했어요.', 'File access was not allowed, so storage was not searched.', '未允许文件访问，无法查找存储中的字体。', 'ファイルへのアクセスが許可されていないため、ストレージは検索できませんでした。')
+            : _t('새로 넣을 글꼴을 찾지 못했어요.', 'No new fonts found.', '没有找到新的字体。', '新しいフォントは見つかりませんでした。'));
   }
 
   Future<void> _remove(UserFontEntry e) async {
@@ -170,15 +224,33 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: Text(_title)),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _busy ? null : _add,
-        icon: _busy
-            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-            : const Icon(Icons.add),
-        label: Text(_t('글꼴 추가', 'Add Font', '添加字体', 'フォント追加'), style: const TextStyle(fontWeight: FontWeight.w800)),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // 글꼴 찾기: 기기 저장소·글꼴 앱에 있는 글꼴을 찾아 한꺼번에 넣음
+          FloatingActionButton.extended(
+            heroTag: 'font_scan',
+            elevation: 2,
+            backgroundColor: cs.surfaceContainerHighest,
+            foregroundColor: cs.onSurface,
+            onPressed: _busy ? null : _scan,
+            icon: const Icon(Icons.manage_search),
+            label: Text(_t('글꼴 찾기', 'Find Fonts', '查找字体', 'フォント検索'), style: const TextStyle(fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(height: 10),
+          FloatingActionButton.extended(
+            heroTag: 'font_add',
+            onPressed: _busy ? null : _add,
+            icon: _busy
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.add),
+            label: Text(_t('글꼴 추가', 'Add Font', '添加字体', 'フォント追加'), style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ],
       ),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: 96),
+        padding: const EdgeInsets.only(bottom: 160),
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),

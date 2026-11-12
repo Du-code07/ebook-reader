@@ -66,33 +66,9 @@ class UserFonts {
   /// 앱 화면에 쓸 글꼴이 바뀌면 알림 (null이면 기본 글꼴)
   static final ValueNotifier<UserFontEntry?> appFont = ValueNotifier<UserFontEntry?>(null);
 
-  /// 앱 화면에 실제로 쓰는 글꼴 이름: 내가 넣은 글꼴 > 휴대폰에서 고른 글꼴 > null(시스템 기본)
+  /// 앱 화면에 실제로 쓰는 글꼴 이름: 내가 넣은 글꼴 > null(휴대폰 기본 글꼴)
   /// (파일 내용 화면에는 쓰지 않음)
   static final ValueNotifier<String?> appFontName = ValueNotifier<String?>(null);
-  static const String _deviceFamily = 'FReaderDeviceFont';
-  static bool _deviceTried = false;
-  static bool _deviceLoaded = false;
-
-  /// 휴대폰 설정에서 고른 글꼴(삼성 글꼴 스타일 등)을 찾아 등록. 못 찾으면 시스템 기본 그대로
-  static Future<void> _loadDeviceFont() async {
-    if (_deviceLoaded) {
-      if (appFont.value == null) appFontName.value = _deviceFamily;
-      return;
-    }
-    if (_deviceTried || !Platform.isAndroid) return;
-    _deviceTried = true;
-    try {
-      final files = await const MethodChannel('ebook_reader/pdf_renderer').invokeListMethod<String>('deviceFontFiles') ?? const [];
-      if (files.isEmpty) return;
-      final loader = FontLoader(_deviceFamily);
-      for (final f in files) {
-        loader.addFont(File(f).readAsBytes().then((b) => ByteData.sublistView(b)));
-      }
-      await loader.load();
-      _deviceLoaded = true;
-      if (appFont.value == null) appFontName.value = _deviceFamily;
-    } catch (_) {}
-  }
 
   /// 앱 화면 글꼴 이름 (Flutter에 등록한 이름). 같은 글꼴의 보통·굵게 파일은 한 이름으로 묶음
   static String appFontFamily(UserFontEntry e) => 'FReaderApp_${familyOf(e).hashCode.toUnsigned(32)}_${e.file.split('.').first}';
@@ -138,9 +114,7 @@ class UserFonts {
       final faces = await activeFaces('app');
       if (faces.isEmpty) {
         appFont.value = null;
-        appFontName.value = _deviceLoaded ? _deviceFamily : null;
-        // 앱이 켜지는 것을 기다리게 하지 않고 뒤에서 찾음
-        unawaited(_loadDeviceFont());
+        appFontName.value = null;
         return;
       }
       final e = faces.first;
@@ -154,7 +128,7 @@ class UserFonts {
       appFontName.value = appFontFamily(e);
     } catch (_) {
       appFont.value = null;
-      appFontName.value = _deviceLoaded ? _deviceFamily : null;
+      appFontName.value = null;
     }
   }
 
@@ -184,7 +158,9 @@ class UserFonts {
   static Future<List<Map<String, Object>>> forViewer() async => [for (final e in await listOf('doc')) e.toJson()];
 
   /// 글꼴 파일을 추가. 돌려주는 값: 추가된 글꼴 수 (글꼴이 아닌 파일은 건너뜀)
-  static Future<int> add(List<String> paths, {String category = 'doc'}) async {
+  /// [activate]: 앱·EPUB 글꼴이면 넣은 글꼴로 바로 바꿈
+  /// [skipExisting]: 같은 이름·굵기·기울임이 이미 있으면 바꿔 넣지 않고 건너뜀 (글꼴 찾기)
+  static Future<int> add(List<String> paths, {String category = 'doc', bool activate = true, bool skipExisting = false}) async {
     final all = await list();
     // 앱·EPUB 글꼴도 여러 개 넣어 두고 눌러서 바꿔 씀 (예전 판에서 하나만 쓰던 것은 그대로 남김)
     if (category != 'doc') {
@@ -213,11 +189,12 @@ class UserFonts {
       try {
         final info = FontNameReader.read(bytes);
         if (info == null || info.names.isEmpty) continue;
+        // 같은 이름·굵기·기울임이 이미 있으면 바꿔 넣음 (글꼴 찾기는 건너뜀)
+        final dup = all.where((e) => e.category == category && e.weight == info.weight && e.italic == info.italic && e.names.any(info.names.contains)).toList();
+        if (skipExisting && dup.isNotEmpty) continue;
         final ext = p.toLowerCase().endsWith('.otf') ? 'otf' : 'ttf';
         final file = 'f${DateTime.now().microsecondsSinceEpoch}.$ext';
         await File('${d.path}/$file').writeAsBytes(bytes, flush: true);
-        // 같은 이름·굵기·기울임이 이미 있으면 바꿔 넣음
-        final dup = all.where((e) => e.category == category && e.weight == info.weight && e.italic == info.italic && e.names.any(info.names.contains)).toList();
         for (final e in dup) {
           all.remove(e);
           try {
@@ -231,7 +208,7 @@ class UserFonts {
     }
     await _save(all);
     // 새로 넣은 앱·EPUB 글꼴은 바로 그 글꼴로 바꿈
-    if (category != 'doc' && lastLabel != null) await setActive(category, lastLabel);
+    if (activate && category != 'doc' && lastLabel != null) await setActive(category, lastLabel);
     return added;
   }
 

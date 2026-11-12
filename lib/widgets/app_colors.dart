@@ -13,8 +13,11 @@ class AppColors {
 Color viewerBackdrop(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark ? Colors.black : Colors.white;
 
-/// 쪽 사이 간격 줄 (고정)
-Color viewerGapColor(bool dark) => dark ? const Color(0xFF0D0D0D) : const Color(0xFFE2E2E6);
+/// 쪽 사이 간격 줄 (스크롤 보기·두 쪽 보기): 테마와 상관없이 밝은 회색
+const Color kViewerGapColor = Color(0xFFE2E2E6);
+
+/// 뷰어 배경 설정(라이트/다크)이 있는 파일(한글·워드·TXT)의 쪽 뒤 바탕
+Color viewerThemeBackdrop(String theme) => theme == 'dark' ? Colors.black : Colors.white;
 
 const Duration kIconMotion = Duration(milliseconds: 240);
 const Curve kIconCurve = Curves.easeOutCubic;

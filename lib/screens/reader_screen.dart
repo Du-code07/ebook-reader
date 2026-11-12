@@ -1288,7 +1288,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   void _snapShow(int page) {
-    if (!_snapEligible || !mounted) return;
+    // 스크롤 보기는 저장해 둔 쪽 화면을 쓰지 않음
+    if (!_snapEligible || !mounted || _docVertical) return;
     if (page < 0 || (_docPageCount > 0 && page >= _docPageCount) || _epubZoomScale > 1.03) {
       _snapHide();
       return;
@@ -3190,8 +3191,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   void _tapTurn(int dir) {
     if (_pageModeScroll) {
-      // 스크롤 모드: 원래 순서대로 한 화면씩
-      if (_isOfflineDocument) {
+      // 스크롤 모드: 원래 순서대로 한 화면씩 (TXT는 쪽 목록, 한글·워드·EPUB은 문서 화면이 직접 굴림)
+      if (_docScrollActive) {
         _scrollCtrl.scrollByScreen(dir);
       } else if (dir > 0) {
         _readerNext();
@@ -3956,8 +3957,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (mounted && !_isOfflineDocument) _startEpubLoadWatchdog(epubViewerKey);
     });
 
-    // 한글·워드: 쪽 뒤 바탕은 앱 테마 색(흰색/검은색) — 쪽 색은 뷰어 배경색 그대로
-    final bgColor = _isWordOrHwp ? viewerBackdrop(context) : _getBgColor();
+    // 쪽 뒤 바탕: 한글·워드·TXT는 뷰어 배경 설정(라이트=흰색, 다크=검은색),
+    // PPT·엑셀은 앱 테마(라이트=흰색, 다크·밝은 다크=검은색), EPUB은 책 배경색 그대로
+    final bgColor = (_isWordOrHwp || _isTxt)
+        ? viewerThemeBackdrop(_epubBgTheme)
+        : (_isPresentation || _isSpreadsheet)
+            ? viewerBackdrop(context)
+            : _getBgColor();
     final footerTextColor = _epubBgTheme == 'dark' ? Colors.white54 : Colors.black54;
     final footerText = _formatEpubFooterText();
 
@@ -4120,7 +4126,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       child: InteractiveViewer(
                       transformationController: _epubZoomController,
                       // 문서 스크롤 보기는 목록이 직접 확대·이동을 맡음 (겹치면 확대가 잘 안 됨)
-                      panEnabled: !_isSpreadsheet && !(_pageModeScroll && _isOfflineDocument && !_isWordOrHwp) && !_isMemoMode && _epubZoomScale > 1.03,
+                      panEnabled: !_isSpreadsheet && !_docScrollActive && !_isMemoMode && _epubZoomScale > 1.03,
                       scaleEnabled: !_isSpreadsheet && !(_pageModeScroll && _isOfflineDocument) && !_isTouchLocked && (!_isMemoMode || !_allowFingerDrawing),
                       minScale: 1.0,
                       maxScale: 4.5,

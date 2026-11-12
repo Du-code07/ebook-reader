@@ -1355,7 +1355,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       gap: 12,
       // 쪽 뒤 바탕은 앱 테마(또는 PDF 자체 배경색), 쪽 사이 간격 줄은 고정 색
       background: _backdrop(context),
-      gapColor: viewerGapColor(Theme.of(context).brightness == Brightness.dark),
+      gapColor: kViewerGapColor,
       onPageChanged: (p) {
         setState(() => _currentPage = p);
         StorageService.saveLastPosition(_bookKey, p.toString());

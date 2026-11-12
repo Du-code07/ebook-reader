@@ -9,6 +9,9 @@
     <script src="../dist/epub.js"></script>
 
     <style type="text/css">
+      /* FReader: 스크롤 보기에서 문서 화면 자체 스크롤바는 숨김 (앱의 회색 막대만 보이게) */
+      .epub-container { scrollbar-width: none; }
+      .epub-container::-webkit-scrollbar { display: none; width: 0; height: 0; }
       /* Application viewport, not the upstream demo's centered/min-height
          layout. The reader must also work while Android attaches/resizes it. */
       html, body {
