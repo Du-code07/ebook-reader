@@ -106,6 +106,10 @@ function setPos(anchorHead, axis, delta) {
   const re = new RegExp(`(<${tag}\\b[^>]*>\\s*<wp:posOffset>)(-?\\d+)(</wp:posOffset>)`);
   return anchorHead.replace(re, (_, a, v, b) => `${a}${Math.round(Number(v) + delta)}${b}`);
 }
+function markMove(head) {
+  if (!/<wp:wrapTopAndBottom\b/.test(head) || !/<wp:positionV\b[^>]*relativeFrom="paragraph"/.test(head)) return head;
+  return head.replace(/<wp:anchor\b/, '<wp:anchor freaderMove="1"');
+}
 function setExtent(head, cx, cy) {
   return head.replace(/<wp:extent\b[^>]*\/>/, `<wp:extent cx="${Math.round(cx)}" cy="${Math.round(cy)}"/>`);
 }
@@ -115,7 +119,20 @@ function setChildXfrm(xml, cx, cy) {
 }
 let docPrSerial = 900000000;
 let shapeJobs = [];
+let groupJobs = [];
 /** 간단한 도형(네모·둥근 네모·타원, 단색 선·채우기)을 사진으로 그릴 준비. 못 그리는 도형이면 null */
+function shapeSpec(xml) {
+  const spPr = /<wps:spPr\b[\s\S]*?<\/wps:spPr>/.exec(xml)?.[0] || '';
+  const prst = /<a:prstGeom\b[^>]*prst="([^"]+)"/.exec(spPr)?.[1] || '';
+  if (!['rect', 'roundRect', 'ellipse'].includes(prst) || /<wps:txbx\b/.test(xml)) return null;
+  const ln = /<a:ln\b[^>]*>[\s\S]*?<\/a:ln>/.exec(spPr)?.[0] || '';
+  const lineColor = /<a:solidFill>\s*<a:srgbClr val="([0-9A-Fa-f]{6})"/.exec(ln)?.[1] || null;
+  const lineW = Number(/<a:ln\b[^>]*\sw="(\d+)"/.exec(ln)?.[1] || 12700);
+  const body = spPr.replace(ln, '');
+  const fillColor = /<a:noFill\s*\/>/.test(body) ? null : (/<a:solidFill>\s*<a:srgbClr val="([0-9A-Fa-f]{6})"/.exec(body)?.[1] || null);
+  if (!lineColor && !fillColor) return null;
+  return { prst, lineColor, lineW, fillColor };
+}
 function shapeJob(xml, cx, cy) {
   const spPr = /<wps:spPr\b[\s\S]*?<\/wps:spPr>/.exec(xml)?.[0] || '';
   const prst = /<a:prstGeom\b[^>]*prst="([^"]+)"/.exec(spPr)?.[1] || '';
@@ -170,12 +187,28 @@ function convertDrawing(drawing) {
   const main = pics[0];
   const isAnchor = /<wp:anchor\b/.test(drawing);
   const before = drawing.slice(0, g.index), after = drawing.slice(g.index + g[0].length);
-  let head = setExtent(before, main.cx, main.cy);
+  let head = markMove(setExtent(before, main.cx, main.cy));
   if (isAnchor) { head = setPos(head, 'H', main.dx); head = setPos(head, 'V', main.dy); }
   // 그룹 이름 대신 그림으로 (엔진이 그림 틀로 알아보게)
   head = head.replace(/<wp:cNvGraphicFramePr\s*\/>/, '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>');
   const picXml = setChildXfrm(main.xml, main.cx, main.cy);
   let out = `${head}<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">${picXml}</a:graphicData>${after}`;
+  // 한 장의 그림으로 합칠 준비 (사진 위에 테두리 상자 등을 그려 넣음 → 위치가 어긋날 일이 없음)
+  const parts = children.filter(c => c.cx > 0 && c.cy > 0 && c.kind !== 'wpg:grpSp');
+  let composite = null;
+  if (parts.length > 1) {
+    const x0 = Math.min(...parts.map(c => c.dx)), y0 = Math.min(...parts.map(c => c.dy));
+    const x1 = Math.max(...parts.map(c => c.dx + c.cx)), y1 = Math.max(...parts.map(c => c.dy + c.cy));
+    const n = groupJobs.length + 1;
+    const id = `rIdFReaderGroup${n}`;
+    let h = markMove(setExtent(before, x1 - x0, y1 - y0));
+    if (isAnchor) { h = setPos(h, 'H', x0); h = setPos(h, 'V', y0); }
+    h = h.replace(/<wp:cNvGraphicFramePr\s*\/>/, '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>');
+    const job = { id, n, x0, y0, cx: x1 - x0, cy: y1 - y0, main, parts, file: '' };
+    composite = `${h}<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">${pictureFor(job)}</a:graphicData>${after}`;
+    job.composite = composite;
+    groupJobs.push(job);
+  }
   // 나머지(다른 사진·도형)는 글을 밀지 않고 그 자리에 얹음 (떠 있는 그림만 가능)
   if (isAnchor) {
     for (const extra of children) {
@@ -197,7 +230,49 @@ function convertDrawing(drawing) {
       out += `${h}<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">${content}</a:graphicData>${after}`;
     }
   }
+  if (composite) {
+    const job = groupJobs[groupJobs.length - 1];
+    job.fallback = out;
+    return `<!--FREADER_GROUP_${job.n}-->`;
+  }
   return out;
+}
+
+/** 그룹 안의 사진·도형을 한 장으로 그림. 못 그리면 null */
+async function renderComposite(job, mediaBytes) {
+  if (typeof OffscreenCanvas !== 'function' || typeof createImageBitmap !== 'function') return null;
+  const bitmaps = new Map();
+  for (const part of job.parts) {
+    if (part.kind !== 'pic:pic') continue;
+    const rid = /<a:blip\b[^>]*r:embed="([^"]+)"/.exec(part.xml)?.[1];
+    const bytes = rid ? mediaBytes(rid) : null;
+    if (!bytes) return null;
+    bitmaps.set(part, await createImageBitmap(new Blob([await bytes])));
+  }
+  const mainBmp = bitmaps.get(job.main);
+  if (!mainBmp) return null;
+  let pxPerEmu = mainBmp.width / job.main.cx;
+  const longest = Math.max(job.cx, job.cy) * pxPerEmu;
+  if (longest > 2400) pxPerEmu *= 2400 / longest;
+  if (Math.max(job.cx, job.cy) * pxPerEmu < 300) pxPerEmu = 300 / Math.max(job.cx, job.cy);
+  const W = Math.max(2, Math.round(job.cx * pxPerEmu)), H = Math.max(2, Math.round(job.cy * pxPerEmu));
+  const canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext('2d');
+  for (const part of job.parts) {
+    const x = (part.dx - job.x0) * pxPerEmu, y = (part.dy - job.y0) * pxPerEmu, w = part.cx * pxPerEmu, h = part.cy * pxPerEmu;
+    if (part.kind === 'pic:pic') { ctx.drawImage(bitmaps.get(part), x, y, w, h); continue; }
+    const shape = shapeSpec(part.xml);
+    if (!shape) continue;
+    const lw = shape.lineColor ? Math.max(1, shape.lineW * pxPerEmu) : 0;
+    ctx.beginPath();
+    if (shape.prst === 'ellipse') ctx.ellipse(x + w / 2, y + h / 2, Math.max(1, (w - lw) / 2), Math.max(1, (h - lw) / 2), 0, 0, Math.PI * 2);
+    else if (shape.prst === 'roundRect' && ctx.roundRect) ctx.roundRect(x + lw / 2, y + lw / 2, w - lw, h - lw, Math.min(w, h) * 0.1667);
+    else ctx.rect(x + lw / 2, y + lw / 2, w - lw, h - lw);
+    if (shape.fillColor) { ctx.fillStyle = `#${shape.fillColor}`; ctx.fill(); }
+    if (shape.lineColor) { ctx.strokeStyle = `#${shape.lineColor}`; ctx.lineWidth = lw; ctx.stroke(); }
+  }
+  for (const b of bitmaps.values()) b.close?.();
+  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 /** [tag] 덩어리(안에 같은 것이 겹쳐 있어도 짝을 맞춰)마다 [fn]으로 바꿈 */
@@ -222,6 +297,26 @@ function replaceBlocks(xml, tag, fn) {
   return out + xml.slice(i);
 }
 
+/** 글 감싸기 '위아래'로 문단에 붙은 그림이 문단 첫머리(번호 바로 뒤)에 있으면 Word처럼 문단 첫 줄 아래로:
+ *  그림을 문단 끝으로 옮기고, 첫 줄 높이만큼 위쪽 간격을 줄임 */
+function moveTopAndBottomPictures(xml) {
+  return xml.replace(/<w:p(?=[\s>])(?:(?!<w:p[\s>])[\s\S])*?<\/w:p>/g, para => {
+    if (!para.includes('freaderMove="1"')) return para;
+    const runRe = /<w:r(?=[\s>])(?:(?!<w:r[\s>])[\s\S])*?freaderMove="1"[\s\S]*?<\/w:r>/;
+    const m = runRe.exec(para);
+    if (!m) return para.replace(/ freaderMove="1"/g, '');
+    const rest = para.slice(m.index + m[0].length);
+    const textAfter = [...rest.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)].map(t => t[1]).join('').trim();
+    let run = m[0].replace(/ freaderMove="1"/g, '');
+    if (!textAfter) return para.slice(0, m.index) + run + rest;
+    const sz = Number(/<w:sz w:val="(\d+)"/.exec(para)?.[1] || 22) / 2; // 글자 크기(pt)
+    const lineEmu = Math.round(sz * 1.3 * 12700);
+    run = run.replace(/(<wp:positionV\b[^>]*>\s*<wp:posOffset>)(-?\d+)(<\/wp:posOffset>)/, (_, a, v, b) => `${a}${Math.max(0, Number(v) - lineEmu)}${b}`);
+    const body = para.slice(0, m.index) + rest;
+    return body.replace(/<\/w:p>$/, `${run}</w:p>`);
+  });
+}
+
 /** 그룹이 있으면 그룹을 풀어 둔 새 docx 바이트, 없으면(또는 다룰 수 없으면) null */
 export async function flattenDrawingGroups(bytes) {
   if (!(bytes?.length > 4) || bytes[0] !== 0x50 || bytes[1] !== 0x4B) return null;
@@ -234,7 +329,7 @@ export async function flattenDrawingGroups(bytes) {
   let xml = new TextDecoder().decode(raw);
   if (!xml.includes('wordprocessingGroup')) return null;
   let changed = false;
-  shapeJobs = [];
+  shapeJobs = []; groupJobs = [];
   // 대체 내용(mc:AlternateContent)으로 싸인 그룹: 엔진은 그룹을 몰라 대체본(VML)을 그리는데, 거기서도 사진이 빠짐.
   // 그룹을 푼 본래 내용만 남김
   xml = replaceBlocks(xml, 'mc:AlternateContent', block => {
@@ -259,18 +354,53 @@ export async function flattenDrawingGroups(bytes) {
   if (!changed) return null;
   const stored = (base, data) => ({ ...base, method: 0, flags: base.flags & 0x0800, crc: crc32(data), size: data.length, data });
   let list = entries.map(e => e);
+  // 그룹을 한 장으로 합친 그림: 그려지면 그것을, 못 그리면 사진·도형을 따로 얹는 방식으로
+  const relsEntry = list.find(e => e.name === 'word/_rels/document.xml.rels');
+  let relTargets = null;
+  const mediaBytes = (rid) => {
+    if (!relsEntry) return null;
+    return (async () => {
+      if (!relTargets) {
+        const relXml = new TextDecoder().decode(relsEntry.method === 8 ? await inflateRaw(relsEntry.data) : relsEntry.data);
+        relTargets = new Map([...relXml.matchAll(/<Relationship\b[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"/g)].map(m => [m[1], m[2]]));
+        for (const m of relXml.matchAll(/<Relationship\b[^>]*\bTarget="([^"]+)"[^>]*\bId="([^"]+)"/g)) relTargets.set(m[2], m[1]);
+      }
+      const target = relTargets.get(rid);
+      if (!target) throw new Error('no media');
+      const name = target.startsWith('/') ? target.slice(1) : `word/${target}`.replace(/\/\.\//g, '/');
+      const e = list.find(x => x.name === name);
+      if (!e) throw new Error('no media');
+      return e.method === 8 ? await inflateRaw(e.data) : e.data;
+    })();
+  };
+  const groupPngs = [];
+  for (const job of groupJobs) {
+    let png = null;
+    try { png = await renderComposite(job, mediaBytes); } catch (_) { png = null; }
+    if (png) {
+      job.file = `media/freader_group_${job.n}.png`;
+      groupPngs.push({ job, png });
+      xml = xml.replace(`<!--FREADER_GROUP_${job.n}-->`, job.composite);
+    } else {
+      xml = xml.replace(`<!--FREADER_GROUP_${job.n}-->`, job.fallback);
+    }
+  }
+  xml = moveTopAndBottomPictures(xml);
+  xml = xml.replace(/ freaderMove="1"/g, '');
   // 도형 그림: 그려서 문서에 넣고, 문서가 그 그림을 찾을 수 있게 연결
   const rels = list.find(e => e.name === 'word/_rels/document.xml.rels');
   const drawn = [];
   if (shapeJobs.length && rels && (rels.method === 0 || rels.method === 8)) {
     for (const job of shapeJobs) {
+      if (!xml.includes(`r:embed="${job.id}"`)) continue; // 한 장으로 합쳐진 그룹의 도형은 따로 그리지 않음
       try { const png = await renderShape(job); if (png) drawn.push({ job, png }); } catch (_) {}
     }
   }
+  for (const g of groupPngs) drawn.push({ job: g.job, png: g.png });
   const okIds = new Set(drawn.map(d => d.job.id));
   // 그리지 못한 도형은 빼기 (빈 '그림 표시 못 함' 자리가 생기지 않게)
   for (const job of shapeJobs) {
-    if (okIds.has(job.id)) continue;
+    if (okIds.has(job.id) || !xml.includes(`r:embed="${job.id}"`)) continue;
     xml = xml.replace(new RegExp(`<w:drawing>(?:(?!<w:drawing>)[\\s\\S])*?r:embed="${job.id}"[\\s\\S]*?<\\/w:drawing>`), '');
   }
   if (drawn.length) {
