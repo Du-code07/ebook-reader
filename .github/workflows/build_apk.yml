@@ -141,6 +141,10 @@ jobs:
             if ! grep -q 'android.permission.POST_NOTIFICATIONS' "$MANIFEST"; then
               sed -i '/<application/i\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' "$MANIFEST"
             fi
+            # 준비가 끝났을 때 진동 (앱 설정 '알림 진동')
+            if ! grep -q 'android.permission.VIBRATE' "$MANIFEST"; then
+              sed -i '/<application/i\    <uses-permission android:name="android.permission.VIBRATE"/>' "$MANIFEST"
+            fi
             if ! grep -q "com.samsung.android.support.REMOTE_ACTION" "$MANIFEST"; then
               sed -i 's/<\/activity>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true"\/><property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
               sed -i 's/<\/application>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true"\/><property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><\/application>/' "$MANIFEST"
