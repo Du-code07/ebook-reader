@@ -70,6 +70,13 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   late bool _hidePages = widget.hidePageCount;
   bool _rememberPage = StorageService.rememberPage;
 
+  bool _tapGuideOff = StorageService.tapGuideOff;
+
+  Future<void> _setTapGuideOff(bool v) async {
+    setState(() => _tapGuideOff = v);
+    await StorageService.setTapGuideOff(v);
+  }
+
   Future<void> _setRememberPage(bool v) async {
     setState(() => _rememberPage = v);
     await StorageService.setRememberPage(v);
@@ -319,6 +326,15 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                   : _t('처음부터 열어요 (다시 켜면 끄기 전 쪽부터)', 'Opens from the start (turn on to resume where you were)', '从头打开（重新开启后从关闭前的页面继续）', '最初から開きます（再びオンにすると前のページから）'),
               onTap: () => _setRememberPage(!_rememberPage),
               trailing: Switch(value: _rememberPage, onChanged: _setRememberPage),
+            ),
+            _item(
+              icon: Icons.touch_app_outlined,
+              title: _t('탭 존 가이드라인 끄기', 'Turn Off Tap Zone Guide', '关闭点击区域指引', 'タップゾーンガイドをオフ'),
+              subtitle: _tapGuideOff
+                  ? _t('파일을 열 때 화면 구역 안내를 보여 주지 않아요', 'The tap zone guide is not shown when opening files', '打开文件时不显示点击区域指引', 'ファイルを開くときにタップゾーンの案内を表示しません')
+                  : _t('파일을 열 때마다 화면을 누르는 구역(메뉴·이전·다음)을 보여 줘요', 'Shows the tap zones (menu, previous, next) every time a file opens', '每次打开文件时显示点击区域（菜单、上一页、下一页）', 'ファイルを開くたびにタップする区域（メニュー・前・次）を表示します'),
+              onTap: () => _setTapGuideOff(!_tapGuideOff),
+              trailing: Switch(value: _tapGuideOff, onChanged: _setTapGuideOff),
             ),
             // (스크롤 보기는 이제 문서 화면 안에서 바로 보여 주므로 미리 준비·준비 완료 알림 설정이 필요 없음)
             _section(_t('글꼴', 'Fonts', '字体', 'フォント')),

@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'app_colors.dart';
+
 import '../services/storage_service.dart';
 import 'pop_dialog.dart';
 
@@ -105,12 +107,16 @@ class MemoToolButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color color = !enabled ? Colors.white30 : (active ? Colors.amber : (this.color ?? Colors.white));
+    // 고른 도구: 앱 시그니처 연두 바탕 + 흰 아이콘
+    final Color color = !enabled ? Colors.white30 : (active ? Colors.white : (this.color ?? Colors.white));
     return Semantics(
       button: true,
       label: label,
       child: InkResponse(
-        radius: 18, // 누를 때 퍼지는 효과가 칸(40) 안에 머물도록
+        // 고를 때 퍼지는 번짐(그라데이션) 효과 없이
+        splashFactory: NoSplash.splashFactory,
+        highlightColor: Colors.transparent,
+        radius: 18,
         onTap: !enabled
             ? null
             : () {
@@ -126,6 +132,13 @@ class MemoToolButton extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
+              if (active && enabled)
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: kMemoToolExtent - 8,
+                  height: kMemoToolExtent - 8,
+                  decoration: BoxDecoration(color: AppColors.signature, borderRadius: BorderRadius.circular(10)),
+                ),
               iconBuilder != null ? iconBuilder!(color) : Icon(icon, color: color, size: 16),
               // 펜 색: 펜 몸통 왼쪽에 살짝 띄워서
               if (dotColor != null)

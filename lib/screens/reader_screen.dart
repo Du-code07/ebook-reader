@@ -787,7 +787,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _isLoading = false;
     });
     unawaited(_snapInit());
+    // 파일을 열 때마다 탭 존 가이드라인 (앱 설정에서 끌 수 있음)
+    if (!StorageService.tapGuideOff) {
+      unawaited(showTapZoneGuide(context, tapTurn: () => _pageModeTap && !_slideShow, rtl: () => _isMangaRtlMode, tr: _tr).then((e) {
+        if (!mounted) {
+          if (e?.mounted ?? false) e!.remove();
+        } else {
+          _tapGuide = e;
+        }
+      }));
+    }
   }
+
+  OverlayEntry? _tapGuide;
 
   // ── 페이지 이동: EPUB이면 EPUB 뷰어, TXT·워드·한글이면 각 문서 뷰어로 보낸다 ──
   /// 스크롤 모드의 TXT: 쪽 목록을 한 화면씩 움직임 (한글·워드는 문서 화면 안에서 굴림)
@@ -869,7 +881,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   // ── 목차 (워드·한글·PPT) ──
   // 1) 파일 안에 '목차'(Contents) 쪽이 있으면 그 항목만
   // 2) 없으면 번호(Ⅰ. / 1. / 1) / (1))로 시작하는 굵은 글씨 줄만 (같은 제목은 한 번)
-  // 3) 그래도 없으면 쪽 목록
+  // 3) 그래도 없으면 목차 칸에 '표시할 목차가 없어요.' (쪽 번호 목록은 보여 주지 않음)
   // 글자가 그림으로만 된 PPT는 그림 속 글자를 읽어(OCR, 기기 안에서) 같은 규칙을 쓴다.
   // 만든 목차는 파일마다 저장해 두어 다음에 열 때는 다시 분석하지 않고 바로 보여 준다.
   Future<Map<int, List<Map<String, Object?>>>>? _outlineCacheFuture;
@@ -1083,24 +1095,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     });
   }
 
-  /// 쪽 목록 목차 (목차가 없을 때)
-  List<EpubChapter> _pageListChapters(int pageCount) => List.generate(
-        pageCount,
-        (index) => EpubChapter(
-          title: _tr('${index + 1}쪽', 'Page ${index + 1}', '第${index + 1}页', '${index + 1}ページ'),
-          href: '$_documentPositionPrefix:$index',
-          id: '$_documentPositionPrefix:$index',
-          subitems: const [],
-        ),
-      );
-
-  /// 문서를 다 읽어 들였을 때: 저장해 둔 목차가 있으면 바로 그것을, 없으면 쪽 목록을 먼저 보여 주고 분석한다
+  /// 문서를 다 읽어 들였을 때: 저장해 둔 목차가 있으면 바로 그것을, 없으면 분석한다 (목차가 없으면 '표시할 목차가 없어요.')
   void _onDocumentLoaded(int pageCount) {
     if (!mounted) return;
     setState(() {
       _chapterLevels = const [];
       _docPageCount = pageCount;
-      _chapters = _isSpreadsheet ? const [] : _pageListChapters(pageCount);
+      _chapters = const [];
     });
     if (_isTxt || _isSpreadsheet) return;
     final cached = _cachedOutlines?[pageCount];
@@ -3628,6 +3629,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     SystemBars.leaveViewer();
     _snapHideTimer?.cancel();
     _slideShowExitTimer?.cancel();
@@ -3752,7 +3754,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   children: [
                     Text(_tr('읽기 방향 전환 (', 'Reading Direction (', '切换阅读方向 (', '読書方向切替 (')),
                     Text(nextRtl ? _tr('우 ', 'R ', '右 ', '右 ') : _tr('좌 ', 'L ', '左 ', '左 ')),
-                    const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 14),
+                    // 알림 바탕이 밝아지는 다크·밝은 다크 테마에서는 검은 화살표
+                    Icon(Icons.arrow_forward_rounded, color: Theme.of(context).colorScheme.onInverseSurface, size: 14),
                     Text(nextRtl ? _tr(' 좌)', ' L)', ' 左)', ' 左)') : _tr(' 우)', ' R)', ' 右)', ' 右)')),
                   ],
                 ),
@@ -4014,7 +4017,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         label: _tr('목차 만드는 중', 'Building contents', '正在生成目录', '目次を作成中'),
                         hint: _tr('처음 한 번만 만들고, 다음부터는 바로 보여요', 'Only the first time — next time it opens instantly', '仅首次生成，下次直接显示', '初回のみ作成し、次回からはすぐ表示されます'),
                       )
-                    : ListView.builder(
+                    : _chapters.isEmpty
+                        ? NoTocView(label: _tr('표시할 목차가 없어요.', 'No contents to show.', '没有可显示的目录。', '表示できる目次がありません。'))
+                        : ListView.builder(
                   itemCount: _chapters.length,
                   itemBuilder: (context, index) {
                     final chapter = _chapters[index];

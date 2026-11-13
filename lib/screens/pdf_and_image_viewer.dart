@@ -10,9 +10,6 @@ import 'package:path_provider/path_provider.dart';
 import '../services/storage_service.dart';
 import '../services/system_bars.dart';
 import '../services/pdf_outline_service.dart';
-import '../services/toc_page_parser.dart';
-import '../services/heading_rules.dart';
-import '../services/outline_cache.dart';
 import '../widgets/outline_progress.dart';
 import '../widgets/text_copy_sheet.dart';
 import '../services/volume_key_service.dart';
@@ -257,6 +254,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   String _toolbarStyle = 'arc';
   // 페이지 모드: 탭(누른 자리로 넘김) / 스크롤(쪽을 이어 붙여 세로로) / 슬라이드(= _useSwipeTurn)
   bool _pageModeTap = true;
+  OverlayEntry? _tapGuide;
   bool _pageModeScroll = false;
   final ContinuousPageController _scrollCtrl = ContinuousPageController();
   final Map<int, Size> _scrollSizes = {};
@@ -758,6 +756,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ScrollThumbBar.leftHanded.value = _quickMenuSide == 'left';
       ScrollThumbBar.off.value = await StorageService.getScrollBarOff();
       _bookmarks = await StorageService.getBookmarks(_bookKey);
+      // 파일을 열 때마다 탭 존 가이드라인 (앱 설정에서 끌 수 있음)
+      if (!StorageService.tapGuideOff && mounted) {
+        unawaited(showTapZoneGuide(context, tapTurn: () => _pageModeTap, rtl: () => _isMangaRtlMode, tr: _tr).then((e) {
+          if (!mounted) {
+            if (e?.mounted ?? false) e!.remove();
+          } else {
+            _tapGuide = e;
+          }
+        }));
+      }
 
       final tempDir = await getTemporaryDirectory();
       final first = widget.files.first;
@@ -923,103 +931,17 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   List<Map<String, Object>> _pdfToc = const [];
 
-  /// 1) 파일 속 목차(책갈피) → 2) '목차'라고 적힌 쪽의 항목들 (기기가 PDF 글 읽기를 지원할 때) → 없으면 쪽 목록
-  /// 목차를 만드는 중이면 진행률(0~1) — 목차 칸에 '목차 만드는 중… n%'
-  double? _pdfTocProgress;
-
-  void _setPdfTocProgress(double? p) {
-    if (!mounted) return;
-    if (p != null && _pdfTocProgress != null && (p - _pdfTocProgress!).abs() < 0.01) return;
-    setState(() => _pdfTocProgress = p);
-  }
-
-  /// PDF 목차 (한글·워드와 같은 규칙): 1) 파일의 책갈피(목차) → 2) '목차' 쪽 → 3) Ⅰ. / 1. 로 시작하는 눈에 띄는 줄
-  /// → 4) 굵은 글씨 줄(가운데 정렬이거나 줄 전체가 굵은 경우) → 없으면 쪽 목록.
-  /// 발표 자료를 PDF로 만든 파일(가로로 긴 쪽)은 PPT처럼 슬라이드마다 제목·부제목.
-  /// 만든 목차는 저장해 두어 다음에는 바로 보여 준다
+  /// PDF 목차: 파일 속 책갈피(목차)가 있을 때만. 없으면 목차 칸에 '표시할 목차가 없어요.'
   Future<void> _loadPdfOutline() async {
     if (!mounted || _totalPages <= 0) return;
-    final path = widget.files.first.path;
-    final int pages = _totalPages;
-    var items = await PdfOutlineService.read(path);
+    var items = await PdfOutlineService.read(widget.files.first.path);
     if (!mounted) return;
     // '슬라이드 1', 'Page 2'처럼 쪽 번호만 적힌 책갈피(발표 자료를 PDF로 저장할 때 생김)는 목차로 쓰지 않음
     if (items.isNotEmpty &&
         items.every((e) => RegExp(r'^\s*(슬라이드|slide|페이지|page|쪽)?\s*\d+\s*(쪽|페이지)?\s*$', caseSensitive: false).hasMatch('${e['title']}'))) {
       items = const [];
     }
-    if (items.isEmpty) {
-      final cached = (await OutlineCache.read(path))[pages];
-      if (!mounted) return;
-      if (cached != null) {
-        if (cached.isNotEmpty) setState(() => _pdfToc = [for (final e in cached) e.cast<String, Object>()]);
-        return;
-      }
-      _setPdfTocProgress(0);
-      try {
-        final int scan = math.min(pages, 3000);
-        Future<List<_PdfPageLines>?> readLines(bool bold, double p0, double p1) async {
-          final out = <_PdfPageLines>[];
-          final int step = bold ? 10 : 20;
-          for (int from = 0; from < scan; from += step) {
-            out.addAll(await _pdfLines(path, from, math.min(scan, from + step), bold));
-            if (!mounted) return null;
-            _setPdfTocProgress(p0 + (p1 - p0) * math.min(1, (from + step) / scan));
-          }
-          return out;
-        }
-
-        // 줄마다 목차 후보 정보 (가운데 정렬, 글자 높이, 굵기)
-        List<Map<String, Object?>> candidates(List<_PdfPageLines> all, {double median = 0}) {
-          final cands = <Map<String, Object?>>[];
-          for (int p = 0; p < all.length; p++) {
-            final page = all[p].lines;
-            if (page.isEmpty) continue;
-            double left = 1, right = 0;
-            for (final l in page) {
-              left = math.min(left, (l['x0'] as num).toDouble());
-              right = math.max(right, (l['x1'] as num).toDouble());
-            }
-            final double width = right - left;
-            for (final l in page) {
-              final double sw = (l['sw'] as num?)?.toDouble() ?? 0;
-              final bool bold = median > 0 && sw >= median * 1.22;
-              final double x0 = (l['x0'] as num).toDouble(), x1 = (l['x1'] as num).toDouble();
-              final bool centered = width > 0 && x1 - x0 < width * 0.85 && ((x0 - left) - (right - x1)).abs() < width * 0.06 + 0.005;
-              cands.add({'title': l['t'], 'page': p, 'bold': bold, 'boldRatio': bold ? 1.0 : 0.0, 'centered': centered, 'fs': l['h']});
-            }
-          }
-          return cands;
-        }
-
-        final lines = await readLines(false, 0, 0.6);
-        if (lines == null) return;
-        final texts = [for (final page in lines) page.lines.map((l) => l['t']).join('\n')];
-        List<Map<String, Object?>>? found = TocPageParser.parse(texts, pages);
-        // 발표 자료로 만든 PDF: 쪽 대부분이 가로로 긴 모양
-        final bool slides = lines.isNotEmpty && lines.where((p) => p.aspect > 1.15).length >= lines.length * 0.7;
-        if (found == null && slides) {
-          found = HeadingRules.slides([for (final p in lines) p.lines], ocr: true);
-        }
-        found ??= HeadingRules.build(candidates(lines));
-        if (found.isEmpty && lines.any((page) => page.lines.isNotEmpty)) {
-          // 번호 줄이 없으면: 쪽을 그려 글자 굵기를 가늠해 굵은 글씨 줄을 찾음
-          final bolds = await readLines(true, 0.6, 0.97);
-          if (bolds == null) return;
-          final ratios = <double>[
-            for (final page in bolds)
-              for (final l in page.lines)
-                if (((l['sw'] as num?) ?? 0) > 0) (l['sw'] as num).toDouble(),
-          ]..sort();
-          found = HeadingRules.build(candidates(bolds, median: ratios.isEmpty ? 0 : ratios[ratios.length ~/ 2]));
-        }
-        items = [for (final e in found) e.cast<String, Object>()];
-        await OutlineCache.write(path, pages, found);
-      } finally {
-        _setPdfTocProgress(null);
-      }
-    }
-    if (mounted && items.isNotEmpty) setState(() => _pdfToc = items);
+    if (items.isNotEmpty) setState(() => _pdfToc = items);
   }
 
   /// 쪽마다 {aspect, 줄들 {t, x0, x1, y, h, (sw: 글자 획 굵기 비율)}} (지원하지 않는 기기에서는 빈 목록)
@@ -1057,14 +979,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ),
             const Divider(height: 1),
             Expanded(
-              child: _pdfTocProgress != null
-                  ? OutlineProgressView(
-                      progress: _pdfTocProgress!,
-                      label: _tr('목차 만드는 중', 'Building contents', '正在生成目录', '目次を作成中'),
-                      hint: _tr('처음 한 번만 만들고, 다음부터는 바로 보여요', 'Only the first time — next time it opens instantly', '仅首次生成，下次直接显示', '初回のみ作成し、次回からはすぐ表示されます'),
-                    )
+              child: !outline
+                  ? NoTocView(label: _tr('표시할 목차가 없어요.', 'No contents to show.', '没有可显示的目录。', '表示できる目次がありません。'))
                   : ListView.builder(
-                itemCount: outline ? _pdfToc.length : _totalPages,
+                itemCount: _pdfToc.length,
                 itemBuilder: (context, index) {
                   final item = outline ? _pdfToc[index] : null;
                   final int page = item == null ? index : (item['page'] as int);
@@ -2684,6 +2602,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   void dispose() {
+    if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     SystemBars.leaveViewer();
     _vPageSwipe.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
@@ -2794,7 +2713,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   children: [
                     Text(_tr('읽기 방향 전환 (', 'Reading Direction (', '切换阅读方向 (', '読書方向切替 (')),
                     Text(nextRtl ? _tr('우 ', 'R ', '右 ', '右 ') : _tr('좌 ', 'L ', '左 ', '左 ')),
-                    const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 14),
+                    // 알림 바탕이 밝아지는 다크·밝은 다크 테마에서는 검은 화살표
+                    Icon(Icons.arrow_forward_rounded, color: Theme.of(context).colorScheme.onInverseSurface, size: 14),
                     Text(nextRtl ? _tr(' 좌)', ' L)', ' 左)', ' 左)') : _tr(' 우)', ' R)', ' 右)', ' 右)')),
                   ],
                 ),

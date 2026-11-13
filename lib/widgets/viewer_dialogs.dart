@@ -273,27 +273,6 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
   bool _dragging = false;
   double _dragRatio = 0;
   int? _dragPointer;
-  // 화면이 굴러가는 동안은 막대를 숨기고(손가락 끌기와 부딪히지 않게), 멈추면 다시 보임
-  bool _moving = false;
-  Timer? _idle;
-
-  @override
-  void didUpdateWidget(covariant ScrollThumbBar old) {
-    super.didUpdateWidget(old);
-    if (!_dragging && (old.ratio - widget.ratio).abs() > 0.0005) {
-      _moving = true;
-      _idle?.cancel();
-      _idle = Timer(const Duration(milliseconds: 450), () {
-        if (mounted) setState(() => _moving = false);
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _idle?.cancel();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -323,7 +302,6 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
         widget.onDragEnd?.call();
       }
 
-      final bool hidden = _moving && !_dragging;
       return Stack(children: [
         Positioned(
           left: left ? 0 : null,
@@ -332,9 +310,6 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
           width: 28, // 누르기 쉬운 범위 (보이는 막대는 가늘게)
           height: thumb,
           // 손가락이 닿자마자 이 막대가 잡음 (아래 화면의 끌기·확대 동작이 가로채지 못하게)
-          // 막대가 숨어 있는 동안(화면이 굴러가는 중)은 손가락을 가로채지 않음
-          child: IgnorePointer(
-          ignoring: hidden,
           child: RawGestureDetector(
             behavior: HitTestBehavior.opaque,
             gestures: <Type, GestureRecognizerFactory>{
@@ -369,11 +344,7 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
                 _dragPointer = null;
                 end();
               },
-              child: AnimatedOpacity(
-                // 화면이 굴러가는 동안은 사라졌다가 멈추면 다시 나타남
-                opacity: hidden ? 0 : 1,
-                duration: Duration(milliseconds: hidden ? 90 : 220),
-                child: Align(
+              child: Align(
                 alignment: left ? Alignment.centerLeft : Alignment.centerRight,
                 child: AnimatedContainer(
                   key: const ValueKey('thumb'),
@@ -386,9 +357,7 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
                   ),
                 ),
               ),
-              ),
             ),
-          ),
           ),
         ),
       ]);
@@ -997,4 +966,126 @@ class FileLoadingView extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 탭 존 가이드라인: 파일을 열 때 화면을 누르는 구역을 보여 줌 (화면을 누르면 닫힘)
+/// [tapTurn]: 탭으로 넘기는 보기면 위 2/3 = 메뉴, 아래 1/3 왼쪽 반·오른쪽 반 = 이전·다음 (아니면 화면 전체 = 메뉴)
+/// [rtl]: 우→좌 읽기면 왼쪽이 다음
+class TapZoneGuide extends StatefulWidget {
+  const TapZoneGuide({super.key, required this.tapTurn, required this.rtl, required this.onClose, required this.tr});
+  final bool tapTurn, rtl;
+  final VoidCallback onClose;
+  final String Function(String ko, String en, String zh, String ja) tr;
+
+  @override
+  State<TapZoneGuide> createState() => _TapZoneGuideState();
+}
+
+class _TapZoneGuideState extends State<TapZoneGuide> {
+  bool _closing = false;
+
+  void _close() {
+    if (_closing) return;
+    setState(() => _closing = true);
+    Future<void>.delayed(const Duration(milliseconds: 180), widget.onClose);
+  }
+
+  Widget _label(String text, {IconData? before, IconData? after}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+        decoration: BoxDecoration(color: const Color(0xE6222222), borderRadius: BorderRadius.circular(18)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (before != null) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(before, color: Colors.white, size: 20)),
+          Text(text, style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800)),
+          if (after != null) Padding(padding: const EdgeInsets.only(left: 4), child: Icon(after, color: Colors.white, size: 20)),
+        ]),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final tr = widget.tr;
+    const line = Color(0xFF9E9E9E);
+    final String prev = tr('이전', 'Previous', '上一页', '前へ'), next = tr('다음', 'Next', '下一页', '次へ');
+    final String leftLabel = widget.rtl ? next : prev, rightLabel = widget.rtl ? prev : next;
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: _closing ? 0 : 1),
+      duration: const Duration(milliseconds: 180),
+      builder: (context, t, child) => Opacity(opacity: t, child: child),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _close,
+        child: LayoutBuilder(builder: (context, c) {
+          final double menuH = widget.tapTurn ? c.maxHeight * 2 / 3 : c.maxHeight;
+          return Stack(children: [
+            // 메뉴 구역
+            Positioned(left: 0, top: 0, right: 0, height: menuH, child: ColoredBox(color: const Color(0x8CE8EAF6), child: Center(child: _label(tr('메뉴', 'Menu', '菜单', 'メニュー'))))),
+            if (widget.tapTurn) ...[
+              Positioned(left: 0, top: menuH, width: c.maxWidth / 2, bottom: 0,
+                  child: ColoredBox(color: const Color(0x8CF6F1E6), child: Center(child: _label(leftLabel, before: Icons.chevron_left_rounded)))),
+              Positioned(left: c.maxWidth / 2, top: menuH, right: 0, bottom: 0,
+                  child: ColoredBox(color: const Color(0x8CE3ECF6), child: Center(child: _label(rightLabel, after: Icons.chevron_right_rounded)))),
+              // 구역 사이 선
+              Positioned(left: 0, right: 0, top: menuH - 1, height: 2, child: const ColoredBox(color: line)),
+              Positioned(left: c.maxWidth / 2 - 1, width: 2, top: menuH, bottom: 0, child: const ColoredBox(color: line)),
+            ],
+            // 위쪽 안내 문구
+            Positioned(
+              left: 16,
+              right: 16,
+              top: MediaQuery.paddingOf(context).top + 14,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(color: const Color(0xE6222222), borderRadius: BorderRadius.circular(14)),
+                  child: Text(
+                    tr('탭 존 가이드라인은 앱 설정에서 끌 수 있어요.\n화면을 누르면 닫혀요.',
+                        'You can turn off this tap zone guide in app settings.\nTap to close.',
+                        '可在应用设置中关闭点击区域指引。\n点击屏幕关闭。',
+                        'タップゾーンガイドはアプリ設定でオフにできます。\n画面をタップすると閉じます。'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ),
+          ]);
+        }),
+      ),
+    );
+  }
+}
+
+/// 파일 화면이 다 열린 뒤(열리는 움직임이 끝난 뒤) 탭 존 가이드라인을 화면 위에 띄움. 닫히거나 화면을 나가면 사라짐
+/// 돌려주는 OverlayEntry는 화면이 사라질 때 remove 해야 함
+Future<OverlayEntry?> showTapZoneGuide(
+  BuildContext context, {
+  required bool Function() tapTurn,
+  required bool Function() rtl,
+  required String Function(String ko, String en, String zh, String ja) tr,
+}) async {
+  final anim = ModalRoute.of(context)?.animation;
+  if (anim != null && anim.status != AnimationStatus.completed) {
+    final done = Completer<void>();
+    void listener(AnimationStatus s) {
+      if (s == AnimationStatus.completed && !done.isCompleted) done.complete();
+    }
+    anim.addStatusListener(listener);
+    await done.future.timeout(const Duration(seconds: 2), onTimeout: () {});
+    anim.removeStatusListener(listener);
+  }
+  if (!context.mounted) return null;
+  final overlay = Overlay.maybeOf(context);
+  if (overlay == null) return null;
+  late OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (ctx) => TapZoneGuide(
+      tapTurn: tapTurn(),
+      rtl: rtl(),
+      tr: tr,
+      onClose: () {
+        if (entry.mounted) entry.remove();
+      },
+    ),
+  );
+  overlay.insert(entry);
+  return entry;
 }

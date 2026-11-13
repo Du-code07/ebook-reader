@@ -1,6 +1,20 @@
 import 'package:flutter/material.dart';
 
 /// 목차 칸: 목차를 만드는 동안 보여 주는 안내 + 진행률
+/// 목차가 없을 때 목차 칸에 보이는 문구
+class NoTocView extends StatelessWidget {
+  const NoTocView({super.key, required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(label, textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        ),
+      );
+}
+
 class OutlineProgressView extends StatelessWidget {
   const OutlineProgressView({super.key, required this.progress, required this.label, this.hint});
 

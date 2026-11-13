@@ -109,8 +109,9 @@ class _FavoriteRibbonState extends State<FavoriteRibbon> with SingleTickerProvid
                         child: CustomPaint(
                           size: Size(widget.width, widget.height),
                           painter: _RibbonPainter(
-                            fill: Color.lerp(emptyFill, Colors.amber, c)!,
-                            stroke: Color.lerp(outline, const Color(0xFFE0A000), c)!,
+                            // 책갈피 색: 안쪽·테두리 모두 한 단계 밝게
+                            fill: Color.lerp(emptyFill, const Color(0xFFFFCA28), c)!,
+                            stroke: Color.lerp(outline, const Color(0xFFFFB300), c)!,
                             shadow: widget.onImage,
                             stretch: stretch,
                           ),

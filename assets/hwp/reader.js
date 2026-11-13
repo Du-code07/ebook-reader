@@ -165,6 +165,7 @@ function installFontMeasurement() {
     return ctx.measureText(text).width;
   };
 }
+let docReady = false;
 function configure(next = {}) {
   const previousSpread = options.spread;
   options = { ...options, ...next };
@@ -173,6 +174,8 @@ function configure(next = {}) {
   if (options.backdrop) document.documentElement.style.setProperty('--backdrop', options.backdrop);
   else document.documentElement.style.removeProperty('--backdrop');
   host.classList.toggle('rtl', !!options.rtl);
+  // FReader: 문서를 다 연 뒤에만 스크롤 보기를 켜고 끔 (여는 도중이면 열 때 한 번에 맞춤)
+  if (!docReady) return;
   if (doc && 'vertical' in next && !!next.vertical !== vertical) return setVertical(!!next.vertical);
   if (vertical) return;
   if (doc && previousSpread !== options.spread) return render();
@@ -209,8 +212,10 @@ async function openDocument(password = null) {
     const saved = /^hwp:(\d+)$/.exec(options.position || '');
     page = clampPage(saved ? Number(saved[1]) : Math.round(Number(options.progress || 0) * (count - 1)));
     incoming.fill(0); incoming = null; received = 0;
+    if (vertical) setVertical(false);
     if (options.vertical) setVertical(true); else await render();
     if (disposed) return false;
+    docReady = true;
     emit('loaded', { pageCount: count });
     reportLocation();
     return true;
@@ -382,6 +387,7 @@ function highlightSelection() {
 }
 function releaseDocument() {
   renderSerial++;
+  docReady = false;
   if (vertical) {
     vertical = false; vResize.disconnect(); vMounted.clear();
     vhost?.remove(); vhost = null; vSlots = []; vTops = []; host.style.display = '';

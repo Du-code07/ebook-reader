@@ -53,7 +53,11 @@ function request(action, data = {}, transfer = []) {
     worker.postMessage({ id, action, ...data }, transfer);
   });
 }
+// FReader: 문서를 다 읽어 쪽을 모두 만든 뒤에만 스크롤 보기를 켜고 끔
+// (읽는 도중에 켜면 그때까지 만든 쪽만으로 스크롤 화면이 만들어져 스크롤이 중간에서 막혔음)
+let docReady = false;
 function clearPages() {
+  docReady = false;
   renderSerial++;
   if (vertical) {
     vertical = false; vResize.disconnect(); vMounted.clear(); vOwner.clear();
@@ -103,7 +107,10 @@ async function openDocument(password = null) {
     if (disposed || current !== generation) return false;
     const saved = /^(?:docx|doc):(\d+)$/.exec(options.position || '');
     page = clampPage(saved ? Number(saved[1]) : Math.round(Number(options.progress || 0) * (pages.length - 1)));
+    // 읽는 동안 바뀐 보기 설정(스크롤/쪽 넘김)을 여기서 한 번에 맞춤
+    if (vertical) setVertical(false);
     if (options.vertical) setVertical(true); else await render();
+    docReady = true;
     emit('loaded', { pageCount: pages.length, unavailableImages }); reportLocation();
     return true;
   } catch (error) { return fail(error); }
@@ -633,7 +640,8 @@ function configure(next = {}) {
   document.body.dataset.theme = ['white', 'sepia', 'dark'].includes(options.theme) ? options.theme : 'white';
   applyBackdrop();
   host.classList.toggle('rtl', !!options.rtl);
-  if (pages.length && 'vertical' in next && !!next.vertical !== vertical) return setVertical(!!next.vertical);
+  if (docReady && pages.length && 'vertical' in next && !!next.vertical !== vertical) return setVertical(!!next.vertical);
+  if (!docReady) return;
   if (vertical) return;
   if (oldSpread !== options.spread) return render();
   fitPages();

@@ -96,6 +96,16 @@ class StorageService {
   static Future<void> loadRememberPage() async {
     final prefs = await SharedPreferences.getInstance();
     rememberPage = prefs.getBool('remember_page_v89') ?? true;
+    tapGuideOff = prefs.getBool('tap_guide_off_v104') ?? false;
+  }
+
+  // 탭 존 가이드라인 끄기 (기본: 켜짐 = 파일을 열 때마다 화면 구역 안내를 보여 줌)
+  static bool tapGuideOff = false;
+
+  static Future<void> setTapGuideOff(bool off) async {
+    tapGuideOff = off;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('tap_guide_off_v104', off);
   }
 
   static Future<void> setRememberPage(bool on) async {

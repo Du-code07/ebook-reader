@@ -50,7 +50,7 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
     final bool alignRight = !beside && anchor.center.dx > screen.width / 2;
     final bool above = !beside && anchor.bottom + 6 + menuHeight > screen.height - pad.bottom - 8 && anchor.top - 6 - menuHeight > pad.top;
     final double edgeX = beside
-        ? math.min(anchor.right + 12, screen.width - 8 - 140)
+        ? math.min(anchor.right + 28, screen.width - 8 - 140)
         : alignRight ? math.min(screen.width - 8, anchor.right) : math.max(8.0, anchor.left);
     // 위아래 어디로도 다 들어가지 않으면 화면 안에 들어오도록 올려서 펼침
     final double edgeY = beside
@@ -65,7 +65,8 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
     final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.5), reverseCurve: const Interval(0.4, 1));
     final cs = Theme.of(context).colorScheme;
     final card = Material(
-      color: cs.surfaceContainerHigh,
+      // 그룹 목록 위에 뜨는 편집 메뉴(beside)는 목록과 구분되게 조금 더 진한 바탕
+      color: beside ? Color.alphaBlend(cs.onSurface.withValues(alpha: 0.07), cs.surfaceContainerHighest) : cs.surfaceContainerHigh,
       elevation: 6,
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,

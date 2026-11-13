@@ -25,6 +25,7 @@ import 'widgets/ui_scale.dart';
 import 'widgets/app_colors.dart';
 import 'services/storage_service.dart';
 import 'services/user_fonts.dart';
+import 'services/pdf_export_service.dart' show ExportFileIcon;
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart' show EpubBookServer;
 import 'services/doc_thumbnail_service.dart';
 import 'widgets/pop_dialog.dart';
@@ -340,57 +341,40 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   }
 }
 
-/// 6. 실제 앱에 표시되는 아이콘 위젯들을 그대로 사용하여 위치를 시각적으로 보여주는 '사용 설명서' 화면
+/// '사용 설명서' 화면: 지금 앱에 있는 기능만, 실제 아이콘과 함께
 class UserManualScreen extends StatelessWidget {
   final String appLang;
   const UserManualScreen({super.key, required this.appLang});
 
-  String _tr(String ko, String en, String zh, String ja) =>
-      AppI18n.t(appLang, ko: ko, en: en, zh: zh, ja: ja);
+  String _tr(String ko, String en, String zh, String ja) => AppI18n.t(appLang, ko: ko, en: en, zh: zh, ja: ja);
 
-  Widget _buildDualDirectionSampleIcon() {
-    return const SizedBox(
-      width: 24,
-      height: 22,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Positioned(top: 1, child: Icon(Icons.east, size: 14, color: Colors.amber)),
-          Positioned(bottom: 1, child: Icon(Icons.west, size: 14, color: Colors.white54)),
-        ],
-      ),
-    );
-  }
+  Widget _section(BuildContext context, String text) => Padding(
+        padding: const EdgeInsets.only(top: 22, bottom: 6),
+        child: Text(text, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+      );
 
-  Widget _buildIconGuideRow({
-    required Widget iconWidget,
-    required String title,
-    required String desc,
-    Color iconBg = const Color(0xFF1E293B),
-  }) {
+  Widget _row(BuildContext context, {required Widget icon, required String title, required String desc}) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 44,
             height: 44,
-            decoration: BoxDecoration(
-              color: iconBg,
-              borderRadius: BorderRadius.circular(12),
-            ),
+            decoration: BoxDecoration(color: cs.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
             alignment: Alignment.center,
-            child: iconWidget,
+            child: IconTheme(data: IconThemeData(color: cs.onSurface, size: 21), child: icon),
           ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+                Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 3),
-                Text(desc, style: const TextStyle(fontSize: 12.5, height: 1.4)),
+                Text(desc, style: TextStyle(fontSize: 13, height: 1.45, color: cs.onSurfaceVariant)),
               ],
             ),
           ),
@@ -401,281 +385,146 @@ class UserManualScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_tr('사용 설명서', 'User Manual', '使用说明书', '取扱説明書')),
-      ),
+      appBar: AppBar(title: Text(_tr('사용 설명서', 'User Manual', '使用说明书', '取扱説明書'))),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
           children: [
-            // 1. 서재(MY) 화면 상단 및 파일 아이콘 안내
             Text(
-              _tr('1. 서재(MY) 화면 아이콘 안내', '1. Bookshelf (MY) Screen Icons', '1. 书架 (MY) 界面图标说明', '1. 書斎(MY)画面のアイコン説明'),
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 10),
-            // 실제 서재 상단 바 미리보기
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Text(
-                        'MY',
-                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      const Spacer(),
-                      const Icon(Icons.dark_mode, color: Colors.white, size: 17),
-                      const SizedBox(width: 14),
-                      const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 17),
-                      const SizedBox(width: 14),
-                      const Icon(Icons.photo_library_outlined, color: Colors.white, size: 17),
-                      const SizedBox(width: 14),
-                      const Icon(Icons.delete_outline, color: Colors.white, size: 17),
-                      const SizedBox(width: 14),
-                      const Icon(Icons.settings_outlined, color: Colors.white, size: 17),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.indigo,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          _tr('전체', 'All', '全部', 'すべて'),
-                          style: const TextStyle(color: Colors.white, fontSize: 12),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.white12,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Text('PDF/문서', style: TextStyle(color: Colors.white, fontSize: 12)),
-                      ),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.amber),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.add, size: 14, color: Colors.amber),
-                      ),
-                      const Spacer(),
-                      const Icon(Icons.more_horiz, color: Colors.white70, size: 17),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.dark_mode, color: Colors.white, size: 19),
-              title: _tr('다크 모드 / 라이트 모드 전환', 'Toggle Dark / Light Mode', '切换深色 / 浅色模式', 'ダーク / ライトモード切替'),
-              desc: _tr('앱 전체 화면 테마를 라이트 모드와 다크 모드로 전환합니다.', 'Switches the app theme between Light and Dark mode.', '在浅色模式和深色模式之间切换。', 'アプリ全体のテーマをライト/ダークに切り替えます。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 19),
-              title: _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'),
-              desc: _tr('2개 이상의 PDF 파일을 고른 순서대로 또는 파일 이름 순서대로 합쳐 하나의 PDF로 만듭니다.', 'Merges 2 or more PDF files in selected order or filename order into a single PDF.', '按所选顺序或文件名顺序将多个 PDF 合并为一个 PDF。', '2つ以上のPDFを選択順または名前順に結合して1つのPDFにします。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.photo_library_outlined, color: Colors.white, size: 19),
-              title: _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'),
-              desc: _tr('여러 장의 JPG/PNG 이미지를 고른 순서 또는 이름 순서대로 묶어 단권 파일(.cbz)로 만듭니다.', 'Bundles multiple JPG/PNG images in selected or filename order into a single .cbz book.', '将多张图片按选择顺序或名称顺序打包为单本文件(.cbz)。', '複数のJPG/PNG画像を選択順または名前順にまとめて1冊(.cbz)にします。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.delete_outline, color: Colors.white, size: 19),
-              title: _tr('휴지통', 'Trash Bin', '回收站', 'ゴミ箱'),
-              desc: _tr('삭제된 파일을 확인하고 복원하거나 영구 삭제합니다.', 'Restore or permanently delete trashed files.', '查看、恢复或永久删除已删除的文件。', '削除したファイルの復元または完全削除を行います。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.settings_outlined, color: Colors.white, size: 19),
-              title: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
-              desc: _tr('앱 언어(한국어/영어/중국어/일본어) 변경, 파일 형식 숨기기, 사용 설명서를 확인합니다.', 'Change app language (KO/EN/ZH/JA), hide file extensions, and open the User Manual.', '更改应用语言、隐藏文件扩展名及查看使用说明书。', '言語(韓/英/中/日)変更、拡張子非表示、取扱説明書を確認します。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.add, color: Colors.amber, size: 21),
-              title: _tr('새 그룹 추가 (+ 버튼)', 'Add New Group (+)', '新建分组 (+)', '新規グループ追加 (+)'),
-              desc: _tr('그룹 네모칸 맨 오른쪽의 [+] 아이콘을 눌러 새 그룹을 추가합니다. (기존 그룹 길게 누르기: 삭제)', 'Tap [+] at the right end of the group bar to add a group (long-press a group to delete).', '点击分组栏最右侧的 [+] 新建分组（长按分组可删除）。', 'グループバー右端の[+]で新規グループを追加します(長押しで削除)。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const SizedBox(
-                width: 24,
-                height: 24,
-                child: FavoriteRibbon(active: true, width: 12, height: 18, isDark: true),
-              ),
-              title: _tr('북마크 (책갈피)', 'Bookmark', '书签', 'ブックマーク (しおり)'),
-              desc: _tr('파일 왼쪽 위의 책갈피를 누르거나, 목록형에서 파일을 오른쪽으로 밀면 북마크되어 책갈피가 노랗게 내려오며 해당 그룹의 가장 상단에 위치합니다. 그룹 막대의 책갈피 아이콘을 누르면 북마크한 파일만 볼 수 있고, 한 번 더 누르거나 밀면 해제됩니다.', 'Tap the bookmark at the top-left of a file, or swipe a file right in list view: the bookmark drops down in yellow and the file is pinned to the top of its group. Tap or swipe again to remove.', '点击文件左上角的书签，或在列表视图中向右滑动文件：书签变黄落下并置顶于当前分组。再次点击或滑动即可取消。', 'ファイル左上のしおりをタップ、またはリスト表示でファイルを右へスワイプすると、しおりが黄色く下りてグループの最上部に固定されます。もう一度で解除します。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.more_horiz, color: Colors.white, size: 19),
-              title: _tr('이름 변경 (점 3개 메뉴)', 'Rename File (⋯ Menu)', '重命名文件 (⋯ 菜单)', 'ファイル名変更 (⋯ メニュー)'),
-              desc: _tr('파일 오른쪽의 점 3개를 눌러 확장자를 유지한 채 파일 이름을 변경합니다.', 'Tap the ⋯ on the right of a file to rename it while preserving its extension.', '点击文件右侧的 ⋯，保持扩展名不变并修改文件名称。', 'ファイル右の ⋯ をタップし、拡張子を維持したままファイル名を変更します。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.drive_file_move_outline, color: Colors.white, size: 19),
-              title: _tr('그룹 이동 (개별 및 다중 선택)', 'Move to Group (Single & Batch)', '移动分组 (单个与批量)', 'グループ移動 (個別・一括)'),
-              desc: _tr('점 3개 메뉴에서 파일을 다른 그룹으로 옮깁니다. 파일을 길게 눌러 다중 선택하면 하단 [그룹 이동] 버튼으로 한 번에 이동할 수 있습니다.', 'Moves the file to another group. Long-press files to batch move multiple files at once.', '将文件移至其他分组；长按多选后可通过底部按钮批量移动。', '別のグループへ移動します。長押しで複数選択すると一括移動できます。'),
+              _tr('PDF·EPUB·워드(docx·doc)·한글(hwp·hwpx)·엑셀(xlsx)·PPT(pptx)·TXT·사진(jpg·png)·만화(cbz) 파일을 볼 수 있어요.',
+                  'Opens PDF, EPUB, Word (docx, doc), Hangul (hwp, hwpx), Excel (xlsx), PowerPoint (pptx), TXT, images (jpg, png) and comics (cbz).',
+                  '可查看 PDF、EPUB、Word(docx·doc)、韩文(hwp·hwpx)、Excel(xlsx)、PPT(pptx)、TXT、图片(jpg·png)、漫画(cbz)文件。',
+                  'PDF・EPUB・Word(docx・doc)・ハングル(hwp・hwpx)・Excel(xlsx)・PPT(pptx)・TXT・画像(jpg・png)・漫画(cbz)を閲覧できます。'),
+              style: TextStyle(fontSize: 13.5, height: 1.45, color: cs.onSurfaceVariant),
             ),
 
-            const Divider(height: 36),
+            // ── 1. 서재(MY) ──
+            _section(context, _tr('1. 서재 (MY)', '1. Library (MY)', '1. 书架 (MY)', '1. 書斎 (MY)')),
+            _row(context,
+                icon: const Icon(Icons.add),
+                title: _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
+                desc: _tr('오른쪽 아래 [파일 추가]를 누르면 파일 추가·PDF 합치기·이미지 합치기(CBZ로 묶기)를 고를 수 있어요.',
+                    'Tap [Add Files] at the bottom right to add files, merge PDFs, or merge images into a CBZ book.',
+                    '点右下角[添加文件]可选择添加文件、合并 PDF、合并图片（打包为 CBZ）。',
+                    '右下の[ファイル追加]から、ファイル追加・PDF結合・画像結合(CBZにまとめる)を選べます。')),
+            _row(context,
+                icon: GroupStackIcon(size: 19, spread: false, color: cs.onSurface),
+                title: _tr('그룹', 'Groups', '分组', 'グループ'),
+                desc: _tr('[그룹] 단추를 누르면 그룹 목록이 펼쳐져요. 맨 위 [전체]·[즐겨찾기]는 고정이고, 그룹은 ≡ 손잡이를 끌어 순서를 바꾸고, 꾹 눌러 이름 수정·그룹 삭제를 해요. 지운 그룹의 파일은 미분류로 옮겨져 [전체]에서 볼 수 있어요. 맨 아래 [+ 그룹 추가]로 새 그룹을 만들어요.',
+                    'Tap [Groups] to open the group list. [All] and [Favorites] stay on top; drag the ≡ handle to reorder, long-press a group to rename or delete it (its files move to Uncategorized, shown in [All]). Use [+ Add Group] at the bottom to create one.',
+                    '点[分组]打开分组列表。[全部]和[收藏]固定在顶部；拖动 ≡ 手柄调整顺序，长按分组可重命名或删除（其中文件移至未分类，可在[全部]中查看）。底部[+ 添加分组]可新建分组。',
+                    '[グループ]を押すとグループ一覧が開きます。[すべて]・[お気に入り]は固定、≡ を引いて並べ替え、長押しで名前変更・削除できます（中のファイルは未分類に移り[すべて]に表示）。一番下の[+ グループ追加]で作成します。')),
+            _row(context,
+                icon: const SizedBox(width: 24, height: 24, child: FavoriteRibbon(active: true, width: 12, height: 18, isDark: true)),
+                title: _tr('즐겨찾기 (책갈피)', 'Favorites (Ribbon)', '收藏（书签）', 'お気に入り（しおり）'),
+                desc: _tr('파일 왼쪽 위 책갈피를 누르거나, 목록형에서 파일을 오른쪽으로 밀면 즐겨찾기가 되어 맨 위에 놓여요. 그룹 목록의 [즐겨찾기]에서 모아 볼 수 있어요.',
+                    'Tap the ribbon at a file\'s top-left, or swipe the file right in list view, to favorite it and pin it to the top. See them all under [Favorites] in the group list.',
+                    '点文件左上角的书签，或在列表视图中向右滑动文件，即可收藏并置顶。可在分组列表的[收藏]中集中查看。',
+                    'ファイル左上のしおりを押すか、リスト表示で右へスワイプするとお気に入りになり一番上に表示されます。グループ一覧の[お気に入り]でまとめて見られます。')),
+            _row(context,
+                icon: const Icon(Icons.more_vert),
+                title: _tr('파일 메뉴 (점 3개)', 'File Menu (⋮)', '文件菜单 (⋮)', 'ファイルメニュー (⋮)'),
+                desc: _tr('이름 변경·그룹 이동·휴지통 이동을 해요. 표지형에서는 표지 변경·원래 표지로도 있어요. 목록형에서 파일을 왼쪽으로 밀면 휴지통으로 가요. (밀기는 앱 설정에서 끌 수 있어요)',
+                    'Rename, move to a group, or move to trash. In cover view you can also change or reset the cover. In list view, swipe a file left to trash it (swiping can be turned off in app settings).',
+                    '可重命名、移动分组、移至回收站。封面视图中还可更换或恢复封面。列表视图中向左滑动文件即移至回收站（可在应用设置中关闭滑动）。',
+                    '名前変更・グループ移動・ゴミ箱へ移動ができます。表紙表示では表紙の変更・元に戻すも。リスト表示で左へスワイプするとゴミ箱へ（スワイプはアプリ設定でオフにできます）。')),
+            _row(context,
+                icon: const Icon(Icons.checklist_rounded),
+                title: _tr('여러 파일 고르기', 'Select Multiple Files', '多选文件', '複数ファイルを選択'),
+                desc: _tr('파일을 꾹 누르면 여러 개를 고를 수 있고, 아래 단추로 한꺼번에 그룹 이동하거나 휴지통으로 보내요.',
+                    'Long-press a file to select several, then move them to a group or trash them at once with the buttons below.',
+                    '长按文件可多选，再用下方按钮一次移动分组或移至回收站。',
+                    'ファイルを長押しすると複数選べ、下のボタンでまとめてグループ移動・ゴミ箱へ移動できます。')),
+            _row(context,
+                icon: const Icon(Icons.search),
+                title: _tr('검색', 'Search', '搜索', '検索'),
+                desc: _tr('파일 이름으로 찾아요.', 'Find files by name.', '按文件名查找。', 'ファイル名で探します。')),
+            _row(context,
+                icon: const Icon(Icons.delete_outline),
+                title: _tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
+                desc: _tr('지운 파일을 되살리거나 완전히 지워요. 빨간 숫자는 휴지통에 있는 파일 수예요.',
+                    'Restore or permanently delete removed files. The red number shows how many files are in the trash.',
+                    '恢复或彻底删除已删除的文件。红色数字为回收站中的文件数。',
+                    '削除したファイルを復元または完全削除します。赤い数字はゴミ箱のファイル数です。')),
+            _row(context,
+                icon: const Icon(Icons.sort_rounded),
+                title: _tr('정렬', 'Sort', '排序', '並べ替え'),
+                desc: _tr('이름(오름차순·내림차순) 또는 파일 추가 날짜(최신순·오래된 순)로 정렬해요. [정렬 기억하기]를 켜면 다음에도 그대로예요.',
+                    'Sort by name (ascending/descending) or date added (newest/oldest). Turn on [Remember sort] to keep it next time.',
+                    '按名称（升序/降序）或添加日期（最新/最早）排序。开启[记住排序]后下次仍保持。',
+                    '名前(昇順・降順)または追加日(新しい順・古い順)で並べ替えます。[並べ替えを記憶]をオンにすると次回も同じです。')),
+            _row(context,
+                icon: const Icon(Icons.settings_outlined),
+                title: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
+                desc: _tr('앱 테마(라이트·다크·밝은 다크), 언어, 파일 표시 방식(목록형·표지형, 형식·그룹 숨기기), 페이지 기억하기, 탭 존 가이드라인 끄기, 글꼴(한글·워드·EPUB·앱 글꼴, 글꼴 찾기), 사용 설명서가 있어요.',
+                    'App theme (light, dark, dim), language, file display (list/cover, hide extensions or groups), remember last page, turn off the tap zone guide, fonts (HWP·Word, EPUB and app fonts, Find Fonts), and this manual.',
+                    '包含应用主题（浅色·深色·浅色深色）、语言、文件显示方式（列表·封面，隐藏格式·分组）、记住页面、关闭点击区域指引、字体（韩文·Word、EPUB、应用字体，查找字体）和使用说明书。',
+                    'アプリのテーマ(ライト・ダーク・明るいダーク)、言語、ファイル表示(リスト・表紙、形式・グループを隠す)、ページを記憶、タップゾーンガイドをオフ、フォント(ハングル・Word・EPUB・アプリ、フォント検索)、取扱説明書があります。')),
 
-            // 2. 파일 열람 시 나오는 상단 UI 아이콘 안내
-            Text(
-              _tr('2. 파일 열람 시 상단 UI 아이콘 안내', '2. Viewer Top Bar Icons', '2. 阅读界面顶部栏图标说明', '2. ファイル閲覧時の上部UIアイコン説明'),
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 10),
-            // 실제 뷰어 상단 바 미리보기
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.black87,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    const Icon(Icons.arrow_back, color: Colors.white, size: 17),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.list, color: Colors.white, size: 17),
-                    const SizedBox(width: 12),
-                    Text(
-                      _tr('문서 제목', 'Document', '文档标题', '文書タイトル'),
-                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(width: 18),
-                    const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 19),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.skip_next_rounded, color: Colors.white, size: 19),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.lock_outline, color: Colors.white, size: 17),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.screen_rotation, color: Colors.white, size: 17),
-                    const SizedBox(width: 12),
-                    const QuillInkIcon(color: Colors.amber, size: 21),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.menu_book, color: Colors.amber, size: 17),
-                    const SizedBox(width: 12),
-                    _buildDualDirectionSampleIcon(),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 17),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.tune, color: Colors.white, size: 17),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.arrow_back, color: Colors.white, size: 19),
-              title: _tr('뒤로가기', 'Back to Bookshelf', '返回书架', '書斎へ戻る'),
-              desc: _tr('서재 화면으로 돌아갑니다. (화면 잠금 상태였다면 자동으로 잠금이 해제되며, 백그라운드 번역은 계속 유지됩니다.)', 'Returns to the bookshelf (automatically unlocks screen if locked; background translation continues).', '返回书架（若处于锁定状态则自动解锁，后台翻译继续进行）。', '書斎に戻ります(画面ロック中は自動解除され、バックグラウンド翻訳は継続します)。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.list, color: Colors.white, size: 19),
-              title: _tr('목차 열기 (문서/EPUB)', 'Table of Contents', '打开目录', '目次を開く'),
-              desc: _tr('EPUB 문서의 장(Chapter) 목록 서랍을 엽니다.', 'Opens the chapter drawer for EPUB documents.', '打开 EPUB 文档章节目录侧边栏。', 'EPUB文書の目次を開きます。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.skip_previous_rounded, color: Colors.white, size: 17),
-                  Icon(Icons.skip_next_rounded, color: Colors.white, size: 17),
-                ],
-              ),
-              title: _tr('이전 파일 / 다음 파일 이동 (같은 그룹)', 'Previous / Next File in Same Group', '同分组上一文件 / 下一文件', '同じグループ内の前 / 次のファイルへ移動'),
-              desc: _tr('서재로 나가지 않고 현재 파일과 같은 그룹에 있는 이전 파일 또는 다음 파일로 즉시 이동합니다.', 'Jumps directly to the previous or next file within the same group without leaving the viewer.', '无需返回书架，直接切换到同一分组中的上一个或下一个文件。', '書斎に戻らずに同じグループ内の前/次のファイルを直接開きます。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const QuillInkIcon(color: Colors.amber, size: 23),
-              title: _tr('S펜 필기 모드 열기/닫기', 'S Pen Handwriting Mode', 'S Pen 手写模式', 'Sペン手書きモード'),
-              desc: _tr('S펜 전용 필기 툴바를 엽니다. 필기 모드가 켜진 동안에는 S펜으로 화면을 움직여도 페이지가 흔들리거나 넘어가지 않으며, 손가락 스와이프로만 페이지가 이동합니다.', 'Opens the S Pen toolbar. While active, S Pen strokes never move or turn the page; finger swipes turn pages.', '打开 S Pen 工具栏。开启时 S Pen 书写不会移动页面，仅手指滑动可翻页。', 'Sペンツールバーを開きます。手書き中はSペンで画面が動かず、指のスワイプでのみページがめくれます。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.menu_book, color: Colors.amber, size: 19),
-              title: _tr('페이지 표시', 'Page Display', '页面显示', 'ページ表示'),
-              desc: _tr('한 페이지 / 두 페이지 / 자동(넓으면 두 페이지) 중에서 고릅니다. 세로 화면에도 적용되며, 스크롤 모드에서는 바뀌지 않습니다.', 'Choose One Page / Two Pages / Auto. Works in portrait too; not applied in scroll mode.', '可选择单页 / 双页 / 自动。竖屏同样适用，滚动模式下不变。', '1ページ / 2ページ / 自動 から選びます。縦画面にも適用され、スクロールモードでは変わりません。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.screen_rotation, color: Colors.white, size: 19),
-              title: _tr('화면 회전', 'Rotate Screen', '旋转屏幕', '画面回転'),
-              desc: _tr('누르면 자동 / 세로 고정 / 가로 고정 중에서 고를 수 있고, 아이콘이 고른 설정 모양으로 바뀝니다.', 'Choose Auto / Portrait Lock / Landscape Lock; the icon shows the chosen setting.', '可选择自动 / 锁定竖屏 / 锁定横屏，图标会显示所选设置。', '自動 / 縦に固定 / 横に固定から選べ、アイコンが選んだ設定の形になります。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: _buildDualDirectionSampleIcon(),
-              title: _tr('읽기 방향 전환 (좌 → 우 / 우 → 좌)', 'Reading Direction (L → R / R → L)', '阅读方向切换 (左 → 右 / 右 → 左)', '読書方向切替 (左 → 右 / 右 → 左)'),
-              desc: _tr('일반 도서 방향(좌 → 우, 기본값)과 만화 방향(우 → 좌)을 전환하며, 각 파일마다 설정한 읽기 방향을 개별적으로 기억합니다. 페이지 모드가 탭·슬라이드일 때만 적용되고, 스크롤은 원본 순서 그대로입니다.', 'Switches between L → R (default) and R → L reading direction and remembers it for each file individually.', '切换左 → 右（默认）与右 → 左方向，并为每个文件单独记忆。', '左 → 右(基本)と右 → 左を切り替え、ファイルごとに記憶します。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.bookmarks_outlined, color: Colors.white, size: 19),
-              title: _tr('북마크 추가 및 목록', 'Bookmarks', '书签管理', 'ブックマーク'),
-              desc: _tr('현재 페이지를 북마크에 저장하거나 저장된 북마크 위치로 즉시 이동합니다.', 'Saves the current page as a bookmark or jumps to saved bookmarks.', '添加当前页书签或跳转到已保存的书签位置。', '現在のページをブックマーク登録、または登録済み位置へ移動します。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.tune, color: Colors.white, size: 19),
-              title: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
-              desc: _tr('글자 크기·배경색(라이트/다크/세피아 — 세피아는 EPUB만), 화면 잠금 방식(흔들기 / 음량 버튼 동시 입력), 페이지 모드(탭 / 스크롤 / 슬라이드), 페이지 넘김 버튼(음량 / 페이지 이동 / S펜), 진행도 UI 위치를 설정합니다.', 'Configure font size, background (light/dark/sepia — sepia for EPUB only), screen lock (shake / dual volume), page turn buttons, and progress bar position.', '设置字号、背景色（浅色/深色/棕褐色）、屏幕锁定方式（摇晃/双音量键）、翻页按钮及进度条位置。', '文字サイズ・背景色(ライト/ダーク/セピア)、画面ロック方式(振る/音量同時押し)、ページ 전환、進行度バー位置を設定します。'),
-            ),
+            // ── 2. 파일 보기 ──
+            _section(context, _tr('2. 파일 보기', '2. Reading Files', '2. 查看文件', '2. ファイルを見る')),
+            _row(context,
+                icon: const Icon(Icons.touch_app_outlined),
+                title: _tr('화면 누르기 (탭 존)', 'Tap Zones', '点击区域', 'タップゾーン'),
+                desc: _tr('탭 넘김일 때 화면 위 2/3를 누르면 메뉴, 아래 1/3의 왼쪽·오른쪽을 누르면 이전·다음 쪽이에요. 슬라이드·스크롤일 때는 어디를 눌러도 메뉴예요. 파일을 열 때마다 구역 안내가 나오고, 앱 설정에서 끌 수 있어요.',
+                    'With tap turning, tap the top two-thirds for the menu and the bottom-left / bottom-right for the previous / next page. In slide or scroll mode, any tap opens the menu. A zone guide appears each time a file opens; turn it off in app settings.',
+                    '点击翻页时，点屏幕上方 2/3 打开菜单，点下方 1/3 的左·右翻到上一页·下一页。滑动·滚动模式下点任意处都是菜单。每次打开文件会显示区域指引，可在应用设置中关闭。',
+                    'タップめくりでは画面上 2/3 でメニュー、下 1/3 の左・右で前・次のページです。スライド・スクロールではどこを押してもメニューです。ファイルを開くたびに区域の案内が出て、アプリ設定でオフにできます。')),
+            _row(context,
+                icon: const Icon(Icons.list),
+                title: _tr('목차', 'Contents', '目录', '目次'),
+                desc: _tr('EPUB·PDF는 파일에 들어 있는 목차(책갈피)를, 워드·한글은 문서의 목차 쪽이나 번호 붙은 제목으로 목차를 만들어 보여 줘요. 목차가 없으면 \'표시할 목차가 없어요.\'라고 나와요. 파일 내보내기를 하면 목차도 함께 들어가요.',
+                    'EPUB and PDF show the contents (bookmarks) stored in the file; Word and Hangul build contents from the document\'s contents page or numbered headings. If there are none, it says "No contents to show." Exported files keep the contents.',
+                    'EPUB·PDF 显示文件内的目录（书签），Word·韩文根据目录页或编号标题生成目录。没有目录时显示“没有可显示的目录。”导出文件时目录也会一并保存。',
+                    'EPUB・PDFはファイル内の目次(しおり)を、Word・ハングルは目次ページや番号付きの見出しから目次を作ります。ない場合は「表示できる目次がありません。」と出ます。書き出したファイルにも目次が入ります。')),
+            _row(context,
+                icon: const Icon(Icons.search),
+                title: _tr('파일 내 단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
+                desc: _tr('파일 안의 글자를 찾아 그 쪽으로 이동해요.', 'Finds words in the file and jumps to them.', '查找文件中的文字并跳转。', 'ファイル内の文字を探してそのページへ移動します。')),
+            _row(context,
+                icon: const MoonMorphIcon(filled: false, size: 20),
+                title: _tr('배경 색상', 'Background Color', '背景颜色', '背景色'),
+                desc: _tr('라이트·다크를 바꿔요(EPUB은 세피아도). 한글·워드·TXT는 이 설정을, 그 밖의 파일은 앱 테마를 따르고, 파일에 배경색이 있으면 그 색이 먼저예요.',
+                    'Switch light / dark (EPUB also has sepia). Hangul, Word and TXT follow this setting; other files follow the app theme. A file\'s own background color always comes first.',
+                    '切换浅色·深色（EPUB 另有棕褐色）。韩文·Word·TXT 按此设置，其他文件按应用主题；文件自带背景色时优先使用。',
+                    'ライト・ダークを切り替えます(EPUBはセピアも)。ハングル・Word・TXTはこの設定、それ以外はアプリのテーマに従い、ファイル自体の背景色があればそれが優先です。')),
+            _row(context,
+                icon: ExportFileIcon(size: 21, color: cs.onSurface),
+                title: _tr('파일 내보내기', 'Export File', '导出文件', 'ファイルを書き出す'),
+                desc: _tr('메모·필기와 목차를 넣은 PDF로 내보내요.', 'Exports a PDF including your memos, handwriting and contents.', '导出包含笔记、手写和目录的 PDF。', 'メモ・手書きと目次を入れたPDFに書き出します。')),
+            _row(context,
+                icon: const Icon(Icons.tune),
+                title: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
+                desc: _tr('글자 크기(EPUB), 페이지 모드(탭·슬라이드·스크롤 — 스크롤이면 스크롤바 끄기), 페이지 넘김 버튼(음량·S펜), 화면 잠금 끄는 방법(흔들기·음량 버튼 동시에), 진행도 UI 위치, 메모 도구 모음 위치, 도구 모음 형태, 왼손잡이, 하단 정보 표시를 정해요.',
+                    'Font size (EPUB), page mode (tap / slide / scroll — with an option to hide the scroll bar), page-turn buttons (volume, S Pen), how to unlock the screen (shake / both volume keys), progress bar position, memo toolbar position, toolbox style, left-handed mode and footer info.',
+                    '设置字号（EPUB）、翻页模式（点击·滑动·滚动，滚动时可隐藏滚动条）、翻页按键（音量·S Pen）、解除锁屏方式（摇晃·同时按音量键）、进度条位置、笔记工具栏位置、工具箱样式、左手模式和底部信息。',
+                    '文字サイズ(EPUB)、ページモード(タップ・スライド・スクロール — スクロール時はスクロールバーを隠す)、ページめくりボタン(音量・Sペン)、画面ロックの解除方法(振る・音量ボタン同時押し)、進行度バーの位置、メモツールバーの位置、ツールボックスの形、左利き、下部情報表示を設定します。')),
+            _row(context,
+                icon: const Icon(Icons.grid_view_rounded),
+                title: _tr('도구 모음', 'Toolbox', '工具箱', 'ツールボックス'),
+                desc: _tr('이전·다음 파일(같은 그룹), 화면 잠금, 화면 회전(자동·세로·가로), 페이지 표시(한 쪽·두 쪽·자동), 읽기 방향(좌→우·우→좌, 파일마다 기억), 메모, 글자 복사, 북마크, 확대·축소가 있어요.',
+                    'Previous / next file (same group), lock screen, rotate (auto / portrait / landscape), page display (one / two pages / auto), reading direction (L→R / R→L, remembered per file), memo, copy text, bookmarks, and zoom.',
+                    '包括上一个·下一个文件（同一分组）、锁定屏幕、旋转屏幕（自动·竖屏·横屏）、页面显示（单页·双页·自动）、阅读方向（左→右·右→左，按文件记忆）、笔记、复制文字、书签、放大·缩小。',
+                    '前・次のファイル(同じグループ)、画面ロック、画面回転(自動・縦・横)、ページ表示(1ページ・2ページ・自動)、読む方向(左→右・右→左、ファイルごとに記憶)、メモ、文字コピー、ブックマーク、拡大・縮小があります。')),
+            _row(context,
+                icon: const Icon(Icons.swap_vert_rounded),
+                title: _tr('스크롤 보기', 'Scroll View', '滚动视图', 'スクロール表示'),
+                desc: _tr('쪽을 세로로 이어서 봐요. 오른쪽 회색 막대를 끌면 빠르게 이동해요. 두 손가락으로 벌려 확대하고, 두 번 누르면 원래 크기로 돌아와요. 스크롤 보기에서는 메모를 쓰지 않아요.',
+                    'Pages continue vertically. Drag the gray bar on the right to move quickly. Pinch to zoom and double-tap to reset. Memos are off in scroll view.',
+                    '页面纵向连续显示。拖动右侧灰色滚动条可快速移动。双指张开放大，双击恢复原始大小。滚动视图中不能使用笔记。',
+                    'ページを縦につなげて表示します。右の灰色バーを引くと素早く移動できます。2本指で拡大、ダブルタップで元のサイズに戻ります。スクロール表示ではメモは使えません。')),
 
-            const Divider(height: 36),
-
-            // 3. S펜 툴바 & 하단 진행도 UI & 페이지 이동 버튼 안내
-            Text(
-              _tr('3. S펜 필기 툴바 및 하단 이동 아이콘 안내', '3. S Pen Toolbar & Bottom Navigation Icons', '3. S Pen 工具栏与底部导航图标', '3. Sペンツールバーと下部移動アイコン'),
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 12),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.touch_app, color: Colors.amber, size: 19),
-              title: _tr('손으로 글씨 쓰기 (한 손가락 모양 아이콘)', 'Finger Writing (One-Finger Icon)', '手指书写（单指图标）', '指で手書き（指差しアイコン）'),
-              desc: _tr('S펜 필기 바에서 색상 원 왼쪽의 한 손가락 아이콘을 누르면 아이콘에 색상(노란색)이 켜지며 손가락으로 글씨를 쓸 수 있습니다. 손으로 글씨를 쓰는 동안에는 손터치 페이지 넘김이 자동으로 잠깁니다.', 'Tap the one-finger icon to the left of the colors to light it up in color and write with your finger. Touch page turning is automatically locked while finger writing is active.', '点击颜色左侧的单指图标使其亮起颜色即可用手指书写，书写期间自动锁定触屏翻页。', '色の左にある指アイコンを押すと色が点灯し指で手書きできます。手書き中は指でのページめくりが自動ロックされます。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Icon(Icons.cleaning_services_outlined, color: Colors.amber, size: 19),
-              title: _tr('지우개 / 색상(6색) / 필기 전체 지우기', 'Eraser, 6 Colors & Clear All Strokes', '橡皮擦、6种颜色与清空手写', '消しゴム・6色パレット・手書き全消去'),
-              desc: _tr('노란·빨간·하늘·초록·흰색·검은색 펜 선택과 선 굵기 슬라이더(기본 2.0pt), 부드러운 부분 지우개(🧹), 텍스트 메모(📝), 필기 전체 지우기(🗑, 2페이지 보기 시 양쪽 페이지 모두 삭제)를 제공합니다.', 'Pick from 6 colors, adjust stroke width, smooth partial Eraser, text notes, or Clear All Strokes (clears both pages in 2-page mode).', '支持6种颜色、粗细滑块、平滑局部橡皮擦、文字备注及清空手写（双页模式下同时清空两页）。', '6色、太さスライダー、滑らかな消しゴム、テキストメモ、手書き全消去(2ページ表示時は両ページ消去)が使えます。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.first_page, color: Colors.white, size: 17),
-                  Icon(Icons.last_page, color: Colors.white, size: 17),
-                ],
-              ),
-              title: _tr('진행도 바 맨 처음 / 맨 마지막 페이지 이동 화살표', 'Jump to First / Last Page Arrows', '跳转至第一页 / 最后一页箭头', '最初 / 最後のページへ移動する矢印'),
-              desc: _tr('진행도 슬라이더 양끝의 화살표를 누르면 문서의 맨 처음(1페이지)과 맨 마지막(끝 페이지)으로 즉시 이동합니다.', 'Tap the arrows at both ends of the progress bar to jump straight to the first or last page.', '点击进度条两端的箭头可直接跳至第一页或最后一页。', '進行度バー両端の矢印で最初(1ページ)と最後のページへ即座に移動します。'),
-            ),
-            _buildIconGuideRow(
-              iconWidget: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.arrow_back, color: Colors.amber, size: 16),
-                  SizedBox(width: 2),
-                  Icon(Icons.arrow_forward, color: Colors.amber, size: 16),
-                ],
-              ),
-              title: _tr('우측 하단 페이지 이동 버튼 (← / →)', 'Bottom-Right Page Nav Buttons (← / →)', '右下角翻页按钮 (← / →)', '右下ページ移動ボタン (← / →)'),
-              desc: _tr('뷰어 설정에서 [페이지 이동 버튼]을 켜면 우측 하단에 나타나며, 상단 UI를 띄우지 않고 깔끔하게 이전(←)·다음(→) 페이지로 전환합니다.', 'When enabled in Viewer Settings, appears at the bottom-right to turn to the previous (←) or next (→) page without popping up the top bar.', '在阅读器设置中开启后显示在右下角，点击左(←)/右(→)箭头可直接翻页且不会弹出顶部菜单。', '뷰어設定でONにすると右下に表示され、上部UIを出さずに前(←)・次(→)のページへ移動します。'),
-            ),
+            // ── 3. 메모 ──
+            _section(context, _tr('3. 메모 (필기)', '3. Memos (Handwriting)', '3. 笔记（手写）', '3. メモ（手書き）')),
+            _row(context,
+                icon: QuillInkIcon(color: cs.onSurface, size: 22),
+                title: _tr('메모 도구 모음', 'Memo Toolbar', '笔记工具栏', 'メモツールバー'),
+                desc: _tr('펜(한 번 더 누르면 굵기·색상), 획 지우개(한 번 더 누르면 종류), 손으로 글씨 쓰기, 되돌리기·다시 실행, 필기 전체 지우기, 완료가 있어요. 고른 도구는 연두색으로 표시돼요. S펜으로 쓰는 동안에는 쪽이 넘어가지 않아요.',
+                    'Pen (tap again for width and color), stroke eraser (tap again for type), finger writing, undo / redo, clear all and done. The selected tool is highlighted in green. Writing with the S Pen never turns the page.',
+                    '有笔（再点一次调粗细·颜色）、笔画橡皮擦（再点一次选类型）、手指书写、撤销·重做、清除全部手写、完成。所选工具以绿色显示。用 S Pen 书写时不会翻页。',
+                    'ペン(もう一度でペンの太さ・色)、消しゴム(もう一度で種類)、指で手書き、元に戻す・やり直し、手書きを全消去、完了があります。選んだツールは黄緑で表示されます。Sペンで書いている間はページがめくれません。')),
           ],
         ),
       ),
@@ -857,25 +706,34 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   bool _sortLoaded = false;
 
   /// 파일 정렬 창: 정렬 기준(이름 / 추가 날짜) · 순서 · 정렬 기억하기. 고르면 바로 적용
+  final GlobalKey _sortBtnKey = GlobalKey();
+
+  /// 정렬 창: 정렬 단추에서 튀어나와 바로 아래로 펼쳐짐 (그룹 목록과 같은 움직임)
+  /// 이름을 고르면 그 아래 오름차순·내림차순, 파일 추가 날짜를 고르면 그 아래 최신순·오래된 순
   Future<void> _showSortSheet() async {
     Future<void> apply() async {
       setState(() => _allBooks = List<File>.of(_allBooks)..sort((a, b) => _libCompare(a, b, _favoritePaths)));
       await StorageService.setLibrarySort(_sortBy, _sortAsc, _sortRemember);
     }
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: false, // 창 안에 회색 막대가 이미 있음
+    final box = _sortBtnKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
+    final Rect anchor = box.localToGlobal(Offset.zero, ancestor: overlayBox) & box.size;
+    await Navigator.of(context).push<void>(PopPanelRoute<void>(
+      anchor: anchor,
+      width: 380,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
           final cs = Theme.of(ctx).colorScheme;
+          final bool byName = _sortBy == 'name';
           Widget label(String t) => Padding(
-                padding: const EdgeInsets.only(top: 18, bottom: 6),
+                padding: const EdgeInsets.only(top: 14, bottom: 2),
                 child: Text(t, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, letterSpacing: 0.5, color: cs.onSurfaceVariant)),
               );
           Widget byRow(String value, String text) => InkWell(
+                borderRadius: BorderRadius.circular(10),
                 onTap: () {
                   // 기준을 바꾸면 순서는 기본값으로: 이름은 오름차순, 추가 날짜는 최신순
                   setSheet(() {
@@ -885,78 +743,73 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   apply();
                 },
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Row(
                     children: [
-                      Expanded(child: Text(text, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600))),
-                      Icon(_sortBy == value ? Icons.check_circle : Icons.circle_outlined, size: 26, color: _sortBy == value ? AppColors.of(ctx) : cs.outline),
+                      Expanded(child: Text(text, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
+                      Icon(_sortBy == value ? Icons.check_circle : Icons.circle_outlined, size: 24, color: _sortBy == value ? AppColors.of(ctx) : cs.outline),
                     ],
                   ),
                 ),
               );
-          final bool byName = _sortBy == 'name';
-          return SafeArea(
-            top: false,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 14),
-                      decoration: BoxDecoration(color: cs.onSurfaceVariant.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(2)),
-                    ),
-                  ),
-                  Text(_tr('정렬', 'Sort', '排序', '並べ替え'), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 4),
-                  Text(_tr('파일을 보여 줄 순서를 골라 주세요.', 'Choose how files are ordered.', '选择文件显示顺序。', 'ファイルの並び順を選んでください。'),
-                      style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
-                  label(_tr('정렬 기준', 'Sort by', '排序依据', '並べ替えの基準')),
-                  byRow('name', _tr('이름', 'Name', '名称', '名前')),
-                  Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.5)),
-                  byRow('date', _tr('파일 추가 날짜', 'Date added', '添加日期', '追加日')),
-                  label(_tr('순서', 'Order', '顺序', '順序')),
-                  SettingGroup(children: [
-                    SettingOption(
-                      label: Text(byName ? _tr('오름차순', 'Ascending', '升序', '昇順') : _tr('최신순', 'Newest', '最新', '新しい順')),
-                      selected: byName ? _sortAsc : !_sortAsc,
-                      onSelected: (_) {
-                        setSheet(() => _sortAsc = byName);
-                        apply();
-                      },
-                    ),
-                    SettingOption(
-                      label: Text(byName ? _tr('내림차순', 'Descending', '降序', '降順') : _tr('오래된 순', 'Oldest', '最早', '古い順')),
-                      selected: byName ? !_sortAsc : _sortAsc,
-                      onSelected: (_) {
-                        setSheet(() => _sortAsc = !byName);
-                        apply();
-                      },
-                    ),
-                  ]),
-                  const SizedBox(height: 10),
-                  SettingToggle(
-                    label: Text(_tr('정렬 기억하기', 'Remember sort', '记住排序', '並べ替えを記憶')),
-                    selected: _sortRemember,
-                    onSelected: (v) {
-                      setSheet(() => _sortRemember = v);
-                      apply();
-                    },
-                  ),
-                  Text(_tr('다시 열어도 이 정렬을 유지해요.', 'Keeps this order next time.', '下次打开时保持此排序。', '次回もこの並び順を保ちます。'),
-                      style: TextStyle(fontSize: 13.5, color: cs.onSurfaceVariant)),
-                  SettingDoneButton(label: _tr('완료', 'Done', '完成', '完了'), onPressed: () => Navigator.of(ctx).pop()),
-                ],
-              ),
+          // 고른 기준 바로 아래에만 순서 고르기가 펼쳐짐
+          Widget orders(bool forName) => AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: byName != forName
+                    ? const SizedBox(width: double.infinity, height: 0)
+                    : Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: SettingGroup(children: [
+                          SettingOption(
+                            label: Text(forName ? _tr('오름차순', 'Ascending', '升序', '昇順') : _tr('최신순', 'Newest', '最新', '新しい順')),
+                            selected: forName ? _sortAsc : !_sortAsc,
+                            onSelected: (_) {
+                              setSheet(() => _sortAsc = forName);
+                              apply();
+                            },
+                          ),
+                          SettingOption(
+                            label: Text(forName ? _tr('내림차순', 'Descending', '降序', '降順') : _tr('오래된 순', 'Oldest', '最早', '古い順')),
+                            selected: forName ? !_sortAsc : _sortAsc,
+                            onSelected: (_) {
+                              setSheet(() => _sortAsc = !forName);
+                              apply();
+                            },
+                          ),
+                        ]),
+                      ),
+              );
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(_tr('정렬', 'Sort', '排序', '並べ替え'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
+                label(_tr('정렬 기준', 'Sort by', '排序依据', '並べ替えの基準')),
+                byRow('name', _tr('이름', 'Name', '名称', '名前')),
+                orders(true),
+                Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.5)),
+                byRow('date', _tr('파일 추가 날짜', 'Date added', '添加日期', '追加日')),
+                orders(false),
+                const SizedBox(height: 4),
+                SettingToggle(
+                  label: Text(_tr('정렬 기억하기', 'Remember sort', '记住排序', '並べ替えを記憶')),
+                  selected: _sortRemember,
+                  onSelected: (v) {
+                    setSheet(() => _sortRemember = v);
+                    apply();
+                  },
+                ),
+                SettingDoneButton(label: _tr('완료', 'Done', '完成', '完了'), onPressed: () => Navigator.of(ctx).pop()),
+              ],
             ),
           );
         },
       ),
-    );
+    ));
   }
 
   /// 북마크한 파일 먼저, 그다음 고른 정렬 (이름 / 추가 날짜)
@@ -3423,6 +3276,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   },
                 ),
                 IconButton(
+                  key: _sortBtnKey,
                   icon: const Icon(Icons.sort_rounded),
                   tooltip: _tr('정렬', 'Sort', '排序', '並べ替え'),
                   onPressed: () {

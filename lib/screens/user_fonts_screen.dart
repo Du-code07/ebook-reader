@@ -276,7 +276,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
             _fontChoice(cs, '', _t('기본 글꼴', 'Default font', '默认字体', '既定のフォント'),
                 widget.category == 'epub'
                     ? _t('책에 들어 있는 원래 글꼴', 'The book\'s own fonts', '书中自带的字体', '本に含まれる元のフォント')
-                    : _t('사용자 지정 글꼴', 'Your phone\'s font setting', '用户指定字体', 'ユーザー指定フォント')),
+                    : _t('앱 기본 글꼴', 'App default font', '应用默认字体', 'アプリの既定フォント')),
             for (final family in {for (final e in _fonts) UserFonts.familyOf(e)})
               _fontChoice(
                 cs,
