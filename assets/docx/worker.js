@@ -8,7 +8,7 @@ let preparedRtf;
 let rtfLayout;
 const engine = (async () => {
   const response = await fetch('./engine/odr-core.wasm');
-  if (!response.ok) throw new Error('Word 문서 엔진 파일을 읽지 못했습니다.');
+  if (!response.ok) throw new Error('Word 문서 엔진 파일을 읽지 못했습니다');
   const odr = await Odr.load({ wasmBinary: new Uint8Array(await response.arrayBuffer()) });
   postMessage({ type: 'ready', version: '7.7.0' });
   return odr;
@@ -45,7 +45,7 @@ async function shrinkRaster(bytes, mimeType) {
 async function perform({ action, bytes, password, path, session: requestedSession, format }) {
   const odr = await engine;
   if (action === 'resource') {
-    if (!document || requestedSession !== session || !resourcePaths.has(path)) throw new Error('문서 이미지 요청이 만료되었습니다.');
+    if (!document || requestedSession !== session || !resourcePaths.has(path)) throw new Error('문서 이미지 요청이 만료되었습니다');
     const picture = rtfPictures.get(path);
     const result = picture ? { bytes: picture.bytes.slice(), mimeType: picture.mimeType } : document.read(path);
     if (/image\/(?:x-)?(?:emf|wmf)/i.test(result.mimeType)) {
@@ -55,7 +55,7 @@ async function perform({ action, bytes, password, path, session: requestedSessio
       // 마스크 연산이 실제로 쓰이는 그림에서만 켠다 (Office의 EMF+ 그림은 사진을 EMF+로 그리므로 필요 없음).
       const { needsExactRasterOps } = await import('./emf_fix.js').catch(() => ({ needsExactRasterOps: () => true }));
       let svg = await convertMetafileToSvg(buffer, needsExactRasterOps(buffer) ? undefined : { exactRasterOps: false });
-      if (!svg) throw new Error('이 벡터 그림을 변환하지 못했습니다.');
+      if (!svg) throw new Error('이 벡터 그림을 변환하지 못했습니다');
       // FReader: 표 칸마다 넣은 사진이 앞 칸의 잘라내기 영역과 잘못 겹쳐 사라지는 문제 보정
       try { const { fixDisjointClipChains } = await import('./emf_fix.js'); svg = fixDisjointClipChains(svg); } catch (_) {}
       return { type: 'resource', bytes: new TextEncoder().encode(svg), mimeType: 'image/svg+xml', session };
@@ -86,7 +86,7 @@ async function perform({ action, bytes, password, path, session: requestedSessio
     }
   }
   if (action === 'close') { closeDocument(); session++; return { type: 'closed' }; }
-  if (!document) throw new Error('Word 문서가 열려 있지 않습니다.');
+  if (!document) throw new Error('Word 문서가 열려 있지 않습니다');
   if (document.isPasswordEncrypted()) {
     if (password == null) return { type: 'password', incorrect: false };
     try { document.decrypt(password); }
@@ -101,7 +101,7 @@ async function perform({ action, bytes, password, path, session: requestedSessio
   const detectedFormat = actualType === odr.enums.FileType.doc ? 'doc'
     : actualType === odr.enums.FileType.docx ? 'docx'
     : actualType === odr.enums.FileType.rtf ? 'rtf' : null;
-  if (!detectedFormat) throw new Error('파일 내용이 Word(DOC/DOCX/RTF) 문서 형식과 일치하지 않습니다.');
+  if (!detectedFormat) throw new Error('파일 내용이 Word(DOC/DOCX/RTF) 문서 형식과 일치하지 않습니다');
   const result = detectedFormat === 'rtf' && rtfLayout
     ? { html: rtfLayout.html, externalResources: [] } : document.render(0);
   let html = result.html;
@@ -109,7 +109,7 @@ async function perform({ action, bytes, password, path, session: requestedSessio
   rtfLayout = null;
   preparedRtf = null;
   // Images no longer count against this text-only safety budget.
-  if (html.length > 64 * 1024 * 1024) throw new Error('문서의 본문 구조가 너무 큽니다. 문서를 나누어 열어 주세요.');
+  if (html.length > 64 * 1024 * 1024) throw new Error('문서의 본문 구조가 너무 큽니다\n문서를 나누어 열어 주세요');
   const resources = [...new Map(result.externalResources.map(r => [r.path, r])).values()];
   for (const picture of rtfPictures.values()) resources.push({ path: picture.path, mimeType: picture.mimeType });
   resourcePaths = new Set(resources.map(r => r.path));

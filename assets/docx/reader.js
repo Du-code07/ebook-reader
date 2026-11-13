@@ -46,7 +46,7 @@ worker.onmessage = ({ data }) => {
   else if (data.type === 'ready') { ready = true; emit('ready', { version: data.version }); }
   else if (data.type === 'error') fail(data.message);
 };
-worker.onerror = event => fail(event.message || 'Word 문서 엔진을 시작하지 못했습니다.');
+worker.onerror = event => fail(event.message || 'Word 문서 엔진을 시작하지 못했습니다');
 function request(action, data = {}, transfer = []) {
   return new Promise(resolve => {
     const id = ++requestId; requests.set(id, resolve);
@@ -71,7 +71,7 @@ function clearPages() {
   document.querySelectorAll('style[data-document]').forEach(el => el.remove());
 }
 function beginDocument(length, config) {
-  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_BYTES) throw new Error('열 수 있는 문서 크기는 256MB 이하입니다.');
+  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_BYTES) throw new Error('열 수 있는 문서 크기는 256MB 이하입니다');
   generation++; clearPages();
   if (incoming) incoming.fill(0);
   incoming = new Uint8Array(length); received = 0; awaitingPassword = false;
@@ -79,9 +79,9 @@ function beginDocument(length, config) {
   configure(config);
 }
 function appendChunk(offset, encoded) {
-  if (!incoming || offset !== received) throw new Error('문서 전송 순서가 올바르지 않습니다.');
+  if (!incoming || offset !== received) throw new Error('문서 전송 순서가 올바르지 않습니다');
   const binary = atob(encoded);
-  if (received + binary.length > incoming.length) throw new Error('문서 전송 크기가 일치하지 않습니다.');
+  if (received + binary.length > incoming.length) throw new Error('문서 전송 크기가 일치하지 않습니다');
   for (let i = 0; i < binary.length; i++) incoming[received + i] = binary.charCodeAt(i);
   received += binary.length;
 }
@@ -91,7 +91,7 @@ async function openDocument(password = null) {
     let result;
     if (awaitingPassword) result = await request('password', { password });
     else {
-      if (!incoming || received !== incoming.length) throw new Error('문서 데이터를 모두 받지 못했습니다.');
+      if (!incoming || received !== incoming.length) throw new Error('문서 데이터를 모두 받지 못했습니다');
       const bytes = incoming; incoming = null; received = 0;
       result = await request('open', { bytes, password, format: options.format }, [bytes.buffer]);
     }
@@ -283,7 +283,7 @@ async function preparePages(html, current) {
   sanitize(parsed);
   if (detectedFormat !== 'docx' || !applyDocxLayout(parsed, options.docxLayout)) applyPageBreaks(parsed);
   const sources = [...parsed.querySelectorAll('.odr-pages > .odr-page-outer')];
-  if (!sources.length) throw new Error('Word 문서에서 표시할 본문을 찾지 못했습니다.');
+  if (!sources.length) throw new Error('Word 문서에서 표시할 본문을 찾지 못했습니다');
   for (const style of parsed.head.querySelectorAll('style')) {
     const copy = document.createElement('style'); copy.dataset.document = '';
     copy.textContent = style.textContent; document.head.insertBefore(copy, document.querySelector('link'));
@@ -325,7 +325,7 @@ async function preparePages(html, current) {
   const result = [];
   for (const source of measure.children) {
     const inner = source.querySelector(':scope > .odr-page-inner');
-    if (!inner) throw new Error('Word 문서 본문 구조가 올바르지 않습니다.');
+    if (!inner) throw new Error('Word 문서 본문 구조가 올바르지 않습니다');
     if (source.classList.contains('rtf-paper')) {
       // Office reserves space for page furniture even when the saved margins
       // would otherwise overlap it. Measure after fonts and image extents load.
@@ -344,7 +344,7 @@ async function preparePages(html, current) {
     }
     const bounds = source.getBoundingClientRect(), css = getComputedStyle(inner);
     const width = bounds.width, height = bounds.height;
-    if (!(width > 0 && height > 0 && width < 20000 && height < 20000)) throw new Error('Word 문서 페이지 크기가 올바르지 않습니다.');
+    if (!(width > 0 && height > 0 && width < 20000 && height < 20000)) throw new Error('Word 문서 페이지 크기가 올바르지 않습니다');
     const margin = ['Top', 'Right', 'Bottom', 'Left'].map(side => parseFloat(css['margin' + side]) || 0);
     const bodyWidth = Math.max(32, width - margin[1] - margin[3]);
     const bodyHeight = Math.max(32, height - margin[0] - margin[2]);
@@ -373,7 +373,7 @@ async function preparePages(html, current) {
     Object.assign(inner.style, { width: `${bodyWidth}px`, height: `${bodyHeight}px`, columnWidth: `${bodyWidth}px`, columnGap: `${columnGap}px` });
     if (inner.classList.contains('docx-layout')) settleDocxPageBreaks(inner, columnStride);
     const columns = Math.max(1, Math.ceil((inner.scrollWidth + columnGap - 1) / columnStride));
-    if (result.length + columns > 10000) throw new Error('표시할 Word 문서 페이지 수가 너무 많습니다.');
+    if (result.length + columns > 10000) throw new Error('표시할 Word 문서 페이지 수가 너무 많습니다');
     // FReader: 쪽마다 들어 있는 그림 목록 (다음·이전 쪽 그림을 미리 불러오는 데 사용)
     const columnImages = Array.from({ length: columns }, () => new Set());
     const innerLeft = inner.getBoundingClientRect().left;
@@ -467,7 +467,7 @@ function missingImage(img, reason) {
   if (!brokenImages.has(key)) { brokenImages.add(key); unavailableImages++; }
   const notice = document.createElement('span');
   notice.className = 'freader-missing-image'; notice.dataset.resource = key; if (reason) notice.dataset.reason = String(reason); notice.style.cssText = img.style.cssText;
-  notice.textContent = '이 그림은 표시할 수 없습니다.'; img.replaceWith(notice);
+  notice.textContent = '이 그림은 표시할 수 없습니다'; img.replaceWith(notice);
 }
 function preparePageSource(source, entry, index) {
     source.querySelector('.freader-columns').style.transform = `translateX(${-entry.column * entry.columnStride}px)`;
@@ -700,20 +700,76 @@ function setVertical(on) {
     document.body.appendChild(vhost);
     vhost.addEventListener('scroll', vSchedule, { passive: true });
     vResize.observe(vhost);
+    vZoomListen(vhost);
     vLayout(false);
     vGoto(page);
   } else {
     vertical = false;
     vResize.disconnect();
     for (const index of [...vMounted.keys()]) vUnmount(index);
-    vhost?.remove(); vhost = null; vSlots = []; vTops = [];
+    vhost?.remove(); vhost = null; vSlots = []; vTops = []; vZoom = 1; vPinch = null;
     host.style.display = '';
     void render().then(reportLocation);
   }
 }
+// ── FReader: 스크롤 보기 두 손가락 확대·축소 (줄이면 쪽이 작아져 가운데에, 늘리면 옆으로도 움직일 수 있음) ──
+let vZoom = 1, vPinch = null;
+const V_ZOOM_MIN = 0.5, V_ZOOM_MAX = 3;
+function vTouchInfo(t) {
+  return { d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 };
+}
+function vPinchStart(e) {
+  if (!vertical || !vhost || e.touches.length !== 2) return;
+  const t = vTouchInfo(e.touches);
+  vPinch = { d0: Math.max(1, t.d), z0: vZoom, fx: t.x, fy: t.y, dx: 0, dy: 0, z: vZoom };
+  vhost.style.transformOrigin = `${t.x}px ${t.y}px`;
+  e.preventDefault();
+}
+function vPinchMove(e) {
+  if (!vPinch || !vhost) return;
+  e.preventDefault();
+  if (e.touches.length !== 2) return;
+  const t = vTouchInfo(e.touches);
+  vPinch.z = Math.max(V_ZOOM_MIN, Math.min(V_ZOOM_MAX, vPinch.z0 * t.d / vPinch.d0));
+  vPinch.dx = t.x - vPinch.fx; vPinch.dy = t.y - vPinch.fy;
+  vhost.style.transform = `translate(${vPinch.dx}px, ${vPinch.dy}px) scale(${vPinch.z / vPinch.z0})`;
+}
+function vPinchEnd(e) {
+  if (!vPinch || !vhost) return;
+  if (e.touches.length >= 2) return;
+  const p = vPinch; vPinch = null;
+  // 손가락 가운데 있던 글 자리를 기억해 두었다가, 새 크기로 다시 놓은 뒤 같은 자리에 오게
+  const cy = vhost.scrollTop + p.fy, i = vIndexAt(cy), slot = vSlots[i];
+  const sh = Math.max(1, slot ? slot.offsetHeight : 1), sw = Math.max(1, slot ? slot.offsetWidth : 1);
+  const fy = (cy - vTops[i]) / sh, fx = (vhost.scrollLeft + p.fx - (slot ? slot.offsetLeft : 0)) / sw;
+  vhost.style.transform = ''; vhost.style.transformOrigin = '';
+  let z = p.z; if (Math.abs(z - 1) < 0.05) z = 1;
+  if (z === vZoom) return;
+  vZoom = z;
+  vLayout(true);
+  const s2 = vSlots[i];
+  if (!s2) return;
+  vhost.scrollTop = vTops[i] + fy * s2.offsetHeight - (p.fy + p.dy);
+  vhost.scrollLeft = s2.offsetLeft + fx * s2.offsetWidth - (p.fx + p.dx);
+  vUpdate(); vReportMetrics();
+}
+function vZoomListen(el) {
+  el.addEventListener('touchstart', vPinchStart, { passive: false });
+  el.addEventListener('touchmove', vPinchMove, { passive: false });
+  el.addEventListener('touchend', vPinchEnd);
+  el.addEventListener('touchcancel', vPinchEnd);
+}
+/** 확대 배율에 맞춘 쪽 너비 */
+function vPageWidth() { return (vhost.clientWidth || innerWidth) * vZoom; }
+/** 화면보다 좁게 줄였으면 쪽을 가로 가운데에 */
+function vPlaceSlot(slot, W) {
+  const VW = vhost.clientWidth || innerWidth;
+  slot.style.marginLeft = W < VW - 0.5 ? `${Math.floor((VW - W) / 2)}px` : '';
+}
 function vLayout(keep) {
   if (!vhost || !pages.length) return;
-  const W = vhost.clientWidth || innerWidth;
+  const W = vPageWidth();
+  vhost.style.overflowX = vZoom > 1.001 ? 'auto' : 'hidden';
   let anchor = page, frac = 0;
   if (keep && vTops.length) {
     const st = vhost.scrollTop;
@@ -732,7 +788,7 @@ function vLayout(keep) {
   vTops = []; let y = 0;
   pages.forEach((entry, i) => {
     const sh = entry.width > 0 ? W * entry.height / entry.width : W * 1.414;
-    vSlots[i].style.width = `${W}px`; vSlots[i].style.height = `${sh}px`;
+    vSlots[i].style.width = `${W}px`; vSlots[i].style.height = `${sh}px`; vPlaceSlot(vSlots[i], W);
     vTops.push(y); y += sh + V_GAP;
   });
   vTops.push(y);
@@ -764,7 +820,7 @@ function vScrollToRatio(t) {
 }
 function vSchedule() {
   if (!vRaf) vRaf = requestAnimationFrame(() => { vRaf = 0; vUpdate(); });
-  if (!vMetricsTimer) vMetricsTimer = setTimeout(() => { vMetricsTimer = 0; vReportMetrics(); }, 70);
+  if (!vMetricsTimer) vMetricsTimer = setTimeout(() => { vMetricsTimer = 0; vReportMetrics(); }, 30);
 }
 function vReportMetrics() {
   if (vhost) emit('scrollMetrics', { top: vhost.scrollTop, height: vhost.scrollHeight, client: vhost.clientHeight });

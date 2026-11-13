@@ -44,10 +44,10 @@ window.addEventListener('flutterInAppWebViewPlatformReady', flush);
 
 function errorMessage(error) {
   switch (error?.code) {
-    case 'unsupported-content': return '이 구형 PPT에는 아직 지원하지 않는 내용이 있습니다. PowerPoint에서 PPTX 또는 PDF로 저장한 뒤 열어 주세요.';
-    case 'unsupported-encryption': return '이 프레젠테이션의 암호화 방식은 지원하지 않습니다. 암호를 해제한 사본을 열어 주세요.';
-    case 'ooxml-resource-limit': return '프레젠테이션을 압축 해제한 데이터가 처리 한도를 초과했습니다. 파일을 나누어 열어 주세요.';
-    case 'ooxml-decoded-image-limit': return '슬라이드의 그림을 처리할 메모리가 부족합니다. 그림 해상도를 낮춘 사본을 열어 주세요.';
+    case 'unsupported-content': return '이 구형 PPT에는 아직 지원하지 않는 내용이 있습니다\nPowerPoint에서 PPTX 또는 PDF로 저장한 뒤 열어 주세요';
+    case 'unsupported-encryption': return '이 프레젠테이션의 암호화 방식은 지원하지 않습니다\n암호를 해제한 사본을 열어 주세요';
+    case 'ooxml-resource-limit': return '프레젠테이션을 압축 해제한 데이터가 처리 한도를 초과했습니다\n파일을 나누어 열어 주세요';
+    case 'ooxml-decoded-image-limit': return '슬라이드의 그림을 처리할 메모리가 부족합니다\n그림 해상도를 낮춘 사본을 열어 주세요';
     default: return '프레젠테이션을 표시하지 못했습니다: ' + String(error?.message || error).slice(0, 400);
   }
 }
@@ -64,8 +64,8 @@ function closePresentation() {
   slideTextCache.clear(); slideLineCache.clear(); searchState = { query: '', results: [], current: -1 };
 }
 function beginDocument(length, config = {}) {
-  if (disposed) throw new Error('뷰어가 종료되었습니다.');
-  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_BYTES) throw new Error('열 수 있는 문서 크기는 256MB 이하입니다.');
+  if (disposed) throw new Error('뷰어가 종료되었습니다');
+  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_BYTES) throw new Error('열 수 있는 문서 크기는 256MB 이하입니다');
   generation++; paintRevision++; closePresentation();
   wipe(incoming);
   incoming = new Uint8Array(length); received = 0; page = 0;
@@ -73,9 +73,9 @@ function beginDocument(length, config = {}) {
   configure(config);
 }
 function appendChunk(offset, encoded) {
-  if (!incoming || offset !== received) throw new Error('문서 전송 순서가 올바르지 않습니다.');
+  if (!incoming || offset !== received) throw new Error('문서 전송 순서가 올바르지 않습니다');
   const data = atob(encoded);
-  if (received + data.length > incoming.length) throw new Error('문서 전송 크기가 일치하지 않습니다.');
+  if (received + data.length > incoming.length) throw new Error('문서 전송 크기가 일치하지 않습니다');
   for (let i = 0; i < data.length; i++) incoming[received + i] = data.charCodeAt(i);
   received += data.length;
 }
@@ -109,7 +109,7 @@ async function openDocument(password = null) {
   const current = generation, bytes = incoming;
   opening = true;
   try {
-    if (!bytes || received !== bytes.length) throw new Error('문서 데이터를 모두 받지 못했습니다.');
+    if (!bytes || received !== bytes.length) throw new Error('문서 데이터를 모두 받지 못했습니다');
     await loadFonts();
     if (disposed || current !== generation) return false;
     const opened = await PptxPresentation.load(bytes.buffer, {
@@ -122,8 +122,8 @@ async function openDocument(password = null) {
     if (disposed || current !== generation) { opened.destroy(); return false; }
     presentation = opened;
     animationSteps = new AnimationSteps(opened, options.format);
-    if (!Number.isInteger(opened.slideCount) || opened.slideCount < 1 || opened.slideCount > 10000) throw new Error('표시할 슬라이드가 없거나 슬라이드 수가 너무 많습니다.');
-    if (!(opened.slideWidth > 0 && opened.slideHeight > 0)) throw new Error('슬라이드 크기가 올바르지 않습니다.');
+    if (!Number.isInteger(opened.slideCount) || opened.slideCount < 1 || opened.slideCount > 10000) throw new Error('표시할 슬라이드가 없거나 슬라이드 수가 너무 많습니다');
+    if (!(opened.slideWidth > 0 && opened.slideHeight > 0)) throw new Error('슬라이드 크기가 올바르지 않습니다');
     // The parser transfers ownership to its Worker; that buffer may be detached.
     awaitingPassword = false; incoming = null; received = 0; wipe(bytes);
     page = positionPage(options.position, options.progress);
@@ -148,7 +148,7 @@ async function waitForSize(current) {
   const start = performance.now();
   while (host.clientWidth < 2 || host.clientHeight < 2) {
     if (disposed || current !== generation) return false;
-    if (performance.now() - start > 15000) throw new Error('슬라이드 화면 크기를 확인하지 못했습니다.');
+    if (performance.now() - start > 15000) throw new Error('슬라이드 화면 크기를 확인하지 못했습니다');
     await new Promise(resolve => setTimeout(resolve, 30));
   }
   return true;

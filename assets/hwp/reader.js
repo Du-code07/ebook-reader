@@ -158,7 +158,7 @@ async function loadFontAliases(names) {
 }
 function installFontMeasurement() {
   const ctx = document.createElement('canvas').getContext('2d');
-  if (!ctx) throw new Error('문서 표시용 Canvas를 초기화하지 못했습니다.');
+  if (!ctx) throw new Error('문서 표시용 Canvas를 초기화하지 못했습니다');
   globalThis.measureTextWidth = (font, text) => {
     const fallback = fontKind(font) === 'serif' ? 'FReaderSerif' : fontKind(font) === 'math' ? 'FReaderMath' : 'FReaderSans';
     ctx.font = `${font}, ${fallback}`;
@@ -182,16 +182,16 @@ function configure(next = {}) {
   fitPages();
 }
 function beginDocument(length, config) {
-  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_BYTES) throw new Error('열 수 있는 문서 크기는 256MB 이하입니다.');
+  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_BYTES) throw new Error('열 수 있는 문서 크기는 256MB 이하입니다');
   releaseDocument();
   incoming = new Uint8Array(length); received = 0;
   configure(config);
   return true;
 }
 function appendChunk(offset, encoded) {
-  if (!incoming || offset !== received) throw new Error('문서 전송 순서가 올바르지 않습니다.');
+  if (!incoming || offset !== received) throw new Error('문서 전송 순서가 올바르지 않습니다');
   const binary = atob(encoded);
-  if (received + binary.length > incoming.length) throw new Error('문서 전송 크기가 일치하지 않습니다.');
+  if (received + binary.length > incoming.length) throw new Error('문서 전송 크기가 일치하지 않습니다');
   for (let i = 0; i < binary.length; i++) incoming[received + i] = binary.charCodeAt(i);
   received += binary.length;
   return received;
@@ -200,7 +200,7 @@ async function openDocument(password = null) {
   let candidate;
   try {
     if (disposed) return false;
-    if (!incoming || received !== incoming.length) throw new Error('문서 데이터를 모두 받지 못했습니다.');
+    if (!incoming || received !== incoming.length) throw new Error('문서 데이터를 모두 받지 못했습니다');
     candidate = password === null ? new engine.HwpDocument(incoming) : engine.HwpDocument.openWithPassword(incoming, password);
     password = null;
     const info = JSON.parse(candidate.getDocumentInfo());
@@ -208,7 +208,7 @@ async function openDocument(password = null) {
     if (disposed) { candidate.free(); return false; }
     doc = candidate; candidate = null;
     count = doc.pageCount();
-    if (count < 1) throw new Error('표시할 페이지가 없는 문서입니다.');
+    if (count < 1) throw new Error('표시할 페이지가 없는 문서입니다');
     const saved = /^hwp:(\d+)$/.exec(options.position || '');
     page = clampPage(saved ? Number(saved[1]) : Math.round(Number(options.progress || 0) * (count - 1)));
     incoming.fill(0); incoming = null; received = 0;
@@ -226,7 +226,7 @@ async function openDocument(password = null) {
       emit('password', { incorrect: password !== null });
       return false;
     }
-    if (/DRM/.test(message)) return fail('DRM으로 보호된 문서는 이 뷰어에서 열 수 없습니다.');
+    if (/DRM/.test(message)) return fail('DRM으로 보호된 문서는 이 뷰어에서 열 수 없습니다');
     return fail(error);
   } finally { password = null; }
 }
@@ -288,7 +288,7 @@ function svgForPage(index) {
 function safeSvg(source) {
   const parsed = new DOMParser().parseFromString(source, 'image/svg+xml');
   const svg = parsed.documentElement;
-  if (svg.localName !== 'svg' || parsed.querySelector('parsererror')) throw new Error('페이지를 표시할 SVG 데이터가 올바르지 않습니다.');
+  if (svg.localName !== 'svg' || parsed.querySelector('parsererror')) throw new Error('페이지를 표시할 SVG 데이터가 올바르지 않습니다');
   for (const el of svg.querySelectorAll('*')) {
     if (['script', 'foreignObject', 'iframe', 'object', 'embed', 'style'].includes(el.localName)) { el.remove(); continue; }
     for (const attr of [...el.attributes]) {
@@ -312,7 +312,7 @@ async function render() {
     const box = svg.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
     const width = box?.[2] || parseFloat(svg.getAttribute('width'));
     const height = box?.[3] || parseFloat(svg.getAttribute('height'));
-    if (!(width > 0 && height > 0 && Number.isFinite(width + height))) throw new Error('문서 페이지 크기가 올바르지 않습니다.');
+    if (!(width > 0 && height > 0 && Number.isFinite(width + height))) throw new Error('문서 페이지 크기가 올바르지 않습니다');
     const frame = document.createElement('section');
     frame.className = 'page'; frame.dataset.page = String(index);
     frame.dataset.width = String(width); frame.dataset.height = String(height);
@@ -422,20 +422,76 @@ function setVertical(on) {
     document.body.appendChild(vhost);
     vhost.addEventListener('scroll', vSchedule, { passive: true });
     vResize.observe(vhost);
+    vZoomListen(vhost);
     vLayout(false);
     vGoto(page);
   } else {
     vertical = false;
     vResize.disconnect();
     for (const index of [...vMounted.keys()]) vUnmount(index);
-    vhost?.remove(); vhost = null; vSlots = []; vTops = [];
+    vhost?.remove(); vhost = null; vSlots = []; vTops = []; vZoom = 1; vPinch = null;
     host.style.display = '';
     void render().then(reportLocation).catch(fail);
   }
 }
+// ── FReader: 스크롤 보기 두 손가락 확대·축소 (줄이면 쪽이 작아져 가운데에, 늘리면 옆으로도 움직일 수 있음) ──
+let vZoom = 1, vPinch = null;
+const V_ZOOM_MIN = 0.5, V_ZOOM_MAX = 3;
+function vTouchInfo(t) {
+  return { d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 };
+}
+function vPinchStart(e) {
+  if (!vertical || !vhost || e.touches.length !== 2) return;
+  const t = vTouchInfo(e.touches);
+  vPinch = { d0: Math.max(1, t.d), z0: vZoom, fx: t.x, fy: t.y, dx: 0, dy: 0, z: vZoom };
+  vhost.style.transformOrigin = `${t.x}px ${t.y}px`;
+  e.preventDefault();
+}
+function vPinchMove(e) {
+  if (!vPinch || !vhost) return;
+  e.preventDefault();
+  if (e.touches.length !== 2) return;
+  const t = vTouchInfo(e.touches);
+  vPinch.z = Math.max(V_ZOOM_MIN, Math.min(V_ZOOM_MAX, vPinch.z0 * t.d / vPinch.d0));
+  vPinch.dx = t.x - vPinch.fx; vPinch.dy = t.y - vPinch.fy;
+  vhost.style.transform = `translate(${vPinch.dx}px, ${vPinch.dy}px) scale(${vPinch.z / vPinch.z0})`;
+}
+function vPinchEnd(e) {
+  if (!vPinch || !vhost) return;
+  if (e.touches.length >= 2) return;
+  const p = vPinch; vPinch = null;
+  // 손가락 가운데 있던 글 자리를 기억해 두었다가, 새 크기로 다시 놓은 뒤 같은 자리에 오게
+  const cy = vhost.scrollTop + p.fy, i = vIndexAt(cy), slot = vSlots[i];
+  const sh = Math.max(1, slot ? slot.offsetHeight : 1), sw = Math.max(1, slot ? slot.offsetWidth : 1);
+  const fy = (cy - vTops[i]) / sh, fx = (vhost.scrollLeft + p.fx - (slot ? slot.offsetLeft : 0)) / sw;
+  vhost.style.transform = ''; vhost.style.transformOrigin = '';
+  let z = p.z; if (Math.abs(z - 1) < 0.05) z = 1;
+  if (z === vZoom) return;
+  vZoom = z;
+  vLayout(true);
+  const s2 = vSlots[i];
+  if (!s2) return;
+  vhost.scrollTop = vTops[i] + fy * s2.offsetHeight - (p.fy + p.dy);
+  vhost.scrollLeft = s2.offsetLeft + fx * s2.offsetWidth - (p.fx + p.dx);
+  vUpdate(); vReportMetrics();
+}
+function vZoomListen(el) {
+  el.addEventListener('touchstart', vPinchStart, { passive: false });
+  el.addEventListener('touchmove', vPinchMove, { passive: false });
+  el.addEventListener('touchend', vPinchEnd);
+  el.addEventListener('touchcancel', vPinchEnd);
+}
+/** 확대 배율에 맞춘 쪽 너비 */
+function vPageWidth() { return (vhost.clientWidth || innerWidth) * vZoom; }
+/** 화면보다 좁게 줄였으면 쪽을 가로 가운데에 */
+function vPlaceSlot(slot, W) {
+  const VW = vhost.clientWidth || innerWidth;
+  slot.style.marginLeft = W < VW - 0.5 ? `${Math.floor((VW - W) / 2)}px` : '';
+}
 function vLayout(keep) {
   if (!vhost || !doc) return;
-  const W = vhost.clientWidth || innerWidth;
+  const W = vPageWidth();
+  vhost.style.overflowX = vZoom > 1.001 ? 'auto' : 'hidden';
   let anchor = page, frac = 0;
   if (keep && vTops.length) {
     const st = vhost.scrollTop;
@@ -456,7 +512,7 @@ function vLayout(keep) {
   for (let i = 0; i < count; i++) {
     const [w, h] = sizes[i] || [0, 0];
     const sh = w > 0 && h > 0 ? W * h / w : W * 1.414;
-    vSlots[i].style.width = `${W}px`; vSlots[i].style.height = `${sh}px`;
+    vSlots[i].style.width = `${W}px`; vSlots[i].style.height = `${sh}px`; vPlaceSlot(vSlots[i], W);
     vTops.push(y); y += sh + V_GAP;
   }
   vTops.push(y);
@@ -492,7 +548,7 @@ function vScrollToRatio(t) {
 function vSchedule() {
   if (vRaf) return;
   vRaf = requestAnimationFrame(() => { vRaf = 0; vUpdate(); });
-  if (!vMetricsTimer) vMetricsTimer = setTimeout(() => { vMetricsTimer = 0; vReportMetrics(); }, 70);
+  if (!vMetricsTimer) vMetricsTimer = setTimeout(() => { vMetricsTimer = 0; vReportMetrics(); }, 30);
 }
 function vReportMetrics() {
   if (!vhost) return;
@@ -708,7 +764,7 @@ window.addEventListener('pagehide', destroy, { once: true });
     // ArrayBuffer init works even when Android's asset MIME database does not
     // recognize .wasm; it does not depend on instantiateStreaming MIME rules.
     const response = await fetch('./rhwp_bg.wasm');
-    if (!response.ok) throw new Error('HWP 엔진 파일을 읽지 못했습니다.');
+    if (!response.ok) throw new Error('HWP 엔진 파일을 읽지 못했습니다');
     await engine.default({ module_or_path: await response.arrayBuffer() });
     await Promise.all(['400 16px FReaderSans', '700 16px FReaderSans', '400 16px FReaderSerif', '700 16px FReaderSerif', '400 16px FReaderMath'].map(font => document.fonts.load(font)));
     await loadFontAliases(['함초롬돋움', '함초롬바탕', '함초롱돋움', '함초롱바탕', '한컴돋움', '한컴바탕', '맑은 고딕', '돋움', '굴림', '바탕', 'HY신명조', '한양신명조', 'HancomEQN']);
