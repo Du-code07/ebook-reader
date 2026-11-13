@@ -102,7 +102,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   String _themeLabel(String mode) => switch (mode) {
         'dark' => _t('다크 모드', 'Dark mode', '深色模式', 'ダークモード'),
         'black' => _t('완전 다크 모드 (검정)', 'Pure black mode', '纯黑模式', '完全ダーク（黒）'),
-        'comfort' => _t('편안한 모드 (블루라이트 줄임)', 'Comfort mode (less blue light)', '护眼模式（减少蓝光）', '目に優しいモード（ブルーライト軽減）'),
+        'comfort' => _t('편안한 모드', 'Comfort mode', '护眼模式', '目に優しいモード'),
+        'library' => _t('서재', 'Library', '书房', '書斎'),
         'light' => _t('라이트 모드', 'Light mode', '浅色模式', 'ライトモード'),
         _ => _t('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト'),
       };
@@ -116,6 +117,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ChoiceOption('light', _themeLabel('light'), icon: Icons.light_mode_outlined),
         ChoiceOption('dark', _themeLabel('dark'), icon: Icons.dark_mode_outlined),
         ChoiceOption('comfort', _themeLabel('comfort'), icon: Icons.wb_incandescent_outlined),
+        ChoiceOption('library', _themeLabel('library'), icon: Icons.local_library_outlined),
       ],
       current: _themeMode,
     );
@@ -432,7 +434,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             ),
             _item(
               icon: Icons.touch_app_outlined,
-              title: _t('탭 존 가이드라인 끄기', 'Turn Off Tap Zone Guide', '关闭点击区域指引', 'タップゾーンガイドをオフ'),
+              title: _t('탭 가이드라인 끄기', 'Turn Off Tap Guide', '关闭点击指引', 'タップガイドをオフ'),
               subtitle: _tapGuideOff
                   ? _t('파일을 열 때 화면 구역 안내를 보여 주지 않아요', 'The tap zone guide is not shown when opening files', '打开文件时不显示点击区域指引', 'ファイルを開くときにタップゾーンの案内を表示しません')
                   : _t('파일을 열 때마다 화면을 누르는 구역(메뉴·이전·다음)을 보여 줘요', 'Shows the tap zones (menu, previous, next) every time a file opens', '每次打开文件时显示点击区域（菜单、上一页、下一页）', 'ファイルを開くたびにタップする区域（メニュー・前・次）を表示します'),
@@ -445,7 +447,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               icon: Icons.description_outlined,
               leading: const DocPairIcon(size: 25),
               title: _t('한글·워드 글꼴', 'HWP·Word Fonts', 'HWP·Word 字体', 'HWP・Wordフォント'),
-              subtitle: _t('문서에 쓰였지만 휴대폰에 없는 글꼴 넣기', 'Add fonts used in documents but missing on the phone', '添加文档使用但手机缺少的字体', '文書で使われ端末にないフォントを追加'),
+              subtitle: _t('문서 글꼴', 'Document fonts', '文档字体', '文書フォント'),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'doc'))),
             ),
             _item(

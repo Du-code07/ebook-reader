@@ -63,6 +63,34 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
         else checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
+    /// 파일 찾기: 기기 저장소에서 [exts] 형식의 파일 경로 (숨은 폴더·Android 폴더 제외, 최대 3000개)
+    private fun scanDocFiles(exts: List<String>): List<String> {
+        val out = ArrayList<String>()
+        if (!fontScanAllowed()) return out
+        val want = exts.map { it.lowercase().trimStart('.') }.toSet()
+        val root = Environment.getExternalStorageDirectory()
+        val stack = ArrayDeque<Pair<java.io.File, Int>>()
+        stack.add(root to 0)
+        var visited = 0
+        while (stack.isNotEmpty() && visited < 40000 && out.size < 3000) {
+            val (dir, depth) = stack.removeLast()
+            visited++
+            val kids = dir.listFiles() ?: continue
+            for (f in kids) {
+                val name = f.name
+                if (f.isDirectory) {
+                    if (name.startsWith(".") || (depth == 0 && name == "Android")) continue
+                    if (depth < 12) stack.add(f to depth + 1)
+                } else {
+                    val dot = name.lastIndexOf('.')
+                    if (dot <= 0 || name.startsWith(".")) continue
+                    if (want.contains(name.substring(dot + 1).lowercase()) && f.length() > 0) out.add(f.absolutePath)
+                }
+            }
+        }
+        return out
+    }
+
     /// 글꼴 찾기: 기기 저장소의 글꼴 파일(.ttf·.otf·.ttc)과 설치된 글꼴 앱(삼성 글꼴 스타일·FlipFont) 안의 글꼴
     private fun scanFontFiles(): List<String> {
         val out = LinkedHashSet<String>()
@@ -410,6 +438,20 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     }
                     result.success(true)
                 } catch (e: Throwable) { result.success(false) }
+            } else if (call.method == "clearAppData") {
+                // 앱 설정 > 데이터 지우기: 안드로이드 설정의 '데이터 삭제'와 같음 (앱이 바로 닫힘)
+                try {
+                    val am = getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                    result.success(am.clearApplicationUserData())
+                } catch (e: Throwable) { result.success(false) }
+            } else if (call.method == "scanDocFiles") {
+                // 그룹의 파일 찾기: 그 형식의 파일을 기기 저장소에서 모두 찾음
+                val exts = call.argument<List<String>>("exts") ?: emptyList()
+                // 썸네일 만들기 줄에 끼면 한참 기다리게 되므로 따로 돌림
+                Thread {
+                    val files = try { scanDocFiles(exts) } catch (e: Throwable) { emptyList<String>() }
+                    runOnUiThread { result.success(files) }
+                }.start()
             } else if (call.method == "scanFontFiles") {
                 thumbExecutor.execute {
                     val files = try { scanFontFiles() } catch (e: Throwable) { emptyList<String>() }

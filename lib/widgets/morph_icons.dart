@@ -205,3 +205,141 @@ class _ParchmentPainter extends CustomPainter {
   @override
   bool shouldRepaint(_ParchmentPainter old) => old.appear != appear || old.open != open;
 }
+
+/// 휴지통 아이콘: [open]이면 뚜껑이 왼쪽 끝을 축으로 들리고, 닫히면 다시 덮임
+class TrashLidIcon extends StatelessWidget {
+  const TrashLidIcon({super.key, required this.open, this.size, this.color});
+
+  final bool open;
+  final double? size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color c = color ?? IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurfaceVariant;
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: open ? 1 : 0),
+      duration: const Duration(milliseconds: 320),
+      curve: open ? Curves.easeOutBack : Curves.easeInCubic,
+      builder: (context, t, _) => SizedBox.square(dimension: size ?? IconTheme.of(context).size ?? 24, child: CustomPaint(painter: _TrashPainter(c, t))),
+    );
+  }
+}
+
+class _TrashPainter extends CustomPainter {
+  _TrashPainter(this.color, this.t);
+
+  final Color color;
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.scale(size.width / 24);
+    final p = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round;
+    // 통
+    final body = Path()
+      ..moveTo(6.2, 8.5)
+      ..lineTo(7.1, 19.2)
+      ..quadraticBezierTo(7.25, 20.5, 8.6, 20.5)
+      ..lineTo(15.4, 20.5)
+      ..quadraticBezierTo(16.75, 20.5, 16.9, 19.2)
+      ..lineTo(17.8, 8.5);
+    canvas.drawPath(body, p);
+    canvas.drawLine(const Offset(10.2, 11.5), const Offset(10.5, 17.3), p);
+    canvas.drawLine(const Offset(13.8, 11.5), const Offset(13.5, 17.3), p);
+    // 뚜껑: 왼쪽 끝을 축으로 들림
+    canvas.save();
+    const Offset hinge = Offset(4.5, 6.5);
+    canvas.translate(hinge.dx, hinge.dy);
+    canvas.rotate(-0.42 * t);
+    canvas.translate(-hinge.dx, -hinge.dy + -0.6 * t);
+    canvas.drawLine(const Offset(4.5, 6.5), const Offset(19.5, 6.5), p);
+    final handle = Path()
+      ..moveTo(9.5, 6.5)
+      ..lineTo(9.5, 4.6)
+      ..quadraticBezierTo(9.5, 3.5, 10.6, 3.5)
+      ..lineTo(13.4, 3.5)
+      ..quadraticBezierTo(14.5, 3.5, 14.5, 4.6)
+      ..lineTo(14.5, 6.5);
+    canvas.drawPath(handle, p);
+    canvas.restore();
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _TrashPainter old) => old.t != t || old.color != color;
+}
+
+/// 정렬 아이콘: [flipped]가 바뀔 때마다 막대(긴 것·중간·짧은 것)가 위아래로 자리를 바꿈
+class SortBarsIcon extends StatelessWidget {
+  const SortBarsIcon({super.key, required this.flipped, this.size, this.color});
+
+  final bool flipped;
+  final double? size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color c = color ?? IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurfaceVariant;
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: flipped ? 1 : 0),
+      duration: const Duration(milliseconds: 380),
+      curve: Curves.easeInOutCubic,
+      builder: (context, t, _) => SizedBox.square(dimension: size ?? IconTheme.of(context).size ?? 24, child: CustomPaint(painter: _SortBarsPainter(c, t))),
+    );
+  }
+}
+
+class _SortBarsPainter extends CustomPainter {
+  _SortBarsPainter(this.color, this.t);
+
+  final Color color;
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.scale(size.width / 24);
+    final p = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    const ys = [7.0, 12.0, 17.0];
+    const lens = [16.0, 10.0, 4.0]; // 긴 막대부터
+    for (int i = 0; i < 3; i++) {
+      // 막대마다 조금씩 늦게 출발해 차례로 미끄러짐
+      final double local = ((t - i * 0.12) / 0.76).clamp(0.0, 1.0);
+      final double y = ys[i] + (ys[2 - i] - ys[i]) * Curves.easeInOutCubic.transform(local);
+      canvas.drawLine(Offset(4, y), Offset(4 + lens[i], y), p);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _SortBarsPainter old) => old.t != t || old.color != color;
+}
+
+/// 설정 아이콘: [turns]가 바뀌면 톱니바퀴가 그만큼 돌아감
+class SpinGearIcon extends StatelessWidget {
+  const SpinGearIcon({super.key, required this.turns, this.size, this.color});
+
+  final double turns;
+  final double? size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedRotation(
+      turns: turns,
+      duration: const Duration(milliseconds: 600),
+      curve: Curves.easeOutBack,
+      child: Icon(Icons.settings_outlined, size: size, color: color),
+    );
+  }
+}

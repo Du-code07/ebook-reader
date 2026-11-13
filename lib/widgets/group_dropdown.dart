@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'app_colors.dart';
 import 'group_jump_menu.dart';
+import 'group_stack_icon.dart';
 import 'ui_scale.dart';
 
 /// 그룹 목록에서 [즐겨찾기]를 고르면 돌려주는 값
@@ -282,7 +283,7 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
             _row(
               key: const ValueKey('dd:fav'),
               value: kFavoritesGroupKey,
-              leading: const Icon(Icons.bookmarks, color: Colors.amber, size: 20),
+              leading: const FavoritesIcon(size: 20),
               label: r.favLabel,
             ),
             if (_groups.isNotEmpty) Divider(height: 9, indent: 12, endIndent: 12, color: cs.outlineVariant),

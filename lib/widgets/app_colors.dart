@@ -1,20 +1,42 @@
 import 'package:flutter/material.dart';
 
 /// 앱 대표 색 RGB(163, 204, 163): 고른 것·켜짐·버튼 바탕과 체크 표시에만 쓰고, 글씨·아이콘에는 쓰지 않음.
-/// 대표 색 바탕 위의 글씨·아이콘은 진한 초록 #2E5A2E. 다크 모드에서는 대표 색 대신 회색('글꼴 찾기' 단추 바탕과 같은 색)에 흰 글씨
+/// 대표 색 바탕 위의 글씨·아이콘은 흰색. 다크 모드에서는 대표 색 대신 회색('글꼴 찾기' 단추 바탕과 같은 색)
 class AppColors {
   static const Color signature = Color(0xFFA3CCA3);
   static const Color signatureDark = Color(0xFF343438);
 
   /// 대표 색 바탕 위 글씨·아이콘 색
-  static const Color onSignature = Color(0xFF2E5A2E);
+  static const Color onSignature = Colors.white;
 
-  /// 지금 테마의 대표 색 바탕 위 글씨·아이콘 색 (다크는 회색 바탕이라 흰색)
-  static Color onSig(BuildContext context) => Theme.of(context).brightness == Brightness.dark ? Colors.white : onSignature;
-  static Color of(BuildContext context) => Theme.of(context).brightness == Brightness.dark ? signatureDark : signature;
+  /// 지금 테마의 대표 색 바탕 위 글씨·아이콘 색
+  static Color onSig(BuildContext context) => Theme.of(context).colorScheme.onSecondaryContainer;
+  static Color of(BuildContext context) =>
+      Theme.of(context).extension<SigColors>()?.sig ?? (Theme.of(context).brightness == Brightness.dark ? signatureDark : signature);
 
   /// 체크 표시·고른 동그라미처럼 '아이콘'으로 보이는 표시: 밝은 테마는 대표 색, 다크는 밝은 회색 (회색 바탕 위에서도 보이게)
-  static Color mark(BuildContext context) => Theme.of(context).brightness == Brightness.dark ? const Color(0xFFE6E6E9) : signature;
+  static Color mark(BuildContext context) =>
+      Theme.of(context).extension<SigColors>()?.mark ?? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFFE6E6E9) : signature);
+}
+
+/// 테마마다 다른 대표 색 (서재 테마는 초록 스탠드 색 등)
+class SigColors extends ThemeExtension<SigColors> {
+  const SigColors({required this.sig, required this.mark});
+
+  /// 고른 것·켜짐·버튼 바탕
+  final Color sig;
+
+  /// 체크 표시처럼 아이콘으로 보이는 표시
+  final Color mark;
+
+  @override
+  SigColors copyWith({Color? sig, Color? mark}) => SigColors(sig: sig ?? this.sig, mark: mark ?? this.mark);
+
+  @override
+  SigColors lerp(ThemeExtension<SigColors>? other, double t) {
+    if (other is! SigColors) return this;
+    return SigColors(sig: Color.lerp(sig, other.sig, t)!, mark: Color.lerp(mark, other.mark, t)!);
+  }
 }
 
 /// 아이콘이 바뀌는 움직임의 기본값 ([전체] 그룹 아이콘과 같은 빠르기·느낌)

@@ -15,6 +15,12 @@ String languageOptionLabel(String code) {
       return '中文';
     case 'ko':
       return '한국어';
+    case 'fr':
+      return 'Français';
+    case 'ru':
+      return 'Русский';
+    case 'es':
+      return 'Español';
   }
   return code;
 }
@@ -31,7 +37,7 @@ class LanguageSelectScreen extends StatefulWidget {
   /// 고른 설정값('system', 'en', 'ja', 'zh', 'ko')
   final ValueChanged<String> onConfirmed;
 
-  static const List<String> options = ['system', 'en', 'ja', 'zh', 'ko'];
+  static const List<String> options = ['system', 'en', 'ja', 'zh', 'ko', 'fr', 'ru', 'es'];
 
   @override
   State<LanguageSelectScreen> createState() => _LanguageSelectScreenState();
@@ -51,6 +57,12 @@ class _LanguageSelectScreenState extends State<LanguageSelectScreen> {
         return '中';
       case 'ko':
         return '가';
+      case 'fr':
+        return 'FR';
+      case 'ru':
+        return 'Я';
+      case 'es':
+        return 'ES';
     }
     return '';
   }
@@ -162,7 +174,7 @@ class ThemeSelectScreen extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onConfirmed;
 
-  static const List<String> options = ['system', 'light', 'dark', 'comfort'];
+  static const List<String> options = ['system', 'light', 'dark', 'comfort', 'library'];
 
   @override
   State<ThemeSelectScreen> createState() => _ThemeSelectScreenState();
@@ -175,7 +187,8 @@ class _ThemeSelectScreenState extends State<ThemeSelectScreen> {
 
   String _label(String mode) => switch (mode) {
         'dark' => t('다크 모드', 'Dark mode', '深色模式', 'ダークモード'),
-        'comfort' => t('편안한 모드 (블루라이트 줄임)', 'Comfort mode (less blue light)', '护眼模式（减少蓝光）', '目に優しいモード（ブルーライト軽減）'),
+        'comfort' => t('편안한 모드', 'Comfort mode', '护眼模式', '目に優しいモード'),
+        'library' => t('서재', 'Library', '书房', '書斎'),
         'light' => t('라이트 모드', 'Light mode', '浅色模式', 'ライトモード'),
         _ => t('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト'),
       };
@@ -183,6 +196,7 @@ class _ThemeSelectScreenState extends State<ThemeSelectScreen> {
   static IconData _icon(String mode) => switch (mode) {
         'dark' => Icons.dark_mode_outlined,
         'comfort' => Icons.wb_incandescent_outlined,
+        'library' => Icons.local_library_outlined,
         'light' => Icons.light_mode_outlined,
         _ => Icons.brightness_auto_outlined,
       };

@@ -186,7 +186,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   ThemeData _appTheme(Brightness b, {String variant = 'dark'}) {
     final String? appFont = UserFonts.appFontName.value;
     // 앱 대표 색: 연두색 — 고른 것·켜짐·버튼 '바탕'에만 (글씨·아이콘은 기본 색), 연두 바탕 위 글씨는 흰색
-    final Color sig = b == Brightness.light ? AppColors.signature : AppColors.signatureDark;
+    final Color sig = variant == 'library' ? const Color(0xFF3F6B4F) : (b == Brightness.light ? AppColors.signature : AppColors.signatureDark);
+    Color mark = b == Brightness.light ? sig : const Color(0xFFE6E6E9);
     // 색이 섞이지 않은 무채색 바탕 (예전 연두빛 바탕 대신): 라이트는 완전 흰색
     var scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF8A8A8A), brightness: b, dynamicSchemeVariant: DynamicSchemeVariant.monochrome);
     if (b == Brightness.light && variant == 'comfort') {
@@ -228,6 +229,28 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         secondaryContainer: sig,
         onSecondaryContainer: AppColors.onSignature,
       );
+    } else if (variant == 'library') {
+      // 서재: 짙은 호두나무 책장 바탕 + 미색 종이 글씨, 대표 색은 초록 독서등(뱅커스 램프) 색
+      mark = const Color(0xFFA9D1B2);
+      scheme = scheme.copyWith(
+        surface: const Color(0xFF2A211B),
+        onSurface: const Color(0xFFEFE4D2),
+        onSurfaceVariant: const Color(0xFFC7B59C),
+        surfaceContainerLowest: const Color(0xFF211A15),
+        surfaceContainerLow: const Color(0xFF30261F),
+        surfaceContainer: const Color(0xFF372B23),
+        surfaceContainerHigh: const Color(0xFF40332A),
+        surfaceContainerHighest: const Color(0xFF4A3B30),
+        outline: const Color(0xFF8A765F),
+        outlineVariant: const Color(0xFF5A4A3C),
+        primary: const Color(0xFFE8D5B5),
+        onPrimary: const Color(0xFF2A211B),
+        secondary: const Color(0xFFD9C3A0),
+        primaryContainer: sig,
+        onPrimaryContainer: Colors.white,
+        secondaryContainer: sig,
+        onSecondaryContainer: Colors.white,
+      );
     } else {
       // 다크: 대표 색 자리에는 회색 (글꼴 찾기 단추 바탕과 같은 색), 그 위 글씨는 흰색
       scheme = scheme.copyWith(
@@ -250,6 +273,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
+      extensions: [SigColors(sig: sig, mark: mark)],
       fontFamily: appFont,
       iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
       // 상단바 아이콘: 테마 글자색 (다크·밝은 다크에서도 보이게)
@@ -294,11 +318,11 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       title: 'FReader',
       // 테마를 바꿀 때 색을 서서히 섞는 동안 화면 전체를 매번 다시 그려 느려짐 → 바로 바꿈
       themeAnimationDuration: Duration.zero,
-      themeMode: _themeMode == 'dark'
+      themeMode: _themeMode == 'dark' || _themeMode == 'library'
           ? ThemeMode.dark
           : (_themeMode == 'light' || _themeMode == 'comfort' ? ThemeMode.light : ThemeMode.system),
       theme: _appTheme(Brightness.light, variant: _themeMode == 'comfort' ? 'comfort' : 'light'),
-      darkTheme: _appTheme(Brightness.dark),
+      darkTheme: _appTheme(Brightness.dark, variant: _themeMode == 'library' ? 'library' : 'dark'),
       builder: (context, child) {
         // 상태표시줄을 내려 화면 위에 보이는 동안에는 그 높이만큼 위쪽 여백을 늘려
         // 상단바(SafeArea를 쓰는 곳 모두)가 함께 내려와 겹치지 않게 한다
@@ -501,10 +525,10 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.settings_outlined),
                 title: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
-                desc: _tr('앱 테마(라이트·다크·밝은 다크), 언어, 파일 표시 방식(목록형·표지형, 형식·그룹 숨기기), 페이지 기억하기, 탭 존 가이드라인 끄기, 글꼴(한글·워드·EPUB·앱 글꼴, 글꼴 찾기), 사용 설명서가 있어요',
-                    'App theme (light, dark, dim), language, file display (list/cover, hide extensions or groups), remember last page, turn off the tap zone guide, fonts (HWP·Word, EPUB and app fonts, Find Fonts), and this manual',
-                    '包含应用主题（浅色·深色·浅色深色）、语言、文件显示方式（列表·封面，隐藏格式·分组）、记住页面、关闭点击区域指引、字体（韩文·Word、EPUB、应用字体，查找字体）和使用说明书',
-                    'アプリのテーマ(ライト・ダーク・明るいダーク)、言語、ファイル表示(リスト・表紙、形式・グループを隠す)、ページを記憶、タップゾーンガイドをオフ、フォント(ハングル・Word・EPUB・アプリ、フォント検索)、取扱説明書があります')),
+                desc: _tr('앱 테마(라이트·다크·편안한 모드·서재), 언어, 파일 표시 방식(목록형·표지형, 형식·그룹 숨기기), 페이지 기억하기, 탭 가이드라인 끄기, 글꼴(한글·워드·EPUB·앱 글꼴, 글꼴 찾기), 사용 설명서가 있어요',
+                    'App theme (light, dark, comfort, library), language, file display (list/cover, hide extensions or groups), remember last page, turn off the tap guide, fonts (HWP·Word, EPUB and app fonts, Find Fonts), and this manual',
+                    '包含应用主题（浅色·深色·舒适·书房）、语言、文件显示方式（列表·封面，隐藏格式·分组）、记住页面、关闭点击指引、字体（韩文·Word、EPUB、应用字体，查找字体）和使用说明书',
+                    'アプリのテーマ(ライト・ダーク・快適・書斎)、言語、ファイル表示(リスト・表紙、形式・グループを隠す)、ページを記憶、タップガイドをオフ、フォント(ハングル・Word・EPUB・アプリ、フォント検索)、取扱説明書があります')),
 
             // ── 2. 파일 보기 ──
             _section(context, _tr('2. 파일 보기', '2. Reading Files', '2. 查看文件', '2. ファイルを見る')),
@@ -620,6 +644,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   static const MethodChannel _pdfChannel = MethodChannel('ebook_reader/pdf_renderer');
 
   List<File> _allBooks = [];
+  // 상단 아이콘 움직임: 휴지통 뚜껑·정렬 막대·설정 톱니바퀴
+  final GlobalKey _trashBtnKey = GlobalKey();
+  bool _trashPanelOpen = false;
+  bool _sortPanelOpen = false;
+  double _gearTurns = 0;
   List<File> _trashedBooks = [];
   List<String> _groups = List<String>.of(StorageService.defaultGroups);
 
@@ -762,6 +791,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     if (box == null || !box.hasSize) return;
     final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
     final Rect anchor = box.localToGlobal(Offset.zero, ancestor: overlayBox) & box.size;
+    setState(() => _sortPanelOpen = true);
     await Navigator.of(context).push<void>(PopPanelRoute<void>(
       anchor: anchor,
       width: 380,
@@ -770,10 +800,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         builder: (ctx, setSheet) {
           final cs = Theme.of(ctx).colorScheme;
           final bool byName = _sortBy == 'name';
-          Widget label(String t) => Padding(
-                padding: const EdgeInsets.only(top: 14, bottom: 2),
-                child: Text(t, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, letterSpacing: 0.5, color: cs.onSurfaceVariant)),
-              );
           Widget byRow(String value, String text) => InkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: () {
@@ -830,7 +856,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(_tr('정렬', 'Sort', '排序', '並べ替え'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
-                label(_tr('정렬 기준', 'Sort by', '排序依据', '並べ替えの基準')),
+                const SizedBox(height: 10),
                 byRow('name', _tr('이름', 'Name', '名称', '名前')),
                 orders(true),
                 Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.5)),
@@ -874,6 +900,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         },
       ),
     ));
+    if (mounted) setState(() => _sortPanelOpen = false);
   }
 
   /// 북마크한 파일 먼저, 그다음 고른 정렬 (이름 / 추가 날짜)
@@ -1648,42 +1675,69 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         return;
       }
     }
-    _groupScanBusy = true;
+    setState(() => _groupScanBusy = true);
     try {
       final groupLabel = _localizeGroupName(group);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('기기에서 파일을 찾는 중이에요…', 'Searching for files…', '正在查找文件…', 'ファイルを探しています…'))));
-      final paths = await _pdfChannel.invokeListMethod<String>('scanDocFiles', {'exts': exts}).catchError((_) => <String>[]) ?? const <String>[];
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        duration: const Duration(minutes: 2),
+        content: Row(children: [
+          const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4)),
+          const SizedBox(width: 14),
+          Expanded(child: Text(_tr('기기에서 파일을 찾는 중이에요…', 'Searching for files…', '正在查找文件…', 'ファイルを探しています…'))),
+        ]),
+      ));
+      final paths = await _pdfChannel.invokeListMethod<String>('scanDocFiles', {'exts': exts}) ?? const <String>[];
       final appDir = await getApplicationDocumentsDirectory();
-      // 이미 서재에 있는 파일(같은 이름)과 앱 안의 파일은 빼고
-      final have = <String>{for (final e in appDir.listSync()) e.path.split(Platform.pathSeparator).last};
+      // 서재에 이미 있는 같은 형식 파일 (이름 기준) → 복사하지 않고 이 그룹으로만 옮김
+      final library = <String, File>{for (final f in _allBooks) f.path.split('/').last: f};
       final seen = <String>{};
-      final found = <String>[];
+      final newFiles = <String>[];
+      final inLibrary = <File>[];
       for (final p in paths) {
         if (p.startsWith(appDir.path)) continue;
         final name = p.split('/').last;
-        if (have.contains(name) || !seen.add(name)) continue;
-        found.add(p);
+        if (!seen.add(name)) continue;
+        final have = library[name];
+        if (have != null) {
+          if (await StorageService.getBookGroup(have.path) != group) inLibrary.add(have);
+        } else {
+          newFiles.add(p);
+        }
+      }
+      for (final f in _allBooks) {
+        final name = f.path.split('/').last;
+        final e = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+        if (exts.contains(e) && seen.add(name) && await StorageService.getBookGroup(f.path) != group) inLibrary.add(f);
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      if (found.isEmpty) {
+      if (newFiles.isEmpty && inLibrary.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('새로 넣을 파일을 찾지 못했어요', 'No new files found', '没有找到新的文件', '新しいファイルは見つかりませんでした'))));
         return;
       }
+      final n = newFiles.length + inLibrary.length;
       final ok = await showPopDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: Text(_tr('파일 ${found.length}개를 찾았어요', 'Found ${found.length} file(s)', '找到 ${found.length} 个文件', 'ファイルが${found.length}個見つかりました')),
-          content: Text(_tr("'$groupLabel' 그룹에 모두 추가할까요?", "Add them all to '$groupLabel'?", "全部添加到“$groupLabel”分组吗？", "「$groupLabel」グループにすべて追加しますか？")),
+          title: Text(_tr('파일 $n개를 찾았어요', 'Found $n file(s)', '找到 $n 个文件', 'ファイルが$n個見つかりました')),
+          content: Text([
+            _tr("'$groupLabel' 그룹에 모두 넣을까요?", "Put them all in '$groupLabel'?", "全部放入“$groupLabel”分组吗？", "「$groupLabel」グループにすべて入れますか？"),
+            if (inLibrary.isNotEmpty)
+              _tr('(서재에 있던 파일 ${inLibrary.length}개는 그룹만 옮겨요)', '(${inLibrary.length} file(s) already in the library will just be moved)', '（书架中已有的 ${inLibrary.length} 个文件只移动分组）', '（ライブラリにある${inLibrary.length}個はグループだけ移します）'),
+          ].join('\n')),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_tr('추가', 'Add', '添加', '追加'))),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_tr('넣기', 'Add', '放入', '入れる'))),
           ],
         ),
       );
       if (ok != true || !mounted) return;
       int added = 0;
-      for (final p in found) {
+      for (final f in inLibrary) {
+        await StorageService.setBookGroup(f.path, group);
+        added++;
+      }
+      for (final p in newFiles) {
         try {
           final saved = await File(p).copy('${appDir.path}/${p.split('/').last}');
           await StorageService.setBookGroup(saved.path, group);
@@ -1692,9 +1746,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       }
       await _loadLibrary();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('파일 $added개를 추가했어요', 'Added $added file(s)', '已添加 $added 个文件', '$added個のファイルを追加しました'))));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr("'$groupLabel' 그룹에 파일 $added개를 넣었어요", "Put $added file(s) in '$groupLabel'", "已将 $added 个文件放入“$groupLabel”", "「$groupLabel」に$added個のファイルを入れました"))));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('파일을 찾지 못했어요 ($e)', 'Could not search files ($e)', '无法查找文件 ($e)', 'ファイルを探せませんでした ($e)'))));
+      }
     } finally {
-      _groupScanBusy = false;
+      if (mounted) setState(() => _groupScanBusy = false);
     }
   }
 
@@ -2464,9 +2523,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final String label = _favoritesOnly ? _tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り') : _localizeGroupName(_selectedGroup);
     final String? ext = _favoritesOnly || _selectedGroup == '전체' ? null : _groupFormatExt(_selectedGroup);
     final Widget groupIcon = _favoritesOnly
-        ? const Icon(Icons.bookmarks, color: Colors.amber, size: 17)
+        ? const FavoritesIcon(size: 18)
         : _selectedGroup == '전체'
-            ? const FolderDocsIcon(size: 19, onAccent: true)
+            ? const FolderDocsIcon(size: 20)
             : ext == null
                 ? Icon(Icons.folder_outlined, size: 18, color: cs.onSecondaryContainer)
                 : FileTypeIcon(ext: ext, size: 18);
@@ -2498,9 +2557,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           // 형식 그룹(PDF·워드 등): 기기에서 그 형식 파일을 찾아 이 그룹에 넣기
           if (ext != null)
             IconButton(
-              icon: const Icon(Icons.find_in_page_outlined),
+              // 상단바 아이콘과 같은 크기·색
+              icon: _groupScanBusy
+                  ? SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: cs.onSurfaceVariant))
+                  : FolderSearchIcon(size: 21, color: cs.onSurfaceVariant),
               tooltip: _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'),
-              onPressed: () => _scanFilesIntoGroup(_selectedGroup, ext),
+              onPressed: _groupScanBusy ? null : () => _scanFilesIntoGroup(_selectedGroup, ext),
             ),
         ]),
       ),
@@ -2596,7 +2658,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           final ext = _groupFormatExt(g);
           return ext == null ? Icon(Icons.folder_outlined, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant) : FileTypeIcon(ext: ext, size: 20);
         },
-        allLeading: FolderDocsIcon(size: 20, onAccent: !_favoritesOnly && _selectedGroup == '전체'),
+        allLeading: const FolderDocsIcon(size: 20),
         allLabel: _localizeGroupName('전체'),
         favLabel: _tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り'),
         addLabel: _tr('그룹 추가', 'Add Group', '添加分组', 'グループ追加'),
@@ -2814,14 +2876,20 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Future<void> _showTrashBinDialog() async {
     await _loadLibrary();
     if (!mounted) return;
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
+    // 정렬 창처럼 휴지통 단추 아래에서 커져 나옴 (닫으면 단추로 들어감)
+    final box = _trashBtnKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
+    final Rect anchor = box.localToGlobal(Offset.zero, ancestor: overlayBox) & box.size;
+    final double panelH = MediaQuery.of(context).size.height * 0.6;
+    setState(() => _trashPanelOpen = true);
+    await Navigator.of(context).push<void>(PopPanelRoute<void>(
+      anchor: anchor,
+      width: 400,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.65,
+        builder: (ctx, setModalState) => SizedBox(
+            height: panelH,
             child: Column(
               children: [
                 ListTile(
@@ -2947,6 +3015,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         ),
       ),
     );
+    if (mounted) setState(() => _trashPanelOpen = false);
   }
 
   Future<void> _assignGroupDialog(File file) async {
@@ -2985,6 +3054,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   /// 화면 전체 높이의 창으로 띄워서, 맨 위에서 아래로 끌면 내려가며 닫힌다.
   Future<void> _showGlobalSettingsDialog() async {
     if (!mounted) return;
+    setState(() => _gearTurns += 0.5);
+    try {
+      await _showGlobalSettingsDialogInner();
+    } finally {
+      if (mounted) setState(() => _gearTurns -= 0.5);
+    }
+  }
+
+  Future<void> _showGlobalSettingsDialogInner() async {
     final sheetCtrl = BottomSheet.createAnimationController(this);
     await showModalBottomSheet(
       context: context,
@@ -3466,8 +3544,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   icon: Badge(
                     isLabelVisible: _trashedBooks.isNotEmpty,
                     label: Text('${_trashedBooks.length}'),
-                    child: const Icon(Icons.delete_outline),
+                    // 휴지통 창이 열려 있는 동안 뚜껑이 열림
+                    child: TrashLidIcon(open: _trashPanelOpen),
                   ),
+                  key: _trashBtnKey,
                   tooltip: _tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
                   onPressed: () {
                     _closeSearch();
@@ -3476,7 +3556,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                 ),
                 IconButton(
                   key: _sortBtnKey,
-                  icon: const Icon(Icons.sort_rounded),
+                  // 정렬 창을 열고 닫을 때 막대가 위아래로 자리를 바꿈
+                  icon: SortBarsIcon(flipped: _sortPanelOpen),
                   tooltip: _tr('정렬', 'Sort', '排序', '並べ替え'),
                   onPressed: () {
                     _closeSearch();
@@ -3484,7 +3565,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   },
                 ),
                 IconButton(
-                  icon: const Icon(Icons.settings_outlined),
+                  // 앱 설정을 열고 닫을 때 톱니바퀴가 돌아감
+                  icon: SpinGearIcon(turns: _gearTurns),
                   tooltip: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
                   onPressed: () {
                     _closeSearch();

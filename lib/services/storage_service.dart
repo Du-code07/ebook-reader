@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'i18n_extra.dart';
 
 class BookmarkItem {
   final String id;
@@ -76,6 +77,11 @@ class AppI18n {
     switch (lang) {
       case 'en':
         return en;
+      // 프랑스어·러시아어·스페인어: 영어 문구로 번역표에서 찾음 (없으면 영어)
+      case 'fr':
+      case 'ru':
+      case 'es':
+        return I18nExtra.tr(lang, en) ?? en;
       case 'zh':
         return zh;
       case 'ja':
@@ -179,13 +185,13 @@ class StorageService {
   }
 
   /// 앱 테마 설정값 → 지금 실제로 어두운 화면인지
-  static bool isDarkFor(String mode) => mode == 'dark' || mode == 'black' || mode == 'dim' ||
+  static bool isDarkFor(String mode) => mode == 'dark' || mode == 'black' || mode == 'dim' || mode == 'library' ||
       (mode == 'system' && WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark);
 
 
   // 6. 앱 언어 설정 ('system': 기본 시스템, 'ko': 한국어, 'en': 영어, 'zh': 중국어, 'ja': 일본어)
   // 저장값은 'system'일 수 있고, 실제 화면 문구에 쓰는 언어(appLangNotifier)는 항상 ko/en/zh/ja 중 하나다.
-  static const List<String> supportedAppLanguages = ['ko', 'en', 'zh', 'ja'];
+  static const List<String> supportedAppLanguages = ['ko', 'en', 'zh', 'ja', 'fr', 'ru', 'es'];
 
   /// 사용자가 고른 언어 설정값 ('system' 포함). 아직 고른 적 없으면 null.
   static String? appLangSetting;

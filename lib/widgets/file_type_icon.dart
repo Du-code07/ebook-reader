@@ -248,8 +248,10 @@ class LanguageGlyphIcon extends StatelessWidget {
       dimension: size,
       child: Stack(
         children: [
-          Positioned(left: size * 0.02, top: size * 0.02, child: Text('ㄱ', textScaler: TextScaler.noScaling, style: st(size * 0.62))),
-          Positioned(right: size * 0.0, bottom: size * 0.0, child: Text('A', textScaler: TextScaler.noScaling, style: st(size * 0.60))),
+          // 한글 ㄱ · 한자 文 · 영어 A
+          Positioned(left: size * 0.0, top: size * 0.0, child: Text('ㄱ', textScaler: TextScaler.noScaling, style: st(size * 0.5))),
+          Positioned(right: size * 0.0, top: size * 0.0, child: Text('文', textScaler: TextScaler.noScaling, style: st(size * 0.46))),
+          Positioned(left: 0, right: 0, bottom: size * 0.0, child: Text('A', textAlign: TextAlign.center, textScaler: TextScaler.noScaling, style: st(size * 0.5))),
         ],
       ),
     );
