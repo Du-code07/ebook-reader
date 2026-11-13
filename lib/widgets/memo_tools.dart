@@ -276,6 +276,7 @@ Future<String?> showEraserTypeMenu(BuildContext buttonContext, String current, M
         ),
       );
 
+  final Offset? popFrom = TapOrigin.last; // 연 자리 (닫을 때 그 자리로 돌아감)
   return showGeneralDialog<String>(
     context: buttonContext,
     barrierDismissible: true,
@@ -283,7 +284,7 @@ Future<String?> showEraserTypeMenu(BuildContext buttonContext, String current, M
     barrierColor: Colors.transparent,
     transitionDuration: Anim.ms(300),
     // 누른 단추 자리에서 커져 나옴 (꾹 눌러 뜨는 메뉴와 같은 움직임)
-    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child),
+    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child, from: popFrom),
     pageBuilder: (ctx, _, __) => Stack(
       children: [
         Positioned(

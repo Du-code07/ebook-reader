@@ -232,7 +232,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (secs >= 90) {
         timer.cancel();
         _handleEpubLoadError(_tr(
-          '본문 표시 시간이 초과되었습니다',
+          '본문 표시 시간이 초과됐어요',
           'Timed out while displaying the document',
           '显示正文超时',
           '本文の表示がタイムアウトしました',
@@ -259,7 +259,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _epubLoadFailureShown = true;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${_tr('문서를 표시하지 못했습니다', 'Could not display the document', '无法显示文档', '文書を表示できませんでした')}: $message'),
+        content: Text('${_tr('문서를 표시하지 못했어요', 'Could not display the document', '无法显示文档', '文書を表示できませんでした')}: $message'),
         duration: const Duration(seconds: 8),
       ),
     );
@@ -448,7 +448,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           // 슬라이드를 고르면 바로 밑에: 종이처럼 말아 넘기기
           if (_useSwipeTurn)
             SettingToggle(
-              label: Text(_tr('종이처럼 넘기기', 'Page curl', '纸张翻页', '紙のようにめくる')),
+              label: Text(_tr('책처럼 넘기기', 'Book page turn', '书本翻页', '本のようにめくる')),
               selected: StorageService.pageCurl,
               onSelected: (val) => apply(() {
                 StorageService.setPageCurl(val);
@@ -694,7 +694,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('현재 그룹("$currentGroup")에 이동할 다른 파일이 없습니다'),
+            content: Text('현재 그룹("$currentGroup")에 이동할 다른 파일이 없어요'),
             duration: const Duration(seconds: 1),
           ),
         );
@@ -1892,7 +1892,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         duration: const Duration(seconds: 5),
         content: Text(
           error == null
-              ? _tr('PDF로 내보냈습니다: $savedPath', 'Exported to PDF: $savedPath', '已导出为 PDF：$savedPath', 'PDFに書き出しました: $savedPath')
+              ? _tr('PDF로 내보냈어요: $savedPath', 'Exported to PDF: $savedPath', '已导出为 PDF：$savedPath', 'PDFに書き出しました: $savedPath')
               : _tr('PDF 내보내기 실패: ', 'PDF export failed: ', 'PDF 导出失败：', 'PDF書き出し失敗: ') + exportErrorText(error, _tr),
         ),
       ),
@@ -2471,7 +2471,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             if (bookmarks.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(24.0),
-                child: Text(_tr('저장된 북마크가 없습니다', 'No saved bookmarks', '暂无保存的书签', '保存されたブックマークはありません')),
+                child: Text(_tr('저장된 북마크가 없어요', 'No saved bookmarks', '暂无保存的书签', '保存されたブックマークはありません')),
               )
             else
               Flexible(
@@ -2969,13 +2969,87 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     } catch (_) {}
   }
 
+  // 손가락이 닿을 때 미리 찍어 둔 화면 (밀고 뗐을 때 바로 말기 시작하게)
+  Future<ui.Image?>? _curlPre;
+  DateTime? _curlPreAt;
+  // 두 쪽 보기: 책처럼 넘기기 (손가락을 따라 모서리부터 말려 넘어감)
+  late final BookCurlDrag _book = BookCurlDrag(
+    vsync: this,
+    capture: _captureForCurl,
+    turn: (dir) {
+      _hasTextSelection = false;
+      return _vTurnAndWait(dir);
+    },
+    isRtl: () => _isMangaRtlMode,
+  );
+
+  /// 손가락이 가로로 끌리기 시작하면 두 쪽 보기는 책처럼 손가락을 따라 넘김
+  void _bookTrackMove(PointerMoveEvent e) {
+    if (_book.tracking) {
+      _book.update(e.position);
+      return;
+    }
+    final start = _swipeStartPos, t0 = _swipeStartTime;
+    if (start == null || t0 == null || _book.busy || _curlBusy) return;
+    if (!_curlOn || !_bookmarkSpreadNow || _swipeMultiTouch || _swipeActivePointers != 1) return;
+    if (_isTouchLocked || _epubZoomScale > 1.03 || _hasTextSelection) return;
+    if (_isMemoMode && (_isStylusEvent(e) || _allowFingerDrawing)) return;
+    final Offset d = e.position - start;
+    if (d.dx.abs() < 16 || d.dx.abs() < d.dy.abs() * 1.2) return;
+    if (DateTime.now().difference(t0).inMilliseconds > 400) return; // 길게 눌러 끄는 건 글 선택
+    final pre = _curlPre;
+    _curlPre = null;
+    _book.begin(start, e.position, pre);
+  }
+
+  Future<ui.Image?> _captureForCurl() async {
+    if (!_isOfflineDocument) {
+      // EPUB: 책 화면(WebView)이 직접 찍은 그림 (네이티브 그리기로는 빈 그림이 나올 때가 있어서)
+      try {
+        final bytes = await _epubController.takeScreenshot().timeout(const Duration(milliseconds: 900));
+        if (bytes != null && bytes.isNotEmpty && mounted) {
+          final codec = await ui.instantiateImageCodec(bytes, targetWidth: (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context) * 0.75).round());
+          return (await codec.getNextFrame()).image;
+        }
+      } catch (_) {}
+    }
+    return _vCaptureCurrent();
+  }
+
+  /// 손가락이 닿으면 미리 지금 화면을 찍어 둠 (종이처럼 넘기기가 켜져 있을 때만)
+  void _curlPrecapture() {
+    if (!_curlOn || _curlBusy || _book.busy) return;
+    final old = _curlPre;
+    _curlPre = _captureForCurl();
+    _curlPreAt = DateTime.now();
+    old?.then((i) => i?.dispose());
+  }
+
   /// 지금 화면을 그림으로 붙잡고 → 실제 화면은 바로 넘긴 뒤 → 붙잡은 그림을 종이처럼 말아 치움
+  /// (두 쪽 보기면 책처럼 가운데를 축으로 한 장이 넘어감)
   Future<void> _curlTurn(double dx) async {
     final bool next = (dx < 0) != _isMangaRtlMode;
-    if (_curlBusy) return;
+    if (_curlBusy || _book.busy) return;
+    if (_bookmarkSpreadNow) {
+      // 두 쪽 보기: 책처럼 한 장이 넘어감
+      final pre = _curlPre;
+      _curlPre = null;
+      final size = MediaQuery.sizeOf(context);
+      _book.autoTurn(dx, pre, Offset(dx < 0 ? size.width * 0.9 : size.width * 0.1, size.height * 0.8));
+      return;
+    }
     _curlBusy = true;
     try {
-      final img = await _vCaptureCurrent();
+      ui.Image? img;
+      final pre = _curlPre;
+      final preAt = _curlPreAt;
+      _curlPre = null;
+      if (pre != null && preAt != null && DateTime.now().difference(preAt).inMilliseconds < 2500) {
+        img = await pre;
+      } else {
+        pre?.then((i) => i?.dispose());
+      }
+      img ??= await _captureForCurl();
       if (!mounted) {
         img?.dispose();
         return;
@@ -2993,8 +3067,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       final bool turned = await _vTurnAndWait(next ? 1 : -1);
       if (!mounted) return;
       if (turned) {
-        await Future<void>.delayed(const Duration(milliseconds: 40)); // 새 쪽이 그려질 시간
-        await _curlCtrl.animateTo(1, duration: Anim.ms(520), curve: Curves.easeInOutCubic);
+        await Future<void>.delayed(const Duration(milliseconds: 16)); // 새 쪽이 그려질 시간
+        await _curlCtrl.animateTo(1, duration: Anim.ms(420), curve: Curves.easeInOutCubic);
       }
       if (!mounted) return;
       setState(() => _curlImg = null);
@@ -3021,6 +3095,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           Positioned.fill(
             child: PageCurlOverlay(image: curl, progress: _curlCtrl, fromRight: _curlFromRight, paper: _isPaperTheme ? null : _getBgColor()),
           ),
+        Positioned.fill(child: BookCurlLayer(drag: _book, paper: _isPaperTheme ? null : _getBgColor())),
       ],
     );
   }
@@ -3066,6 +3141,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_isMemoMode && _isStylusEvent(e)) return;
     _swipeActivePointers++;
     if (_swipeActivePointers == 1) {
+      _curlPrecapture();
       _swipeMultiTouch = false;
       _swipeHandledByDrag = false;
       _swipeScaleStarted = false;
@@ -3074,10 +3150,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _swipeFirstMoveTime = null;
     } else {
       _swipeMultiTouch = true;
+      if (_book.tracking) _book.end(cancel: true); // 두 손가락: 넘기기 취소
     }
   }
 
   void _swipeTrackMove(PointerMoveEvent e) {
+    _bookTrackMove(e);
     final start = _swipeStartPos;
     if (start == null || _swipeFirstMoveTime != null) return;
     if ((e.position - start).distance > 12.0) {
@@ -3095,6 +3173,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final startTime = _swipeStartTime;
     _swipeStartPos = null;
     _swipeStartTime = null;
+    if (_book.tracking) {
+      // 책처럼 넘기는 중: 손을 뗀 곳에 따라 넘기거나 되돌림
+      _book.end(cancel: cancelled || _swipeMultiTouch);
+      return;
+    }
     if (cancelled || start == null || startTime == null) return;
     if (_swipeMultiTouch || _swipeHandledByDrag) return;
     if (_isTouchLocked || _epubZoomScale > 1.03 || _hasTextSelection) return;
@@ -3790,6 +3873,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
     _vPageSwipe.dispose();
     _curlCtrl.dispose();
+    _book.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     _epubLoadWatchdog?.cancel();
     WidgetsBinding.instance.removeObserver(this);

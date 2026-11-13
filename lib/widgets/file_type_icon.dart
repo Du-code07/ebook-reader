@@ -24,7 +24,7 @@ class GroupFolderIcon extends StatelessWidget {
     final fill = IconInnerFill.of(context);
     final icon = Icon(Icons.folder_outlined, size: size, color: color);
     if (fill == null) return icon;
-    return SizedBox.square(dimension: size, child: Stack(alignment: Alignment.center, children: [Icon(Icons.folder, size: size * 0.9, color: fill), icon]));
+    return SizedBox.square(dimension: size, child: Stack(alignment: Alignment.center, children: [Icon(Icons.folder, size: size, color: fill), icon]));
   }
 }
 
@@ -108,7 +108,7 @@ class FileTypeIcon extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          if (IconInnerFill.of(context) != null) Icon(Icons.insert_drive_file, size: size * 0.92, color: IconInnerFill.of(context)),
+          if (IconInnerFill.of(context) != null) Icon(Icons.insert_drive_file, size: size, color: IconInnerFill.of(context)),
           Icon(Icons.insert_drive_file_outlined, size: size, color: color),
           // 종이 모양 안쪽(접힌 귀 아래) 가운데에 글자
           Positioned(
@@ -151,7 +151,7 @@ class _TxtIcon extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          if (IconInnerFill.of(context) != null) Icon(Icons.insert_drive_file, size: size * 0.92, color: IconInnerFill.of(context)),
+          if (IconInnerFill.of(context) != null) Icon(Icons.insert_drive_file, size: size, color: IconInnerFill.of(context)),
           Icon(Icons.insert_drive_file_outlined, size: size, color: color),
           Positioned(
             top: size * 0.48,

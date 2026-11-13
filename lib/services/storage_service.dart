@@ -108,7 +108,7 @@ class StorageService {
     pageCurl = prefs.getBool('page_curl_v109') ?? true;
   }
 
-  /// 슬라이드로 넘길 때 종이처럼 말아 넘기기 (기본 켜짐)
+  /// 슬라이드로 넘길 때 책처럼 넘기기 (기본 켜짐)
   static bool pageCurl = true;
 
   static Future<void> setPageCurl(bool on) async {

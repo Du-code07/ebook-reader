@@ -138,15 +138,19 @@ class _QuickArcMenuState extends State<QuickArcMenu>
       if (_open) _resetScroll(); // 열 때마다 정해진 항목부터 보이게
     });
     if (_open) {
+      _openCtrl.duration = Anim.ms(200);
       _openCtrl.forward();
     } else {
-      _openCtrl.reverse();
+      _openCtrl.duration = Anim.ms(200);
+      _openCtrl.duration = Anim.ms(200);
+    _openCtrl.reverse();
     }
   }
 
   void _close() {
     if (!_open) return;
     setState(() => _open = false);
+    _openCtrl.duration = Anim.ms(200);
     _openCtrl.reverse();
   }
 
@@ -184,6 +188,7 @@ class _QuickArcMenuState extends State<QuickArcMenu>
     if ((target - _scrollDeg).abs() < 0.5) return;
     _snapFrom = _scrollDeg;
     _snapTo = target;
+    _snapCtrl.duration = Anim.ms(160);
     _snapCtrl.forward(from: 0.0);
   }
 
@@ -455,7 +460,10 @@ class _WiggleOnChangeState extends State<WiggleOnChange> with SingleTickerProvid
   @override
   void didUpdateWidget(WiggleOnChange oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.trigger != widget.trigger) _ctrl.forward(from: 0.0);
+    if (oldWidget.trigger != widget.trigger) {
+      _ctrl.duration = Anim.ms(520);
+      _ctrl.forward(from: 0.0);
+    }
   }
 
   @override

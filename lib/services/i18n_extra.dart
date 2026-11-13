@@ -329,7 +329,7 @@ class I18nExtra {
     'Stop Animations': ['Arrêter les animations', 'Отключить анимацию', 'Detener animaciones'],
     'Buttons, windows and page turns change instantly': ['Boutons, fenêtres et pages changent instantanément', 'Кнопки, окна и страницы меняются мгновенно', 'Botones, ventanas y páginas cambian al instante'],
     'Shows motion for buttons, windows and page turns': ['Affiche les animations des boutons, fenêtres et pages', 'Показывать анимацию кнопок, окон и перелистывания', 'Muestra animaciones en botones, ventanas y cambios de página'],
-    'Page curl': ['Tourner comme du papier', 'Перелистывание как бумага', 'Pasar como papel'],
+    'Book page turn': ['Tourner comme un livre', 'Перелистывание как в книге', 'Pasar como un libro'],
     'Search took too long and was stopped': ['La recherche a pris trop de temps et a été arrêtée', 'Поиск занял слишком много времени и был остановлен', 'La búsqueda tardó demasiado y se detuvo'],
   };
 

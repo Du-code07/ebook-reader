@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 /// 대표 색 바탕 위의 글씨·아이콘은 흰색. 다크 모드에서는 대표 색 대신 회색('글꼴 찾기' 단추 바탕과 같은 색)
 class AppColors {
   static const Color signature = Color(0xFFA3CCA3);
-  static const Color signatureDark = Color(0xFF343438);
+  // 다크: 고른 표시가 잘 보이게 한 단계 밝은 회색 ('글꼴 찾기' 단추 바탕도 같은 색)
+  static const Color signatureDark = Color(0xFF4C4C54);
 
   /// 대표 색 바탕 위 글씨·아이콘 색
   static const Color onSignature = Colors.white;

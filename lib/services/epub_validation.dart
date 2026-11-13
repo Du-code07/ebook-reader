@@ -20,8 +20,8 @@ class EpubValidation {
       }
       ArchiveFile? find(String name) => archive.findFile(name) ?? lower[name.toLowerCase()];
       XmlDocument read(ArchiveFile? entry, String name) {
-        if (entry == null || !entry.isFile) throw FormatException('EPUB 내부 파일이 없습니다: $name');
-        if (entry.size > 16 * 1024 * 1024) throw FormatException('EPUB 메타데이터가 너무 큽니다: $name');
+        if (entry == null || !entry.isFile) throw FormatException('EPUB 내부 파일이 없어요: $name');
+        if (entry.size > 16 * 1024 * 1024) throw FormatException('EPUB 메타데이터가 너무 커요: $name');
         final bytes = entry.content as List<int>;
         String source;
         if (bytes.length >= 2 && ((bytes[0] == 0xff && bytes[1] == 0xfe) || (bytes[0] == 0xfe && bytes[1] == 0xff))) {
@@ -40,9 +40,9 @@ class EpubValidation {
       final root = container.descendants.whereType<XmlElement>()
           .where((e) => e.name.local == 'rootfile').firstOrNull;
       final raw = root?.getAttribute('full-path');
-      if (raw == null || raw.isEmpty) throw const FormatException('EPUB 패키지 경로가 없습니다');
+      if (raw == null || raw.isEmpty) throw const FormatException('EPUB 패키지 경로가 없어요');
       final rootUri = Uri.parse(raw);
-      if (rootUri.hasScheme || rootUri.hasAuthority) throw const FormatException('EPUB 패키지 경로가 올바르지 않습니다');
+      if (rootUri.hasScheme || rootUri.hasAuthority) throw const FormatException('EPUB 패키지 경로가 올바르지 않아요');
       final opfPath = Uri.decodeComponent(rootUri.normalizePath().path).replaceFirst(RegExp(r'^/'), '');
       final entry = find(opfPath);
       final opf = read(entry, opfPath);
@@ -52,15 +52,15 @@ class EpubValidation {
         if (id != null && href != null) items[id] = href;
       }
       final spine = opf.descendants.whereType<XmlElement>().where((e) => e.name.local == 'itemref').toList();
-      if (spine.isEmpty) throw const FormatException('EPUB 본문 목록이 비어 있습니다');
+      if (spine.isEmpty) throw const FormatException('EPUB 본문 목록이 비어 있어요');
       final base = Uri(path: '/${entry!.name}');
       for (final ref in spine) {
         final href = items[ref.getAttribute('idref')];
-        if (href == null) throw const FormatException('EPUB 본문 참조가 올바르지 않습니다');
+        if (href == null) throw const FormatException('EPUB 본문 참조가 올바르지 않아요');
         final uri = base.resolve(href);
         final name = Uri.decodeComponent(uri.path).replaceFirst(RegExp(r'^/'), '');
         if (uri.hasScheme || uri.hasAuthority || find(name)?.isFile != true) {
-          throw FormatException('EPUB 본문을 찾을 수 없습니다: $href');
+          throw FormatException('EPUB 본문을 찾을 수 없어요: $href');
         }
       }
     } finally {

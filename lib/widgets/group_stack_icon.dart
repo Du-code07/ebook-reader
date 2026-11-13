@@ -100,16 +100,22 @@ class _FolderDocsPainter extends CustomPainter {
       ..close();
     canvas.drawPath(backPath, Paint()..color = back);
     canvas.drawPath(backPath, edgePaint);
-    // 서류 (살짝 오른쪽으로 꽂아 왼쪽 위 손잡이가 보이게)
-    final sheet = RRect.fromLTRBR(8.2, 2.6, 19, 14, const Radius.circular(1.2));
+    // 서류 두 장 (뒷장은 살짝 오른쪽 위로 비켜 꽂힘, 왼쪽 위 손잡이가 보이게)
+    final sheet2 = RRect.fromLTRBR(11.4, 1.4, 20.2, 12, const Radius.circular(1.2));
+    canvas.drawRRect(sheet2, Paint()..color = const Color(0xFFE4E6E9));
+    canvas.drawRRect(sheet2, Paint()
+      ..color = const Color(0xFF8A8F96)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4);
+    final sheet = RRect.fromLTRBR(7.6, 3.2, 17.6, 14, const Radius.circular(1.2));
     canvas.drawRRect(sheet, Paint()..color = paper);
     canvas.drawRRect(sheet, edgePaint..color = const Color(0xFF8A8F96));
     final line = Paint()
       ..color = lines
       ..strokeWidth = 1.5
       ..strokeCap = StrokeCap.round;
-    canvas.drawLine(const Offset(10.6, 6.2), const Offset(16.6, 6.2), line);
-    canvas.drawLine(const Offset(10.6, 8.8), const Offset(15, 8.8), line);
+    canvas.drawLine(const Offset(10, 6.6), const Offset(15.2, 6.6), line);
+    canvas.drawLine(const Offset(10, 9.2), const Offset(13.8, 9.2), line);
     // 앞쪽 폴더 판
     edgePaint.color = edge;
     final frontRect = RRect.fromLTRBR(2.5, 10.8, 21.5, 20.5, const Radius.circular(1.6));

@@ -130,6 +130,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
 
   void _onDesiredOrientationChanged() {
     if (mounted) {
+      _rotationAnimController.duration = Anim.ms(240);
       _rotationAnimController.forward(from: 0.0);
     }
   }
@@ -294,7 +295,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       switchTheme: SwitchThemeData(
         trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : (b == Brightness.dark ? scheme.surfaceContainerLow : null)),
         thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Colors.white : null),
-        trackOutlineColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? (b == Brightness.dark ? const Color(0xFF5A5A60) : sig) : null),
+        trackOutlineColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? (b == Brightness.dark ? const Color(0xFFC8C8CF) : sig) : null),
       ),
       checkboxTheme: CheckboxThemeData(
         fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null),
@@ -677,6 +678,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       _searchQuery = '';
     });
     _searchCtrl.clear();
+    _searchAnim
+      ..duration = Anim.ms(300)
+      ..reverseDuration = Anim.ms(210);
     _searchAnim.forward();
     // 줄이 다 그어질 즈음 자판을 올림
     Future<void>.delayed(const Duration(milliseconds: 180), () {
@@ -693,6 +697,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       _searchOpen = false;
       _searchQuery = '';
     });
+    _searchAnim
+      ..duration = Anim.ms(300)
+      ..reverseDuration = Anim.ms(210);
     _searchAnim.reverse();
   }
 
@@ -1621,7 +1628,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         SnackBar(
           content: Text(
             _tr(
-              '${importedFiles.length}개의 파일이 서재에 추가되었습니다',
+              '${importedFiles.length}개의 파일이 서재에 추가됐어요',
               'Added ${importedFiles.length} file(s) to bookshelf',
               '已添加 ${importedFiles.length} 个文件到书架',
               '${importedFiles.length}個のファイルが追加されました',
@@ -1689,7 +1696,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       // 찾는 중 알림: 다른 알림이 앞에 쌓여 있으면 늦게 떠서 끝난 뒤에도 남았었음 → 앞 알림을 모두 치우고 띄운 뒤, 끝나면 이 알림만 닫음
       final messenger = ScaffoldMessenger.of(context);
       messenger.clearSnackBars();
-      final searching = messenger.showSnackBar(SnackBar(
+      // 찾기가 금방 끝나면 '찾는 중' 알림이 잠깐 떴다 사라지며 깜빡이므로, 0.8초 넘게 걸릴 때만 띄움
+      ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? searching;
+      final searchingTimer = Timer(const Duration(milliseconds: 800), () {
+        if (!mounted) return;
+        searching = messenger.showSnackBar(SnackBar(
         duration: const Duration(seconds: 10),
         content: Row(children: [
           // 어두운 알림 바탕에서도 보이게 밝은 색
@@ -1698,18 +1709,28 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           Expanded(child: Text(_tr('기기에서 파일을 찾는 중이에요…', 'Searching for files…', '正在查找文件…', 'ファイルを探しています…'))),
         ]),
       ));
+      });
+      void closeSearching() {
+        searchingTimer.cancel();
+        if (searching != null) {
+          // 다음 알림·창이 겹쳐 보이지 않게 움직임 없이 바로 치움
+          messenger.removeCurrentSnackBar();
+          searching = null;
+        }
+      }
       // 너무 오래 걸리면 (기기 파일이 아주 많을 때) 10초에서 멈춤
       List<String> paths;
       try {
         paths = await _pdfChannel.invokeListMethod<String>('scanDocFiles', {'exts': exts}).timeout(const Duration(seconds: 10)) ?? const <String>[];
-      } on TimeoutException {
-        searching.close();
+      } catch (e) {
+        closeSearching();
+        if (e is! TimeoutException) rethrow;
         if (mounted) {
           messenger.showSnackBar(SnackBar(content: Text(_tr('찾는 데 너무 오래 걸려 멈췄어요', 'Search took too long and was stopped', '查找时间过长，已停止', '時間がかかりすぎたため中止しました'))));
         }
         return;
       }
-      searching.close();
+      closeSearching();
       final appDir = await getApplicationDocumentsDirectory();
       // 서재에 이미 있는 같은 형식 파일 (이름 기준) → 복사하지 않고 이 그룹으로만 옮김
       final library = <String, File>{for (final f in _allBooks) f.path.split('/').last: f};
@@ -1944,7 +1965,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         SnackBar(
           content: Text(
             _tr(
-              'cbz 파일이 [$grpDisplay]에 생성되었습니다\n($safeTitle.cbz)',
+              'cbz 파일이 [$grpDisplay]에 만들어졌어요\n($safeTitle.cbz)',
               'cbz file created in [$grpDisplay]\n($safeTitle.cbz)',
               'cbz 文件已创建于 [$grpDisplay]\n($safeTitle.cbz)',
               'cbzファイルが [$grpDisplay] に作成されました\n($safeTitle.cbz)',
@@ -2177,7 +2198,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           SnackBar(
             content: Text(
               _tr(
-                'PDF 파일이 [$grpDisplay]에 생성되었습니다\n($safeTitle.pdf)',
+                'PDF 파일이 [$grpDisplay]에 만들어졌어요\n($safeTitle.pdf)',
                 'PDF file created in [$grpDisplay]\n($safeTitle.pdf)',
                 'PDF 文件已创建于 [$grpDisplay]\n($safeTitle.pdf)',
                 'PDFファイルが [$grpDisplay] に作成されました\n($safeTitle.pdf)',
@@ -2303,7 +2324,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     if (await File(newPath).exists()) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_tr('같은 이름의 파일이 이미 존재합니다', 'A file with that name already exists', '同名文件已存在', '同じ名前のファイルが既に存在します'))),
+          SnackBar(content: Text(_tr('같은 이름의 파일이 이미 있어요', 'A file with that name already exists', '同名文件已存在', '同じ名前のファイルが既に存在します'))),
         );
       }
       return;
@@ -2641,7 +2662,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_tr('표지를 바꾸지 못했습니다', 'Could not change the cover', '无法更换封面', '表紙を変更できませんでした'))),
+        SnackBar(content: Text(_tr('표지를 바꾸지 못했어요', 'Could not change the cover', '无法更换封面', '表紙を変更できませんでした'))),
       );
     }
   }
@@ -2751,7 +2772,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Future<bool> _confirmDeleteGroup(String groupName) async {
     if (groupName == '전체') {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_tr('"전체" 기본 보기는 삭제할 수 없습니다', '"All" group cannot be deleted', '无法删除“全部”默认分组', '「すべて」は削除できません'))),
+        SnackBar(content: Text(_tr('"전체" 기본 보기는 삭제할 수 없어요', '"All" group cannot be deleted', '无法删除“全部”默认分组', '「すべて」は削除できません'))),
       );
       return false;
     }
@@ -2962,8 +2983,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                 const Divider(height: 1),
                 Expanded(
                   child: _trashedBooks.isEmpty
-                      ? Center(child: Text(_tr('휴지통이 비어 있습니다', 'Trash is empty', '回收站为空', 'ゴミ箱は空です')))
+                      ? Center(child: Text(_tr('휴지통이 비어 있어요', 'Trash is empty', '回收站为空', 'ゴミ箱は空です')))
                       : ListView.separated(
+                          // 창 위쪽에 생기던 빈 간격(상태표시줄 높이만큼 자동으로 들어가던 여백) 없앰
+                          padding: EdgeInsets.zero,
                           itemCount: _trashedBooks.length,
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (_, idx) {
@@ -2971,6 +2994,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             final fileName = tf.path.split(Platform.pathSeparator).last;
                             final trashExt = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
                             return ListTile(
+                              // 줄 높이를 줄여 더 많이 보이게
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
                               // 파일 이름 앞: 그 파일 형식 아이콘
                               leading: FileTypeIcon(ext: trashExt, size: 24),
                               title: Text(_formatDisplayFileName(fileName), maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -3625,7 +3651,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           child: Padding(
                             padding: const EdgeInsets.only(top: 96),
                             child: Text(
-                              _tr('찾은 파일이 없습니다', 'No matching files', '没有找到文件', '該当するファイルがありません'),
+                              _tr('찾은 파일이 없어요', 'No matching files', '没有找到文件', '該当するファイルがありません'),
                               style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                             ),
                           ),

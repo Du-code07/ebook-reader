@@ -25,9 +25,9 @@ class TxtReaderService {
   static Future<void> _preparePlainText(String path, String destination) async {
     final input = File(path);
     final before = await input.stat();
-    if (before.size == 0) throw const FormatException('TXT 파일이 비어 있습니다');
+    if (before.size == 0) throw const FormatException('TXT 파일이 비어 있어요');
     if (before.size > maxInputBytes) {
-      throw const FormatException('TXT 파일은 최대 256 MiB까지 열 수 있습니다');
+      throw const FormatException('TXT 파일은 최대 256 MiB까지 열 수 있어요');
     }
     final handle = await input.open();
     late final Uint8List sample;
@@ -45,7 +45,7 @@ class TxtReaderService {
     }
     final after = await input.stat();
     if (before.size != after.size || before.modified != after.modified) {
-      throw const FileSystemException('읽는 중 TXT 파일이 변경되었습니다\n다시 열어 주세요');
+      throw const FileSystemException('읽는 중 TXT 파일이 바뀌었어요\n다시 열어 주세요');
     }
   }
 
@@ -100,13 +100,13 @@ class TxtReaderService {
 
   static Future<String> _convert(String path) async {
     if (!path.toLowerCase().endsWith('.txt')) {
-      throw const FormatException('TXT 파일이 아닙니다');
+      throw const FormatException('TXT 파일이 아니에요');
     }
     final input = File(path);
     final before = await input.stat();
-    if (before.size == 0) throw const FormatException('TXT 파일이 비어 있습니다');
+    if (before.size == 0) throw const FormatException('TXT 파일이 비어 있어요');
     if (before.size > maxInputBytes) {
-      throw const FormatException('TXT 파일은 최대 256 MiB까지 열 수 있습니다');
+      throw const FormatException('TXT 파일은 최대 256 MiB까지 열 수 있어요');
     }
     final handle = await input.open();
     late final Uint8List sample;
@@ -135,14 +135,14 @@ class TxtReaderService {
           await _write(input, temp, title, 'cp949', 0);
         } on FormatException {
           throw const FormatException(
-            'TXT 인코딩을 읽을 수 없습니다\nUTF-8, CP949/EUC-KR 또는 '
+            'TXT 인코딩을 읽을 수 없어요\nUTF-8, CP949/EUC-KR 또는 '
             'BOM이 있는 UTF-16/UTF-32 파일인지 확인해 주세요',
           );
         }
       }
       final after = await input.stat();
       if (after.size != before.size || after.modified != before.modified) {
-        throw const FileSystemException('읽는 중 TXT 파일이 변경되었습니다\n다시 열어 주세요');
+        throw const FileSystemException('읽는 중 TXT 파일이 바뀌었어요\n다시 열어 주세요');
       }
       await temp.rename(output);
       return output;
@@ -247,12 +247,12 @@ class TxtReaderService {
           end += width;
           if (width == 4) {
             if (value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) {
-              throw const FormatException('올바르지 않은 UTF-32 문자입니다');
+              throw const FormatException('올바르지 않은 UTF-32 문자예요');
             }
             text.writeCharCode(value);
           } else if (highSurrogate != null) {
             if (value < 0xdc00 || value > 0xdfff) {
-              throw const FormatException('올바르지 않은 UTF-16 문자입니다');
+              throw const FormatException('올바르지 않은 UTF-16 문자예요');
             }
             text.writeCharCode(
               0x10000 + ((highSurrogate - 0xd800) << 10) + value - 0xdc00,
@@ -261,7 +261,7 @@ class TxtReaderService {
           } else if (value >= 0xd800 && value <= 0xdbff) {
             highSurrogate = value;
           } else if (value >= 0xdc00 && value <= 0xdfff) {
-            throw const FormatException('올바르지 않은 UTF-16 문자입니다');
+            throw const FormatException('올바르지 않은 UTF-16 문자예요');
           } else {
             text.writeCharCode(value);
           }
@@ -271,7 +271,7 @@ class TxtReaderService {
       pending = bytes.sublist(end);
     }
     if (pending.isNotEmpty || highSurrogate != null) {
-      throw const FormatException('TXT 파일 끝의 문자 데이터가 잘렸습니다');
+      throw const FormatException('TXT 파일 끝의 문자 데이터가 잘렸어요');
     }
   }
 }
@@ -361,7 +361,7 @@ class _TxtEpubWriter {
 
   void finish() {
     _flush();
-    if (_chapters == 0) throw const FormatException('TXT 파일에 표시할 문자가 없습니다');
+    if (_chapters == 0) throw const FormatException('TXT 파일에 표시할 문자가 없어요');
     _file(
       'OEBPS/content.opf',
       '''<?xml version="1.0" encoding="UTF-8"?>

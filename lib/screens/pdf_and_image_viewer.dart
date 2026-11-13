@@ -458,7 +458,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           // 슬라이드를 고르면 바로 밑에: 종이처럼 말아 넘기기
           if (_useSwipeTurn)
             SettingToggle(
-              label: Text(_tr('종이처럼 넘기기', 'Page curl', '纸张翻页', '紙のようにめくる')),
+              label: Text(_tr('책처럼 넘기기', 'Book page turn', '书本翻页', '本のようにめくる')),
               selected: StorageService.pageCurl,
               onSelected: (val) => apply(() {
                 StorageService.setPageCurl(val);
@@ -709,7 +709,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('현재 그룹("$currentGroup")에 이동할 다른 파일이 없습니다'),
+            content: Text('현재 그룹("$currentGroup")에 이동할 다른 파일이 없어요'),
             duration: const Duration(seconds: 1),
           ),
         );
@@ -1624,7 +1624,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         duration: const Duration(seconds: 5),
         content: Text(
           error == null
-              ? _tr('PDF로 내보냈습니다: $savedPath', 'Exported to PDF: $savedPath', '已导出为 PDF：$savedPath', 'PDFに書き出しました: $savedPath')
+              ? _tr('PDF로 내보냈어요: $savedPath', 'Exported to PDF: $savedPath', '已导出为 PDF：$savedPath', 'PDFに書き出しました: $savedPath')
               : _tr('PDF 내보내기 실패: ', 'PDF export failed: ', 'PDF 导出失败：', 'PDF書き出し失敗: ') + exportErrorText(error, _tr),
         ),
       ),
@@ -2109,6 +2109,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     if (curl != null) {
       children.add(Positioned.fill(child: PageCurlOverlay(image: curl, progress: _curlCtrl, fromRight: _curlFromRight, paper: _backdrop(context))));
     }
+    children.add(Positioned.fill(child: BookCurlLayer(drag: _book, paper: _backdrop(context))));
     return Stack(fit: StackFit.expand, clipBehavior: Clip.hardEdge, children: children);
   }
 
@@ -2118,6 +2119,38 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   ui.Image? _curlImg;
   bool _curlFromRight = true;
   bool _curlBusy = false;
+
+  // 두 쪽 보기: 책처럼 넘기기 (손가락을 따라 모서리부터 말려 넘어감)
+  late final BookCurlDrag _book = BookCurlDrag(
+    vsync: this,
+    capture: _curlCapture,
+    turn: (dir) async {
+      if (!_canStepPage(dir)) return false;
+      await _stepPageInstant(dir);
+      return true;
+    },
+    isRtl: () => _isMangaRtlMode,
+    canTurn: _canStepPage,
+  );
+
+  void _curlTrackMove(PointerMoveEvent e) {
+    if (_book.tracking) {
+      _book.update(e.position);
+      return;
+    }
+    final start = _curlDownPos, t0 = _curlDownTime;
+    if (start == null || t0 == null || _curlMulti || _book.busy || _curlBusy) return;
+    if (!_curlOn || !_lastIsSpreadMode) return;
+    if (_isTouchLocked || _currentZoomScale > 1.03 || _vPageSwipe.offset != 0) return;
+    if (_isMemoMode && (e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus || _allowFingerDrawing)) return;
+    final Offset d = e.position - start;
+    if (d.dx.abs() < 16 || d.dx.abs() < d.dy.abs() * 1.2) return;
+    if (DateTime.now().difference(t0).inMilliseconds > 600) return;
+    final pre = _curlPre;
+    _curlPre = null;
+    _book.begin(start, e.position, pre);
+  }
+  Future<ui.Image?>? _curlPre;
   Offset? _curlDownPos;
   DateTime? _curlDownTime;
   bool _curlMulti = false;
@@ -2130,16 +2163,37 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     if (_activeTouchPointerIds.isNotEmpty) {
       // 두 번째 손가락: 확대·축소이므로 넘기지 않음
       _curlMulti = true;
+      if (_book.tracking) _book.end(cancel: true);
       return;
     }
     _curlMulti = false;
     _curlDownPos = e.position;
     _curlDownTime = DateTime.now();
+    // 손가락이 닿을 때 미리 지금 쪽을 찍어 둠 (밀고 뗐을 때 바로 말기 시작)
+    if (_curlOn && !_curlBusy && !_book.busy) {
+      final old = _curlPre;
+      _curlPre = _curlCapture();
+      old?.then((i) => i?.dispose());
+    }
+  }
+
+  Future<ui.Image?> _curlCapture() async {
+    try {
+      final boundary = _curlKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      return await boundary?.toImage(pixelRatio: MediaQuery.devicePixelRatioOf(context) * 0.75);
+    } catch (_) {
+      return null;
+    }
   }
 
   void _curlTrackUp(PointerUpEvent e) {
     final start = _curlDownPos, t0 = _curlDownTime;
     _curlDownPos = null;
+    if (_book.tracking) {
+      // 책처럼 넘기는 중: 손을 뗀 곳에 따라 넘기거나 되돌림
+      _book.end(cancel: _curlMulti);
+      return;
+    }
     if (start == null || t0 == null || _curlMulti || !_curlOn) return;
     if (_isTouchLocked || _currentZoomScale > 1.03 || _vPageSwipe.offset != 0) return;
     if (_isMemoMode && (e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus || _allowFingerDrawing)) return;
@@ -2152,14 +2206,21 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   /// 지금 쪽을 그림으로 붙잡고 → 실제 쪽은 바로 넘긴 뒤 → 붙잡은 그림을 종이처럼 말아 치움
   Future<void> _curlTurn(double dx) async {
     final int dir = ((dx < 0) != _isMangaRtlMode) ? 1 : -1;
-    if (_curlBusy || !_canStepPage(dir)) return;
+    if (_curlBusy || _book.busy || !_canStepPage(dir)) return;
+    if (_lastIsSpreadMode) {
+      // 두 쪽 보기: 책처럼 한 장이 넘어감
+      final pre = _curlPre;
+      _curlPre = null;
+      final size = MediaQuery.sizeOf(context);
+      _book.autoTurn(dx, pre, Offset(dx < 0 ? size.width * 0.9 : size.width * 0.1, size.height * 0.8));
+      return;
+    }
     _curlBusy = true;
     try {
-      ui.Image? img;
-      try {
-        final boundary = _curlKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-        img = await boundary?.toImage(pixelRatio: MediaQuery.devicePixelRatioOf(context) * 0.75);
-      } catch (_) {}
+      final pre = _curlPre;
+      _curlPre = null;
+      ui.Image? img = pre == null ? null : await pre;
+      img ??= await _curlCapture();
       if (!mounted) {
         img?.dispose();
         return;
@@ -2176,7 +2237,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       await WidgetsBinding.instance.endOfFrame;
       await _stepPageInstant(dir);
       if (!mounted) return;
-      await _curlCtrl.animateTo(1, duration: Anim.ms(520), curve: Curves.easeInOutCubic);
+      await _curlCtrl.animateTo(1, duration: Anim.ms(420), curve: Curves.easeInOutCubic);
       if (!mounted) return;
       setState(() => _curlImg = null);
       img.dispose();
@@ -2424,7 +2485,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             if (bookmarks.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(24.0),
-                child: Text(_tr('저장된 북마크가 없습니다', 'No saved bookmarks', '暂无保存的书签', '保存されたブックマークはありません')),
+                child: Text(_tr('저장된 북마크가 없어요', 'No saved bookmarks', '暂无保存的书签', '保存されたブックマークはありません')),
               )
             else
               Flexible(
@@ -2754,6 +2815,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     SystemBars.leaveViewer();
     _vPageSwipe.dispose();
     _curlCtrl.dispose();
+    _book.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     // 서재로 완전히 복귀할 때 방향이 초기화됨
     _zoomController.dispose();
@@ -3003,11 +3065,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     }
                   }
                 },
-                onPointerMove: (event) => _vPageSwipe.move(
-                  event,
-                  enabled: _vSwipeEnabled(event),
-                  canTurn: _canStepPage,
-                ),
+                onPointerMove: (event) {
+                  _curlTrackMove(event);
+                  _vPageSwipe.move(
+                    event,
+                    enabled: _vSwipeEnabled(event),
+                    canTurn: _canStepPage,
+                  );
+                },
                 onPointerUp: (event) {
                   _curlTrackUp(event);
                   if (_activeTouchPointerIds.remove(event.pointer)) {
@@ -3027,6 +3092,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   }
                 },
                 onPointerCancel: (event) {
+                  if (_book.tracking) _book.end(cancel: true);
+                  _curlDownPos = null;
                   _vPageSwipe.up(
                     event,
                     height: MediaQuery.sizeOf(context).height,

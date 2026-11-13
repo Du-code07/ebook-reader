@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_epub_viewer/src/epub_metadata.dart';
 import 'package:flutter_epub_viewer/src/models/epub_display_settings.dart';
@@ -17,6 +18,9 @@ class EpubController {
   /// Backed by flutter_inappwebview on mobile/desktop and by a native
   /// `<iframe>` + `dart:js_interop` on the web.
   EpubWebViewController? webViewController;
+
+  /// FReader: 지금 보이는 책 화면 그림 (종이처럼 넘기기)
+  Future<Uint8List?> takeScreenshot() async => webViewController?.takeScreenshot();
 
   /// Maximum time to wait for a request/response call before giving up.
   ///

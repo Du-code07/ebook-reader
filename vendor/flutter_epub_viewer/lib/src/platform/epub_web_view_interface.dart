@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
 
 /// Signature for handlers invoked from the JavaScript side of the EPUB viewer.
@@ -56,6 +58,9 @@ abstract class EpubWebViewController {
 
   /// Releases any resources held by the bridge.
   void dispose();
+
+  /// FReader: 지금 보이는 책 화면을 그림(PNG/JPEG 바이트)으로. 지원하지 않으면 null
+  Future<Uint8List?> takeScreenshot({double quality = 0.88}) async => null;
 }
 
 /// Configuration passed to [createEpubPlatformView].

@@ -106,7 +106,7 @@ class TxtPageDocument {
             }
             break;
           }
-          if (cut <= 0) throw const FormatException('TXT 글자가 한 페이지 높이를 초과합니다');
+          if (cut <= 0) throw const FormatException('TXT 글자가 한 페이지 높이를 초과해요');
           await append(pending.substring(0, cut));
           pending = pending.substring(cut);
           // Layout every new page from its own start: a page beginning inside
@@ -120,7 +120,7 @@ class TxtPageDocument {
           pending += chunk;
           await paginate(last: false);
           if (pending.length > 1024 * 1024) {
-            throw const FormatException('하나의 TXT 글자 조합이 너무 길어 표시할 수 없습니다');
+            throw const FormatException('하나의 TXT 글자 조합이 너무 길어 표시할 수 없어요');
           }
         }
         await paginate(last: true);
@@ -129,7 +129,7 @@ class TxtPageDocument {
       }
       checkCancelled();
       if (offsets.length < 2)
-        throw const FormatException('TXT 파일에 표시할 글이 없습니다');
+        throw const FormatException('TXT 파일에 표시할 글이 없어요');
       await plain.delete();
       return TxtPageDocument._(directory, pages, offsets);
     } catch (_) {

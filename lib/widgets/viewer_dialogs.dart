@@ -23,6 +23,7 @@ TapZone tapZoneAt(Offset local, Size size) {
 
 /// 가운데에 뜨는 둥근 창 (페이지 표시·화면 회전 등 짧은 고르기)
 Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) {
+  final Offset? popFrom = TapOrigin.last; // 연 자리 (닫을 때 그 자리로 돌아감)
   return showGeneralDialog<T>(
     context: context,
     barrierDismissible: true,
@@ -31,7 +32,7 @@ Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) 
     transitionDuration: Anim.ms(300),
     pageBuilder: (ctx, _, __) => SafeArea(child: Center(child: builder(ctx))),
     // 꾹 눌러 뜨는 메뉴와 같은 움직임: 누른 자리에서 커져 나옴
-    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child),
+    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child, from: popFrom),
   );
 }
 
@@ -821,7 +822,7 @@ class SettingOption extends StatelessWidget {
       color: selected ? sig : Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: selected ? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF5A5A60) : sig) : cs.outlineVariant, width: selected ? 1.5 : 1),
+        side: BorderSide(color: selected ? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFFC8C8CF) : sig) : cs.outlineVariant, width: selected ? (Theme.of(context).brightness == Brightness.dark ? 1.8 : 1.5) : 1),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),

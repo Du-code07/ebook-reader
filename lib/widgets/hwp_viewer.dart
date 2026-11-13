@@ -220,12 +220,12 @@ class _HwpViewerState extends State<HwpViewer> {
         await rootBundle.load(asset);
       } catch (_) {
         final folder = asset.contains('/') ? asset.substring(0, asset.lastIndexOf('/')) : asset;
-        _reportError('앱 안에 표시 파일($asset)이 없습니다\nGitHub에 $folder 폴더가 올라가 있는지, '
+        _reportError('앱 안에 표시 파일($asset)이 없어요\nGitHub에 $folder 폴더가 올라가 있는지, '
             'pubspec.yaml이 새 버전인지 확인한 뒤 다시 빌드해 주세요');
         return;
       }
     }
-    _reportError('문서 표시 파일을 불러오지 못했습니다: $description');
+    _reportError('문서 표시 파일을 불러오지 못했어요: $description');
   }
 
   String get _jsObject => _isSpreadsheet ? 'freaderXlsx' : _isPresentation ? 'freaderPpt' : _isWord ? 'freaderDocx' : 'freaderHwp';
@@ -277,7 +277,7 @@ class _HwpViewerState extends State<HwpViewer> {
     _timeout?.cancel();
     _timeout = Timer(const Duration(minutes: 5), () {
       _reportError(
-        '$_format 문서 표시 시간이 초과되었습니다\nAndroid System WebView와 파일 상태를 확인해 주세요',
+        '$_format 문서 표시 시간이 초과됐어요\nAndroid System WebView와 파일 상태를 확인해 주세요',
       );
     });
   }
@@ -347,7 +347,7 @@ class _HwpViewerState extends State<HwpViewer> {
         _cacheKey = '${widget.filePath.hashCode.toUnsigned(32)}-$length-$modified';
       } catch (_) {}
       if (length < 1 || length > _maxBytes) {
-        throw const FormatException('비어 있거나 256MB를 초과하는 문서입니다');
+        throw const FormatException('비어 있거나 256MB를 초과하는 문서예요');
       }
       if (_isDocx) {
         final path = widget.filePath;
@@ -372,7 +372,7 @@ class _HwpViewerState extends State<HwpViewer> {
           generation == _generation) {
         final chunk = await opened.read(_chunkBytes);
         if (chunk.isEmpty)
-          throw const FormatException('문서를 읽는 중 파일 크기가 변경되었습니다');
+          throw const FormatException('문서를 읽는 중 파일 크기가 바뀌었어요');
         await _invoke('appendChunk', [offset, base64Encode(chunk)]);
         offset += chunk.length;
         _loadProgress.value = 0.9 * offset / length;
@@ -439,7 +439,7 @@ class _HwpViewerState extends State<HwpViewer> {
         unawaited(_requestPassword(event['incorrect'] == true));
         break;
       case 'error':
-        _reportError(event['message'] ?? '$_format 문서를 표시하지 못했습니다');
+        _reportError(event['message'] ?? '$_format 문서를 표시하지 못했어요');
         break;
     }
   }
@@ -461,7 +461,7 @@ class _HwpViewerState extends State<HwpViewer> {
           enableSuggestions: false,
           decoration: InputDecoration(
             labelText: '비밀번호',
-            errorText: incorrect ? '비밀번호가 일치하지 않습니다' : null,
+            errorText: incorrect ? '비밀번호가 일치하지 않아요' : null,
           ),
           onSubmitted: (value) => Navigator.pop(context, value),
         ),
@@ -652,7 +652,7 @@ class _HwpViewerState extends State<HwpViewer> {
               _reportError('문서 표시 파일 오류 (${response.statusCode})');
           },
           onRenderProcessGone: (controller, detail) async {
-            _reportError('문서 표시 프로세스가 종료되었습니다\n문서를 다시 열어 주세요');
+            _reportError('문서 표시 프로세스가 종료됐어요\n문서를 다시 열어 주세요');
           },
         ),
         // 처음 열 때: 돌아가는 원 + '파일 여는 중 n%' (파일을 넘기는 동안 진행률)

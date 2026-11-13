@@ -14,12 +14,13 @@ class TapOrigin {
 }
 
 /// 꾹 눌러 뜨는 메뉴와 같은 움직임: 누른 자리에서 커져 나오고, 닫힐 때는 그 자리로 작아지며 들어감
-Widget popTransition(BuildContext context, Animation<double> animation, Widget child) {
+/// [from]: 창을 연 자리 (열 때 붙잡아 둔 값). 창 안의 단추를 눌러 닫아도 처음 연 아이콘 자리로 돌아감
+Widget popTransition(BuildContext context, Animation<double> animation, Widget child, {Offset? from}) {
   final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutBack, reverseCurve: Curves.easeInCubic);
   final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.5), reverseCurve: const Interval(0.4, 1));
   final Size screen = MediaQuery.sizeOf(context);
   final Offset center = screen.center(Offset.zero);
-  final Offset origin = (TapOrigin.last ?? center) - center;
+  final Offset origin = (from ?? TapOrigin.last ?? center) - center;
   return AnimatedBuilder(
     animation: animation,
     child: child,
@@ -39,6 +40,7 @@ Future<T?> showPopDialog<T>({
   bool useRootNavigator = true,
 }) {
   final captured = InheritedTheme.capture(from: context, to: Navigator.of(context, rootNavigator: useRootNavigator).context);
+  final Offset? from = TapOrigin.last; // 연 자리를 붙잡아 둠 (닫을 때 창 안에서 누른 자리로 들어가지 않게)
   return showGeneralDialog<T>(
     context: context,
     useRootNavigator: useRootNavigator,
@@ -47,7 +49,7 @@ Future<T?> showPopDialog<T>({
     barrierColor: barrierColor ?? Colors.black54,
     transitionDuration: Anim.ms(300),
     pageBuilder: (ctx, _, __) => captured.wrap(SafeArea(child: Builder(builder: builder))),
-    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child),
+    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child, from: from),
   );
 }
 

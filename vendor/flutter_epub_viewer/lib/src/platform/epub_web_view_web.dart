@@ -29,6 +29,9 @@ class WebEpubWebViewController implements EpubWebViewController {
   WebEpubWebViewController(this._window);
 
   final JSObject _window;
+
+  @override
+  Future<Uint8List?> takeScreenshot({double quality = 0.88}) async => null;
   final Map<String, EpubJsHandler> _handlers = {};
   bool _disposed = false;
 
