@@ -2107,13 +2107,13 @@ function freaderAttachChapterScroll(r) {
   }
   var edgeTimer = null;
   function scheduleEdge() { if (edgeTimer) return; edgeTimer = setTimeout(function () { edgeTimer = null; reportEdge(); }, 120); }
-  // 앱 오른쪽 회색 스크롤 막대용: 지금 위치·전체 길이 (자주 보내지 않게 70ms마다 한 번)
+  // 앱 오른쪽 회색 스크롤 막대용: 지금 위치·전체 길이 (막대가 부드럽게 따라오게 30ms마다 한 번)
   var metricsTimer = null;
   function reportMetrics() {
     var c = box(); if (!c) return;
     try { window.flutter_inappwebview.callHandler('scrollMetrics', { top: c.scrollTop, height: c.scrollHeight, client: c.clientHeight }); } catch (e) {}
   }
-  function scheduleMetrics() { if (metricsTimer) return; metricsTimer = setTimeout(function () { metricsTimer = null; reportMetrics(); }, 70); }
+  function scheduleMetrics() { if (metricsTimer) return; metricsTimer = setTimeout(function () { metricsTimer = null; reportMetrics(); }, 30); }
   var watched = null;
   r.on('rendered', function () {
     var c = box();

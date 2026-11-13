@@ -164,10 +164,10 @@ ExportProgressController showExportProgress(BuildContext context, ExportTr tr, {
 String exportErrorText(Object error, ExportTr tr) {
   if (error is MissingPluginException) {
     return tr(
-      '이 설치본에는 PDF 내보내기 기능(안드로이드 부분)이 없어요. 앱을 최신 버전으로 다시 빌드·설치해 주세요.',
-      'This build does not include the PDF export feature (Android part). Please rebuild and reinstall the latest version.',
-      '此安装包不含 PDF 导出功能（安卓部分）。请重新构建并安装最新版本。',
-      'このビルドにはPDF書き出し機能（Android部分）がありません。最新版を再ビルドしてインストールしてください。',
+      '이 설치본에는 PDF 내보내기 기능(안드로이드 부분)이 없어요\n앱을 최신 버전으로 다시 빌드·설치해 주세요',
+      'This build does not include the PDF export feature (Android part)\nPlease rebuild and reinstall the latest version',
+      '此安装包不含 PDF 导出功能（安卓部分）\n请重新构建并安装最新版本',
+      'このビルドにはPDF書き出し機能（Android部分）がありません\n最新版を再ビルドしてインストールしてください',
     );
   }
   if (error is PlatformException) return error.message ?? error.code;

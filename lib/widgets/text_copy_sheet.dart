@@ -38,7 +38,7 @@ Future<void> showTextCopySheet(
                           if (!ctx.mounted) return;
                           Navigator.pop(ctx);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(tr('복사했습니다.', 'Copied.', '已复制。', 'コピーしました。')), duration: const Duration(seconds: 1)),
+                            SnackBar(content: Text(tr('복사했습니다', 'Copied', '已复制', 'コピーしました')), duration: const Duration(seconds: 1)),
                           );
                         },
                       ),
@@ -48,7 +48,7 @@ Future<void> showTextCopySheet(
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
                 child: Text(
-                  tr('필요한 부분만 복사하려면 글을 길게 눌러 고르세요.', 'Long-press the text to select a part.', '长按文字可选择部分内容。', '一部だけなら文字を長押しして選択してください。'),
+                  tr('필요한 부분만 복사하려면 글을 길게 눌러 고르세요', 'Long-press the text to select a part', '长按文字可选择部分内容', '一部だけなら文字を長押しして選択してください'),
                   style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant),
                 ),
               ),
@@ -58,7 +58,7 @@ Future<void> showTextCopySheet(
                     ? Padding(
                         padding: const EdgeInsets.all(28),
                         child: Text(
-                          tr('이 쪽에서 읽을 수 있는 글자가 없습니다.', 'No text found on this page.', '此页没有可读取的文字。', 'このページに読み取れる文字がありません。'),
+                          tr('이 쪽에서 읽을 수 있는 글자가 없습니다', 'No text found on this page', '此页没有可读取的文字', 'このページに読み取れる文字がありません'),
                           textAlign: TextAlign.center,
                         ),
                       )

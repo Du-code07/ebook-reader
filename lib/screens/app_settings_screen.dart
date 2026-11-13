@@ -141,7 +141,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       current: _viewMode,
       toggleIcon: Icons.visibility_off_outlined,
       toggleLabel: _t('파일 형식 숨기기', 'Hide file type', '隐藏文件类型', 'ファイル形式を隠す'),
-      toggleSubtitle: _t('.pdf, .epub 등', '.pdf, .epub, etc.', '.pdf、.epub 等', '.pdf、.epub など'),
+      toggleSubtitle: _t('.pdf, .epub 등', '.pdf, .epub, etc', '.pdf、.epub 等', '.pdf、.epub など'),
       toggleValue: _hideExt,
       onChanged: (r) async {
         final (mode, hide) = r;
@@ -208,7 +208,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         SheetToggle(
           icon: Icons.filter_none_outlined,
           label: _t('페이지 수 숨기기', 'Hide page count', '隐藏页数', 'ページ数を隠す'),
-          subtitle: _t('파일 아래 읽은 쪽 (예: 6/983)', 'Pages under each file (e.g. 6/983)', '文件下方的页数', 'ファイルの下のページ数'),
+          subtitle: _t('파일 아래 읽은 쪽 (예: 6/983)', 'Pages under each file (e.g., 6/983)', '文件下方的页数', 'ファイルの下のページ数'),
           value: _hidePages,
           onChanged: (v) async {
             if (!mounted) return;

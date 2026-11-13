@@ -57,8 +57,8 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
     await _reload();
     if (!mounted) return;
     _snack(widget.category == 'epub'
-        ? _t('EPUB 글꼴을 바꿨어요. 책을 다시 열면 적용돼요.', 'EPUB font changed. Reopen books to apply.', '已更换EPUB字体，重新打开书籍后生效。', 'EPUBのフォントを変更しました。本を開き直すと反映されます。')
-        : _t('앱 글꼴을 바꿨어요.', 'App font changed.', '已更换应用字体。', 'アプリのフォントを変更しました。'));
+        ? _t('EPUB 글꼴을 바꿨어요\n책을 다시 열면 적용돼요', 'EPUB font changed\nReopen books to apply', '已更换EPUB字体，重新打开书籍后生效', 'EPUBのフォントを変更しました\n本を開き直すと反映されます')
+        : _t('앱 글꼴을 바꿨어요', 'App font changed', '已更换应用字体', 'アプリのフォントを変更しました'));
   }
 
   Future<void> _add() async {
@@ -69,7 +69,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
         if (f.path != null && RegExp(r'\.(ttf|otf|ttc)$', caseSensitive: false).hasMatch(f.name)) f.path!,
     ];
     if (res != null && paths.isEmpty && mounted) {
-      _snack(_t('글꼴 파일(.ttf, .otf, .ttc)을 골라 주세요.', 'Please choose font files (.ttf, .otf, .ttc).', '请选择字体文件（.ttf、.otf、.ttc）。', 'フォントファイル（.ttf・.otf・.ttc）を選んでください。'));
+      _snack(_t('글꼴 파일(.ttf, .otf, .ttc)을 골라 주세요', 'Please choose font files (.ttf, .otf, .ttc)', '请选择字体文件（.ttf、.otf、.ttc）', 'フォントファイル（.ttf・.otf・.ttc）を選んでください'));
       return;
     }
     if (paths.isEmpty) return;
@@ -81,11 +81,11 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
     await _reload();
     _snack(n > 0
         ? (widget.category == 'app'
-            ? _t('앱 글꼴을 바꿨어요.', 'App font changed.', '已更换应用字体。', 'アプリのフォントを変更しました。')
+            ? _t('앱 글꼴을 바꿨어요', 'App font changed', '已更换应用字体', 'アプリのフォントを変更しました')
             : widget.category == 'epub'
-                ? _t('EPUB 글꼴을 바꿨어요. 책을 다시 열면 적용돼요.', 'EPUB font changed. Reopen books to apply.', '已更换EPUB字体，重新打开书籍后生效。', 'EPUBのフォントを変更しました。本を開き直すと反映されます。')
-                : _t('글꼴 $n개를 넣었어요. 문서를 다시 열면 적용돼요.', 'Added $n font(s). Reopen documents to apply.', '已添加 $n 个字体。重新打开文档后生效。', '$n 個のフォントを追加しました。文書を開き直すと反映されます。'))
-        : _t('글꼴을 읽지 못했어요.', 'Could not read the font.', '无法读取字体。', 'フォントを読み込めませんでした。'));
+                ? _t('EPUB 글꼴을 바꿨어요\n책을 다시 열면 적용돼요', 'EPUB font changed\nReopen books to apply', '已更换EPUB字体，重新打开书籍后生效', 'EPUBのフォントを変更しました\n本を開き直すと反映されます')
+                : _t('글꼴 $n개를 넣었어요\n문서를 다시 열면 적용돼요', 'Added $n font(s)\nReopen documents to apply', '已添加 $n 个字体\n重新打开文档后生效', '$n 個のフォントを追加しました\n文書を開き直すと反映されます'))
+        : _t('글꼴을 읽지 못했어요', 'Could not read the font', '无法读取字体', 'フォントを読み込めませんでした'));
   }
 
   static const MethodChannel _ch = MethodChannel('ebook_reader/pdf_renderer');
@@ -100,10 +100,10 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
         builder: (ctx) => AlertDialog(
           title: Text(_t('파일 접근 허용', 'Allow file access', '允许访问文件', 'ファイルへのアクセスを許可')),
           content: Text(_t(
-              '기기에 저장된 글꼴 파일을 찾으려면 파일 접근 권한이 필요해요. 다음 화면에서 FReader를 허용해 주세요.\n(허용하지 않아도 설치된 글꼴 앱의 글꼴은 찾아요)',
-              'To find font files on this device, FReader needs file access. Please allow it on the next screen.\n(Fonts from installed font apps are found either way.)',
-              '要查找设备中的字体文件，需要文件访问权限。请在下一个页面允许 FReader。\n（不允许也会查找已安装字体应用中的字体）',
-              '端末内のフォントファイルを探すにはファイルへのアクセス権限が必要です。次の画面で FReader を許可してください。\n（許可しなくてもインストール済みのフォントアプリのフォントは探します）')),
+              '기기에 저장된 글꼴 파일을 찾으려면 파일 접근 권한이 필요해요\n다음 화면에서 FReader를 허용해 주세요\n(허용하지 않아도 설치된 글꼴 앱의 글꼴은 찾아요)',
+              'To find font files on this device, FReader needs file access\nPlease allow it on the next screen\n(Fonts from installed font apps are found either way.)',
+              '要查找设备中的字体文件，需要文件访问权限\n请在下一个页面允许 FReader\n（不允许也会查找已安装字体应用中的字体）',
+              '端末内のフォントファイルを探すにはファイルへのアクセス権限が必要です\n次の画面で FReader を許可してください\n（許可しなくてもインストール済みのフォントアプリのフォントは探します）')),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('그냥 찾기', 'Search anyway', '直接查找', 'そのまま探す'))),
             ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_t('허용하러 가기', 'Allow', '去允许', '許可する'))),
@@ -132,10 +132,10 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
     setState(() => _busy = false);
     await _reload();
     _snack(n > 0
-        ? _t('글꼴 $n개를 찾아 넣었어요.', 'Found and added $n font(s).', '已找到并添加 $n 个字体。', '$n 個のフォントを見つけて追加しました。')
+        ? _t('글꼴 $n개를 찾아 넣었어요', 'Found and added $n font(s)', '已找到并添加 $n 个字体', '$n 個のフォントを見つけて追加しました')
         : paths.isEmpty && !allowed
-            ? _t('파일 접근이 허용되지 않아 저장소의 글꼴은 찾지 못했어요.', 'File access was not allowed, so storage was not searched.', '未允许文件访问，无法查找存储中的字体。', 'ファイルへのアクセスが許可されていないため、ストレージは検索できませんでした。')
-            : _t('새로 넣을 글꼴을 찾지 못했어요.', 'No new fonts found.', '没有找到新的字体。', '新しいフォントは見つかりませんでした。'));
+            ? _t('파일 접근이 허용되지 않아 저장소의 글꼴은 찾지 못했어요', 'File access was not allowed, so storage was not searched', '未允许文件访问，无法查找存储中的字体', 'ファイルへのアクセスが許可されていないため、ストレージは検索できませんでした')
+            : _t('새로 넣을 글꼴을 찾지 못했어요', 'No new fonts found', '没有找到新的字体', '新しいフォントは見つかりませんでした'));
   }
 
   Future<void> _remove(UserFontEntry e) async {
@@ -173,18 +173,18 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
       };
 
   String get _description => switch (widget.category) {
-        'app' => _t('글꼴 파일(.ttf, .otf)을 여러 개 넣어 두고, 누르면 앱의 메뉴·목록·설정 화면이 그 글꼴로 바뀌어요. 같은 글꼴의 보통·굵게 파일을 함께 넣으면 굵은 글씨도 그 글꼴로 보여 줘요.',
-            'Add several font files (.ttf, .otf) and tap one to use it for the app\'s menus, lists and settings. Add the regular and bold files of a font together to show bold text in it too.',
-            '可添加多个字体文件（.ttf、.otf），点击即可用于应用菜单、列表和设置。同时添加常规和粗体文件，粗体文字也会使用该字体。',
-            'フォントファイル（.ttf・.otf）を複数追加し、タップするとアプリのメニュー・一覧・設定がそのフォントになります。標準と太字のファイルを一緒に追加すると太字もそのフォントで表示します。'),
-        'epub' => _t('글꼴 파일을 여러 개 넣어 두고, 누르면 EPUB 책 본문이 그 글꼴로 바뀌어요. \'기본 글꼴\'은 책에 들어 있는 원래 글꼴이에요.',
-            'Add several font files and tap one to show EPUB book text in it. \'Default font\' uses the book\'s own fonts.',
-            '可添加多个字体文件，点击即可用该字体显示EPUB正文。“默认字体”使用书中自带的字体。',
-            'フォントファイルを複数追加し、タップするとEPUB本文がそのフォントになります。「既定のフォント」は本に含まれる元のフォントです。'),
+        'app' => _t('글꼴 파일(.ttf, .otf)을 여러 개 넣어 두고, 누르면 앱의 메뉴·목록·설정 화면이 그 글꼴로 바뀌어요\n같은 글꼴의 보통·굵게 파일을 함께 넣으면 굵은 글씨도 그 글꼴로 보여 줘요',
+            'Add several font files (.ttf, .otf) and tap one to use it for the app\'s menus, lists and settings\nAdd the regular and bold files of a font together to show bold text in it too',
+            '可添加多个字体文件（.ttf、.otf），点击即可用于应用菜单、列表和设置\n同时添加常规和粗体文件，粗体文字也会使用该字体',
+            'フォントファイル（.ttf・.otf）を複数追加し、タップするとアプリのメニュー・一覧・設定がそのフォントになります\n標準と太字のファイルを一緒に追加すると太字もそのフォントで表示します'),
+        'epub' => _t('글꼴 파일을 여러 개 넣어 두고, 누르면 EPUB 책 본문이 그 글꼴로 바뀌어요\n\'기본 글꼴\'은 책에 들어 있는 원래 글꼴이에요',
+            'Add several font files and tap one to show EPUB book text in it\n\'Default font\' uses the book\'s own fonts',
+            '可添加多个字体文件，点击即可用该字体显示EPUB正文\n“默认字体”使用书中自带的字体',
+            'フォントファイルを複数追加し、タップするとEPUB本文がそのフォントになります\n「既定のフォント」は本に含まれる元のフォントです'),
         _ => _t(
             '한글·워드 문서에 쓰인 글꼴(예: 맑은 고딕, 함초롬바탕)이 휴대폰에 없으면 다른 글꼴로 바뀌어 글과 사진 배치가 밀릴 수 있어요. '
-                '가지고 있는 글꼴 파일을 넣으면 같은 이름의 글꼴 대신 그 파일로 보여 줘요. 넣은 글꼴은 이 기기 안에서만 쓰여요.\n'
-                'Arial·Times New Roman·Courier New·Calibri·Cambria는 글자 폭이 같은 무료 글꼴로 자동으로 바꿔 보여 줘요.',
+                '가지고 있는 글꼴 파일을 넣으면 같은 이름의 글꼴 대신 그 파일로 보여 줘요\n넣은 글꼴은 이 기기 안에서만 쓰여요\n'
+                'Arial·Times New Roman·Courier New·Calibri·Cambria는 글자 폭이 같은 무료 글꼴로 자동으로 바꿔 보여 줘요',
             'If a font used in a document (e.g. Malgun Gothic) is missing on this phone, another font is used and text or pictures may shift. '
                 'Add font files you own and they will be used for fonts with the same name. Added fonts stay on this device.\n'
                 'Arial, Times New Roman, Courier New, Calibri and Cambria are automatically replaced with free fonts of the same widths.',

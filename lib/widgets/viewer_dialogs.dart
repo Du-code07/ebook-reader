@@ -74,8 +74,8 @@ Future<void> showPageDisplayDialog(
                 padding: const EdgeInsets.only(right: 8),
                 child: Text(
                   scrollMode
-                      ? tr('스크롤 모드에서는 바뀌지 않아요. 탭·슬라이드 모드에서 적용돼요.', 'Not applied in scroll mode. Applies in tap/slide mode.', '滚动模式下不变，在点击/滑动模式下生效。', 'スクロールモードでは変わりません。タップ・スライドモードで適用されます。')
-                      : tr('탭·슬라이드 모드에서 적용돼요. 스크롤 모드의 표시는 바뀌지 않아요.', 'Applies in tap/slide mode. Scroll mode is not affected.', '在点击/滑动模式下生效，滚动模式不受影响。', 'タップ・スライドモードで適用されます。スクロールモードは変わりません。'),
+                      ? tr('스크롤 모드에서는 바뀌지 않아요\n탭·슬라이드 모드에서 적용돼요', 'Not applied in scroll mode\nApplies in tap/slide mode', '滚动模式下不变，在点击/滑动模式下生效', 'スクロールモードでは変わりません\nタップ・スライドモードで適用されます')
+                      : tr('탭·슬라이드 모드에서 적용돼요\n스크롤 모드의 표시는 바뀌지 않아요', 'Applies in tap/slide mode\nScroll mode is not affected', '在点击/滑动模式下生效，滚动模式不受影响', 'タップ・スライドモードで適用されます\nスクロールモードは変わりません'),
                   style: TextStyle(fontSize: 14, height: 1.4, color: cs.onSurfaceVariant),
                 ),
               ),
@@ -84,7 +84,7 @@ Future<void> showPageDisplayDialog(
                 ('one', tr('한 페이지', 'One Page', '单页', '1ページ'), null),
                 ('two', tr('두 페이지', 'Two Pages', '双页', '2ページ'), null),
                 ('auto', tr('자동', 'Auto', '自动', '自動'),
-                    tr('화면이 넓으면 두 페이지, 좁으면 한 페이지로 표시해요.', 'Two pages on wide screens, one on narrow screens.', '屏幕宽时显示双页，窄时显示单页。', '画面が広いと2ページ、狭いと1ページで表示します。')),
+                    tr('화면이 넓으면 두 페이지, 좁으면 한 페이지로 표시해요', 'Two pages on wide screens, one on narrow screens', '屏幕宽时显示双页，窄时显示单页', '画面が広いと2ページ、狭いと1ページで表示します')),
               ])
                 InkWell(
                   borderRadius: BorderRadius.circular(12),
@@ -237,7 +237,7 @@ class ContinuousPageController {
   void scrollByScreen(int dir) => _state?._scrollByScreen(dir);
 
   /// 확대돼 있는지
-  bool get zoomed => (_state?._scale ?? 1) > 1.03;
+  bool get zoomed => ((_state?._scale ?? 1) - 1).abs() > 0.03;
 
   /// 확대를 처음(1배)으로 (보던 자리는 그대로)
   void resetZoom() => _state?._resetZoom();
@@ -303,7 +303,10 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
       }
 
       return Stack(children: [
-        Positioned(
+        // 위치 알림은 띄엄띄엄 오므로 그 사이를 이어 그려 막대가 부드럽게 따라오게 (끄는 중에는 손가락 그대로)
+        AnimatedPositioned(
+          duration: _dragging ? Duration.zero : const Duration(milliseconds: 110),
+          curve: Curves.linear,
           left: left ? 0 : null,
           right: left ? null : 0,
           top: ratio * track,
@@ -453,6 +456,8 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
   }
 
   double get _maxScale => widget.zoomable ? 5 : 1;
+  // 두 손가락으로 오므려 화면보다 작게도 볼 수 있음 (가운데에 놓임)
+  double get _minScale => widget.zoomable ? 0.5 : 1;
   double get _contentHeight => (_tops.isEmpty ? 0 : _tops.last) * _scale;
   double get _maxX => math.max(0, _width * _scale - _width);
   double get _maxY => math.max(0, _contentHeight - _height);
@@ -461,7 +466,8 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
   double _padYFor(double scale) => math.max(0, (_height - (_tops.isEmpty ? 0 : _tops.last) * scale) / 2);
 
   void _clamp() {
-    _ox = _ox.clamp(0.0, _maxX).toDouble();
+    // 화면보다 작게 줄였으면 쪽을 가로 가운데에
+    _ox = _scale < 1 ? -(_width - _width * _scale) / 2 : _ox.clamp(0.0, _maxX).toDouble();
     _oy = _oy.clamp(0.0, _maxY).toDouble();
   }
 
@@ -591,7 +597,7 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
   Offset? _downLocal; // 손가락이 처음 닿은 자리
 
   void _resetZoom() {
-    if (_scale <= 1.0001 || _height <= 0) return;
+    if ((_scale - 1).abs() < 0.0001 || _height <= 0) return;
     _stopSim();
     final double cy = (_oy + _height / 2 - _padYFor(_scale)) / _scale;
     _scale = 1;
@@ -616,7 +622,7 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
       _startScale = _scale / (d.scale == 0 ? 1 : d.scale);
       _startContent = Offset((_ox + d.localFocalPoint.dx) / _scale, (_oy + d.localFocalPoint.dy - _padYFor(_scale)) / _scale);
     }
-    final double ns = (_startScale * d.scale).clamp(1.0, _maxScale).toDouble();
+    final double ns = (_startScale * d.scale).clamp(_minScale, _maxScale).toDouble();
     _scale = ns;
     _ox = _startContent.dx * ns - d.localFocalPoint.dx;
     _oy = _startContent.dy * ns - d.localFocalPoint.dy + _padYFor(ns);
@@ -625,7 +631,8 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
 
   void _onScaleEnd(ScaleEndDetails d) {
     final v = d.velocity.pixelsPerSecond;
-    if (_scale < 1.03 && _scale != 1) {
+    // 거의 원래 크기면 딱 맞춤
+    if (_scale > 0.97 && _scale < 1.03 && _scale != 1) {
       _scale = 1;
       _moved();
     }
@@ -666,8 +673,9 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
               if (widget.gapColor != null && widget.gap > 0 && i < widget.count - 1) {
                 children.add(Positioned(
                   key: ValueKey('gap$i'),
-                  left: 0,
-                  right: 0,
+                  // 화면보다 작게 줄였을 때는 쪽 너비만큼만
+                  left: s < 1 ? -_ox : 0,
+                  width: s < 1 ? _width * s : c.maxWidth,
                   top: _tops[i] * s - _oy + padY + h,
                   height: widget.gap * s,
                   child: ColoredBox(color: widget.gapColor!),
@@ -990,9 +998,10 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
     Future<void>.delayed(const Duration(milliseconds: 180), widget.onClose);
   }
 
-  Widget _label(String text, {IconData? before, IconData? after}) => Container(
+  Widget _label(BuildContext context, String text, {IconData? before, IconData? after}) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-        decoration: BoxDecoration(color: const Color(0xE6222222), borderRadius: BorderRadius.circular(18)),
+        // 메뉴·이전·다음 표시는 시그니쳐 색 바탕에 흰 글자
+        decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(18)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (before != null) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(before, color: Colors.white, size: 20)),
           Text(text, style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800)),
@@ -1010,19 +1019,22 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
       tween: Tween<double>(begin: 0, end: _closing ? 0 : 1),
       duration: const Duration(milliseconds: 180),
       builder: (context, t, child) => Opacity(opacity: t, child: child),
-      child: GestureDetector(
+      // 화면 위에 따로 띄우는 것이라 Material로 감싸야 글자 밑에 노란 줄이 생기지 않음
+      child: Material(
+        type: MaterialType.transparency,
+        child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _close,
         child: LayoutBuilder(builder: (context, c) {
           final double menuH = widget.tapTurn ? c.maxHeight * 2 / 3 : c.maxHeight;
           return Stack(children: [
             // 메뉴 구역
-            Positioned(left: 0, top: 0, right: 0, height: menuH, child: ColoredBox(color: const Color(0x8CE8EAF6), child: Center(child: _label(tr('메뉴', 'Menu', '菜单', 'メニュー'))))),
+            Positioned(left: 0, top: 0, right: 0, height: menuH, child: ColoredBox(color: const Color(0x8CE8EAF6), child: Center(child: _label(context, tr('메뉴', 'Menu', '菜单', 'メニュー'))))),
             if (widget.tapTurn) ...[
               Positioned(left: 0, top: menuH, width: c.maxWidth / 2, bottom: 0,
-                  child: ColoredBox(color: const Color(0x8CF6F1E6), child: Center(child: _label(leftLabel, before: Icons.chevron_left_rounded)))),
+                  child: ColoredBox(color: const Color(0x8CF6F1E6), child: Center(child: _label(context, leftLabel, before: Icons.chevron_left_rounded)))),
               Positioned(left: c.maxWidth / 2, top: menuH, right: 0, bottom: 0,
-                  child: ColoredBox(color: const Color(0x8CE3ECF6), child: Center(child: _label(rightLabel, after: Icons.chevron_right_rounded)))),
+                  child: ColoredBox(color: const Color(0x8CE3ECF6), child: Center(child: _label(context, rightLabel, after: Icons.chevron_right_rounded)))),
               // 구역 사이 선
               Positioned(left: 0, right: 0, top: menuH - 1, height: 2, child: const ColoredBox(color: line)),
               Positioned(left: c.maxWidth / 2 - 1, width: 2, top: menuH, bottom: 0, child: const ColoredBox(color: line)),
@@ -1037,10 +1049,10 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(color: const Color(0xE6222222), borderRadius: BorderRadius.circular(14)),
                   child: Text(
-                    tr('탭 존 가이드라인은 앱 설정에서 끌 수 있어요.\n화면을 누르면 닫혀요.',
-                        'You can turn off this tap zone guide in app settings.\nTap to close.',
-                        '可在应用设置中关闭点击区域指引。\n点击屏幕关闭。',
-                        'タップゾーンガイドはアプリ設定でオフにできます。\n画面をタップすると閉じます。'),
+                    tr('탭 존 가이드라인은 앱 설정에서 끌 수 있어요\n화면을 누르면 닫혀요',
+                        'You can turn off this tap zone guide in app settings\nTap to close',
+                        '可在应用设置中关闭点击区域指引\n点击屏幕关闭',
+                        'タップゾーンガイドはアプリ設定でオフにできます\n画面をタップすると閉じます'),
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4, fontWeight: FontWeight.w600),
                   ),
@@ -1049,6 +1061,7 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
             ),
           ]);
         }),
+      ),
       ),
     );
   }
@@ -1072,7 +1085,8 @@ Future<OverlayEntry?> showTapZoneGuide(
     await done.future.timeout(const Duration(seconds: 2), onTimeout: () {});
     anim.removeStatusListener(listener);
   }
-  if (!context.mounted) return null;
+  // 탭으로 넘기지 않는 보기(스크롤·슬라이드만 등)에서는 띄우지 않음
+  if (!context.mounted || !tapTurn()) return null;
   final overlay = Overlay.maybeOf(context);
   if (overlay == null) return null;
   late OverlayEntry entry;

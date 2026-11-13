@@ -90,7 +90,7 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
                       children: [
                         leadingFor?.call(value) ?? Icon(icon, size: 16, color: color ?? cs.onSurfaceVariant),
                         const SizedBox(width: 10),
-                        Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, color: color))),
+                        Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, color: color, fontWeight: beside ? FontWeight.w700 : null))),
                         if (selected != null && selected == value) ...[
                           const SizedBox(width: 12),
                           Icon(Icons.check, size: 18, color: AppColors.of(context)),

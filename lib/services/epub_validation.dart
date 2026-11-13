@@ -40,9 +40,9 @@ class EpubValidation {
       final root = container.descendants.whereType<XmlElement>()
           .where((e) => e.name.local == 'rootfile').firstOrNull;
       final raw = root?.getAttribute('full-path');
-      if (raw == null || raw.isEmpty) throw const FormatException('EPUB 패키지 경로가 없습니다.');
+      if (raw == null || raw.isEmpty) throw const FormatException('EPUB 패키지 경로가 없습니다');
       final rootUri = Uri.parse(raw);
-      if (rootUri.hasScheme || rootUri.hasAuthority) throw const FormatException('EPUB 패키지 경로가 올바르지 않습니다.');
+      if (rootUri.hasScheme || rootUri.hasAuthority) throw const FormatException('EPUB 패키지 경로가 올바르지 않습니다');
       final opfPath = Uri.decodeComponent(rootUri.normalizePath().path).replaceFirst(RegExp(r'^/'), '');
       final entry = find(opfPath);
       final opf = read(entry, opfPath);
@@ -52,11 +52,11 @@ class EpubValidation {
         if (id != null && href != null) items[id] = href;
       }
       final spine = opf.descendants.whereType<XmlElement>().where((e) => e.name.local == 'itemref').toList();
-      if (spine.isEmpty) throw const FormatException('EPUB 본문 목록이 비어 있습니다.');
+      if (spine.isEmpty) throw const FormatException('EPUB 본문 목록이 비어 있습니다');
       final base = Uri(path: '/${entry!.name}');
       for (final ref in spine) {
         final href = items[ref.getAttribute('idref')];
-        if (href == null) throw const FormatException('EPUB 본문 참조가 올바르지 않습니다.');
+        if (href == null) throw const FormatException('EPUB 본문 참조가 올바르지 않습니다');
         final uri = base.resolve(href);
         final name = Uri.decodeComponent(uri.path).replaceFirst(RegExp(r'^/'), '');
         if (uri.hasScheme || uri.hasAuthority || find(name)?.isFile != true) {

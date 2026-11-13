@@ -231,10 +231,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (secs >= 90) {
         timer.cancel();
         _handleEpubLoadError(_tr(
-          '본문 표시 시간이 초과되었습니다.',
-          'Timed out while displaying the document.',
-          '显示正文超时。',
-          '本文の表示がタイムアウトしました。',
+          '본문 표시 시간이 초과되었습니다',
+          'Timed out while displaying the document',
+          '显示正文超时',
+          '本文の表示がタイムアウトしました',
         ));
       }
     });
@@ -401,7 +401,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     );
   }
 
-  /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 넘김 버튼'
+  /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 전환 버튼'
   /// 스크롤은 탭·슬라이드와 함께 켤 수 없음 (스크롤을 켜면 둘 다 꺼짐). 탭과 슬라이드는 함께 사용 가능
   List<Widget> _pageModeSettings(StateSetter setModalState) {
     Future<void> apply(VoidCallback change) async {
@@ -422,7 +422,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _settingsHeader(Icons.swipe_outlined, _tr('페이지 모드', 'Page Mode', '翻页模式', 'ページモード')),
       const SizedBox(height: 4),
       Text(
-        _tr('스크롤은 탭·슬라이드와 함께 쓸 수 없어요. 탭과 슬라이드는 함께 쓸 수 있어요.', 'Scroll cannot be combined with Tap or Slide. Tap and Slide can be used together.', '滚动不能与点击、滑动同时使用；点击和滑动可以同时使用。', 'スクロールはタップ・スライドと併用できません。タップとスライドは併用できます。'),
+        _tr('스크롤은 탭·슬라이드와 함께 쓸 수 없어요\n탭과 슬라이드는 함께 쓸 수 있어요', 'Scroll cannot be combined with Tap or Slide\nTap and Slide can be used together', '滚动不能与点击、滑动同时使用；点击和滑动可以同时使用', 'スクロールはタップ・スライドと併用できません\nタップとスライドは併用できます'),
         style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
       const SizedBox(height: 6),
@@ -433,6 +433,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             selected: _pageModeTap,
             onSelected: (val) => apply(() {
               _pageModeTap = val;
+              if (val) _pageModeScroll = false;
+            }),
+          ),
+          SettingToggle(
+            label: Text(_tr('슬라이드', 'Slide', '滑动', 'スライド')),
+            selected: _useSwipeTurn,
+            onSelected: (val) => apply(() {
+              _useSwipeTurn = val;
               if (val) _pageModeScroll = false;
             }),
           ),
@@ -459,21 +467,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 StorageService.setScrollBarOff(val);
               }),
             ),
-          SettingToggle(
-            label: Text(_tr('슬라이드', 'Slide', '滑动', 'スライド')),
-            selected: _useSwipeTurn,
-            onSelected: (val) => apply(() {
-              _useSwipeTurn = val;
-              if (val) _pageModeScroll = false;
-            }),
-          ),
         ],
       ),
       const SizedBox(height: 26),
       // EPUB 스크롤 보기에서는 버튼이 챕터를 넘김
       _settingsHeader(Icons.smart_button_outlined, _isEpub && _pageModeScroll
           ? _tr('챕터 넘김 버튼 (동시 사용 가능)', 'Chapter Turn Buttons (Multiple allowed)', '翻章按钮 (可同时启用)', '章めくりボタン (同時使用可)')
-          : _tr('페이지 넘김 버튼 (동시 사용 가능)', 'Page Turn Buttons (Multiple allowed)', '翻页按钮 (可同时启用)', 'ページめくりボタン (同時使用可)')),
+          : _tr('페이지 전환 버튼 (동시 사용 가능)', 'Page Switch Buttons (Multiple allowed)', '翻页按钮 (可同时启用)', 'ページ切替ボタン (同時使用可)')),
       const SizedBox(height: 6),
       SettingGroup(
         children: [
@@ -508,9 +508,50 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     });
   }
 
+  /// 뷰어 설정 초기화: 음량 버튼 동시에 눌러 끄기 / 탭 + 슬라이드 / 음량 버튼 / 진행도 하단 / 메모 도구 모음 하단 / 반원 / 정보 표시 없음
+  Future<void> _resetViewerSettings(StateSetter setModalState) async {
+    final bool scrollWas = _pageModeScroll;
+    setState(() {
+      _useVolumeComboLock = true;
+      _useShakeLock = false;
+      _pageModeTap = !_isSpreadsheet;
+      _useSwipeTurn = true;
+      _pageModeScroll = false;
+      _useVolumeTurn = true;
+      _useSpenTurn = false;
+      _progressBarPosSetting = 'bottom';
+      _memoToolbarPos = 'bottom';
+      _toolbarStyle = 'arc';
+      _footerInfoMode = 'none';
+    });
+    setModalState(() {});
+    await StorageService.setUseVolumeComboLock(true);
+    await StorageService.setUseShakeLock(false);
+    await StorageService.setPageModeTap(true);
+    await StorageService.setUseSwipeTurn(true);
+    await StorageService.setPageModeScroll(false);
+    await StorageService.setUseVolumeTurn(true);
+    await StorageService.setUseSpenTurn(false);
+    await StorageService.setProgressBarPosition('bottom');
+    await StorageService.setMemoToolbarPosition('bottom');
+    await StorageService.setToolbarStyle('arc');
+    await StorageService.setFooterInfoMode('none');
+    _storedPageModeScroll = false;
+    if (scrollWas) {
+      _onPageModeChanged();
+    } else if (!_isOfflineDocument) {
+      try {
+        _epubController.setSwipeEnabled(_useSwipeTurn);
+      } catch (_) {}
+    }
+  }
+
   /// 페이지 모드가 바뀌었을 때: 보던 자리에서 다시 보여 줌 (EPUB은 넘김/스크롤 방식이 바뀌어 다시 염)
   void _onPageModeChanged() {
     if (!mounted) return;
+    // 슬라이드에서 밀던 상태(미리 본 화면·이동량)가 남아 스크롤을 막지 않게 모두 정리
+    _vPageSwipe.reset();
+    _vPeekClear();
     setState(() {
       _initialCfi = _currentCfi;
       // 스크롤 보기에서는 메모를 쓰지 않음
@@ -634,7 +675,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('현재 그룹("$currentGroup")에 이동할 다른 파일이 없습니다.'),
+            content: Text('현재 그룹("$currentGroup")에 이동할 다른 파일이 없습니다'),
             duration: const Duration(seconds: 1),
           ),
         );
@@ -789,7 +830,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     unawaited(_snapInit());
     // 파일을 열 때마다 탭 존 가이드라인 (앱 설정에서 끌 수 있음)
     if (!StorageService.tapGuideOff) {
-      unawaited(showTapZoneGuide(context, tapTurn: () => _pageModeTap && !_slideShow, rtl: () => _isMangaRtlMode, tr: _tr).then((e) {
+      unawaited(showTapZoneGuide(context, tapTurn: () => _pageModeTap && !_slideShow && !_isSpreadsheet, rtl: () => _isMangaRtlMode, tr: _tr).then((e) {
         if (!mounted) {
           if (e?.mounted ?? false) e!.remove();
         } else {
@@ -2216,7 +2257,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ),
                   ],
                 ),
-                SettingDoneButton(label: _tr('완료', 'Done', '完成', '完了'), onPressed: () => Navigator.of(ctx).pop()),
+                // 초기화: 기본값으로 (화면 잠금 끄기·페이지 모드·페이지 전환 버튼·진행도 UI·메모 도구 모음·도구 모음 형태·하단 정보)
+                SettingDoneButton(label: _tr('초기화', 'Reset', '重置', 'リセット'), onPressed: () => _resetViewerSettings(setModalState)),
               ],
             ),
           ),
@@ -2389,7 +2431,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             if (bookmarks.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(24.0),
-                child: Text(_tr('저장된 북마크가 없습니다.', 'No saved bookmarks.', '暂无保存的书签。', '保存されたブックマークはありません。')),
+                child: Text(_tr('저장된 북마크가 없습니다', 'No saved bookmarks', '暂无保存的书签', '保存されたブックマークはありません')),
               )
             else
               Flexible(
@@ -3729,10 +3771,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ScaffoldMessenger.of(context)
               ..clearSnackBars()
               ..showSnackBar(SnackBar(
-                content: Text(_tr('스크롤 모드에서는 읽기 방향이 바뀌지 않아요. 탭·슬라이드 모드에서 바꿀 수 있어요.',
-                    'Reading direction does not change in scroll mode. Change it in tap/slide mode.',
-                    '滚动模式下不能切换阅读方向，请在点击/滑动模式下切换。',
-                    'スクロールモードでは読書方向は変わりません。タップ・スライドモードで変更できます。')),
+                content: Text(_tr('스크롤 모드에서는 읽기 방향이 바뀌지 않아요\n탭·슬라이드 모드에서 바꿀 수 있어요',
+                    'Reading direction does not change in scroll mode\nChange it in tap/slide mode',
+                    '滚动模式下不能切换阅读方向，请在点击/滑动模式下切换',
+                    'スクロールモードでは読書方向は変わりません\nタップ・スライドモードで変更できます')),
                 duration: const Duration(seconds: 2),
               ));
             return;
@@ -3942,6 +3984,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     _syncShakeListening();
+    // 메뉴를 띄운 동안에는 상태표시줄도 함께 보임
+    SystemBars.viewerStatus(_showControls && !_isTouchLocked);
     if (_isLoading) {
       return Scaffold(body: FileLoadingView(label: _tr('파일 여는 중', 'Opening file', '正在打开文件', 'ファイルを開いています')));
     }
@@ -4018,7 +4062,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         hint: _tr('처음 한 번만 만들고, 다음부터는 바로 보여요', 'Only the first time — next time it opens instantly', '仅首次生成，下次直接显示', '初回のみ作成し、次回からはすぐ表示されます'),
                       )
                     : _chapters.isEmpty
-                        ? NoTocView(label: _tr('표시할 목차가 없어요.', 'No contents to show.', '没有可显示的目录。', '表示できる目次がありません。'))
+                        ? NoTocView(label: _tr('표시할 목차가 없어요', 'No contents to show', '没有可显示的目录', '表示できる目次がありません'))
                         : ListView.builder(
                   itemCount: _chapters.length,
                   itemBuilder: (context, index) {
@@ -4513,6 +4557,9 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                 top: 0,
                 left: 0,
                 right: 0,
+                child: AnnotatedRegion<SystemUiOverlayStyle>(
+                // 메뉴와 함께 보이는 상태표시줄: 검은 막대 위라 흰 아이콘
+                value: SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
                 child: Material(
                   color: Colors.black87,
                   child: SafeArea(
@@ -4628,7 +4675,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       ),
                     ),
                   ),
-                ),
+                )),
               ),
 
             _buildEpubProgressBar(bottomPadding),

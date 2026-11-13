@@ -43,6 +43,18 @@ class VerticalPageSwipe extends ChangeNotifier {
 
   bool get isAnimating => _busy;
 
+  /// 보기 방식이 바뀌었을 때: 하던 밀기를 모두 잊고 제자리로
+  void reset() {
+    _anim.stop();
+    _busy = false;
+    _pointers = 0;
+    _multi = false;
+    _start = null;
+    _locked = null;
+    offset = 0.0;
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _anim.dispose();

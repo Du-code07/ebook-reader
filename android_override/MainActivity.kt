@@ -175,6 +175,34 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     // 서재(첫 화면): 상태표시줄은 늘 보이고, 내비게이션 바는 버튼 방식일 때만 보임. 파일 열람 중에는 모두 숨김
     @Volatile private var libraryBars = true
 
+    // 파일 열람 중 메뉴(위아래 막대)가 떠 있는 동안에는 상태표시줄도 보임 (내비게이션 바는 숨긴 채)
+    @Volatile private var viewerStatusBar = false
+
+    private fun showViewerStatusBar() {
+        try {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.setDecorFitsSystemWindows(false)
+                window.insetsController?.let { controller ->
+                    controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    controller.show(WindowInsets.Type.statusBars())
+                    try {
+                        controller.hide(WindowInsets.Type.navigationBars())
+                    } catch (_: Exception) {}
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                )
+            }
+        } catch (_: Throwable) {}
+    }
+
     /// 내비게이션 바가 버튼(3버튼·2버튼) 방식인가 (제스처 방식이면 false)
     private fun isButtonNavigation(): Boolean = try {
         android.provider.Settings.Secure.getInt(contentResolver, "navigation_mode", 0) != 2
@@ -205,6 +233,10 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private fun hideSystemStatusBar(alsoHideNavBar: Boolean = false) {
         if (libraryBars) {
             showLibraryBars()
+            return
+        }
+        if (viewerStatusBar) {
+            showViewerStatusBar()
             return
         }
         try {
@@ -275,7 +307,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 @Suppress("DEPRECATION")
                 insets.systemWindowInsetTop > 0
             }
-            if (statusBarVisible && isActivityResumed && !libraryBars) {
+            if (statusBarVisible && isActivityResumed && !libraryBars && !viewerStatusBar) {
                 scheduleStatusBarReHide()
             }
             v.onApplyWindowInsets(insets)
@@ -859,11 +891,21 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     applyRequestedScreenOrientation(mode)
                     result.success(true)
                 }
+            } else if (call.method == "setViewerStatusBar") {
+                // 파일 열람 중 메뉴를 띄우면 상태표시줄도 함께 보이고, 메뉴를 닫으면 다시 숨김
+                val show = call.argument<Boolean>("show") ?: false
+                runOnUiThread {
+                    viewerStatusBar = show && !libraryBars
+                    mainHandler.removeCallbacks(reHideStatusBarRunnable)
+                    hideSystemStatusBar(alsoHideNavBar = true)
+                    result.success(true)
+                }
             } else if (call.method == "setLibraryBars") {
                 // 서재에서는 상태표시줄(과 버튼식 내비게이션 바)을 보이고, 파일을 열면 모두 숨김
                 val on = call.argument<Boolean>("on") ?: true
                 runOnUiThread {
                     libraryBars = on
+                    viewerStatusBar = false
                     hideSystemStatusBar(alsoHideNavBar = !on)
                     if (!on) mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 200L)
                     result.success(true)

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 class SystemBars {
   static const _channel = MethodChannel('ebook_reader/pdf_renderer');
   static int _viewers = 0;
+  static bool _status = false;
 
   static Future<void> _set(bool library) async {
     try {
@@ -16,12 +17,27 @@ class SystemBars {
   /// 뷰어 화면이 열릴 때 (initState)
   static void enterViewer() {
     _viewers++;
+    _status = false;
     if (_viewers == 1) _set(false);
   }
 
   /// 뷰어 화면이 닫힐 때 (dispose)
   static void leaveViewer() {
     if (_viewers > 0) _viewers--;
-    if (_viewers == 0) _set(true);
+    if (_viewers == 0) {
+      _status = false;
+      _set(true);
+    }
+  }
+
+  /// 파일 열람 중 메뉴(위아래 막대)를 띄운 동안에는 상태표시줄도 보임. 같은 값이면 다시 보내지 않음
+  static void viewerStatus(bool show) {
+    if (_viewers == 0 || show == _status) return;
+    _status = show;
+    () async {
+      try {
+        await _channel.invokeMethod('setViewerStatusBar', {'show': show});
+      } catch (_) {}
+    }();
   }
 }

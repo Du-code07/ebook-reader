@@ -329,7 +329,7 @@ class StorageService {
   // 파일 정렬: 기준 'name' | 'date', 순서 asc(이름 오름차순·오래된 순) / desc, 정렬 기억하기
   static Future<(String, bool, bool)> getLibrarySort() async {
     final p = await SharedPreferences.getInstance();
-    final remember = p.getBool('lib_sort_remember_v90') ?? false;
+    final remember = p.getBool('lib_sort_remember_v90') ?? true; // 기본: 정렬 기억하기 켜짐
     if (!remember) return ('name', true, false);
     return (p.getString('lib_sort_by_v90') ?? 'name', p.getBool('lib_sort_asc_v90') ?? true, true);
   }

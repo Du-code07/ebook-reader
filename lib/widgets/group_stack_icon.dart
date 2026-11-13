@@ -46,3 +46,64 @@ class _GroupStackPainter extends CustomPainter {
   @override
   bool shouldRepaint(_GroupStackPainter old) => old.color != color || old.spread != spread;
 }
+
+/// 그룹 목록의 [전체] 아이콘: 서류가 들어 있는 폴더
+class FolderDocsIcon extends StatelessWidget {
+  const FolderDocsIcon({super.key, this.size = 20, this.color});
+
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color c = color ?? IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
+    return SizedBox.square(dimension: size, child: CustomPaint(painter: _FolderDocsPainter(c)));
+  }
+}
+
+class _FolderDocsPainter extends CustomPainter {
+  _FolderDocsPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double u = size.width / 24;
+    canvas.save();
+    canvas.scale(u);
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round;
+    final clear = Paint()..blendMode = BlendMode.clear;
+    canvas.saveLayer(const Rect.fromLTWH(-2, -2, 28, 28), Paint());
+    // 뒤쪽 폴더 (손잡이 달린 윗부분)
+    final back = Path()
+      ..moveTo(2.5, 12)
+      ..lineTo(2.5, 5.2)
+      ..quadraticBezierTo(2.5, 4, 3.7, 4)
+      ..lineTo(8.6, 4)
+      ..lineTo(10.4, 6)
+      ..lineTo(20.3, 6)
+      ..quadraticBezierTo(21.5, 6, 21.5, 7.2)
+      ..lineTo(21.5, 12);
+    canvas.drawPath(back, stroke);
+    // 폴더에 꽂힌 서류
+    final paper = RRect.fromLTRBR(6, 2.6, 18, 14, const Radius.circular(1.2));
+    canvas.drawRRect(paper.inflate(1.4), clear);
+    canvas.drawRRect(paper, stroke);
+    canvas.drawLine(const Offset(8.8, 6), const Offset(15.2, 6), stroke);
+    canvas.drawLine(const Offset(8.8, 8.8), const Offset(13.4, 8.8), stroke);
+    // 앞쪽 폴더 판
+    final front = RRect.fromLTRBR(2.5, 10.8, 21.5, 20.5, const Radius.circular(1.6));
+    canvas.drawRRect(front.inflate(1.2), clear);
+    canvas.drawRRect(front, stroke);
+    canvas.restore();
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _FolderDocsPainter old) => old.color != color;
+}

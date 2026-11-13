@@ -407,7 +407,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 넘김 버튼'
+  /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 전환 버튼'
   /// 스크롤은 탭·슬라이드와 함께 켤 수 없음 (스크롤을 켜면 둘 다 꺼짐). 탭과 슬라이드는 함께 사용 가능
   List<Widget> _pageModeSettings(StateSetter setModalState) {
     Future<void> apply(VoidCallback change) async {
@@ -431,7 +431,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _settingsHeader(Icons.swipe_outlined, _tr('페이지 모드', 'Page Mode', '翻页模式', 'ページモード')),
       const SizedBox(height: 4),
       Text(
-        _tr('스크롤은 탭·슬라이드와 함께 쓸 수 없어요. 탭과 슬라이드는 함께 쓸 수 있어요.', 'Scroll cannot be combined with Tap or Slide. Tap and Slide can be used together.', '滚动不能与点击、滑动同时使用；点击和滑动可以同时使用。', 'スクロールはタップ・スライドと併用できません。タップとスライドは併用できます。'),
+        _tr('스크롤은 탭·슬라이드와 함께 쓸 수 없어요\n탭과 슬라이드는 함께 쓸 수 있어요', 'Scroll cannot be combined with Tap or Slide\nTap and Slide can be used together', '滚动不能与点击、滑动同时使用；点击和滑动可以同时使用', 'スクロールはタップ・スライドと併用できません\nタップとスライドは併用できます'),
         style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
       const SizedBox(height: 6),
@@ -442,6 +442,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             selected: _pageModeTap,
             onSelected: (val) => apply(() {
               _pageModeTap = val;
+              if (val) _pageModeScroll = false;
+            }),
+          ),
+          SettingToggle(
+            label: Text(_tr('슬라이드', 'Slide', '滑动', 'スライド')),
+            selected: _useSwipeTurn,
+            onSelected: (val) => apply(() {
+              _useSwipeTurn = val;
               if (val) _pageModeScroll = false;
             }),
           ),
@@ -466,18 +474,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 StorageService.setScrollBarOff(val);
               }),
             ),
-          SettingToggle(
-            label: Text(_tr('슬라이드', 'Slide', '滑动', 'スライド')),
-            selected: _useSwipeTurn,
-            onSelected: (val) => apply(() {
-              _useSwipeTurn = val;
-              if (val) _pageModeScroll = false;
-            }),
-          ),
         ],
       ),
       const SizedBox(height: 26),
-      _settingsHeader(Icons.smart_button_outlined, _tr('페이지 넘김 버튼 (동시 사용 가능)', 'Page Turn Buttons (Multiple allowed)', '翻页按钮 (可同时启用)', 'ページめくりボタン (同時使用可)')),
+      _settingsHeader(Icons.smart_button_outlined, _tr('페이지 전환 버튼 (동시 사용 가능)', 'Page Switch Buttons (Multiple allowed)', '翻页按钮 (可同时启用)', 'ページ切替ボタン (同時使用可)')),
       const SizedBox(height: 6),
       SettingGroup(
         children: [
@@ -510,6 +510,37 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   /// 페이지 모드가 바뀌었을 때: 스크롤로 바꾸면 쪽 크기를 미리 다 알아 둠 (한 번에 이어 붙여 끊김 없이)
+  /// 뷰어 설정 초기화: 음량 버튼 동시에 눌러 끄기 / 탭 + 슬라이드 / 음량 버튼 / 진행도 하단 / 메모 도구 모음 하단 / 반원 / 정보 표시 없음
+  Future<void> _resetViewerSettings(StateSetter setModalState) async {
+    final bool scrollWas = _pageModeScroll;
+    setState(() {
+      _useVolumeComboLock = true;
+      _useShakeLock = false;
+      _pageModeTap = true;
+      _useSwipeTurn = true;
+      _pageModeScroll = false;
+      _useVolumeTurn = true;
+      _useSpenTurn = false;
+      _progressBarPosSetting = 'bottom';
+      _memoToolbarPos = 'bottom';
+      _toolbarStyle = 'arc';
+      _footerInfoMode = 'none';
+    });
+    setModalState(() {});
+    await StorageService.setUseVolumeComboLock(true);
+    await StorageService.setUseShakeLock(false);
+    await StorageService.setPageModeTap(true);
+    await StorageService.setUseSwipeTurn(true);
+    await StorageService.setPageModeScroll(false);
+    await StorageService.setUseVolumeTurn(true);
+    await StorageService.setUseSpenTurn(false);
+    await StorageService.setProgressBarPosition('bottom');
+    await StorageService.setMemoToolbarPosition('bottom');
+    await StorageService.setToolbarStyle('arc');
+    await StorageService.setFooterInfoMode('none');
+    if (scrollWas) _onPageModeChanged();
+  }
+
   void _onPageModeChanged() {
     if (!mounted) return;
     if (_pageModeScroll) _prepareScrollSizes();
@@ -658,7 +689,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('현재 그룹("$currentGroup")에 이동할 다른 파일이 없습니다.'),
+            content: Text('현재 그룹("$currentGroup")에 이동할 다른 파일이 없습니다'),
             duration: const Duration(seconds: 1),
           ),
         );
@@ -980,7 +1011,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             const Divider(height: 1),
             Expanded(
               child: !outline
-                  ? NoTocView(label: _tr('표시할 목차가 없어요.', 'No contents to show.', '没有可显示的目录。', '表示できる目次がありません。'))
+                  ? NoTocView(label: _tr('표시할 목차가 없어요', 'No contents to show', '没有可显示的目录', '表示できる目次がありません'))
                   : ListView.builder(
                 itemCount: _pdfToc.length,
                 itemBuilder: (context, index) {
@@ -1735,7 +1766,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           controller: ctrl,
           maxLines: 4,
           decoration: const InputDecoration(
-            hintText: 'S펜이나 키보드로 간단한 메모를 남겨보세요.',
+            hintText: 'S펜이나 키보드로 간단한 메모를 남겨보세요',
             border: OutlineInputBorder(),
           ),
         ),
@@ -1982,7 +2013,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     ),
                   ],
                 ),
-                SettingDoneButton(label: _tr('완료', 'Done', '完成', '完了'), onPressed: () => Navigator.of(ctx).pop()),
+                // 초기화: 기본값으로 (화면 잠금 끄기·페이지 모드·페이지 전환 버튼·진행도 UI·메모 도구 모음·도구 모음 형태·하단 정보)
+                SettingDoneButton(label: _tr('초기화', 'Reset', '重置', 'リセット'), onPressed: () => _resetViewerSettings(setModalState)),
               ],
             ),
           ),
@@ -2276,7 +2308,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             if (bookmarks.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(24.0),
-                child: Text(_tr('저장된 북마크가 없습니다.', 'No saved bookmarks.', '暂无保存的书签。', '保存されたブックマークはありません。')),
+                child: Text(_tr('저장된 북마크가 없습니다', 'No saved bookmarks', '暂无保存的书签', '保存されたブックマークはありません')),
               )
             else
               Flexible(
@@ -2693,10 +2725,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ScaffoldMessenger.of(context)
               ..clearSnackBars()
               ..showSnackBar(SnackBar(
-                content: Text(_tr('스크롤 모드에서는 읽기 방향이 바뀌지 않아요. 탭·슬라이드 모드에서 바꿀 수 있어요.',
-                    'Reading direction does not change in scroll mode. Change it in tap/slide mode.',
-                    '滚动模式下不能切换阅读方向，请在点击/滑动模式下切换。',
-                    'スクロールモードでは読書方向は変わりません。タップ・スライドモードで変更できます。')),
+                content: Text(_tr('스크롤 모드에서는 읽기 방향이 바뀌지 않아요\n탭·슬라이드 모드에서 바꿀 수 있어요',
+                    'Reading direction does not change in scroll mode\nChange it in tap/slide mode',
+                    '滚动模式下不能切换阅读方向，请在点击/滑动模式下切换',
+                    'スクロールモードでは読書方向は変わりません\nタップ・スライドモードで変更できます')),
                 duration: const Duration(seconds: 2),
               ));
             return;
@@ -2786,6 +2818,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   @override
   Widget build(BuildContext context) {
     _syncShakeListening();
+    // 메뉴를 띄운 동안에는 상태표시줄도 함께 보임
+    SystemBars.viewerStatus(_showControls && !_isTouchLocked);
     if (_isPreparingPages || _pageController == null) {
       return Scaffold(
         backgroundColor: _backdrop(context),
@@ -3011,7 +3045,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               top: 0,
               left: 0,
               right: 0,
-              child: Material(
+              child: AnnotatedRegion<SystemUiOverlayStyle>(
+                // 메뉴와 함께 보이는 상태표시줄: 검은 막대 위라 흰 아이콘
+                value: SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
+                child: Material(
                 color: Colors.black87,
                 child: SafeArea(
                   bottom: false,
@@ -3090,7 +3127,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     ),
                   ),
                 ),
-              ),
+              )),
             ),
 
           _buildProgressControlBar(bottomInset),

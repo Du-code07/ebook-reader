@@ -220,8 +220,8 @@ class _HwpViewerState extends State<HwpViewer> {
         await rootBundle.load(asset);
       } catch (_) {
         final folder = asset.contains('/') ? asset.substring(0, asset.lastIndexOf('/')) : asset;
-        _reportError('앱 안에 표시 파일($asset)이 없습니다. GitHub에 $folder 폴더가 올라가 있는지, '
-            'pubspec.yaml이 새 버전인지 확인한 뒤 다시 빌드해 주세요.');
+        _reportError('앱 안에 표시 파일($asset)이 없습니다\nGitHub에 $folder 폴더가 올라가 있는지, '
+            'pubspec.yaml이 새 버전인지 확인한 뒤 다시 빌드해 주세요');
         return;
       }
     }
@@ -277,7 +277,7 @@ class _HwpViewerState extends State<HwpViewer> {
     _timeout?.cancel();
     _timeout = Timer(const Duration(minutes: 5), () {
       _reportError(
-        '$_format 문서 표시 시간이 초과되었습니다. Android System WebView와 파일 상태를 확인해 주세요.',
+        '$_format 문서 표시 시간이 초과되었습니다\nAndroid System WebView와 파일 상태를 확인해 주세요',
       );
     });
   }
@@ -347,7 +347,7 @@ class _HwpViewerState extends State<HwpViewer> {
         _cacheKey = '${widget.filePath.hashCode.toUnsigned(32)}-$length-$modified';
       } catch (_) {}
       if (length < 1 || length > _maxBytes) {
-        throw const FormatException('비어 있거나 256MB를 초과하는 문서입니다.');
+        throw const FormatException('비어 있거나 256MB를 초과하는 문서입니다');
       }
       if (_isDocx) {
         final path = widget.filePath;
@@ -372,7 +372,7 @@ class _HwpViewerState extends State<HwpViewer> {
           generation == _generation) {
         final chunk = await opened.read(_chunkBytes);
         if (chunk.isEmpty)
-          throw const FormatException('문서를 읽는 중 파일 크기가 변경되었습니다.');
+          throw const FormatException('문서를 읽는 중 파일 크기가 변경되었습니다');
         await _invoke('appendChunk', [offset, base64Encode(chunk)]);
         offset += chunk.length;
         _loadProgress.value = 0.9 * offset / length;
@@ -439,7 +439,7 @@ class _HwpViewerState extends State<HwpViewer> {
         unawaited(_requestPassword(event['incorrect'] == true));
         break;
       case 'error':
-        _reportError(event['message'] ?? '$_format 문서를 표시하지 못했습니다.');
+        _reportError(event['message'] ?? '$_format 문서를 표시하지 못했습니다');
         break;
     }
   }
@@ -461,7 +461,7 @@ class _HwpViewerState extends State<HwpViewer> {
           enableSuggestions: false,
           decoration: InputDecoration(
             labelText: '비밀번호',
-            errorText: incorrect ? '비밀번호가 일치하지 않습니다.' : null,
+            errorText: incorrect ? '비밀번호가 일치하지 않습니다' : null,
           ),
           onSubmitted: (value) => Navigator.pop(context, value),
         ),
@@ -558,11 +558,12 @@ class _HwpViewerState extends State<HwpViewer> {
           // 엑셀·한글/워드 스크롤 보기: 손가락이 닿자마자 문서 화면이 받아 직접 굴림
           // (Flutter가 세로 밀기인지 판단할 때까지 터치를 붙잡아 두면 가로 화면·화면 가장자리에서 스크롤이 잘 안 됐음.
           //  화면 누르기(메뉴)는 바깥 Listener가 따로 받음)
-          gestureRecognizers: _isSpreadsheet || widget.vertical
-              ? {Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer())}
-              : {
-                  Factory<LongPressGestureRecognizer>(() => LongPressGestureRecognizer(duration: const Duration(milliseconds: 350))),
-                },
+          // 주의: WebView는 처음 만들 때 받은 목록을 계속 써서 (나중에 목록을 바꿔도 반영 안 됨)
+          // 슬라이드→스크롤로 바꾸면 스크롤이 먹통이 됐었음. 그래서 목록은 그대로 두고, 누를 때마다 지금 보기 방식을 확인함
+          gestureRecognizers: {
+            Factory<OneSequenceGestureRecognizer>(() => _ModeEagerRecognizer(() => mounted && (_isSpreadsheet || widget.vertical))),
+            Factory<LongPressGestureRecognizer>(() => LongPressGestureRecognizer(duration: const Duration(milliseconds: 350))),
+          },
           initialUrlRequest: URLRequest(url: WebUri(_entry)),
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,
@@ -651,7 +652,7 @@ class _HwpViewerState extends State<HwpViewer> {
               _reportError('문서 표시 파일 오류 (${response.statusCode})');
           },
           onRenderProcessGone: (controller, detail) async {
-            _reportError('문서 표시 프로세스가 종료되었습니다. 문서를 다시 열어 주세요.');
+            _reportError('문서 표시 프로세스가 종료되었습니다\n문서를 다시 열어 주세요');
           },
         ),
         // 처음 열 때: 돌아가는 원 + '파일 여는 중 n%' (파일을 넘기는 동안 진행률)
@@ -663,4 +664,29 @@ class _HwpViewerState extends State<HwpViewer> {
       ],
     );
   }
+}
+
+/// 켜져 있을 때만 손가락이 닿자마자 문서 화면(WebView)이 터치를 바로 가져가게 함 (스크롤 보기·엑셀)
+class _ModeEagerRecognizer extends OneSequenceGestureRecognizer {
+  _ModeEagerRecognizer(this.active);
+  final bool Function() active;
+
+  @override
+  bool isPointerAllowed(PointerDownEvent event) => active() && super.isPointerAllowed(event);
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    resolve(GestureDisposition.accepted);
+    stopTrackingPointer(event.pointer);
+  }
+
+  @override
+  String get debugDescription => 'mode eager';
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {}
+
+  @override
+  void handleEvent(PointerEvent event) {}
 }
