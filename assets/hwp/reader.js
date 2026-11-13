@@ -158,7 +158,7 @@ async function loadFontAliases(names) {
 }
 function installFontMeasurement() {
   const ctx = document.createElement('canvas').getContext('2d');
-  if (!ctx) throw new Error('문서 표시용 Canvas를 초기화하지 못했습니다');
+  if (!ctx) throw new Error('문서 표시용 Canvas를 초기화하지 못했어요');
   globalThis.measureTextWidth = (font, text) => {
     const fallback = fontKind(font) === 'serif' ? 'FReaderSerif' : fontKind(font) === 'math' ? 'FReaderMath' : 'FReaderSans';
     ctx.font = `${font}, ${fallback}`;
@@ -182,16 +182,16 @@ function configure(next = {}) {
   fitPages();
 }
 function beginDocument(length, config) {
-  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_BYTES) throw new Error('열 수 있는 문서 크기는 256MB 이하입니다');
+  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_BYTES) throw new Error('열 수 있는 문서 크기는 256MB 이하예요');
   releaseDocument();
   incoming = new Uint8Array(length); received = 0;
   configure(config);
   return true;
 }
 function appendChunk(offset, encoded) {
-  if (!incoming || offset !== received) throw new Error('문서 전송 순서가 올바르지 않습니다');
+  if (!incoming || offset !== received) throw new Error('문서 전송 순서가 올바르지 않아요');
   const binary = atob(encoded);
-  if (received + binary.length > incoming.length) throw new Error('문서 전송 크기가 일치하지 않습니다');
+  if (received + binary.length > incoming.length) throw new Error('문서 전송 크기가 일치하지 않아요');
   for (let i = 0; i < binary.length; i++) incoming[received + i] = binary.charCodeAt(i);
   received += binary.length;
   return received;
@@ -200,7 +200,7 @@ async function openDocument(password = null) {
   let candidate;
   try {
     if (disposed) return false;
-    if (!incoming || received !== incoming.length) throw new Error('문서 데이터를 모두 받지 못했습니다');
+    if (!incoming || received !== incoming.length) throw new Error('문서 데이터를 모두 받지 못했어요');
     candidate = password === null ? new engine.HwpDocument(incoming) : engine.HwpDocument.openWithPassword(incoming, password);
     password = null;
     const info = JSON.parse(candidate.getDocumentInfo());
@@ -208,7 +208,7 @@ async function openDocument(password = null) {
     if (disposed) { candidate.free(); return false; }
     doc = candidate; candidate = null;
     count = doc.pageCount();
-    if (count < 1) throw new Error('표시할 페이지가 없는 문서입니다');
+    if (count < 1) throw new Error('표시할 페이지가 없는 문서예요');
     const saved = /^hwp:(\d+)$/.exec(options.position || '');
     page = clampPage(saved ? Number(saved[1]) : Math.round(Number(options.progress || 0) * (count - 1)));
     incoming.fill(0); incoming = null; received = 0;
@@ -226,7 +226,7 @@ async function openDocument(password = null) {
       emit('password', { incorrect: password !== null });
       return false;
     }
-    if (/DRM/.test(message)) return fail('DRM으로 보호된 문서는 이 뷰어에서 열 수 없습니다');
+    if (/DRM/.test(message)) return fail('DRM으로 보호된 문서는 이 뷰어에서 열 수 없어요');
     return fail(error);
   } finally { password = null; }
 }
@@ -288,7 +288,7 @@ function svgForPage(index) {
 function safeSvg(source) {
   const parsed = new DOMParser().parseFromString(source, 'image/svg+xml');
   const svg = parsed.documentElement;
-  if (svg.localName !== 'svg' || parsed.querySelector('parsererror')) throw new Error('페이지를 표시할 SVG 데이터가 올바르지 않습니다');
+  if (svg.localName !== 'svg' || parsed.querySelector('parsererror')) throw new Error('페이지를 표시할 SVG 데이터가 올바르지 않아요');
   for (const el of svg.querySelectorAll('*')) {
     if (['script', 'foreignObject', 'iframe', 'object', 'embed', 'style'].includes(el.localName)) { el.remove(); continue; }
     for (const attr of [...el.attributes]) {
@@ -312,7 +312,7 @@ async function render() {
     const box = svg.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
     const width = box?.[2] || parseFloat(svg.getAttribute('width'));
     const height = box?.[3] || parseFloat(svg.getAttribute('height'));
-    if (!(width > 0 && height > 0 && Number.isFinite(width + height))) throw new Error('문서 페이지 크기가 올바르지 않습니다');
+    if (!(width > 0 && height > 0 && Number.isFinite(width + height))) throw new Error('문서 페이지 크기가 올바르지 않아요');
     const frame = document.createElement('section');
     frame.className = 'page'; frame.dataset.page = String(index);
     frame.dataset.width = String(width); frame.dataset.height = String(height);
@@ -764,7 +764,7 @@ window.addEventListener('pagehide', destroy, { once: true });
     // ArrayBuffer init works even when Android's asset MIME database does not
     // recognize .wasm; it does not depend on instantiateStreaming MIME rules.
     const response = await fetch('./rhwp_bg.wasm');
-    if (!response.ok) throw new Error('HWP 엔진 파일을 읽지 못했습니다');
+    if (!response.ok) throw new Error('HWP 엔진 파일을 읽지 못했어요');
     await engine.default({ module_or_path: await response.arrayBuffer() });
     await Promise.all(['400 16px FReaderSans', '700 16px FReaderSans', '400 16px FReaderSerif', '700 16px FReaderSerif', '400 16px FReaderMath'].map(font => document.fonts.load(font)));
     await loadFontAliases(['함초롬돋움', '함초롬바탕', '함초롱돋움', '함초롱바탕', '한컴돋움', '한컴바탕', '맑은 고딕', '돋움', '굴림', '바탕', 'HY신명조', '한양신명조', 'HancomEQN']);

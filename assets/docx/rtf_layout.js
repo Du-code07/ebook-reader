@@ -24,19 +24,19 @@ function* tokenize(bytes) {
     if (c === 123 || c === 125) { yield { type: c === 123 ? 'open' : 'close' }; continue; }
     if (c === 10 || c === 13) continue;
     if (c !== 92) { yield { type: 'byte', value: c }; continue; }
-    if (i >= bytes.length) throw new Error('RTF 제어 문자가 잘렸습니다');
+    if (i >= bytes.length) throw new Error('RTF 제어 문자가 잘렸어요');
     if (!letter(bytes[i])) {
       const symbol = bytes[i++];
       if (symbol === 39) {
         const hex = String.fromCharCode(...bytes.subarray(i, i + 2)); i += 2;
-        if (!/^[0-9a-f]{2}$/i.test(hex)) throw new Error('RTF 문자 데이터가 올바르지 않습니다');
+        if (!/^[0-9a-f]{2}$/i.test(hex)) throw new Error('RTF 문자 데이터가 올바르지 않아요');
         yield { type: 'byte', value: parseInt(hex, 16) };
       } else yield { type: 'symbol', value: String.fromCharCode(symbol) };
       continue;
     }
     const start = i;
     while (i < bytes.length && letter(bytes[i])) i++;
-    if (i - start > 64) throw new Error('RTF 제어 문자가 너무 깁니다');
+    if (i - start > 64) throw new Error('RTF 제어 문자가 너무 길어요');
     const word = String.fromCharCode(...bytes.subarray(start, i));
     let sign = 1, value = null;
     if (bytes[i] === 45) { sign = -1; i++; }
@@ -44,11 +44,11 @@ function* tokenize(bytes) {
       value = 0;
       while (bytes[i] >= 48 && bytes[i] <= 57) value = value * 10 + bytes[i++] - 48;
       value *= sign;
-      if (!Number.isSafeInteger(value)) throw new Error('RTF 숫자 값이 올바르지 않습니다');
+      if (!Number.isSafeInteger(value)) throw new Error('RTF 숫자 값이 올바르지 않아요');
     }
     if (bytes[i] === 32) i++;
     if (word === 'bin') {
-      if (value === null || value < 0 || i + value > bytes.length) throw new Error('RTF 바이너리 데이터가 잘렸습니다');
+      if (value === null || value < 0 || i + value > bytes.length) throw new Error('RTF 바이너리 데이터가 잘렸어요');
       i += value; yield { type: 'binary' };
     } else yield { type: 'word', word, value };
   }
@@ -84,7 +84,7 @@ export function parseRtfLayout(bytes, prepared) {
     if (!field && previous?.key === key && !previous.field) previous.text += text;
     else p.runs.push({ text, field, ch: { ...frame.ch }, key });
     textSize += text.length;
-    if (textSize > 32 * 1024 * 1024) throw new Error('RTF 문서의 본문이 너무 큽니다');
+    if (textSize > 32 * 1024 * 1024) throw new Error('RTF 문서의 본문이 너무 커요');
   };
   const flush = (partial = false) => {
     if ((!byteRun.length && !byteDecoder) || !frame) return;
@@ -129,14 +129,14 @@ export function parseRtfLayout(bytes, prepared) {
   for (const token of tokenize(bytes)) {
     if (token.type === 'open') {
       flush(); skip = 0;
-      if (stack.length >= 1024) throw new Error('RTF 문서 구조가 너무 깊습니다');
+      if (stack.length >= 1024) throw new Error('RTF 문서 구조가 너무 깊어요');
       const previous = frame || rootFrame(); stack.push(frame);
       frame = { ...previous, ch: { ...previous.ch }, p: { ...previous.p, tabs: [...previous.p.tabs] }, star: false, firstWord: true, storyOwner: null, definition: null };
       continue;
     }
     if (token.type === 'close') {
       flush(); skip = 0;
-      if (!stack.length || !frame) throw new Error('RTF 문서의 괄호 구조가 올바르지 않습니다');
+      if (!stack.length || !frame) throw new Error('RTF 문서의 괄호 구조가 올바르지 않아요');
       if (frame.definition?.id != null) styles.set(frame.definition.id, frame.definition);
       if (frame.storyOwner) { finishParagraph(false); finishRow(); current.stories[frame.storyOwner] = frame.ctx.blocks; }
       if (stack.length === 1) { finishParagraph(false); finishRow(); }
@@ -242,7 +242,7 @@ export function parseRtfLayout(bytes, prepared) {
     if (w === 'cell') { finishCell(); continue; }
     if (w === 'row') { finishRow(); frame.p.inTable = false; continue; }
   }
-  if (stack.length) throw new Error('RTF 문서가 끝까지 저장되지 않았습니다');
+  if (stack.length) throw new Error('RTF 문서가 끝까지 저장되지 않았어요');
   for (const font of fonts.values()) font.name = font.name.split(';')[0].trim().slice(0, 160);
   const pictureByToken = new Map(prepared.pictures.map(p => [p.token, p]));
   const usedPictures = new Map();
@@ -291,7 +291,7 @@ export function parseRtfLayout(bytes, prepared) {
   }).join('');
   const htmlSections = sections.filter(s => s.body.blocks.length).map((s, index) => {
     const g = s.geometry;
-    if (!(g.width > 0 && g.height > 0 && g.width < 300000 && g.height < 300000)) throw new Error('RTF 용지 크기가 올바르지 않습니다');
+    if (!(g.width > 0 && g.height > 0 && g.width < 300000 && g.height < 300000)) throw new Error('RTF 용지 크기가 올바르지 않아요');
     const furniture = kind => `<div class="rtf-page-${kind}" style="${kind === 'header' ? 'top' : 'bottom'}:${twips(g[kind])}px;left:${twips(g.left)}px;right:${twips(g.right)}px">`
       + ['', 'f', 'l', 'r'].filter(suffix => s.stories[kind + suffix]).map(suffix => `<div data-rtf-story="${kind + suffix}">${renderBlocks(s.stories[kind + suffix])}</div>`).join('') + '</div>';
     return `<div class="odr-page-outer rtf-paper" data-rtf-section="${index}" data-rtf-first="${g.titlePage}" data-rtf-facing="${g.facing}" data-rtf-start="${g.pageStart ?? ''}" style="width:${twips(g.width)}px;min-height:${twips(g.height)}px">`

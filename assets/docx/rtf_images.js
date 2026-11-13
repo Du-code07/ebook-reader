@@ -19,7 +19,7 @@ function koreanRun(bytes, start) {
     const c = bytes[end];
     if (c === 92 && bytes[end + 1] === 39) {
       const a = hexValue(bytes[end + 2]), b = hexValue(bytes[end + 3]);
-      if (a < 0 || b < 0) throw new Error('RTF 문자 데이터가 올바르지 않습니다');
+      if (a < 0 || b < 0) throw new Error('RTF 문자 데이터가 올바르지 않아요');
       run.push(a * 16 + b); end += 4;
     } else if ([123, 125, 92].includes(c)) break;
     else { if (c !== 10 && c !== 13) run.push(c); end++; }
@@ -42,7 +42,7 @@ export function prepareRtfPictures(bytes, { includePageFurniture = false } = {})
   while (i < bytes.length) {
     const offset = i, c = bytes[i++];
     if (c === 123) {
-      if (stack.length >= 1024) throw new Error('RTF 문서 구조가 너무 깊습니다');
+      if (stack.length >= 1024) throw new Error('RTF 문서 구조가 너무 깊어요');
       const parent = stack.at(-1);
       if (parent) parent.skip = 0;
       stack.push({ start: offset, parent, hidden: parent?.hidden || false, destination: null, tokens: [], image: null,
@@ -51,10 +51,10 @@ export function prepareRtfPictures(bytes, { includePageFurniture = false } = {})
     }
     const frame = stack.at(-1);
     if (c === 125) {
-      if (!frame) throw new Error('RTF 문서의 괄호 구조가 올바르지 않습니다');
+      if (!frame) throw new Error('RTF 문서의 괄호 구조가 올바르지 않아요');
       if (frame.image) {
         const image = frame.image;
-        if (image.highNibble !== null) throw new Error('RTF 그림 데이터가 잘렸습니다');
+        if (image.highNibble !== null) throw new Error('RTF 그림 데이터가 잘렸어요');
         const data = new Uint8Array(image.length);
         let cursor = 0;
         for (const chunk of image.chunks) { data.set(chunk, cursor); cursor += chunk.length; }
@@ -69,7 +69,7 @@ export function prepareRtfPictures(bytes, { includePageFurniture = false } = {})
       continue;
     }
     if (c === 92) {
-      if (i >= bytes.length) throw new Error('RTF 제어 문자가 잘렸습니다');
+      if (i >= bytes.length) throw new Error('RTF 제어 문자가 잘렸어요');
       if (!isLetter(bytes[i])) {
         const symbol = bytes[i++];
         if (frame && !frame.hidden && !frame.image && frame.codepage === 949 && !frame.skip && symbol === 39) {
@@ -80,12 +80,12 @@ export function prepareRtfPictures(bytes, { includePageFurniture = false } = {})
         if (symbol === 42 && frame) frame.hidden = true;
         if (symbol === 39) i += 2; // Escaped character, never a group delimiter.
         if (frame?.skip) frame.skip--;
-        if (i > bytes.length) throw new Error('RTF 문자 데이터가 잘렸습니다');
+        if (i > bytes.length) throw new Error('RTF 문자 데이터가 잘렸어요');
         continue;
       }
       const start = i;
       while (i < bytes.length && isLetter(bytes[i])) i++;
-      if (i - start > 64) throw new Error('RTF 제어 문자가 너무 깁니다');
+      if (i - start > 64) throw new Error('RTF 제어 문자가 너무 길어요');
       const word = String.fromCharCode(...bytes.subarray(start, i));
       let sign = 1, value = null;
       if (bytes[i] === 45) { sign = -1; i++; }
@@ -93,7 +93,7 @@ export function prepareRtfPictures(bytes, { includePageFurniture = false } = {})
         value = 0;
         while (i < bytes.length && isDigit(bytes[i])) { value = value * 10 + bytes[i++] - 48; }
         value *= sign;
-        if (!Number.isSafeInteger(value)) throw new Error('RTF 숫자 값이 올바르지 않습니다');
+        if (!Number.isSafeInteger(value)) throw new Error('RTF 숫자 값이 올바르지 않아요');
       }
       if (bytes[i] === 32) i++;
       const skipped = frame?.skip > 0;
@@ -120,9 +120,9 @@ export function prepareRtfPictures(bytes, { includePageFurniture = false } = {})
         if (word === 'picscaley') image.scaleY = value;
       }
       if (word === 'bin') {
-        if (value === null || value < 0 || value > bytes.length - i) throw new Error('RTF 그림의 바이너리 데이터가 잘렸습니다');
+        if (value === null || value < 0 || value > bytes.length - i) throw new Error('RTF 그림의 바이너리 데이터가 잘렸어요');
         if (image) {
-          if (image.highNibble !== null) throw new Error('RTF 그림 데이터가 올바르지 않습니다');
+          if (image.highNibble !== null) throw new Error('RTF 그림 데이터가 올바르지 않아요');
           image.chunks.push(bytes.subarray(i, i + value)); image.length += value;
         }
         i += value;
@@ -139,7 +139,7 @@ export function prepareRtfPictures(bytes, { includePageFurniture = false } = {})
       for (let p = start; p < i; p++) {
         if ([9, 10, 13, 32].includes(bytes[p])) continue;
         const nibble = hexValue(bytes[p]);
-        if (nibble < 0) throw new Error('RTF 그림의 16진수 데이터가 올바르지 않습니다');
+        if (nibble < 0) throw new Error('RTF 그림의 16진수 데이터가 올바르지 않아요');
         if (image.highNibble === null) image.highNibble = nibble;
         else { decoded[count++] = image.highNibble * 16 + nibble; image.highNibble = null; }
       }
@@ -151,15 +151,15 @@ export function prepareRtfPictures(bytes, { includePageFurniture = false } = {})
       if (change.bytes) replacements.push(change);
     }
   }
-  if (stack.length) throw new Error('RTF 문서가 끝까지 저장되지 않았습니다');
+  if (stack.length) throw new Error('RTF 문서가 끝까지 저장되지 않았어요');
   if (!replacements.length) return empty;
   replacements.sort((a, b) => a.start - b.start);
   let length = bytes.length, previous = 0;
   for (const change of replacements) {
-    if (change.start < previous) throw new Error('RTF 그림 구조가 겹칩니다');
+    if (change.start < previous) throw new Error('RTF 그림 구조가 겹쳐요');
     previous = change.end; length += change.bytes.length - (change.end - change.start);
   }
-  if (length > 256 * 1024 * 1024) throw new Error('RTF 문서의 본문 구조가 너무 큽니다');
+  if (length > 256 * 1024 * 1024) throw new Error('RTF 문서의 본문 구조가 너무 커요');
   const result = new Uint8Array(length);
   let source = 0, target = 0;
   for (const change of replacements) {

@@ -46,7 +46,7 @@ worker.onmessage = ({ data }) => {
   else if (data.type === 'ready') { ready = true; emit('ready', { version: data.version }); }
   else if (data.type === 'error') fail(data.message);
 };
-worker.onerror = event => fail(event.message || 'Word 문서 엔진을 시작하지 못했습니다');
+worker.onerror = event => fail(event.message || 'Word 문서 엔진을 시작하지 못했어요');
 function request(action, data = {}, transfer = []) {
   return new Promise(resolve => {
     const id = ++requestId; requests.set(id, resolve);
@@ -71,7 +71,7 @@ function clearPages() {
   document.querySelectorAll('style[data-document]').forEach(el => el.remove());
 }
 function beginDocument(length, config) {
-  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_BYTES) throw new Error('열 수 있는 문서 크기는 256MB 이하입니다');
+  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_BYTES) throw new Error('열 수 있는 문서 크기는 256MB 이하예요');
   generation++; clearPages();
   if (incoming) incoming.fill(0);
   incoming = new Uint8Array(length); received = 0; awaitingPassword = false;
@@ -79,9 +79,9 @@ function beginDocument(length, config) {
   configure(config);
 }
 function appendChunk(offset, encoded) {
-  if (!incoming || offset !== received) throw new Error('문서 전송 순서가 올바르지 않습니다');
+  if (!incoming || offset !== received) throw new Error('문서 전송 순서가 올바르지 않아요');
   const binary = atob(encoded);
-  if (received + binary.length > incoming.length) throw new Error('문서 전송 크기가 일치하지 않습니다');
+  if (received + binary.length > incoming.length) throw new Error('문서 전송 크기가 일치하지 않아요');
   for (let i = 0; i < binary.length; i++) incoming[received + i] = binary.charCodeAt(i);
   received += binary.length;
 }
@@ -91,7 +91,7 @@ async function openDocument(password = null) {
     let result;
     if (awaitingPassword) result = await request('password', { password });
     else {
-      if (!incoming || received !== incoming.length) throw new Error('문서 데이터를 모두 받지 못했습니다');
+      if (!incoming || received !== incoming.length) throw new Error('문서 데이터를 모두 받지 못했어요');
       const bytes = incoming; incoming = null; received = 0;
       result = await request('open', { bytes, password, format: options.format }, [bytes.buffer]);
     }
@@ -283,7 +283,7 @@ async function preparePages(html, current) {
   sanitize(parsed);
   if (detectedFormat !== 'docx' || !applyDocxLayout(parsed, options.docxLayout)) applyPageBreaks(parsed);
   const sources = [...parsed.querySelectorAll('.odr-pages > .odr-page-outer')];
-  if (!sources.length) throw new Error('Word 문서에서 표시할 본문을 찾지 못했습니다');
+  if (!sources.length) throw new Error('Word 문서에서 표시할 본문을 찾지 못했어요');
   for (const style of parsed.head.querySelectorAll('style')) {
     const copy = document.createElement('style'); copy.dataset.document = '';
     copy.textContent = style.textContent; document.head.insertBefore(copy, document.querySelector('link'));
@@ -325,7 +325,7 @@ async function preparePages(html, current) {
   const result = [];
   for (const source of measure.children) {
     const inner = source.querySelector(':scope > .odr-page-inner');
-    if (!inner) throw new Error('Word 문서 본문 구조가 올바르지 않습니다');
+    if (!inner) throw new Error('Word 문서 본문 구조가 올바르지 않아요');
     if (source.classList.contains('rtf-paper')) {
       // Office reserves space for page furniture even when the saved margins
       // would otherwise overlap it. Measure after fonts and image extents load.
@@ -344,7 +344,7 @@ async function preparePages(html, current) {
     }
     const bounds = source.getBoundingClientRect(), css = getComputedStyle(inner);
     const width = bounds.width, height = bounds.height;
-    if (!(width > 0 && height > 0 && width < 20000 && height < 20000)) throw new Error('Word 문서 페이지 크기가 올바르지 않습니다');
+    if (!(width > 0 && height > 0 && width < 20000 && height < 20000)) throw new Error('Word 문서 페이지 크기가 올바르지 않아요');
     const margin = ['Top', 'Right', 'Bottom', 'Left'].map(side => parseFloat(css['margin' + side]) || 0);
     const bodyWidth = Math.max(32, width - margin[1] - margin[3]);
     const bodyHeight = Math.max(32, height - margin[0] - margin[2]);
@@ -373,7 +373,7 @@ async function preparePages(html, current) {
     Object.assign(inner.style, { width: `${bodyWidth}px`, height: `${bodyHeight}px`, columnWidth: `${bodyWidth}px`, columnGap: `${columnGap}px` });
     if (inner.classList.contains('docx-layout')) settleDocxPageBreaks(inner, columnStride);
     const columns = Math.max(1, Math.ceil((inner.scrollWidth + columnGap - 1) / columnStride));
-    if (result.length + columns > 10000) throw new Error('표시할 Word 문서 페이지 수가 너무 많습니다');
+    if (result.length + columns > 10000) throw new Error('표시할 Word 문서 페이지 수가 너무 많아요');
     // FReader: 쪽마다 들어 있는 그림 목록 (다음·이전 쪽 그림을 미리 불러오는 데 사용)
     const columnImages = Array.from({ length: columns }, () => new Set());
     const innerLeft = inner.getBoundingClientRect().left;
@@ -467,7 +467,7 @@ function missingImage(img, reason) {
   if (!brokenImages.has(key)) { brokenImages.add(key); unavailableImages++; }
   const notice = document.createElement('span');
   notice.className = 'freader-missing-image'; notice.dataset.resource = key; if (reason) notice.dataset.reason = String(reason); notice.style.cssText = img.style.cssText;
-  notice.textContent = '이 그림은 표시할 수 없습니다'; img.replaceWith(notice);
+  notice.textContent = '이 그림은 표시할 수 없어요'; img.replaceWith(notice);
 }
 function preparePageSource(source, entry, index) {
     source.querySelector('.freader-columns').style.transform = `translateX(${-entry.column * entry.columnStride}px)`;
