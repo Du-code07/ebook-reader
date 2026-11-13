@@ -28,7 +28,7 @@ Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) 
     barrierDismissible: true,
     barrierLabel: 'close',
     barrierColor: Colors.black54,
-    transitionDuration: const Duration(milliseconds: 300),
+    transitionDuration: Anim.ms(300),
     pageBuilder: (ctx, _, __) => SafeArea(child: Center(child: builder(ctx))),
     // 꾹 눌러 뜨는 메뉴와 같은 움직임: 누른 자리에서 커져 나옴
     transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child),
@@ -311,7 +311,7 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
       return Stack(children: [
         // 위치 알림은 띄엄띄엄 오므로 그 사이를 이어 그려 막대가 부드럽게 따라오게 (끄는 중에는 손가락 그대로)
         AnimatedPositioned(
-          duration: _dragging ? Duration.zero : const Duration(milliseconds: 110),
+          duration: _dragging ? Duration.zero : Anim.ms(110),
           curve: Curves.linear,
           left: left ? 0 : null,
           right: left ? null : 0,
@@ -357,7 +357,7 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
                 alignment: left ? Alignment.centerLeft : Alignment.centerRight,
                 child: AnimatedContainer(
                   key: const ValueKey('thumb'),
-                  duration: const Duration(milliseconds: 120),
+                  duration: Anim.ms(120),
                   margin: EdgeInsets.only(left: left ? 3 : 0, right: left ? 0 : 3),
                   width: _dragging ? 9 : 6,
                   decoration: BoxDecoration(
@@ -837,6 +837,7 @@ class SettingOption extends StatelessWidget {
                   fontSize: 15,
                   fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
                   color: selected ? AppColors.onSig(context) : cs.onSurfaceVariant,
+                  shadows: selected ? AppColors.sigShadows(context) : null,
                 ),
                 child: label,
               ),
@@ -1010,7 +1011,7 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
         decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(18)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (before != null) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(before, color: AppColors.onSig(context), size: 20)),
-          Text(text, style: TextStyle(color: AppColors.onSig(context), fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(text, style: TextStyle(color: AppColors.onSig(context), fontSize: 19, fontWeight: FontWeight.w800, shadows: AppColors.sigShadows(context))),
           if (after != null) Padding(padding: const EdgeInsets.only(left: 4), child: Icon(after, color: AppColors.onSig(context), size: 20)),
         ]),
       );
@@ -1023,7 +1024,7 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
     final String leftLabel = widget.rtl ? next : prev, rightLabel = widget.rtl ? prev : next;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: _closing ? 0 : 1),
-      duration: const Duration(milliseconds: 180),
+      duration: Anim.ms(180),
       builder: (context, t, child) => Opacity(opacity: t, child: child),
       // 화면 위에 따로 띄우는 것이라 Material로 감싸야 글자 밑에 노란 줄이 생기지 않음
       child: Material(

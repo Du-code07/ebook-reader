@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'app_colors.dart';
 
 /// 파일 왼쪽 위 끝에 걸쳐 있는 작은 책갈피 모양 즐겨찾기 표시.
 /// 꺼져 있으면 빈 책갈피가 살짝 위로 올라가 있고, 켜지면 살짝 내려오면서 노랗게 바뀐다.
@@ -69,7 +70,7 @@ class _FavoriteRibbonState extends State<FavoriteRibbon> with SingleTickerProvid
   void _onDragEnd([DragEndDetails? _]) {
     if (_armed) widget.onTap?.call();
     _armed = false;
-    _pull.animateTo(0, duration: const Duration(milliseconds: 260), curve: Curves.easeOutBack);
+    _pull.animateTo(0, duration: Anim.ms(260), curve: Curves.easeOutBack);
   }
 
   @override
@@ -96,7 +97,7 @@ class _FavoriteRibbonState extends State<FavoriteRibbon> with SingleTickerProvid
               alignment: Alignment.topLeft,
               child: TweenAnimationBuilder<double>(
                 tween: Tween<double>(end: widget.active ? 1.0 : 0.0),
-                duration: still ? Duration.zero : const Duration(milliseconds: 280),
+                duration: still ? Duration.zero : Anim.ms(280),
                 curve: Curves.easeOutBack,
                 builder: (context, t, _) {
                   final double c = t.clamp(0.0, 1.0).toDouble();

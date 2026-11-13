@@ -7,6 +7,7 @@ import 'app_colors.dart';
 import 'group_jump_menu.dart';
 import 'group_stack_icon.dart';
 import 'ui_scale.dart';
+import 'file_type_icon.dart';
 
 /// 그룹 목록에서 [즐겨찾기]를 고르면 돌려주는 값
 const String kFavoritesGroupKey = '__favorites__';
@@ -71,10 +72,10 @@ class GroupDropdownRoute extends PopupRoute<String> {
 
   // 예전(99판) [전체] 그룹 메뉴와 같은 움직임: 누른 단추에서 커져 나오고, 닫힐 때는 다시 작아지며 단추 안으로 들어감
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 300);
+  Duration get transitionDuration => Anim.ms(300);
 
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 200);
+  Duration get reverseTransitionDuration => Anim.ms(200);
 
   @override
   Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) {
@@ -154,7 +155,8 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
             child: Row(children: [
               // 왼쪽 손잡이(≡) 자리 (고정된 [전체]·[즐겨찾기]는 비워 둠)
               handle ?? const SizedBox(width: 40),
-              SizedBox(width: 24, child: Center(child: leading)),
+              // 고른 줄(시그니쳐 색)에서도 아이콘 안쪽은 목록 바탕색 그대로
+              SizedBox(width: 24, child: Center(child: sel ? IconInnerFill(color: cs.surfaceContainerHigh, child: leading) : leading)),
               const SizedBox(width: 12),
               Expanded(
                 child: Align(
@@ -163,10 +165,10 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
                   child: Text(label,
                       key: _nameKeys.putIfAbsent(value, GlobalKey.new),
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 15, color: fg, fontWeight: sel ? FontWeight.w700 : FontWeight.w500)),
+                      style: TextStyle(fontSize: 15, color: fg, fontWeight: sel ? FontWeight.w700 : FontWeight.w500, shadows: sel ? AppColors.sigShadows(context) : null)),
                 ),
               ),
-              if (sel) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(Icons.check, size: 18, color: AppColors.onSig(context))),
+              if (sel) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(Icons.check, size: 18, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context))),
               const SizedBox(width: 14),
             ]),
           ),

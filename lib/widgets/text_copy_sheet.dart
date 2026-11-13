@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'app_colors.dart';
 
 /// 지금 보고 있는 쪽의 글을 보여 주고, 골라서(길게 눌러) 또는 전체를 복사할 수 있게 하는 창
 Future<void> showTextCopySheet(
@@ -9,6 +10,7 @@ Future<void> showTextCopySheet(
 }) {
   final cleaned = text.replaceAll(RegExp(r'[ \t]+\n'), '\n').replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
   return showModalBottomSheet<void>(
+    sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
     context: context,
     isScrollControlled: true,
     showDragHandle: true,

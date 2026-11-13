@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_colors.dart';
 
 /// 마지막으로 화면을 누른 자리 (앱 화면 기준). 창이 그 자리에서 커져 나오게 씀
 class TapOrigin {
@@ -44,7 +45,7 @@ Future<T?> showPopDialog<T>({
     barrierDismissible: barrierDismissible,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
     barrierColor: barrierColor ?? Colors.black54,
-    transitionDuration: const Duration(milliseconds: 300),
+    transitionDuration: Anim.ms(300),
     pageBuilder: (ctx, _, __) => captured.wrap(SafeArea(child: Builder(builder: builder))),
     transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child),
   );
@@ -70,10 +71,10 @@ class PopPanelRoute<T> extends PopupRoute<T> {
   bool get barrierDismissible => true;
 
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 300);
+  Duration get transitionDuration => Anim.ms(300);
 
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 200);
+  Duration get reverseTransitionDuration => Anim.ms(200);
 
   @override
   Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) {

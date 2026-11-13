@@ -9,6 +9,10 @@ class AppColors {
   /// 대표 색 바탕 위 글씨·아이콘 색
   static const Color onSignature = Colors.white;
 
+  /// 대표 색 바탕 위 흰 글씨가 잘 보이게 까는 옅은 그림자 (밝은 테마만, 다크는 회색 바탕이라 필요 없음)
+  static List<Shadow>? sigShadows(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? null : const [Shadow(color: Color(0x66000000), blurRadius: 3, offset: Offset(0, 0.6))];
+
   /// 지금 테마의 대표 색 바탕 위 글씨·아이콘 색
   static Color onSig(BuildContext context) => Theme.of(context).colorScheme.onSecondaryContainer;
   static Color of(BuildContext context) =>
@@ -50,7 +54,7 @@ const Color kViewerGapColor = Color(0xFFE2E2E6);
 /// 뷰어 배경 설정(라이트/다크)이 있는 파일(한글·워드·TXT)의 쪽 뒤 바탕
 Color viewerThemeBackdrop(String theme) => theme == 'dark' ? Colors.black : Colors.white;
 
-const Duration kIconMotion = Duration(milliseconds: 240);
+Duration get kIconMotion => Anim.ms(240);
 const Curve kIconCurve = Curves.easeOutCubic;
 
 /// 아이콘이 다른 아이콘으로 바뀔 때: 살짝 돌며 커지고 흐려지며 바뀜 (기본 움직임)
@@ -69,4 +73,12 @@ class MorphIcon extends StatelessWidget {
       child: child,
     );
   }
+}
+
+/// 앱 설정 '애니메이션 멈추기': 켜면 앱의 움직임(버튼 튀어나옴·아이콘 움직임·창 열고 닫기·페이지 넘김 효과)을 모두 바로 바뀌게
+class Anim {
+  static final ValueNotifier<bool> off = ValueNotifier<bool>(false);
+
+  /// 움직임 시간. 멈추기를 켜면 1ms (0이면 일부 스크롤 움직임이 오류를 내므로)
+  static Duration ms(int v) => Duration(milliseconds: off.value ? 1 : v);
 }

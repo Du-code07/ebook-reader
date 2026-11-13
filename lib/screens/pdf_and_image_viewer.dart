@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:archive/archive.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +26,7 @@ import '../widgets/direction_arrow_icon.dart';
 import '../widgets/find_in_file_bar.dart';
 import 'reader_screen.dart';
 import '../widgets/pop_dialog.dart';
+import '../widgets/page_curl.dart';
 
 /// 1. S펜 전용 즉시 승리 제스처 인식기 (Eager Stylus Gesture Recognizer):
 /// S펜(stylus / invertedStylus)이 화면에 닿는 순간(PointerDown) 즉시 GestureArena에서 승리(accepted)를 선언하여
@@ -453,6 +455,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               if (val) _pageModeScroll = false;
             }),
           ),
+          // 슬라이드를 고르면 바로 밑에: 종이처럼 말아 넘기기
+          if (_useSwipeTurn)
+            SettingToggle(
+              label: Text(_tr('종이처럼 넘기기', 'Page curl', '纸张翻页', '紙のようにめくる')),
+              selected: StorageService.pageCurl,
+              onSelected: (val) => apply(() {
+                StorageService.setPageCurl(val);
+                _syncCurlSwipe();
+              }),
+            ),
           SettingToggle(
             label: Text(_tr('스크롤', 'Scroll', '滚动', 'スクロール')),
             selected: _pageModeScroll,
@@ -941,7 +953,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     if (animate && (targetViewIdx - currentViewIdx).abs() <= 2) {
       ctrl.animateToPage(
         targetViewIdx,
-        duration: const Duration(milliseconds: 220),
+        duration: Anim.ms(220),
         curve: Curves.easeOutCubic,
       );
     } else {
@@ -1221,7 +1233,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       if (smoothAnimation && (targetViewIdx - currentViewIdx).abs() <= 2) {
         ctrl.animateToPage(
           targetViewIdx,
-          duration: Duration(milliseconds: animDurationMs),
+          duration: Anim.ms(animDurationMs),
           curve: Curves.easeOutCubic,
         );
       } else {
@@ -1853,6 +1865,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     // 내용이 맨 위일 때 아래로 끌면 창이 따라 내려오고, 충분히 내리면 닫힘
     final sheetCtrl = BottomSheet.createAnimationController(this);
     await showModalBottomSheet(
+      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
       context: context,
       isScrollControlled: true,
       // 화면의 2/3까지만 가림 (나머지는 스크롤)
@@ -2075,7 +2088,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   Widget _buildVerticalSwipeStage(BuildContext context, Widget pages, bool isSpread, int viewItemCount) {
     final double off = _vPageSwipe.offset;
     if (off == 0.0) _vPreviewBaseView = null;
-    final List<Widget> children = [Transform.translate(offset: Offset(0, off), child: pages)];
+    final List<Widget> children = [Transform.translate(offset: Offset(0, off), child: RepaintBoundary(key: _curlKey, child: pages))];
     if (off != 0.0) {
       final int base = _vPreviewBaseView ??= isSpread ? _currentPage ~/ 2 : _currentPage;
       final int dir = off < 0 ? 1 : -1;
@@ -2092,7 +2105,84 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         );
       }
     }
+    final curl = _curlImg;
+    if (curl != null) {
+      children.add(Positioned.fill(child: PageCurlOverlay(image: curl, progress: _curlCtrl, fromRight: _curlFromRight, paper: _backdrop(context))));
+    }
     return Stack(fit: StackFit.expand, clipBehavior: Clip.hardEdge, children: children);
+  }
+
+  // ── 종이처럼 말아 넘기기 (슬라이드) ──
+  final GlobalKey _curlKey = GlobalKey();
+  late final AnimationController _curlCtrl = AnimationController(vsync: this);
+  ui.Image? _curlImg;
+  bool _curlFromRight = true;
+  bool _curlBusy = false;
+  Offset? _curlDownPos;
+  DateTime? _curlDownTime;
+  bool _curlMulti = false;
+
+  bool get _curlOn => StorageService.pageCurl && _useSwipeTurn && !_pageModeScroll && !Anim.off.value;
+
+  void _syncCurlSwipe() => setState(() {});
+
+  void _curlTrackDown(PointerDownEvent e) {
+    if (_activeTouchPointerIds.isNotEmpty) {
+      // 두 번째 손가락: 확대·축소이므로 넘기지 않음
+      _curlMulti = true;
+      return;
+    }
+    _curlMulti = false;
+    _curlDownPos = e.position;
+    _curlDownTime = DateTime.now();
+  }
+
+  void _curlTrackUp(PointerUpEvent e) {
+    final start = _curlDownPos, t0 = _curlDownTime;
+    _curlDownPos = null;
+    if (start == null || t0 == null || _curlMulti || !_curlOn) return;
+    if (_isTouchLocked || _currentZoomScale > 1.03 || _vPageSwipe.offset != 0) return;
+    if (_isMemoMode && (e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus || _allowFingerDrawing)) return;
+    if (DateTime.now().difference(t0).inMilliseconds > 600) return;
+    final Offset d = e.position - start;
+    if (d.dx.abs() < 40 || d.dx.abs() < d.dy.abs() * 1.2) return;
+    _curlTurn(d.dx);
+  }
+
+  /// 지금 쪽을 그림으로 붙잡고 → 실제 쪽은 바로 넘긴 뒤 → 붙잡은 그림을 종이처럼 말아 치움
+  Future<void> _curlTurn(double dx) async {
+    final int dir = ((dx < 0) != _isMangaRtlMode) ? 1 : -1;
+    if (_curlBusy || !_canStepPage(dir)) return;
+    _curlBusy = true;
+    try {
+      ui.Image? img;
+      try {
+        final boundary = _curlKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+        img = await boundary?.toImage(pixelRatio: MediaQuery.devicePixelRatioOf(context) * 0.75);
+      } catch (_) {}
+      if (!mounted) {
+        img?.dispose();
+        return;
+      }
+      if (img == null) {
+        await _stepPageInstant(dir);
+        return;
+      }
+      _curlCtrl.value = 0;
+      setState(() {
+        _curlImg = img;
+        _curlFromRight = dx < 0;
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      await _stepPageInstant(dir);
+      if (!mounted) return;
+      await _curlCtrl.animateTo(1, duration: Anim.ms(520), curve: Curves.easeInOutCubic);
+      if (!mounted) return;
+      setState(() => _curlImg = null);
+      img.dispose();
+    } finally {
+      _curlBusy = false;
+    }
   }
 
   Widget _buildSinglePagePanel(int pageIndex, {int spreadSide = 0}) {
@@ -2300,6 +2390,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
     if (!mounted) return;
     showModalBottomSheet(
+      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
@@ -2662,6 +2753,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     SystemBars.leaveViewer();
     _vPageSwipe.dispose();
+    _curlCtrl.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     // 서재로 완전히 복귀할 때 방향이 초기화됨
     _zoomController.dispose();
@@ -2894,6 +2986,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 behavior: HitTestBehavior.translucent,
                 onPointerDown: (event) {
                   _vPageSwipe.down(event);
+                  _curlTrackDown(event); // (손가락 목록에 넣기 전에 확인)
                   if (event.kind == PointerDeviceKind.touch) {
                     if (_activeTouchPointerIds.isEmpty) _pinchSeen = false;
                     _activeTouchPointerIds.add(event.pointer);
@@ -2916,6 +3009,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   canTurn: _canStepPage,
                 ),
                 onPointerUp: (event) {
+                  _curlTrackUp(event);
                   if (_activeTouchPointerIds.remove(event.pointer)) {
                     setState(() {});
                   }
@@ -2968,6 +3062,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     reverse: _isMangaRtlMode,
                     physics: (_isTouchLocked ||
                             !_useSwipeTurn ||
+                            _curlOn ||
                             _activeTouchPointerIds.length >= 2 ||
                             _currentZoomScale > 1.03 ||
                             (_isMemoMode && (_isStylusDown || _allowFingerDrawing)))

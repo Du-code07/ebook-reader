@@ -219,7 +219,7 @@ class TrashLidIcon extends StatelessWidget {
     final Color c = color ?? IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurfaceVariant;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(end: open ? 1 : 0),
-      duration: const Duration(milliseconds: 320),
+      duration: Anim.ms(320),
       curve: open ? Curves.easeOutBack : Curves.easeInCubic,
       builder: (context, t, _) => SizedBox.square(dimension: size ?? IconTheme.of(context).size ?? 24, child: CustomPaint(painter: _TrashPainter(c, t))),
     );
@@ -289,7 +289,7 @@ class SortBarsIcon extends StatelessWidget {
     final Color c = color ?? IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurfaceVariant;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(end: flipped ? 1 : 0),
-      duration: const Duration(milliseconds: 380),
+      duration: Anim.ms(380),
       curve: Curves.easeInOutCubic,
       builder: (context, t, _) => SizedBox.square(dimension: size ?? IconTheme.of(context).size ?? 24, child: CustomPaint(painter: _SortBarsPainter(c, t))),
     );
@@ -337,7 +337,7 @@ class SpinGearIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnimatedRotation(
       turns: turns,
-      duration: const Duration(milliseconds: 600),
+      duration: Anim.ms(600),
       curve: Curves.easeOutBack,
       child: Icon(Icons.settings_outlined, size: size, color: color),
     );

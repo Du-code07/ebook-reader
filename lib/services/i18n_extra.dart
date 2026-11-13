@@ -326,6 +326,11 @@ class I18nExtra {
     'Landscape Lock': ['Paysage verrouillé', 'Только альбомная', 'Bloqueo horizontal'],
     'Menu': ['Menu', 'Меню', 'Menú'],
     'You can turn off this tap guide in app settings\nTap to close': ['Vous pouvez désactiver ce guide tactile dans les réglages\nTouchez pour fermer', 'Эту подсказку касаний можно отключить в настройках\nНажмите, чтобы закрыть', 'Puedes desactivar esta guía táctil en los ajustes\nToca para cerrar'],
+    'Stop Animations': ['Arrêter les animations', 'Отключить анимацию', 'Detener animaciones'],
+    'Buttons, windows and page turns change instantly': ['Boutons, fenêtres et pages changent instantanément', 'Кнопки, окна и страницы меняются мгновенно', 'Botones, ventanas y páginas cambian al instante'],
+    'Shows motion for buttons, windows and page turns': ['Affiche les animations des boutons, fenêtres et pages', 'Показывать анимацию кнопок, окон и перелистывания', 'Muestra animaciones en botones, ventanas y cambios de página'],
+    'Page curl': ['Tourner comme du papier', 'Перелистывание как бумага', 'Pasar como papel'],
+    'Search took too long and was stopped': ['La recherche a pris trop de temps et a été arrêtée', 'Поиск занял слишком много времени и был остановлен', 'La búsqueda tardó demasiado y se detuvo'],
   };
 
   /// 바뀌는 값(\$n 등)이 들어 있는 문구: [영어, 프랑스어, 러시아어, 스페인어]

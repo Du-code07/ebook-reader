@@ -114,7 +114,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     WidgetsBinding.instance.addObserver(this);
     _rotationAnimController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 240),
+      duration: Anim.ms(240),
       value: 1.0,
     );
     _rotationFadeAnim = Tween<double>(begin: 0.72, end: 1.0).animate(
@@ -273,6 +273,13 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
+      // 애니메이션 멈추기: 화면 넘어갈 때도 바로
+      pageTransitionsTheme: Anim.off.value
+          ? const PageTransitionsTheme(builders: {
+              TargetPlatform.android: _NoPageTransition(),
+              TargetPlatform.iOS: _NoPageTransition(),
+            })
+          : null,
       extensions: [SigColors(sig: sig, mark: mark)],
       fontFamily: appFont,
       iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
@@ -307,7 +314,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     return ValueListenableBuilder<String?>(
       valueListenable: UserFonts.appFontName,
-      builder: (context, _, __) => _buildApp(context),
+      // 애니메이션 멈추기를 바꾸면 화면 전환 방식도 다시 정함
+      builder: (context, _, __) => ValueListenableBuilder<bool>(valueListenable: Anim.off, builder: (context, _, __) => _buildApp(context)),
     );
   }
 
@@ -658,7 +666,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   final TextEditingController _searchCtrl = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
   late final AnimationController _searchAnim =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 300), reverseDuration: const Duration(milliseconds: 210));
+      AnimationController(vsync: this, duration: Anim.ms(300), reverseDuration: Anim.ms(210));
   // 펼칠 때는 빠르게 나가다 천천히 멈추고, 돌아올 때도 빠르게 출발해 제자리에 부드럽게 내려앉음
   late final CurvedAnimation _searchCurve = CurvedAnimation(parent: _searchAnim, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
 
@@ -707,7 +715,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         final double target = home - lineLen;
         return TweenAnimationBuilder<double>(
           tween: Tween<double>(end: target),
-          duration: const Duration(milliseconds: 160),
+          duration: Anim.ms(160),
           curve: Curves.easeOut,
           builder: (context, openLeft, _) => AnimatedBuilder(
           animation: _searchCurve,
@@ -822,7 +830,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               );
           // 고른 기준 바로 아래에만 순서 고르기가 펼쳐짐
           Widget orders(bool forName) => AnimatedSize(
-                duration: const Duration(milliseconds: 220),
+                duration: Anim.ms(220),
                 curve: Curves.easeOutCubic,
                 alignment: Alignment.topCenter,
                 child: byName != forName
@@ -1678,15 +1686,30 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     setState(() => _groupScanBusy = true);
     try {
       final groupLabel = _localizeGroupName(group);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        duration: const Duration(minutes: 2),
+      // 찾는 중 알림: 다른 알림이 앞에 쌓여 있으면 늦게 떠서 끝난 뒤에도 남았었음 → 앞 알림을 모두 치우고 띄운 뒤, 끝나면 이 알림만 닫음
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.clearSnackBars();
+      final searching = messenger.showSnackBar(SnackBar(
+        duration: const Duration(seconds: 10),
         content: Row(children: [
-          const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4)),
+          // 어두운 알림 바탕에서도 보이게 밝은 색
+          SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4, color: Theme.of(context).colorScheme.onInverseSurface)),
           const SizedBox(width: 14),
           Expanded(child: Text(_tr('기기에서 파일을 찾는 중이에요…', 'Searching for files…', '正在查找文件…', 'ファイルを探しています…'))),
         ]),
       ));
-      final paths = await _pdfChannel.invokeListMethod<String>('scanDocFiles', {'exts': exts}) ?? const <String>[];
+      // 너무 오래 걸리면 (기기 파일이 아주 많을 때) 10초에서 멈춤
+      List<String> paths;
+      try {
+        paths = await _pdfChannel.invokeListMethod<String>('scanDocFiles', {'exts': exts}).timeout(const Duration(seconds: 10)) ?? const <String>[];
+      } on TimeoutException {
+        searching.close();
+        if (mounted) {
+          messenger.showSnackBar(SnackBar(content: Text(_tr('찾는 데 너무 오래 걸려 멈췄어요', 'Search took too long and was stopped', '查找时间过长，已停止', '時間がかかりすぎたため中止しました'))));
+        }
+        return;
+      }
+      searching.close();
       final appDir = await getApplicationDocumentsDirectory();
       // 서재에 이미 있는 같은 형식 파일 (이름 기준) → 복사하지 않고 이 그룹으로만 옮김
       final library = <String, File>{for (final f in _allBooks) f.path.split('/').last: f};
@@ -1710,7 +1733,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         if (exts.contains(e) && seen.add(name) && await StorageService.getBookGroup(f.path) != group) inLibrary.add(f);
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
       if (newFiles.isEmpty && inLibrary.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('새로 넣을 파일을 찾지 못했어요', 'No new files found', '没有找到新的文件', '新しいファイルは見つかりませんでした'))));
         return;
@@ -1749,7 +1771,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr("'$groupLabel' 그룹에 파일 $added개를 넣었어요", "Put $added file(s) in '$groupLabel'", "已将 $added 个文件放入“$groupLabel”", "「$groupLabel」に$added個のファイルを入れました"))));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('파일을 찾지 못했어요 ($e)', 'Could not search files ($e)', '无法查找文件 ($e)', 'ファイルを探せませんでした ($e)'))));
       }
     } finally {
@@ -2444,7 +2466,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         // 접을 때: 거꾸로, 맨 위 버튼부터 바로 아래 버튼 뒤로 겹쳐 들어감 (마지막은 파일 추가 버튼 뒤로)
         TweenAnimationBuilder<double>(
           tween: Tween<double>(end: _fabOpen ? 1.0 : 0.0),
-          duration: Duration(milliseconds: _fabOpen ? 460 : 340),
+          duration: Anim.ms(_fabOpen ? 460 : 340),
           builder: (context, t, _) {
             if (t <= 0.001) return const SizedBox.shrink();
             // 위에서 아래 순서
@@ -2493,7 +2515,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           // 아이콘 움직임: [전체] 그룹 아이콘과 같은 빠르기·느낌 (기본 움직임)
           icon: PlusCloseIcon(open: _fabOpen, size: 24),
           label: Text(_fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
-              style: const TextStyle(fontWeight: FontWeight.w800)),
+              style: TextStyle(fontWeight: FontWeight.w800, shadows: AppColors.sigShadows(context))),
         ),
       ],
     );
@@ -2527,7 +2549,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         : _selectedGroup == '전체'
             ? const FolderDocsIcon(size: 20)
             : ext == null
-                ? Icon(Icons.folder_outlined, size: 18, color: cs.onSecondaryContainer)
+                ? GroupFolderIcon(size: 18, color: cs.onSecondaryContainer)
                 : FileTypeIcon(ext: ext, size: 18);
     return Align(
       alignment: Alignment.centerLeft,
@@ -2536,13 +2558,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           ChoiceChip(
             key: _allGroupChipKey,
-            avatar: groupIcon,
+            // 시그니쳐 색 칸 안에서도 아이콘 안쪽은 바탕(흰색)으로
+            avatar: IconInnerFill(color: cs.surface, child: groupIcon),
             showCheckmark: false,
             // 아이콘과 글자 사이는 좁게, 글자 오른쪽 여백은 아이콘 왼쪽 여백과 같게 (칸 가운데에 오도록)
             labelPadding: const EdgeInsets.only(left: 4, right: 2),
             label: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 220),
-              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(shadows: AppColors.sigShadows(context))),
             ),
             selected: true,
             onSelected: (_) {
@@ -2656,7 +2679,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         labelOf: _localizeGroupName,
         leadingOf: (g) {
           final ext = _groupFormatExt(g);
-          return ext == null ? Icon(Icons.folder_outlined, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant) : FileTypeIcon(ext: ext, size: 20);
+          return ext == null ? GroupFolderIcon(size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant) : FileTypeIcon(ext: ext, size: 20);
         },
         allLeading: const FolderDocsIcon(size: 20),
         allLabel: _localizeGroupName('전체'),
@@ -2788,6 +2811,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     ];
 
     final chosenGroup = await showModalBottomSheet<String>(
+      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
       context: context,
       builder: (ctx) => SafeArea(
         child: SingleChildScrollView(
@@ -3024,6 +3048,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       if (!_groups.contains('미분류')) '미분류',
     ];
     await showModalBottomSheet(
+      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
       context: context,
       builder: (ctx) => SafeArea(
         child: SingleChildScrollView(
@@ -3065,6 +3090,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Future<void> _showGlobalSettingsDialogInner() async {
     final sheetCtrl = BottomSheet.createAnimationController(this);
     await showModalBottomSheet(
+      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -3710,7 +3736,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           // 왼쪽으로 밀기: 휴지통
                           // (앱 설정 → 파일 표시 방식 → 목록형 '밀어서 즐겨찾기·휴지통 끄기')
                           direction: _isSelectionMode || StorageService.listSwipeOff.value ? DismissDirection.none : DismissDirection.horizontal,
-                          resizeDuration: const Duration(milliseconds: 220),
+                          resizeDuration: Anim.ms(220),
                           background: Container(
                             color: Colors.amber.shade600,
                             alignment: Alignment.centerLeft,
@@ -3878,7 +3904,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     icon: const Icon(Icons.drive_file_move_outline, size: 16),
                     label: Text(
                       '${_tr("그룹", "Group", "分组", "グループ")} (${_selectedFilePaths.length})',
-                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, shadows: AppColors.sigShadows(context)),
                     ),
                   ),
                 ),
@@ -4061,7 +4087,7 @@ class _FileMergeSelectDialogState extends State<_FileMergeSelectDialog> {
         backgroundColor: AppColors.of(context),
         child: Text(
           '${selIndex + 1}',
-          style: TextStyle(fontSize: 11, color: AppColors.onSig(context), fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: 11, color: AppColors.onSig(context), fontWeight: FontWeight.bold, shadows: AppColors.sigShadows(context)),
         ),
       );
 
@@ -4208,14 +4234,14 @@ class _FavoritePopState extends State<_FavoritePop> with SingleTickerProviderSta
 
   void _grow() {
     _c.value = 0;
-    _c.animateTo(1, duration: Duration(milliseconds: widget.slide ? 260 : 220), curve: widget.slide ? Curves.easeOutCubic : Curves.easeOutBack);
+    _c.animateTo(1, duration: Anim.ms(widget.slide ? 260 : 220), curve: widget.slide ? Curves.easeOutCubic : Curves.easeOutBack);
   }
 
   @override
   void didUpdateWidget(_FavoritePop old) {
     super.didUpdateWidget(old);
     if (widget.shrinking && !old.shrinking) {
-      _c.animateTo(0, duration: const Duration(milliseconds: 160), curve: Curves.easeInCubic);
+      _c.animateTo(0, duration: Anim.ms(160), curve: Curves.easeInCubic);
     } else if (!widget.shrinking && widget.growAt != old.growAt && _recent(widget.growAt)) {
       _grow();
     } else if (!widget.shrinking && old.shrinking && _c.value < 1) {
@@ -4238,4 +4264,12 @@ class _FavoritePopState extends State<_FavoritePop> with SingleTickerProviderSta
       builder: (context, child) => FractionalTranslation(translation: Offset(1 - _c.value, 0), child: child),
     );
   }
+}
+
+/// 애니메이션 멈추기를 켰을 때의 화면 전환: 움직임 없이 바로
+class _NoPageTransition extends PageTransitionsBuilder {
+  const _NoPageTransition();
+
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) => child;
 }

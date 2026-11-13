@@ -134,7 +134,7 @@ class MemoToolButton extends StatelessWidget {
             children: [
               if (active && enabled)
                 AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
+                  duration: Anim.ms(150),
                   width: kMemoToolExtent - 8,
                   height: kMemoToolExtent - 8,
                   decoration: BoxDecoration(color: AppColors.signature, borderRadius: BorderRadius.circular(10)),
@@ -281,7 +281,7 @@ Future<String?> showEraserTypeMenu(BuildContext buttonContext, String current, M
     barrierDismissible: true,
     barrierLabel: tr('닫기', 'Close', '关闭', '閉じる'),
     barrierColor: Colors.transparent,
-    transitionDuration: const Duration(milliseconds: 300),
+    transitionDuration: Anim.ms(300),
     // 누른 단추 자리에서 커져 나옴 (꾹 눌러 뜨는 메뉴와 같은 움직임)
     transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child),
     pageBuilder: (ctx, _, __) => Stack(

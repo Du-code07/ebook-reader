@@ -47,9 +47,8 @@ class _GroupStackPainter extends CustomPainter {
   bool shouldRepaint(_GroupStackPainter old) => old.color != color || old.spread != spread;
 }
 
-/// 그룹 목록·그룹 단추의 [전체] 아이콘: 서류가 들어 있는 폴더 (어디서나 같은 모양)
-/// 테마 색으로 칠하고 진한 테두리로 감싸 어느 바탕에서도 잘 보이게
-/// (밝은 테마는 시그니쳐 초록 계열, 다크는 회색 계열, 서재는 초록 독서등 계열)
+/// 그룹 목록·그룹 단추의 [전체] 아이콘: 서류가 들어 있는 노란 폴더
+/// 안쪽까지 칠하고 진한 테두리를 둘러 어느 바탕(시그니쳐 색 칸 포함)에서도 똑같이 보이게
 class FolderDocsIcon extends StatelessWidget {
   const FolderDocsIcon({super.key, this.size = 20});
 
@@ -57,22 +56,19 @@ class FolderDocsIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final bool dark = theme.brightness == Brightness.dark;
-    final Color sig = theme.colorScheme.secondaryContainer;
-    final _FolderDocsPainter painter;
-    if (!dark) {
-      painter = _FolderDocsPainter(
-          back: const Color(0xFF6F9E6F), front: const Color(0xFFA3CCA3), paper: Colors.white, lines: const Color(0xFF8DB98D), edge: const Color(0xFF3C6A3C));
-    } else if (sig.value != 0xFF343438) {
-      // 서재처럼 색이 있는 다크 테마
-      painter = _FolderDocsPainter(
-          back: Color.lerp(sig, Colors.black, 0.25)!, front: Color.lerp(sig, Colors.white, 0.2)!, paper: const Color(0xFFF3E8D5), lines: const Color(0xFF8A765F), edge: const Color(0xFFE8D5B5));
-    } else {
-      painter = const _FolderDocsPainter(
-          back: Color(0xFF55585E), front: Color(0xFF8B8F96), paper: Color(0xFFEDEDEF), lines: Color(0xFF8B8F96), edge: Color(0xFFD4D6DA));
-    }
-    return SizedBox.square(dimension: size, child: CustomPaint(painter: painter));
+    return SizedBox.square(
+      dimension: size,
+      child: const CustomPaint(
+        painter: _FolderDocsPainter(
+          // 즐겨찾기 아이콘과 같은 노란색 + 진한 노란 테두리 (안의 서류만 흰색)
+          back: Color(0xFFF2B300),
+          front: Color(0xFFFFC107),
+          paper: Colors.white,
+          lines: Color(0xFF9AA0A6),
+          edge: Color(0xFFB07800),
+        ),
+      ),
+    );
   }
 }
 
@@ -89,7 +85,7 @@ class _FolderDocsPainter extends CustomPainter {
     final edgePaint = Paint()
       ..color = edge
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.4
+      ..strokeWidth = 1.6
       ..strokeJoin = StrokeJoin.round;
     // 뒤쪽 폴더 (손잡이 달린 윗부분)
     final backPath = Path()
@@ -104,20 +100,18 @@ class _FolderDocsPainter extends CustomPainter {
       ..close();
     canvas.drawPath(backPath, Paint()..color = back);
     canvas.drawPath(backPath, edgePaint);
-    // 서류 두 장 (살짝 오른쪽으로 꽂아 왼쪽 위 손잡이가 보이게)
-    final paper2 = RRect.fromLTRBR(11, 1.6, 20, 12, const Radius.circular(1.2));
-    canvas.drawRRect(paper2, Paint()..color = Color.lerp(paper, lines, 0.35)!);
-    canvas.drawRRect(paper2, edgePaint);
-    final sheet = RRect.fromLTRBR(7.6, 3, 18.4, 14, const Radius.circular(1.2));
+    // 서류 (살짝 오른쪽으로 꽂아 왼쪽 위 손잡이가 보이게)
+    final sheet = RRect.fromLTRBR(8.2, 2.6, 19, 14, const Radius.circular(1.2));
     canvas.drawRRect(sheet, Paint()..color = paper);
-    canvas.drawRRect(sheet, edgePaint);
+    canvas.drawRRect(sheet, edgePaint..color = const Color(0xFF8A8F96));
     final line = Paint()
       ..color = lines
       ..strokeWidth = 1.5
       ..strokeCap = StrokeCap.round;
-    canvas.drawLine(const Offset(10, 6.2), const Offset(16, 6.2), line);
-    canvas.drawLine(const Offset(10, 8.8), const Offset(14.4, 8.8), line);
+    canvas.drawLine(const Offset(10.6, 6.2), const Offset(16.6, 6.2), line);
+    canvas.drawLine(const Offset(10.6, 8.8), const Offset(15, 8.8), line);
     // 앞쪽 폴더 판
+    edgePaint.color = edge;
     final frontRect = RRect.fromLTRBR(2.5, 10.8, 21.5, 20.5, const Radius.circular(1.6));
     canvas.drawRRect(frontRect, Paint()..color = front);
     canvas.drawRRect(frontRect, edgePaint);
@@ -129,7 +123,7 @@ class _FolderDocsPainter extends CustomPainter {
       old.back != back || old.front != front || old.paper != paper || old.lines != lines || old.edge != edge;
 }
 
-/// 즐겨찾기 아이콘: 노란 책갈피 + 진한 테두리 (밝은 바탕·초록 바탕에서도 잘 보이게)
+/// 즐겨찾기 아이콘: 노란 책갈피 + 진한 테두리 (어느 바탕에서도 똑같이 보이게)
 class FavoritesIcon extends StatelessWidget {
   const FavoritesIcon({super.key, this.size = 18});
 

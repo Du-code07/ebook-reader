@@ -41,6 +41,7 @@ import '../widgets/find_in_file_bar.dart';
 import 'pdf_and_image_viewer.dart';
 import '../widgets/pop_dialog.dart';
 import '../widgets/group_jump_menu.dart';
+import '../widgets/page_curl.dart';
 
 class _EpubMemoPainter extends CustomPainter {
   final List<MemoStroke> strokes;
@@ -444,6 +445,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               if (val) _pageModeScroll = false;
             }),
           ),
+          // 슬라이드를 고르면 바로 밑에: 종이처럼 말아 넘기기
+          if (_useSwipeTurn)
+            SettingToggle(
+              label: Text(_tr('종이처럼 넘기기', 'Page curl', '纸张翻页', '紙のようにめくる')),
+              selected: StorageService.pageCurl,
+              onSelected: (val) => apply(() {
+                StorageService.setPageCurl(val);
+                _syncCurlSwipe();
+              }),
+            ),
           // PPT는 스크롤 보기 없음 (슬라이드 단위로 넘김)
           if (!_isPresentation)
           SettingToggle(
@@ -549,7 +560,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _onPageModeChanged();
     } else if (!_isOfflineDocument) {
       try {
-        _epubController.setSwipeEnabled(_useSwipeTurn);
+        _epubController.setSwipeEnabled(_useSwipeTurn && !_curlOn);
       } catch (_) {}
     }
   }
@@ -576,7 +587,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
     if (!_isOfflineDocument) {
       try {
-        _epubController.setSwipeEnabled(_useSwipeTurn && !_pageModeScroll);
+        _epubController.setSwipeEnabled(_useSwipeTurn && !_pageModeScroll && !_curlOn);
       } catch (_) {}
     }
   }
@@ -2066,8 +2077,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   Future<void> _showViewerSettingsSheetInner() async {
     // 내용이 맨 위일 때 아래로 끌면 창이 따라 내려오고, 충분히 내리면 닫힘
-    final sheetCtrl = BottomSheet.createAnimationController(this);
+    final sheetCtrl = BottomSheet.createAnimationController(this)
+      ..duration = Anim.ms(250)
+      ..reverseDuration = Anim.ms(200);
     await showModalBottomSheet(
+      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
       context: context,
       isScrollControlled: true,
       // 화면의 2/3까지만 가림 (나머지는 스크롤)
@@ -2423,6 +2437,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (!mounted) return;
 
     showModalBottomSheet(
+      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
@@ -2592,7 +2607,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             alignment: Alignment.topRight,
             child: AnimatedOpacity(
               opacity: _slideShowExitVisible ? 1 : 0,
-              duration: const Duration(milliseconds: 200),
+              duration: Anim.ms(200),
               child: IgnorePointer(
                 ignoring: !_slideShowExitVisible,
                 child: SafeArea(
@@ -2937,8 +2952,61 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     return off + _vTurned * screenHeight;
   }
 
+  // ── 종이처럼 말아 넘기기 (슬라이드) ──
+  late final AnimationController _curlCtrl = AnimationController(vsync: this);
+  ui.Image? _curlImg;
+  bool _curlFromRight = true;
+  bool _curlBusy = false;
+
+  bool get _curlOn =>
+      StorageService.pageCurl && _useSwipeTurn && !_pageModeScroll && !Anim.off.value && !_isSpreadsheet && !_slideShow;
+
+  /// 종이처럼 넘기기 설정이 바뀌면 EPUB 책 화면 스스로의 밀어 넘기기를 끄고/켬
+  void _syncCurlSwipe() {
+    if (_isOfflineDocument) return;
+    try {
+      _epubController.setSwipeEnabled(_useSwipeTurn && !_pageModeScroll && !_curlOn);
+    } catch (_) {}
+  }
+
+  /// 지금 화면을 그림으로 붙잡고 → 실제 화면은 바로 넘긴 뒤 → 붙잡은 그림을 종이처럼 말아 치움
+  Future<void> _curlTurn(double dx) async {
+    final bool next = (dx < 0) != _isMangaRtlMode;
+    if (_curlBusy) return;
+    _curlBusy = true;
+    try {
+      final img = await _vCaptureCurrent();
+      if (!mounted) {
+        img?.dispose();
+        return;
+      }
+      if (img == null) {
+        (next ? _readerNext : _readerPrevious)();
+        return;
+      }
+      _curlCtrl.value = 0;
+      setState(() {
+        _curlImg = img;
+        _curlFromRight = dx < 0;
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      final bool turned = await _vTurnAndWait(next ? 1 : -1);
+      if (!mounted) return;
+      if (turned) {
+        await Future<void>.delayed(const Duration(milliseconds: 40)); // 새 쪽이 그려질 시간
+        await _curlCtrl.animateTo(1, duration: Anim.ms(520), curve: Curves.easeInOutCubic);
+      }
+      if (!mounted) return;
+      setState(() => _curlImg = null);
+      img.dispose();
+    } finally {
+      _curlBusy = false;
+    }
+  }
+
   Widget _vSwipeStage(Widget content, double screenHeight) {
     final snap = _vSnap;
+    final curl = _curlImg;
     return Stack(
       fit: StackFit.expand,
       clipBehavior: Clip.none,
@@ -2948,6 +3016,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           Transform.translate(
             offset: Offset(0, _vPageSwipe.offset),
             child: IgnorePointer(child: RawImage(image: snap, fit: BoxFit.fill)),
+          ),
+        if (curl != null)
+          Positioned.fill(
+            child: PageCurlOverlay(image: curl, progress: _curlCtrl, fromRight: _curlFromRight, paper: _isPaperTheme ? null : _getBgColor()),
           ),
       ],
     );
@@ -3044,6 +3116,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _turnBySwipeDirection(d.dx);
       return;
     }
+    if (_curlOn) {
+      // 종이처럼 넘기기: EPUB도 책 화면 스스로 넘기지 않고 여기서 말아 넘김
+      _turnBySwipeDirection(d.dx);
+      return;
+    }
     if (_swipeScaleStarted) {
       // 확대 제스처가 터치를 가져가 WebView가 못 받은 스와이프
       _turnBySwipeDirection(d.dx);
@@ -3071,6 +3148,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void _turnBySwipeDirection(double dx) {
     _hasTextSelection = false;
     setState(() => _activeStrokePoints.clear());
+    if (_curlOn) {
+      _curlTurn(dx);
+      return;
+    }
     if ((dx < 0) != _isMangaRtlMode) {
       _readerNext();
     } else {
@@ -3708,6 +3789,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       }).catchError((_) => null);
     }
     _vPageSwipe.dispose();
+    _curlCtrl.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     _epubLoadWatchdog?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -4253,7 +4335,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       if (mounted && !_epubDisplayed) setState(() => _epubDisplayed = true);
                       _epubDisplayed = true;
                       _epubController.setSwipeReversed(_isMangaRtlMode);
-                      _epubController.setSwipeEnabled(_useSwipeTurn && !_pageModeScroll);
+                      _epubController.setSwipeEnabled(_useSwipeTurn && !_pageModeScroll && !_curlOn);
                       _epubLoadWatchdog?.cancel();
                     },
                     onLoadError: (error) => _handleEpubLoadError(error.message),

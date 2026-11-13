@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'i18n_extra.dart';
+import '../widgets/app_colors.dart';
 
 class BookmarkItem {
   final String id;
@@ -103,6 +104,24 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     rememberPage = prefs.getBool('remember_page_v89') ?? true;
     tapGuideOff = prefs.getBool('tap_guide_off_v104') ?? false;
+    Anim.off.value = prefs.getBool('anim_off_v109') ?? false;
+    pageCurl = prefs.getBool('page_curl_v109') ?? true;
+  }
+
+  /// 슬라이드로 넘길 때 종이처럼 말아 넘기기 (기본 켜짐)
+  static bool pageCurl = true;
+
+  static Future<void> setPageCurl(bool on) async {
+    pageCurl = on;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('page_curl_v109', on);
+  }
+
+  /// 애니메이션 멈추기 (앱 전체)
+  static Future<void> setAnimOff(bool off) async {
+    Anim.off.value = off;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('anim_off_v109', off);
   }
 
   // 탭 존 가이드라인 끄기 (기본: 켜짐 = 파일을 열 때마다 화면 구역 안내를 보여 줌)

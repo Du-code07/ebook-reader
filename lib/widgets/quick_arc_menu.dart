@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'app_colors.dart';
 
 /// 빠른 메뉴 항목
 class QuickArcMenuItem {
@@ -75,9 +76,9 @@ class _QuickArcMenuState extends State<QuickArcMenu>
   static const double _closedBottomPad = _toggleRadius;
 
   late final AnimationController _openCtrl = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 200));
+      vsync: this, duration: Anim.ms(200));
   late final AnimationController _snapCtrl = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 160));
+      vsync: this, duration: Anim.ms(160));
 
   bool _open = false;
   double _scrollDeg = 0.0; // 호를 따라 밀어낸 각도
@@ -449,7 +450,7 @@ class WiggleOnChange extends StatefulWidget {
 }
 
 class _WiggleOnChangeState extends State<WiggleOnChange> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
+  late final AnimationController _ctrl = AnimationController(vsync: this, duration: Anim.ms(520));
 
   @override
   void didUpdateWidget(WiggleOnChange oldWidget) {

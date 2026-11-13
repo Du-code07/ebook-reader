@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'app_colors.dart';
 
 /// 위/아래로 밀어서 페이지 넘기기 (손가락을 따라 페이지가 위·아래로 움직임)
 /// - 위로 밀면: 지금 페이지가 위로 올라가고 다음 페이지가 아래에서 올라옴
@@ -174,7 +175,7 @@ class VerticalPageSwipe extends ChangeNotifier {
     _from = offset;
     _to = target;
     _curve = curve;
-    _anim.duration = Duration(milliseconds: ms);
+    _anim.duration = Anim.ms(ms);
     try {
       await _anim.forward(from: 0.0).orCancel;
     } on TickerCanceled {

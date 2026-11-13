@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'app_colors.dart';
 
 /// Fixed above the worksheet: dragging these tabs never scrolls the grid.
 /// Every sheet is present, including names wider than the available screen.
@@ -69,7 +70,7 @@ class _SpreadsheetTabBarState extends State<SpreadsheetTabBar> {
                 padding: EdgeInsets.only(right: i == widget.names.length - 1 ? 0 : 8),
                 child: ChoiceChip(
                   showCheckmark: false,
-                  label: Text(widget.names[i], maxLines: 1),
+                  label: Text(widget.names[i], maxLines: 1, style: TextStyle(shadows: i == widget.selectedIndex ? AppColors.sigShadows(context) : null)),
                   selected: i == widget.selectedIndex,
                   onSelected: (_) => widget.onSelected(i),
                 ),

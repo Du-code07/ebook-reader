@@ -21,6 +21,7 @@ Future<T?> showChoiceSheet<T>({
   String confirmLabel = '',
 }) async {
   final r = await showModalBottomSheet<(T, bool)>(
+    sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -61,6 +62,7 @@ Future<(T, bool)?> showChoiceSheetWithToggle<T>({
   List<SheetToggle> moreToggles = const [],
 }) {
   return showModalBottomSheet<(T, bool)>(
+    sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,

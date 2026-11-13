@@ -1,5 +1,33 @@
 import 'package:flutter/material.dart';
 
+/// 선으로 그린 아이콘의 안쪽을 이 색으로 채움 (시그니쳐 색 칸 안에서도 아이콘 안쪽이 초록으로 물들지 않게)
+class IconInnerFill extends InheritedWidget {
+  const IconInnerFill({super.key, required this.color, required super.child});
+
+  final Color color;
+
+  static Color? of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<IconInnerFill>()?.color;
+
+  @override
+  bool updateShouldNotify(IconInnerFill old) => old.color != color;
+}
+
+/// 그룹 폴더 아이콘 (선). [IconInnerFill] 안에서는 안쪽을 채움
+class GroupFolderIcon extends StatelessWidget {
+  const GroupFolderIcon({super.key, this.size = 20, this.color});
+
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final fill = IconInnerFill.of(context);
+    final icon = Icon(Icons.folder_outlined, size: size, color: color);
+    if (fill == null) return icon;
+    return SizedBox.square(dimension: size, child: Stack(alignment: Alignment.center, children: [Icon(Icons.folder, size: size * 0.9, color: fill), icon]));
+  }
+}
+
 /// 서재에서 파일 이름 앞에 보이는 형식 아이콘.
 /// 워드·엑셀·파워포인트·PDF·한글은 종이 모양 안에 글자(W·X·P·P·ㅎ)를 넣고 형식별 색으로 보여 준다.
 class FileTypeIcon extends StatelessWidget {
@@ -48,13 +76,27 @@ class FileTypeIcon extends StatelessWidget {
     if (mark == null) {
       switch (ext.toLowerCase()) {
         case 'epub':
-          return _EpubIcon(size: size, color: this.color ?? epubColor ?? epubBrown, bookmarkColor: this.color);
+          return _EpubIcon(size: size, color: this.color ?? epubColor ?? epubBrown, bookmarkColor: this.color, fill: IconInnerFill.of(context));
         case 'txt':
           // 다른 형식처럼 끝이 접힌 종이 + 안에 줄 2개, 검은색 (어두운 화면에서는 밝게)
           return _TxtIcon(size: size, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.black87);
       }
       // 이미지: 테두리와 안의 산 모양을 초록색으로
-      return Icon(Icons.image_outlined, size: size, color: imageGreen);
+      final fill = IconInnerFill.of(context);
+      final img = Icon(Icons.image_outlined, size: size, color: imageGreen);
+      if (fill == null) return img;
+      return SizedBox.square(
+        dimension: size,
+        child: Stack(children: [
+          Positioned.fill(
+            child: Padding(
+              padding: EdgeInsets.all(size * 3.5 / 24),
+              child: DecoratedBox(decoration: BoxDecoration(color: fill, borderRadius: BorderRadius.circular(size * 2 / 24))),
+            ),
+          ),
+          img,
+        ]),
+      );
     }
     final (letter, typeColor) = mark;
     final Color color = this.color ?? typeColor;
@@ -66,6 +108,7 @@ class FileTypeIcon extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
+          if (IconInnerFill.of(context) != null) Icon(Icons.insert_drive_file, size: size * 0.92, color: IconInnerFill.of(context)),
           Icon(Icons.insert_drive_file_outlined, size: size, color: color),
           // 종이 모양 안쪽(접힌 귀 아래) 가운데에 글자
           Positioned(
@@ -108,6 +151,7 @@ class _TxtIcon extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
+          if (IconInnerFill.of(context) != null) Icon(Icons.insert_drive_file, size: size * 0.92, color: IconInnerFill.of(context)),
           Icon(Icons.insert_drive_file_outlined, size: size, color: color),
           Positioned(
             top: size * 0.48,
@@ -129,7 +173,9 @@ class _TxtIcon extends StatelessWidget {
 
 /// EPUB: 갈색 직사각형(책) 안에 줄 3개 + 오른쪽 끝에 노란 책갈피
 class _EpubIcon extends StatelessWidget {
-  const _EpubIcon({required this.size, required this.color, this.bookmarkColor});
+  const _EpubIcon({required this.size, required this.color, this.bookmarkColor, this.fill});
+
+  final Color? fill;
 
   final double size;
   final Color color;
@@ -139,13 +185,14 @@ class _EpubIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      SizedBox.square(dimension: size, child: CustomPaint(painter: _EpubIconPainter(color, bookmarkColor ?? const Color(0xFFFFC107))));
+      SizedBox.square(dimension: size, child: CustomPaint(painter: _EpubIconPainter(color, bookmarkColor ?? const Color(0xFFFFC107), fill)));
 }
 
 class _EpubIconPainter extends CustomPainter {
-  _EpubIconPainter(this.color, this.bookmarkColor);
+  _EpubIconPainter(this.color, this.bookmarkColor, [this.fill]);
 
   final Color color;
+  final Color? fill;
   final Color bookmarkColor;
 
   @override
@@ -154,6 +201,9 @@ class _EpubIconPainter extends CustomPainter {
     canvas.save();
     canvas.scale(u);
     // 직사각형 (다른 파일 아이콘의 종이와 같은 크기)
+    if (fill != null) {
+      canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTRB(5.0, 3.0, 19.0, 21.0), const Radius.circular(1.6)), Paint()..color = fill!);
+    }
     canvas.drawRRect(
       RRect.fromRectAndRadius(const Rect.fromLTRB(5.0, 3.0, 19.0, 21.0), const Radius.circular(1.6)),
       Paint()
@@ -179,7 +229,7 @@ class _EpubIconPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_EpubIconPainter old) => old.color != color || old.bookmarkColor != bookmarkColor;
+  bool shouldRepaint(_EpubIconPainter old) => old.color != color || old.bookmarkColor != bookmarkColor || old.fill != fill;
 }
 
 class _BookmarkPainter extends CustomPainter {
@@ -248,10 +298,8 @@ class LanguageGlyphIcon extends StatelessWidget {
       dimension: size,
       child: Stack(
         children: [
-          // 한글 ㄱ · 한자 文 · 영어 A
-          Positioned(left: size * 0.0, top: size * 0.0, child: Text('ㄱ', textScaler: TextScaler.noScaling, style: st(size * 0.5))),
-          Positioned(right: size * 0.0, top: size * 0.0, child: Text('文', textScaler: TextScaler.noScaling, style: st(size * 0.46))),
-          Positioned(left: 0, right: 0, bottom: size * 0.0, child: Text('A', textAlign: TextAlign.center, textScaler: TextScaler.noScaling, style: st(size * 0.5))),
+          Positioned(left: size * 0.02, top: size * 0.02, child: Text('ㄱ', textScaler: TextScaler.noScaling, style: st(size * 0.62))),
+          Positioned(right: size * 0.0, bottom: size * 0.0, child: Text('A', textScaler: TextScaler.noScaling, style: st(size * 0.60))),
         ],
       ),
     );

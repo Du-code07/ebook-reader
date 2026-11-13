@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import '../widgets/pop_dialog.dart';
+import '../widgets/app_colors.dart';
 
 import '../services/storage_service.dart';
 import '../widgets/choice_sheet.dart';
@@ -409,6 +410,19 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               title: _t('언어', 'Language', '语言', '言語'),
               subtitle: languageOptionLabel(_langSetting),
               onTap: _pickLanguage,
+            ),
+            // 애니메이션 멈추기: 앱 전체의 움직임을 바로 바뀌게
+            ValueListenableBuilder<bool>(
+              valueListenable: Anim.off,
+              builder: (context, off, _) => _item(
+                icon: Icons.motion_photos_off_outlined,
+                title: _t('애니메이션 멈추기', 'Stop Animations', '停止动画', 'アニメーションを停止'),
+                subtitle: off
+                    ? _t('버튼·창·페이지 넘김이 움직임 없이 바로 바뀌어요', 'Buttons, windows and page turns change instantly', '按钮、窗口和翻页立即切换，没有动画', 'ボタン・ウィンドウ・ページめくりが動きなしですぐ切り替わります')
+                    : _t('버튼·창·페이지 넘김에 움직임을 보여 줘요', 'Shows motion for buttons, windows and page turns', '按钮、窗口和翻页显示动画', 'ボタン・ウィンドウ・ページめくりに動きを表示します'),
+                onTap: () => StorageService.setAnimOff(!off),
+                trailing: Switch(value: off, onChanged: StorageService.setAnimOff),
+              ),
             ),
             // 파일: 파일 목록·여는 방식에 관한 설정
             _section(_t('파일', 'Files', '文件', 'ファイル')),
