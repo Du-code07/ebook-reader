@@ -100,7 +100,7 @@ Future<void> showPageDisplayDialog(
                         Icon(
                           selected == value ? Icons.radio_button_checked : Icons.radio_button_unchecked,
                           size: 23,
-                          color: selected == value ? AppColors.of(context) : cs.outline,
+                          color: selected == value ? AppColors.mark(context) : cs.outline,
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -241,6 +241,12 @@ class ContinuousPageController {
 
   /// 확대를 처음(1배)으로 (보던 자리는 그대로)
   void resetZoom() => _state?._resetZoom();
+}
+
+/// 뷰어 설정 페이지 모드: 스크롤을 켜기 직전의 탭·슬라이드 (스크롤을 다시 끄면 이대로 되돌림, 기억이 없으면 기본값 탭 + 슬라이드)
+class PageModeMemory {
+  static bool tap = true;
+  static bool slide = true;
 }
 
 /// 스크롤 보기 오른쪽의 회색 막대: 지금 위치를 보여 주고, 끌면 그 비율 위치로 바로 이동
@@ -815,7 +821,7 @@ class SettingOption extends StatelessWidget {
       color: selected ? sig : Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: selected ? sig : cs.outlineVariant, width: selected ? 1.5 : 1),
+        side: BorderSide(color: selected ? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF5A5A60) : sig) : cs.outlineVariant, width: selected ? 1.5 : 1),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
@@ -830,7 +836,7 @@ class SettingOption extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
-                  color: selected ? Colors.white : cs.onSurfaceVariant,
+                  color: selected ? AppColors.onSig(context) : cs.onSurfaceVariant,
                 ),
                 child: label,
               ),
@@ -1003,9 +1009,9 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
         // 메뉴·이전·다음 표시는 시그니쳐 색 바탕에 흰 글자
         decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(18)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (before != null) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(before, color: Colors.white, size: 20)),
-          Text(text, style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800)),
-          if (after != null) Padding(padding: const EdgeInsets.only(left: 4), child: Icon(after, color: Colors.white, size: 20)),
+          if (before != null) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(before, color: AppColors.onSig(context), size: 20)),
+          Text(text, style: TextStyle(color: AppColors.onSig(context), fontSize: 19, fontWeight: FontWeight.w800)),
+          if (after != null) Padding(padding: const EdgeInsets.only(left: 4), child: Icon(after, color: AppColors.onSig(context), size: 20)),
         ]),
       );
 

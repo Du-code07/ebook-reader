@@ -107,7 +107,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     // '완전 다크 모드'는 없앰: 예전에 고른 경우 다크 모드로
-    _themeMode = widget.initialThemeMode == 'black' ? 'dark' : widget.initialThemeMode;
+    // 없어진 테마(완전 다크·밝은 다크)는 다크로
+    _themeMode = widget.initialThemeMode == 'black' || widget.initialThemeMode == 'dim' ? 'dark' : widget.initialThemeMode;
     _appLang = widget.initialLang;
     _needsLanguage = widget.needsLanguage;
     WidgetsBinding.instance.addObserver(this);
@@ -186,42 +187,64 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     final String? appFont = UserFonts.appFontName.value;
     // 앱 대표 색: 연두색 — 고른 것·켜짐·버튼 '바탕'에만 (글씨·아이콘은 기본 색), 연두 바탕 위 글씨는 흰색
     final Color sig = b == Brightness.light ? AppColors.signature : AppColors.signatureDark;
-    var scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF8BC34A), brightness: b);
-    scheme = b == Brightness.light
-        ? scheme.copyWith(
-            primary: const Color(0xFF33382E),
-            onPrimary: Colors.white,
-            primaryContainer: sig,
-            onPrimaryContainer: Colors.white,
-            secondary: const Color(0xFF5E6458),
-            secondaryContainer: sig,
-            onSecondaryContainer: Colors.white,
-          )
-        : scheme.copyWith(
-            primary: const Color(0xFFE4E8DE),
-            onPrimary: const Color(0xFF1A1C18),
-            primaryContainer: sig,
-            onPrimaryContainer: Colors.white,
-            secondaryContainer: sig,
-            onSecondaryContainer: Colors.white,
-          );
-    if (b == Brightness.dark && variant == 'black') {
+    // 색이 섞이지 않은 무채색 바탕 (예전 연두빛 바탕 대신): 라이트는 완전 흰색
+    var scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF8A8A8A), brightness: b, dynamicSchemeVariant: DynamicSchemeVariant.monochrome);
+    if (b == Brightness.light && variant == 'comfort') {
+      // 편안한 모드: 푸른빛을 줄인 따뜻한 미색 종이 바탕 + 짙은 갈색 글씨
       scheme = scheme.copyWith(
-        surface: Colors.black,
-        surfaceContainerLowest: Colors.black,
-        surfaceContainerLow: const Color(0xFF0B0B0D),
-        surfaceContainer: const Color(0xFF121214),
-        surfaceContainerHigh: const Color(0xFF18181B),
-        surfaceContainerHighest: const Color(0xFF202024),
+        surface: const Color(0xFFFAF3E6),
+        onSurface: const Color(0xFF3B3328),
+        onSurfaceVariant: const Color(0xFF6B5E4D),
+        surfaceContainerLowest: const Color(0xFFFFFAF1),
+        surfaceContainerLow: const Color(0xFFF6EEDF),
+        surfaceContainer: const Color(0xFFF2E9D8),
+        surfaceContainerHigh: const Color(0xFFEDE3D0),
+        surfaceContainerHighest: const Color(0xFFE7DCC7),
+        outline: const Color(0xFFAD9F88),
+        outlineVariant: const Color(0xFFD8CCB6),
+        primary: const Color(0xFF4A4034),
+        onPrimary: Colors.white,
+        secondary: const Color(0xFF6E6252),
+        primaryContainer: sig,
+        onPrimaryContainer: AppColors.onSignature,
+        secondaryContainer: sig,
+        onSecondaryContainer: AppColors.onSignature,
       );
-    } else if (b == Brightness.dark && variant == 'dim') {
+    } else if (b == Brightness.light) {
       scheme = scheme.copyWith(
-        surface: const Color(0xFF2B2D31),
-        surfaceContainerLowest: const Color(0xFF232428),
-        surfaceContainerLow: const Color(0xFF2F3136),
-        surfaceContainer: const Color(0xFF34363C),
-        surfaceContainerHigh: const Color(0xFF3A3C42),
-        surfaceContainerHighest: const Color(0xFF42444B),
+        surface: Colors.white,
+        onSurface: const Color(0xFF1C1C1E),
+        onSurfaceVariant: const Color(0xFF5C5C61),
+        surfaceContainerLowest: Colors.white,
+        surfaceContainerLow: const Color(0xFFF7F7F8),
+        surfaceContainer: const Color(0xFFF2F2F4),
+        surfaceContainerHigh: const Color(0xFFECECEF),
+        surfaceContainerHighest: const Color(0xFFE6E6E9),
+        primary: const Color(0xFF33363A),
+        onPrimary: Colors.white,
+        primaryContainer: sig,
+        onPrimaryContainer: AppColors.onSignature,
+        secondary: const Color(0xFF5E6166),
+        secondaryContainer: sig,
+        onSecondaryContainer: AppColors.onSignature,
+      );
+    } else {
+      // 다크: 대표 색 자리에는 회색 (글꼴 찾기 단추 바탕과 같은 색), 그 위 글씨는 흰색
+      scheme = scheme.copyWith(
+        surface: const Color(0xFF141416),
+        onSurface: const Color(0xFFE6E6E9),
+        onSurfaceVariant: const Color(0xFFB4B4BA),
+        surfaceContainerLowest: const Color(0xFF0E0E10),
+        surfaceContainerLow: const Color(0xFF1A1A1D),
+        surfaceContainer: const Color(0xFF1F1F22),
+        surfaceContainerHigh: const Color(0xFF29292D),
+        surfaceContainerHighest: sig,
+        primary: const Color(0xFFE6E6E9),
+        onPrimary: const Color(0xFF1A1A1C),
+        primaryContainer: sig,
+        onPrimaryContainer: Colors.white,
+        secondaryContainer: sig,
+        onSecondaryContainer: Colors.white,
       );
     }
     return ThemeData(
@@ -238,13 +261,13 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       ),
       // 켜짐 스위치·체크 상자: 연두색 바탕 + 흰 손잡이/체크
       switchTheme: SwitchThemeData(
-        trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null),
+        trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : (b == Brightness.dark ? scheme.surfaceContainerLow : null)),
         thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Colors.white : null),
-        trackOutlineColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null),
+        trackOutlineColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? (b == Brightness.dark ? const Color(0xFF5A5A60) : sig) : null),
       ),
       checkboxTheme: CheckboxThemeData(
         fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null),
-        checkColor: const WidgetStatePropertyAll(Colors.white),
+        checkColor: WidgetStatePropertyAll(b == Brightness.dark ? Colors.white : AppColors.onSignature),
       ),
       radioTheme: RadioThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null)),
       // 아래에서 올라오는 모든 창: 위쪽 가운데 회색 막대
@@ -271,11 +294,11 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       title: 'FReader',
       // 테마를 바꿀 때 색을 서서히 섞는 동안 화면 전체를 매번 다시 그려 느려짐 → 바로 바꿈
       themeAnimationDuration: Duration.zero,
-      themeMode: (_themeMode == 'dark' || _themeMode == 'black' || _themeMode == 'dim')
+      themeMode: _themeMode == 'dark'
           ? ThemeMode.dark
-          : (_themeMode == 'light' ? ThemeMode.light : ThemeMode.system),
-      theme: _appTheme(Brightness.light),
-      darkTheme: _appTheme(Brightness.dark, variant: _themeMode),
+          : (_themeMode == 'light' || _themeMode == 'comfort' ? ThemeMode.light : ThemeMode.system),
+      theme: _appTheme(Brightness.light, variant: _themeMode == 'comfort' ? 'comfort' : 'light'),
+      darkTheme: _appTheme(Brightness.dark),
       builder: (context, child) {
         // 상태표시줄을 내려 화면 위에 보이는 동안에는 그 높이만큼 위쪽 여백을 늘려
         // 상단바(SafeArea를 쓰는 곳 모두)가 함께 내려와 겹치지 않게 한다
@@ -305,7 +328,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
             );
           },
         );
-        return FadeTransition(
+        final Widget app = FadeTransition(
           opacity: _rotationFadeAnim,
           child: ScaleTransition(
             scale: _rotationScaleAnim,
@@ -323,6 +346,12 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
             ),
           ),
         );
+        if (_themeMode != 'comfort') return app;
+        // 편안한 모드: 화면 전체(열어 본 파일 포함)에 옅은 호박색을 덮어 푸른빛을 줄임
+        return Stack(fit: StackFit.expand, textDirection: TextDirection.ltr, children: [
+          app,
+          const IgnorePointer(child: ColoredBox(color: Color(0x1FFF9100))),
+        ]);
       },
       home: _needsLanguage
           ? LanguageSelectScreen(
@@ -593,7 +622,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   List<File> _allBooks = [];
   List<File> _trashedBooks = [];
   List<String> _groups = List<String>.of(StorageService.defaultGroups);
-  bool _groupMenuOpen = false; // [전체]에서 그룹 목록을 펼친 중 (아이콘 엇갈림)
 
   // ── 파일 검색 (상단 돋보기) ──
   bool _searchOpen = false;
@@ -761,7 +789,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   child: Row(
                     children: [
                       Expanded(child: Text(text, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
-                      Icon(_sortBy == value ? Icons.check_circle : Icons.circle_outlined, size: 24, color: _sortBy == value ? AppColors.of(ctx) : cs.outline),
+                      Icon(_sortBy == value ? Icons.check_circle : Icons.circle_outlined, size: 24, color: _sortBy == value ? AppColors.mark(ctx) : cs.outline),
                     ],
                   ),
                 ),
@@ -1569,6 +1597,107 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }
   }
 
+  /// 형식 그룹의 파일 찾기: 기기 저장소에서 그 형식 파일을 모두 찾아 이 그룹에 넣음 (권한이 없으면 먼저 허용 받기)
+  bool _groupScanBusy = false;
+  Future<void> _scanFilesIntoGroup(String group, String ext) async {
+    if (_groupScanBusy) return;
+    const extsOf = {
+      'pdf': ['pdf'],
+      'epub': ['epub'],
+      'txt': ['txt'],
+      'docx': ['docx', 'doc'],
+      'hwp': ['hwp', 'hwpx'],
+      'pptx': ['pptx', 'ppt'],
+      'xlsx': ['xlsx', 'xlsm', 'xls'],
+      'cbz': ['cbz'],
+      'jpg': ['jpg', 'jpeg', 'png', 'webp'],
+    };
+    final exts = extsOf[ext] ?? [ext];
+    bool allowed = await _pdfChannel.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
+    if (!allowed) {
+      if (!mounted) return;
+      final go = await showPopDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(_tr('파일 접근 허용', 'Allow file access', '允许访问文件', 'ファイルへのアクセスを許可')),
+          content: Text(_tr(
+            '기기에 저장된 파일을 찾으려면 파일 접근 권한이 필요해요\n다음 화면에서 FReader를 허용해 주세요',
+            'To find files on this device, FReader needs file access\nPlease allow it on the next screen',
+            '要查找设备中的文件，需要文件访问权限\n请在下一个页面允许 FReader',
+            '端末内のファイルを探すにはファイルへのアクセス権限が必要です\n次の画面で FReader を許可してください',
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_tr('허용하러 가기', 'Allow', '去允许', '許可する'))),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
+      // 허용 화면에서 돌아올 때까지 기다림
+      final back = Completer<void>();
+      final listener = AppLifecycleListener(onResume: () {
+        if (!back.isCompleted) back.complete();
+      });
+      await _pdfChannel.invokeMethod('requestFontScan').catchError((_) => null);
+      await back.future.timeout(const Duration(minutes: 3), onTimeout: () {});
+      listener.dispose();
+      allowed = await _pdfChannel.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
+      if (!mounted) return;
+      if (!allowed) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('파일 접근이 허용되지 않아 찾지 못했어요', 'File access was not allowed', '未允许文件访问，无法查找', 'ファイルへのアクセスが許可されていません'))));
+        return;
+      }
+    }
+    _groupScanBusy = true;
+    try {
+      final groupLabel = _localizeGroupName(group);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('기기에서 파일을 찾는 중이에요…', 'Searching for files…', '正在查找文件…', 'ファイルを探しています…'))));
+      final paths = await _pdfChannel.invokeListMethod<String>('scanDocFiles', {'exts': exts}).catchError((_) => <String>[]) ?? const <String>[];
+      final appDir = await getApplicationDocumentsDirectory();
+      // 이미 서재에 있는 파일(같은 이름)과 앱 안의 파일은 빼고
+      final have = <String>{for (final e in appDir.listSync()) e.path.split(Platform.pathSeparator).last};
+      final seen = <String>{};
+      final found = <String>[];
+      for (final p in paths) {
+        if (p.startsWith(appDir.path)) continue;
+        final name = p.split('/').last;
+        if (have.contains(name) || !seen.add(name)) continue;
+        found.add(p);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      if (found.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('새로 넣을 파일을 찾지 못했어요', 'No new files found', '没有找到新的文件', '新しいファイルは見つかりませんでした'))));
+        return;
+      }
+      final ok = await showPopDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(_tr('파일 ${found.length}개를 찾았어요', 'Found ${found.length} file(s)', '找到 ${found.length} 个文件', 'ファイルが${found.length}個見つかりました')),
+          content: Text(_tr("'$groupLabel' 그룹에 모두 추가할까요?", "Add them all to '$groupLabel'?", "全部添加到“$groupLabel”分组吗？", "「$groupLabel」グループにすべて追加しますか？")),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_tr('추가', 'Add', '添加', '追加'))),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      int added = 0;
+      for (final p in found) {
+        try {
+          final saved = await File(p).copy('${appDir.path}/${p.split('/').last}');
+          await StorageService.setBookGroup(saved.path, group);
+          added++;
+        } catch (_) {}
+      }
+      await _loadLibrary();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('파일 $added개를 추가했어요', 'Added $added file(s)', '已添加 $added 个文件', '$added個のファイルを追加しました'))));
+    } finally {
+      _groupScanBusy = false;
+    }
+  }
+
   Future<void> _createMangaBookFromImages(List<File> sourceImages, {bool deleteSourceAfter = false}) async {
     final now = DateTime.now();
     final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
@@ -2331,43 +2460,49 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   /// [그룹] 단추 하나 (예전 [전체] 단추와 같은 크기·아이콘): 누르면 아이콘이 펼쳐지며 바로 아래로 그룹 목록
   Widget _buildGroupBar() {
     final cs = Theme.of(context).colorScheme;
-    final bool groupPicked = _favoritesOnly || _selectedGroup != '전체';
-    final String label = _favoritesOnly
-        ? _tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り')
-        : groupPicked
-            ? _localizeGroupName(_selectedGroup)
-            : _tr('그룹', 'Groups', '分组', 'グループ');
-    Widget groupIcon = const SizedBox.shrink();
-    if (_favoritesOnly) {
-      groupIcon = const Icon(Icons.bookmarks, color: Colors.amber, size: 17);
-    } else if (groupPicked) {
-      final ext = _groupFormatExt(_selectedGroup);
-      groupIcon = ext == null ? Icon(Icons.folder_outlined, size: 18, color: cs.onSecondaryContainer) : FileTypeIcon(ext: ext, size: 18);
-    }
+    // 고른 그룹의 아이콘과 이름 (전체도 아이콘 + '전체')
+    final String label = _favoritesOnly ? _tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り') : _localizeGroupName(_selectedGroup);
+    final String? ext = _favoritesOnly || _selectedGroup == '전체' ? null : _groupFormatExt(_selectedGroup);
+    final Widget groupIcon = _favoritesOnly
+        ? const Icon(Icons.bookmarks, color: Colors.amber, size: 17)
+        : _selectedGroup == '전체'
+            ? const FolderDocsIcon(size: 19, onAccent: true)
+            : ext == null
+                ? Icon(Icons.folder_outlined, size: 18, color: cs.onSecondaryContainer)
+                : FileTypeIcon(ext: ext, size: 18);
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: ChoiceChip(
-          key: _allGroupChipKey,
-          avatar: groupPicked ? groupIcon : GroupStackIcon(size: 17, spread: _groupMenuOpen, color: cs.onSecondaryContainer),
-          showCheckmark: false,
-          // 그룹을 고르면 '그룹' 대신 그 그룹 이름 (아이콘과 글자 사이는 조금 좁게)
-          labelPadding: groupPicked ? const EdgeInsets.only(left: 3, right: 8) : null,
-          label: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 220),
-            child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          ChoiceChip(
+            key: _allGroupChipKey,
+            avatar: groupIcon,
+            showCheckmark: false,
+            // 아이콘과 글자 사이는 좁게, 글자 오른쪽 여백은 아이콘 왼쪽 여백과 같게 (칸 가운데에 오도록)
+            labelPadding: const EdgeInsets.only(left: 4, right: 2),
+            label: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 220),
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            selected: true,
+            onSelected: (_) {
+              if (_searchOpen) {
+                _closeSearch();
+                return;
+              }
+              if (_fabOpen) setState(() => _fabOpen = false);
+              _showGroupJumpMenu();
+            },
           ),
-          selected: true,
-          onSelected: (_) {
-            if (_searchOpen) {
-              _closeSearch();
-              return;
-            }
-            if (_fabOpen) setState(() => _fabOpen = false);
-            _showGroupJumpMenu();
-          },
-        ),
+          // 형식 그룹(PDF·워드 등): 기기에서 그 형식 파일을 찾아 이 그룹에 넣기
+          if (ext != null)
+            IconButton(
+              icon: const Icon(Icons.find_in_page_outlined),
+              tooltip: _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'),
+              onPressed: () => _scanFilesIntoGroup(_selectedGroup, ext),
+            ),
+        ]),
       ),
     );
   }
@@ -2381,7 +2516,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       if (_bookshelfViewMode == 'grid' && _customCovers.containsKey(file.path))
         ('cover_reset', _tr('원래 표지로', 'Original Cover', '恢复原封面', '元の表紙に戻す'), Icons.restore, null),
       if (withTrash) ('trash', _tr('휴지통 이동', 'Move to Trash', '移至回收站', 'ゴミ箱へ移動'), Icons.delete_outline, Colors.redAccent),
-    ]);
+    ], compact: true);
     if (!mounted || action == null) return;
     if (action == 'rename') {
       _renameFileDialog(file);
@@ -2450,7 +2585,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
     final Offset topLeft = box.localToGlobal(Offset.zero, ancestor: overlayBox);
     final Rect anchor = topLeft & box.size;
-    setState(() => _groupMenuOpen = true);
     final picked = await Navigator.of(context).push<String>(
       GroupDropdownRoute(
         anchor: anchor,
@@ -2462,7 +2596,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           final ext = _groupFormatExt(g);
           return ext == null ? Icon(Icons.folder_outlined, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant) : FileTypeIcon(ext: ext, size: 20);
         },
-        allLeading: FolderDocsIcon(size: 20, color: _favoritesOnly || _selectedGroup != '전체' ? Theme.of(context).colorScheme.onSurfaceVariant : Colors.white),
+        allLeading: FolderDocsIcon(size: 20, onAccent: !_favoritesOnly && _selectedGroup == '전체'),
         allLabel: _localizeGroupName('전체'),
         favLabel: _tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り'),
         addLabel: _tr('그룹 추가', 'Add Group', '添加分组', 'グループ追加'),
@@ -2479,7 +2613,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     );
     if (!mounted) return;
     setState(() {
-      _groupMenuOpen = false;
       if (picked == null) return;
       _closeSearch();
       if (picked == kFavoritesGroupKey) {
@@ -3656,7 +3789,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   child: FloatingActionButton.extended(
                     heroTag: 'fab_batch_move_group',
                     backgroundColor: AppColors.of(context),
-                    foregroundColor: Colors.white,
+                    foregroundColor: AppColors.onSig(context),
                     extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
                     extendedIconLabelSpacing: 6,
                     onPressed: _selectedFilePaths.isNotEmpty ? _moveSelectedFilesBatch : null,
@@ -3846,7 +3979,7 @@ class _FileMergeSelectDialogState extends State<_FileMergeSelectDialog> {
         backgroundColor: AppColors.of(context),
         child: Text(
           '${selIndex + 1}',
-          style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: 11, color: AppColors.onSig(context), fontWeight: FontWeight.bold),
         ),
       );
 

@@ -760,10 +760,10 @@ function vZoomListen(el) {
   el.addEventListener('touchcancel', vPinchEnd);
 }
 /** 확대 배율에 맞춘 쪽 너비 */
-function vPageWidth() { return (vhost.clientWidth || innerWidth) * vZoom; }
+function vPageWidth() { return (innerWidth || vhost.clientWidth) * vZoom; }
 /** 화면보다 좁게 줄였으면 쪽을 가로 가운데에 */
 function vPlaceSlot(slot, W) {
-  const VW = vhost.clientWidth || innerWidth;
+  const VW = innerWidth || vhost.clientWidth;
   slot.style.marginLeft = W < VW - 0.5 ? `${Math.floor((VW - W) / 2)}px` : '';
 }
 function vLayout(keep) {
@@ -793,7 +793,7 @@ function vLayout(keep) {
   });
   vTops.push(y);
   // 쪽이 화면보다 짧으면(1쪽뿐인 문서 등) 위에 붙이지 않고 화면 가운데에
-  const total = y - V_GAP, viewH = vhost.clientHeight || innerHeight;
+  const total = y - V_GAP, viewH = innerHeight || vhost.clientHeight;
   const pad = total < viewH ? Math.floor((viewH - total) / 2) : 0;
   if (vSlots.length) {
     vSlots[0].style.marginTop = pad ? `${pad}px` : '';
@@ -813,7 +813,7 @@ function vGoto(index) {
   vhost.scrollTop = vTops[clampPage(index)];
   vUpdate();
 }
-function vScrollBy(dir) { vhost?.scrollBy({ top: dir * vhost.clientHeight * 0.9, behavior: 'smooth' }); }
+function vScrollBy(dir) { vhost?.scrollBy({ top: dir * (innerHeight || vhost.clientHeight) * 0.9, behavior: 'smooth' }); }
 function vScrollToRatio(t) {
   if (!vhost) return;
   vhost.scrollTop = Math.max(0, Math.min(1, Number(t) || 0)) * Math.max(0, vhost.scrollHeight - vhost.clientHeight);

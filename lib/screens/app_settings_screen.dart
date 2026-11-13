@@ -1,7 +1,12 @@
 import '../widgets/favorite_ribbon.dart';
 import '../widgets/file_type_icon.dart';
 import 'user_fonts_screen.dart';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import '../widgets/pop_dialog.dart';
 
 import '../services/storage_service.dart';
 import '../widgets/choice_sheet.dart';
@@ -72,6 +77,12 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
 
   bool _tapGuideOff = StorageService.tapGuideOff;
 
+  @override
+  void initState() {
+    super.initState();
+    _measureCache();
+  }
+
   Future<void> _setTapGuideOff(bool v) async {
     setState(() => _tapGuideOff = v);
     await StorageService.setTapGuideOff(v);
@@ -91,7 +102,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   String _themeLabel(String mode) => switch (mode) {
         'dark' => _t('다크 모드', 'Dark mode', '深色模式', 'ダークモード'),
         'black' => _t('완전 다크 모드 (검정)', 'Pure black mode', '纯黑模式', '完全ダーク（黒）'),
-        'dim' => _t('밝은 다크 모드 (회색)', 'Dim dark mode (gray)', '浅色深色模式（灰）', '明るいダーク（グレー）'),
+        'comfort' => _t('편안한 모드 (블루라이트 줄임)', 'Comfort mode (less blue light)', '护眼模式（减少蓝光）', '目に優しいモード（ブルーライト軽減）'),
         'light' => _t('라이트 모드', 'Light mode', '浅色模式', 'ライトモード'),
         _ => _t('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト'),
       };
@@ -104,7 +115,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ChoiceOption('system', _themeLabel('system'), icon: Icons.brightness_auto_outlined),
         ChoiceOption('light', _themeLabel('light'), icon: Icons.light_mode_outlined),
         ChoiceOption('dark', _themeLabel('dark'), icon: Icons.dark_mode_outlined),
-        ChoiceOption('dim', _themeLabel('dim'), icon: Icons.contrast),
+        ChoiceOption('comfort', _themeLabel('comfort'), icon: Icons.wb_incandescent_outlined),
       ],
       current: _themeMode,
     );
@@ -218,6 +229,98 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ),
       ],
     );
+  }
+
+  // ── 데이터 ──
+  int? _cacheBytes;
+
+  /// 지울 수 있는 임시 파일 폴더 (지워도 필요할 때 다시 만들어짐)
+  Future<List<Directory>> _cacheDirs() async => [
+        await getTemporaryDirectory(),
+        Directory('${(await getApplicationSupportDirectory()).path}/outline_cache'),
+      ];
+
+  Future<void> _measureCache() async {
+    int total = 0;
+    try {
+      for (final d in await _cacheDirs()) {
+        if (!await d.exists()) continue;
+        await for (final e in d.list(recursive: true, followLinks: false)) {
+          if (e is File) {
+            try {
+              total += await e.length();
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _cacheBytes = total);
+  }
+
+  String _fmtBytes(int b) {
+    if (b < 1024) return '${b}B';
+    if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(0)}KB';
+    if (b < 1024 * 1024 * 1024) return '${(b / 1024 / 1024).toStringAsFixed(1)}MB';
+    return '${(b / 1024 / 1024 / 1024).toStringAsFixed(2)}GB';
+  }
+
+  Future<void> _clearCache() async {
+    final ok = await showPopDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_t('캐시 지우기', 'Clear Cache', '清除缓存', 'キャッシュを削除')),
+        content: Text(_t('미리 그려 둔 쪽·목차 같은 임시 파일을 지울까요?\n파일·메모·설정은 그대로예요',
+            'Delete temporary files such as pre-rendered pages and contents?\nYour files, notes and settings stay',
+            '要删除预先渲染的页面、目录等临时文件吗？\n文件、笔记和设置不受影响',
+            '事前に描いたページ・目次などの一時ファイルを削除しますか？\nファイル・メモ・設定はそのままです')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('취소', 'Cancel', '取消', 'キャンセル'))),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_t('지우기', 'Clear', '清除', '削除'))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    for (final d in await _cacheDirs()) {
+      try {
+        if (!await d.exists()) continue;
+        await for (final e in d.list(followLinks: false)) {
+          try {
+            await e.delete(recursive: true);
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
+    PaintingBinding.instance.imageCache.clear();
+    await _measureCache();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('캐시를 지웠어요', 'Cache cleared', '缓存已清除', 'キャッシュを削除しました'))));
+  }
+
+  Future<void> _clearData() async {
+    final ok = await showPopDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_t('데이터 지우기', 'Clear Data', '清除数据', 'データを削除')),
+        content: Text(_t('앱에 넣은 파일·메모·북마크·설정이 모두 지워지고 되돌릴 수 없어요\n지운 뒤 앱이 닫혀요',
+            'All files, notes, bookmarks and settings in the app will be deleted and cannot be restored\nThe app will close afterwards',
+            '应用中的所有文件、笔记、书签和设置都将被删除且无法恢复\n删除后应用将关闭',
+            'アプリ内のファイル・メモ・ブックマーク・設定がすべて削除され、元に戻せません\n削除後アプリが閉じます')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('취소', 'Cancel', '取消', 'キャンセル'))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(_t('모두 지우기', 'Delete All', '全部删除', 'すべて削除')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    const ch = MethodChannel('ebook_reader/pdf_renderer');
+    final done = await ch.invokeMethod<bool>('clearAppData').catchError((_) => false) ?? false;
+    if (!done && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('데이터를 지우지 못했어요', 'Could not clear data', '无法清除数据', 'データを削除できませんでした'))));
+    }
   }
 
   Widget _section(String text) {
@@ -357,6 +460,22 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               title: _t('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント'),
               subtitle: _t('EPUB 책 본문 글꼴', 'Font for EPUB book text', 'EPUB正文字体', 'EPUB本文のフォント'),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'epub'))),
+            ),
+            // 데이터: 캐시 지우기 · 데이터 지우기
+            _section(_t('데이터', 'Data', '数据', 'データ')),
+            _item(
+              icon: Icons.cleaning_services_outlined,
+              title: _t('캐시 지우기', 'Clear Cache', '清除缓存', 'キャッシュを削除'),
+              subtitle: _cacheBytes == null
+                  ? _t('미리 그려 둔 쪽·목차 등 임시 파일', 'Temporary files such as pre-rendered pages and contents', '预先渲染的页面、目录等临时文件', '事前に描いたページ・目次などの一時ファイル')
+                  : _t('임시 파일 ${_fmtBytes(_cacheBytes!)}', 'Temporary files ${_fmtBytes(_cacheBytes!)}', '临时文件 ${_fmtBytes(_cacheBytes!)}', '一時ファイル ${_fmtBytes(_cacheBytes!)}'),
+              onTap: _clearCache,
+            ),
+            _item(
+              icon: Icons.delete_forever_outlined,
+              title: _t('데이터 지우기', 'Clear Data', '清除数据', 'データを削除'),
+              subtitle: _t('파일·메모·설정을 모두 지우고 처음 상태로', 'Delete all files, notes and settings and start over', '删除所有文件、笔记和设置，恢复初始状态', 'ファイル・メモ・設定をすべて削除して初期状態に'),
+              onTap: _clearData,
             ),
             _section(_t('도움말', 'Help', '帮助', 'ヘルプ')),
             _item(

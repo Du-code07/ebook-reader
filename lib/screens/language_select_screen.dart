@@ -116,7 +116,7 @@ class _LanguageSelectScreenState extends State<LanguageSelectScreen> {
                         leading: CircleAvatar(
                           radius: 18,
                           backgroundColor: code == _selected ? Colors.white.withValues(alpha: 0.28) : cs.surfaceContainerHighest,
-                          foregroundColor: code == _selected ? Colors.white : cs.onSurfaceVariant,
+                          foregroundColor: code == _selected ? cs.onSecondaryContainer : cs.onSurfaceVariant,
                           child: code == 'system'
                               ? const Icon(Icons.phone_android, size: 17)
                               : Text(_badge(code), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
@@ -126,7 +126,7 @@ class _LanguageSelectScreenState extends State<LanguageSelectScreen> {
                         subtitle: code == 'system' ? Text(languageOptionLabel(StorageService.resolveSystemLanguage())) : null,
                         trailing: Icon(
                           code == _selected ? Icons.check_circle : Icons.radio_button_unchecked,
-                          color: code == _selected ? Colors.white : cs.outline,
+                          color: code == _selected ? cs.onSecondaryContainer : cs.outline,
                         ),
                         onTap: () => setState(() => _selected = code),
                       ),
@@ -162,7 +162,7 @@ class ThemeSelectScreen extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onConfirmed;
 
-  static const List<String> options = ['system', 'light', 'dark', 'dim'];
+  static const List<String> options = ['system', 'light', 'dark', 'comfort'];
 
   @override
   State<ThemeSelectScreen> createState() => _ThemeSelectScreenState();
@@ -175,14 +175,14 @@ class _ThemeSelectScreenState extends State<ThemeSelectScreen> {
 
   String _label(String mode) => switch (mode) {
         'dark' => t('다크 모드', 'Dark mode', '深色模式', 'ダークモード'),
-        'dim' => t('밝은 다크 모드 (회색)', 'Dim dark mode (gray)', '浅色深色模式（灰）', '明るいダーク（グレー）'),
+        'comfort' => t('편안한 모드 (블루라이트 줄임)', 'Comfort mode (less blue light)', '护眼模式（减少蓝光）', '目に優しいモード（ブルーライト軽減）'),
         'light' => t('라이트 모드', 'Light mode', '浅色模式', 'ライトモード'),
         _ => t('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト'),
       };
 
   static IconData _icon(String mode) => switch (mode) {
         'dark' => Icons.dark_mode_outlined,
-        'dim' => Icons.contrast,
+        'comfort' => Icons.wb_incandescent_outlined,
         'light' => Icons.light_mode_outlined,
         _ => Icons.brightness_auto_outlined,
       };
@@ -244,13 +244,13 @@ class _ThemeSelectScreenState extends State<ThemeSelectScreen> {
                         leading: CircleAvatar(
                           radius: 18,
                           backgroundColor: mode == _selected ? Colors.white.withValues(alpha: 0.28) : cs.surfaceContainerHighest,
-                          foregroundColor: mode == _selected ? Colors.white : cs.onSurfaceVariant,
+                          foregroundColor: mode == _selected ? cs.onSecondaryContainer : cs.onSurfaceVariant,
                           child: Icon(_icon(mode), size: 18),
                         ),
                         title: Text(_label(mode), style: const TextStyle(fontWeight: FontWeight.w600)),
                         trailing: Icon(
                           mode == _selected ? Icons.check_circle : Icons.radio_button_unchecked,
-                          color: mode == _selected ? Colors.white : cs.outline,
+                          color: mode == _selected ? cs.onSecondaryContainer : cs.outline,
                         ),
                         onTap: () {
                           setState(() => _selected = mode);

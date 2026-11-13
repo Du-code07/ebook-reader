@@ -107,8 +107,8 @@ class MemoToolButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 고른 도구: 앱 시그니처 연두 바탕 + 흰 아이콘
-    final Color color = !enabled ? Colors.white30 : (active ? Colors.white : (this.color ?? Colors.white));
+    // 고른 도구: 시그니쳐 색 바탕 + 진한 초록 아이콘
+    final Color color = !enabled ? Colors.white30 : (active ? AppColors.onSignature : (this.color ?? Colors.white));
     return Semantics(
       button: true,
       label: label,

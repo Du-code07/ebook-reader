@@ -101,7 +101,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
           title: Text(_t('파일 접근 허용', 'Allow file access', '允许访问文件', 'ファイルへのアクセスを許可')),
           content: Text(_t(
               '기기에 저장된 글꼴 파일을 찾으려면 파일 접근 권한이 필요해요\n다음 화면에서 FReader를 허용해 주세요\n(허용하지 않아도 설치된 글꼴 앱의 글꼴은 찾아요)',
-              'To find font files on this device, FReader needs file access\nPlease allow it on the next screen\n(Fonts from installed font apps are found either way.)',
+              'To find font files on this device, FReader needs file access\nPlease allow it on the next screen\n(Fonts from installed font apps are found either way)',
               '要查找设备中的字体文件，需要文件访问权限\n请在下一个页面允许 FReader\n（不允许也会查找已安装字体应用中的字体）',
               '端末内のフォントファイルを探すにはファイルへのアクセス権限が必要です\n次の画面で FReader を許可してください\n（許可しなくてもインストール済みのフォントアプリのフォントは探します）')),
           actions: [
@@ -136,6 +136,32 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
         : paths.isEmpty && !allowed
             ? _t('파일 접근이 허용되지 않아 저장소의 글꼴은 찾지 못했어요', 'File access was not allowed, so storage was not searched', '未允许文件访问，无法查找存储中的字体', 'ファイルへのアクセスが許可されていないため、ストレージは検索できませんでした')
             : _t('새로 넣을 글꼴을 찾지 못했어요', 'No new fonts found', '没有找到新的字体', '新しいフォントは見つかりませんでした'));
+  }
+
+  /// 초기화: 이 화면에 넣어 둔 글꼴을 모두 빼고 기본 글꼴로 되돌림 (먼저 물어봄)
+  Future<void> _resetAll() async {
+    final ok = await showPopDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_t('글꼴 초기화', 'Reset fonts', '重置字体', 'フォントをリセット')),
+        content: Text(_t('넣어 둔 글꼴을 모두 빼고 기본 글꼴로 되돌릴까요?\n기기에 있는 원래 글꼴 파일은 지워지지 않아요',
+            'Remove all added fonts and go back to the default font?\nThe original font files on your device are not deleted',
+            '要移除所有已添加的字体并恢复默认字体吗？\n设备中的原字体文件不会被删除',
+            '追加したフォントをすべて外して既定のフォントに戻しますか？\n端末にある元のフォントファイルは削除されません')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('취소', 'Cancel', '取消', 'キャンセル'))),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_t('초기화', 'Reset', '重置', 'リセット'))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    for (final family in {for (final e in _fonts) UserFonts.familyOf(e)}) {
+      await UserFonts.removeFamily(widget.category, family);
+    }
+    if (_pickable) await UserFonts.setActive(widget.category, '');
+    if (widget.category == 'app') await UserFonts.loadAppFont();
+    await _reload();
+    if (mounted) _snack(_t('기본 글꼴로 되돌렸어요', 'Reset to the default font', '已恢复默认字体', '既定のフォントに戻しました'));
   }
 
   Future<void> _remove(UserFontEntry e) async {
@@ -204,7 +230,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
     final bool on = _active == family;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
-      leading: Icon(on ? Icons.radio_button_checked : Icons.radio_button_off, color: on ? AppColors.of(context) : cs.onSurfaceVariant),
+      leading: Icon(on ? Icons.radio_button_checked : Icons.radio_button_off, color: on ? AppColors.mark(context) : cs.onSurfaceVariant),
       title: Text(title, style: TextStyle(fontWeight: on ? FontWeight.w800 : FontWeight.w600)),
       subtitle: subtitle.isEmpty ? null : Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
       selected: on,
@@ -223,7 +249,17 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: Text(_title)),
+      appBar: AppBar(
+        title: Text(_title),
+        actions: [
+          // 초기화: 넣어 둔 글꼴을 모두 빼고 기본 글꼴로
+          TextButton(
+            onPressed: _busy ? null : _resetAll,
+            child: Text(_t('초기화', 'Reset', '重置', 'リセット'), style: TextStyle(color: cs.onSurface, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 6),
+        ],
+      ),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -265,7 +301,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
               ListTile(
                 dense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                leading: Icon(Icons.check_circle_outline, color: AppColors.of(context), size: 20),
+                leading: Icon(Icons.check_circle_outline, color: AppColors.mark(context), size: 20),
                 title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(note),
               ),

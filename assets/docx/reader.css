@@ -76,7 +76,9 @@ body { --gap: #e2e2e6; }
 /* 스크롤 보기: 문서 화면 자체 스크롤바는 숨김 (앱의 회색 막대만 보이게) */
 #vpages { scrollbar-width: none; }
 #vpages::-webkit-scrollbar { display: none; width: 0; height: 0; }
-#vpages { position: fixed; inset: 0; overflow-y: auto; overflow-x: hidden; background: var(--backdrop, var(--gap)); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+/* 휴대폰에 따라 위 설정을 무시하고 문서 자체의 얇은 스크롤바가 함께 보이는 경우가 있어서 (막대 2개),
+   상자를 화면 오른쪽·아래로 30px 더 넓혀 그 스크롤바가 화면 밖에 그려지게 함 */
+#vpages { position: fixed; top: 0; left: 0; right: -30px; bottom: -30px; padding: 0 30px 30px 0; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; background: var(--backdrop, var(--gap)); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 #vpages .vslot { position: relative; margin: 0 0 12px 0; background: var(--file-page, white); overflow: hidden; box-shadow: 0 12px 0 0 var(--gap); }
 #vpages .vslot:last-child { box-shadow: none; }
 body[data-theme="dark"] #vpages .vslot { background: var(--file-page, #1e1e1e); }

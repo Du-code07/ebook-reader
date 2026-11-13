@@ -191,7 +191,7 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                               Icon(
                                 opt.value == _selected ? Icons.check_circle : Icons.circle_outlined,
                                 size: 23,
-                                color: opt.value == _selected ? AppColors.of(context) : cs.outline,
+                                color: opt.value == _selected ? AppColors.mark(context) : cs.outline,
                               ),
                             ],
                           ),

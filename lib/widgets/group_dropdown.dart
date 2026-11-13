@@ -136,7 +136,7 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
   }) {
     final cs = Theme.of(context).colorScheme;
     final bool sel = value == r.selected;
-    final Color fg = sel ? Colors.white : cs.onSurface;
+    final Color fg = sel ? AppColors.onSig(context) : cs.onSurface;
     return Padding(
       key: key,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
@@ -165,7 +165,7 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
                       style: TextStyle(fontSize: 15, color: fg, fontWeight: sel ? FontWeight.w700 : FontWeight.w500)),
                 ),
               ),
-              if (sel) const Padding(padding: EdgeInsets.only(left: 6), child: Icon(Icons.check, size: 18, color: Colors.white)),
+              if (sel) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(Icons.check, size: 18, color: AppColors.onSig(context))),
               const SizedBox(width: 14),
             ]),
           ),
@@ -259,7 +259,7 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
                 child: SizedBox(
                   width: 40,
                   height: 46,
-                  child: Icon(Icons.drag_handle, size: 20, color: sel ? Colors.white : cs.onSurfaceVariant.withValues(alpha: 0.7)),
+                  child: Icon(Icons.drag_handle, size: 20, color: sel ? AppColors.onSig(context) : cs.onSurfaceVariant.withValues(alpha: 0.7)),
                 ),
               ),
             ),

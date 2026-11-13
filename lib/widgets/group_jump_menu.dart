@@ -10,13 +10,16 @@ typedef ScaleMenuItem<T> = (T, String, IconData, Color?);
 /// 누른 아이콘(칩)에서 빠져나오며 커지고, 닫힐 때는 다시 작아지며 그 안으로 들어가는 메뉴.
 /// [전체] 그룹 목록, 파일의 점 3개 메뉴가 같이 쓴다.
 class GroupJumpMenuRoute<T> extends PopupRoute<T> {
-  GroupJumpMenuRoute({required this.anchor, required this.items, this.barrierLabel, this.leadingFor, this.beside = false, this.selected});
+  GroupJumpMenuRoute({required this.anchor, required this.items, this.barrierLabel, this.leadingFor, this.beside = false, this.selected, this.compact = false});
 
   /// 지금 고른 값 (줄 끝에 체크 표시)
   final T? selected;
 
   /// true면 누른 것(예: 그룹 이름)의 바로 오른쪽, 위쪽을 맞춰 펼침
   final bool beside;
+
+  /// 글자 길이만큼만 (최소 너비 없이, 오른쪽 빈 공간 없게)
+  final bool compact;
 
   /// 줄 앞 그림을 따로 줄 때 (예: 그룹 이름이 파일 형식이면 그 형식 아이콘). null이면 기본 아이콘
   final Widget? Function(T value)? leadingFor;
@@ -72,7 +75,7 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
       clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
         // 글자 길이만큼만 (오른쪽 빈 공간 없이)
-        constraints: BoxConstraints(minWidth: beside ? 0 : 150, maxWidth: menuWidth, maxHeight: screen.height * 0.6),
+        constraints: BoxConstraints(minWidth: beside || compact ? 0 : 150, maxWidth: menuWidth, maxHeight: screen.height * 0.6),
         child: IntrinsicWidth(
           // ListView는 내용 너비를 잴 수 없어 Column + 스크롤로
           child: SingleChildScrollView(
@@ -90,10 +93,10 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
                       children: [
                         leadingFor?.call(value) ?? Icon(icon, size: 16, color: color ?? cs.onSurfaceVariant),
                         const SizedBox(width: 10),
-                        Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, color: color, fontWeight: beside ? FontWeight.w700 : null))),
+                        Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, color: color))),
                         if (selected != null && selected == value) ...[
                           const SizedBox(width: 12),
-                          Icon(Icons.check, size: 18, color: AppColors.of(context)),
+                          Icon(Icons.check, size: 18, color: AppColors.mark(context)),
                         ],
                       ],
                     ),
@@ -132,7 +135,7 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
 }
 
 /// [anchorContext] 위치에서 커져 나오는 메뉴를 띄우고 고른 값을 돌려줌 (닫으면 null)
-Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> items, {bool beside = false}) {
+Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> items, {bool beside = false, bool compact = false}) {
   final box = anchorContext.findRenderObject() as RenderBox?;
   if (box == null || !box.hasSize) return Future.value(null);
   // 메뉴가 놓이는 화면 기준 좌표 (태블릿처럼 앱을 크게 보여 줄 때도 누른 자리에 맞게)
@@ -144,6 +147,7 @@ Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> i
       barrierLabel: MaterialLocalizations.of(anchorContext).modalBarrierDismissLabel,
       items: items,
       beside: beside,
+      compact: compact,
     ),
   );
 }

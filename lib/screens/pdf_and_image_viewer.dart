@@ -459,8 +459,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             onSelected: (val) => apply(() {
               _pageModeScroll = val;
               if (val) {
+                // 켜기 직전의 탭·슬라이드를 기억해 두었다가 스크롤을 다시 끄면 되돌림
+                if (_pageModeTap || _useSwipeTurn) {
+                  PageModeMemory.tap = _pageModeTap;
+                  PageModeMemory.slide = _useSwipeTurn;
+                }
                 _useSwipeTurn = false;
                 _pageModeTap = false;
+              } else {
+                _pageModeTap = PageModeMemory.tap;
+                _useSwipeTurn = PageModeMemory.slide;
               }
             }),
           ),
@@ -789,13 +797,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _bookmarks = await StorageService.getBookmarks(_bookKey);
       // 파일을 열 때마다 탭 존 가이드라인 (앱 설정에서 끌 수 있음)
       if (!StorageService.tapGuideOff && mounted) {
-        unawaited(showTapZoneGuide(context, tapTurn: () => _pageModeTap, rtl: () => _isMangaRtlMode, tr: _tr).then((e) {
-          if (!mounted) {
-            if (e?.mounted ?? false) e!.remove();
-          } else {
-            _tapGuide = e;
-          }
-        }));
+        _showTapGuide();
       }
 
       final tempDir = await getTemporaryDirectory();
@@ -1824,7 +1826,30 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
+  /// 탭 존 가이드라인 띄우기 (앞에 떠 있던 것은 지움)
+  void _showTapGuide() {
+    if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
+    _tapGuide = null;
+    unawaited(showTapZoneGuide(context, tapTurn: () => _pageModeTap, rtl: () => _isMangaRtlMode, tr: _tr).then((e) {
+      if (!mounted) {
+        if (e?.mounted ?? false) e!.remove();
+      } else {
+        _tapGuide = e;
+      }
+    }));
+  }
+
   Future<void> _showViewerSettingsSheet() async {
+    // 뷰어 설정에서 탭을 켜고 나가면 탭 존 가이드라인을 보여 줌
+    final bool tapBefore = _pageModeTap;
+    try {
+      await _showViewerSettingsSheetInner();
+    } finally {
+      if (mounted && !tapBefore && _pageModeTap && !StorageService.tapGuideOff) _showTapGuide();
+    }
+  }
+
+  Future<void> _showViewerSettingsSheetInner() async {
     // 내용이 맨 위일 때 아래로 끌면 창이 따라 내려오고, 충분히 내리면 닫힘
     final sheetCtrl = BottomSheet.createAnimationController(this);
     await showModalBottomSheet(
