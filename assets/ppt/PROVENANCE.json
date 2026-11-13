@@ -280,8 +280,8 @@
   "integrationRevision": "54+freader-v65-bridge",
   "integrationArtifacts": {
     "reader.js": {
-      "bytes": 27352,
-      "sha256": "8a22578563c402a94df1ecf6edcf9a9694f3f0b5700ead24fe20bd600e30ee13"
+      "bytes": 27340,
+      "sha256": "eb2537fc7fe1b54efbb7e14412eb4634d64ac8efe6767243d0eaafc8f17b4723"
     },
     "animation_steps.js": {
       "bytes": 8362,
