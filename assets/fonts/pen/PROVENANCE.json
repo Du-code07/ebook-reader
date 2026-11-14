@@ -1,0 +1,11 @@
+{
+  "font": "Petit Formal Script",
+  "designers": "Pablo Impallari, Brenda Gallo, Rodrigo Fuenzalida",
+  "license": "SIL Open Font License 1.1 (see OFL.txt)",
+  "source": "npm @fontsource/petit-formal-script 5.3.0, file files/petit-formal-script-latin-400-normal.woff2",
+  "modification": "woff2 decompressed to TrueType (fontTools); glyphs unchanged; Latin subset only",
+  "use": "FReader EPUB font choice 'fountain pen' (English letters only)",
+  "sha256": {
+    "PetitFormalScript-Regular.ttf": "80cb184b9ffe44a2bd96b448ae034d949ea0018d31e1014b21ec899bd160c4bb"
+  }
+}

@@ -7,7 +7,7 @@ import 'app_colors.dart';
 /// 누르거나, 아래로 잡아당기면(살짝 늘어남) 즐겨찾기가 켜지고/꺼진다.
 /// 부모가 위쪽을 잘라(clip) 주면 책갈피가 위 테두리에 꽂혀 있는 것처럼 보인다.
 class FavoriteRibbon extends StatefulWidget {
-  const FavoriteRibbon({super.key, required this.active, this.onTap, this.width = 14, this.height = 22, this.onImage = false, this.isDark = false, this.extraHitArea = 0});
+  const FavoriteRibbon({super.key, required this.active, this.onTap, this.width = 14, this.height = 22, this.onImage = false, this.isDark = false, this.extraHitArea = 0, this.tapNeedsSetting = false});
 
   final bool active;
   final VoidCallback? onTap;
@@ -21,7 +21,10 @@ class FavoriteRibbon extends StatefulWidget {
   /// 누르는 범위를 오른쪽·아래로 이만큼 더 넓힘 (책갈피 위치는 그대로)
   final double extraHitArea;
 
-  /// 앱 설정 '책갈피 애니메이션 끄기': 잡아당기는 움직임 없이 누르면 바로 켜고 끔
+  /// true(표지형): 앱 설정 '책갈피 터치로 즐겨찾기'가 켜져 있을 때만 누르기로 켜고 끔 (꺼져 있으면 잡아당겨야만)
+  final bool tapNeedsSetting;
+
+  /// 앱 설정 '책갈피 터치로 즐겨찾기': 잡아당기는 움직임 없이 누르면 바로 켜고 끔
   static final ValueNotifier<bool> animationOff = ValueNotifier<bool>(false);
 
   @override
@@ -80,7 +83,8 @@ class _FavoriteRibbonState extends State<FavoriteRibbon> with SingleTickerProvid
     final bool still = FavoriteRibbon.animationOff.value;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: widget.onTap,
+      // 표지형에서 설정이 꺼져 있으면 눌러도 아무 일 없음 (누른 자리는 막아 파일이 열리지 않게)
+      onTap: (widget.tapNeedsSetting && !still) ? () {} : widget.onTap,
       onVerticalDragUpdate: still ? null : _onDragUpdate,
       onVerticalDragEnd: still ? null : _onDragEnd,
       onVerticalDragCancel: still ? null : _onDragEnd,

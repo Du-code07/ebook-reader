@@ -2047,7 +2047,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         );
       }
     }
-    children.add(Positioned.fill(child: BookCurlLayer(drag: _book, paper: _backdrop(context))));
+    children.add(Positioned.fill(child: BookCurlLayer(drag: _book, paper: _backdrop(context), backside: Colors.white /* 한 쪽 보기 종이 뒷면은 테마와 상관없이 흰 종이 */)));
     // 길게 눌러 고른 글: 바탕·손잡이·[복사 | 모두 선택 | 공유] 막대
     children.add(Positioned.fill(child: SizedBox.expand(key: _textLayerKey, child: PageTextSelectLayer(sel: _textSel, tr: _tr))));
     return Stack(fit: StackFit.expand, clipBehavior: Clip.hardEdge, children: children);

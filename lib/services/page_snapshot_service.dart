@@ -53,7 +53,7 @@ class PageSnapshotService {
     required bool rtl,
     required String theme,
   }) =>
-      'p${page}_${width}x${height}_${spread ? 's' : '1'}${rtl ? 'r' : 'l'}_$theme.jpg';
+      'p${page}_${width}x${height}_${spread ? 's' : '1'}${rtl ? 'r' : 'l'}_${theme}_t1.jpg'; // t1: 여백을 줄여 크게 보는 배치 (예전 배치의 저장 화면은 쓰지 않음)
 
   /// 오래 안 연 문서의 저장 화면부터 지움. 파일이 많을 수 있어 따로(백그라운드 isolate)에서 한다
   static Future<void> _prune(String keepPath) async {

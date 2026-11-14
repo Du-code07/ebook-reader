@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1137,6 +1138,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (waiter != null && !waiter.isCompleted) waiter.complete();
     final relocation = ++_docRelocation;
     if (page != _docPage) _lastReadyPage = -1;
+    _dropIdleShot();
     if (_snapShownPage != null && _snapShownPage != page) _snapShow(page);
     if (page != _docPage) _docSel.clear();
     setState(() {
@@ -1197,6 +1199,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           initialProgress: _initialProgress,
           theme: _epubBgTheme,
           spread: _spreadFor(isLandscape),
+          trimMargins: StorageService.trimMargins,
           rtl: _isMangaRtlMode,
           // 한글·워드 스크롤 보기: 쪽을 세로로 늘어놓음 (내보내는 동안은 쪽 넘김 화면으로)
           vertical: _docVertical && !_isExporting,
@@ -1308,7 +1311,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       height: box.height.round(),
       spread: _snapSpread,
       rtl: _isMangaRtlMode,
-      theme: _epubBgTheme,
+      // 여백 줄이기를 끈 화면은 따로 저장
+      theme: (_isWordOrHwp && !StorageService.trimMargins) ? '${_epubBgTheme}_full' : _epubBgTheme,
     );
     return File('${dir.path}/$name');
   }
@@ -1347,6 +1351,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   void _onDocumentPageReady(int page) {
     _lastReadyPage = page;
+    if (!_book.busy) _scheduleIdleShot();
     final readyWaiter = _pageReadyWaiter;
     if (readyWaiter != null && !readyWaiter.isCompleted) {
       _pageReadyWaiter = null;
@@ -1616,7 +1621,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     // 메뉴를 열 때 상태표시줄이 나타나도 본문 자리가 그대로이도록 (바뀌면 책 화면이 다시 그려지며 깜빡임)
     final double barBottom = SystemBars.stableTop(context) + 48.0;
     // TXT는 화면 안쪽에 자체 여백(32)이 있어 그만큼 덜 내린다
-    return _isTxt ? math.max(12.0, barBottom + 10.0 - TxtPageDocument.margin) : barBottom + 10.0;
+    if (_isTxt) return math.max(12.0, barBottom + 10.0 - TxtPageDocument.margin);
+    // EPUB: 빈 곳을 줄이려고 상단바와 겹치더라도 상태표시줄 바로 아래에서 시작
+    // (책 화면 안쪽 위 여백도 8로 줄여 첫 줄이 상단바 아랫부분쯤에 옴)
+    return SystemBars.stableTop(context);
   }
 
   /// 6. 카메라(디스플레이 컷아웃)·시스템 영역 여백. 떠 있는 UI가 카메라를 가리지 않도록 좌우에 더한다.
@@ -2229,6 +2237,26 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   ],
                 ),
                 const SizedBox(height: 26),
+                // 한글·워드: 여백 줄이기 (쪽 여백을 잘라 내고 글씨를 크게)
+                if (_isWordOrHwp) ...[
+                  _settingsHeader(Icons.fit_screen_outlined, _tr('여백 줄이기', 'Trim Margins', '缩小页边距', '余白を詰める')),
+                  const SizedBox(height: 8),
+                  SettingGroup(
+                    children: [
+                      SettingToggle(
+                        label: Text(_tr('쪽 여백을 줄이고 글씨를 크게', 'Smaller margins, larger text', '缩小页边距、放大文字', '余白を詰めて文字を大きく')),
+                        selected: StorageService.trimMargins,
+                        onSelected: (val) async {
+                          await StorageService.setTrimMargins(val);
+                          if (!mounted) return;
+                          setState(() {});
+                          setModalState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 26),
+                ],
                 // 왼손잡이: 스크롤 막대·도구 모음을 왼쪽에 (끄면 오른쪽)
                 _settingsHeader(Icons.back_hand_outlined, _tr('왼손잡이', 'Left-handed', '左手模式', '左利き')),
                 const SizedBox(height: 8),
@@ -2962,7 +2990,74 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     // 넘긴 새 쪽이 늦게 그려지면(EPUB 장 바뀜·한글·워드) 다 그려진 뒤에 덮개를 걷음 → 검은·흰 화면이 비치지 않게
     waitForPage: () => true,
     beforeAfterCapture: _waitTurnedPageReady,
-  );
+    // 새 쪽 그림을 찍어 붙이지 않고, 넘겨 둔 실제 화면이 다 그려지면 그대로 비쳐 보이게 (부드럽고 바로 보임)
+    liveReady: _curlLiveReady,
+  )..addListener(_onBookCurlChanged);
+
+  /// 넘겨 둔 실제 화면이 다 그려질 때까지 기다림
+  Future<void> _curlLiveReady() async {
+    if (_isOfflineDocument && !_isTxt) {
+      await _waitTurnedPageReady();
+    } else if (!_isTxt) {
+      // EPUB: 위치가 바뀐 뒤 책 화면이 새 쪽을 실제로 그릴 틈 (장이 바뀔 때 빈 화면이 비치지 않게)
+      await SchedulerBinding.instance.endOfFrame;
+      await Future<void>.delayed(const Duration(milliseconds: 110));
+    }
+    // 화면에 실제로 올라올 때까지 한두 장면
+    await SchedulerBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 34));
+  }
+
+  // ── 손가락을 대자마자 넘기기 시작하도록: 가만히 읽는 동안 지금 쪽을 미리 찍어 둠 ──
+  ui.Image? _idleShot;
+  String? _idleShotKey;
+  List<Rect>? _idleFrames;
+  Timer? _idleShotTimer;
+  bool _bookWasBusy = false;
+
+  String _curlShotKey() {
+    if (!mounted) return '';
+    final size = MediaQuery.sizeOf(context);
+    return '${_currentCfi ?? ''}|$_docPage|${size.width.round()}x${size.height.round()}|${_getBgColor().toARGB32()}|$_bookmarkSpreadNow|$_lastReadyPage|${StorageService.trimMargins}';
+  }
+
+  void _dropIdleShot() {
+    _idleShotTimer?.cancel();
+    _idleShot?.dispose();
+    _idleShot = null;
+    _idleShotKey = null;
+    _idleFrames = null;
+  }
+
+  /// 쪽이 바뀌었거나 다시 그려짐: 예전 그림은 버리고 잠시 뒤 다시 찍음
+  void _scheduleIdleShot() {
+    _dropIdleShot();
+    if (!_curlOn || _isTxt) return;
+    _idleShotTimer = Timer(const Duration(milliseconds: 380), () async {
+      if (!mounted || !_curlOn || _book.busy) return;
+      if (_isOfflineDocument && _lastReadyPage != _docPage) return; // 다 그려지면 다시 불림
+      final key = _curlShotKey();
+      final img = await _captureForCurl();
+      List<Rect>? frames;
+      if (_isOfflineDocument) {
+        frames = await _hwpController.pageFrames().timeout(const Duration(milliseconds: 300), onTimeout: () => const <Rect>[]);
+      }
+      if (!mounted || _book.busy || key != _curlShotKey() || img == null) {
+        img?.dispose();
+        return;
+      }
+      _idleShot?.dispose();
+      _idleShot = img;
+      _idleShotKey = key;
+      _idleFrames = (frames == null || frames.isEmpty) ? null : frames;
+    });
+  }
+
+  void _onBookCurlChanged() {
+    final bool busy = _book.busy;
+    if (_bookWasBusy && !busy) _scheduleIdleShot(); // 다 넘어간 뒤 새 쪽을 찍어 둠
+    _bookWasBusy = busy;
+  }
 
   /// 한글·워드: 넘긴 쪽의 그림까지 다 그려졌다는 알림(pageReady)을 기다림
   Future<void> _waitTurnedPageReady() async {
@@ -2977,7 +3072,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// EPUB·TXT는 화면 전체가 종이
   Future<BookPaper?> _curlPaper(bool spread, bool fromRight, Size size) async {
     if (!_isOfflineDocument || _isTxt) return null;
-    final frames = await _hwpController.pageFrames().timeout(const Duration(milliseconds: 300), onTimeout: () => const <Rect>[]);
+    final cached = (_idleFrames != null && _idleShotKey == _curlShotKey()) ? _idleFrames! : null;
+    final frames = cached ?? await _hwpController.pageFrames().timeout(const Duration(milliseconds: 300), onTimeout: () => const <Rect>[]);
     if (frames.isEmpty) return null;
     Rect px(Rect f) => Rect.fromLTWH(f.left * size.width, f.top * size.height, f.width * size.width, f.height * size.height);
     final pages = frames.map(px).toList();
@@ -3174,7 +3270,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void _curlPrecapture() {
     if (!_curlOn || _book.busy) return;
     final old = _curlPre;
-    _curlPre = _captureForCurl();
+    final shot = _idleShot;
+    // 미리 찍어 둔 지금 쪽이 있으면 바로 씀 (찍는 동안 기다리지 않음)
+    _curlPre = (shot != null && _idleShotKey == _curlShotKey()) ? Future<ui.Image?>.value(shot.clone()) : _captureForCurl();
     old?.then((i) => i?.dispose());
   }
 
@@ -3208,6 +3306,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             // 넘어가는 종이 뒷면·빈 곳 색: 지금 보는 배경색 (세피아면 세피아. 앱이 다크여도 검게 보이지 않게)
             paper: _getBgColor(),
             texture: _isPaperTheme ? BookCurlLayer.paperTexture(() => mounted ? setState(() {}) : null) : null,
+            // 한 쪽 보기 종이 뒷면: 한글·워드·TXT는 테마와 상관없이 흰 종이, EPUB은 보는 색 그대로(세피아면 종이 질감)
+            backside: _isOfflineDocument ? Colors.white : null,
+            textureKey: _epubBodyKey,
           ),
         ),
         // 워드·한글: 길게 눌러 고른 글 — 바탕·손잡이·[복사 | 모두 선택 | 공유 | 형광펜] 막대
@@ -3605,6 +3706,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           'line-height': '1.75',
           'text-align': 'justify',
         },
+        // 책 화면 위 여백: 기본 20 → 8 (첫 줄이 위쪽에서 바로 시작하게)
+        'html body': {
+          'padding-top': '8px !important',
+        },
         'pre, code': {
           'white-space': 'pre-wrap !important',
           'overflow-wrap': 'anywhere',
@@ -3980,6 +4085,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    _dropIdleShot();
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     SystemBars.leaveViewer();
     _snapHideTimer?.cancel();
@@ -4646,6 +4752,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       }
                       _hasRestoredInitialPosition = true;
                       _currentCfi = value.startCfi;
+                      if (!_book.busy) _scheduleIdleShot();
                       _epubAtStart = value.atStart;
                       _epubAtEnd = value.atEnd;
                       final double clampedProg = value.progress.clamp(0.0, 1.0).toDouble();

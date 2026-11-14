@@ -5,6 +5,11 @@ class I18nExtra {
   static const List<String> langs = ['fr', 'ru', 'es'];
 
   static const Map<String, List<String>> _exact = {
+    'Trim Margins': ['Réduire les marges', 'Уменьшить поля', 'Reducir márgenes'],
+    'Smaller margins, larger text': ['Marges réduites, texte plus grand', 'Меньше поля, крупнее текст', 'Márgenes menores, texto más grande'],
+    'Fountain pen (English)': ['Stylo plume (anglais)', 'Перьевая ручка (английский)', 'Pluma estilográfica (inglés)'],
+    'Petit Formal Script · English letters only': ['Petit Formal Script · lettres anglaises uniquement', 'Petit Formal Script · только английские буквы', 'Petit Formal Script · solo letras en inglés'],
+    'Unfavorite': ['Retirer des favoris', 'Убрать из избранного', 'Quitar de favoritos'],
     'Tap bookmark to favorite': ['Toucher le ruban pour ajouter aux favoris', 'Добавлять в избранное касанием закладки', 'Tocar la cinta para marcar favorito'],
     'Tap instead of pulling': ['Toucher au lieu de tirer', 'Касание вместо оттягивания', 'Tocar en lugar de tirar'],
     'Turn Off Animations': ['Désactiver les animations', 'Отключить анимацию', 'Desactivar animaciones'],

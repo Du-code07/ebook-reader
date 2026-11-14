@@ -316,6 +316,7 @@ async function render() {
     const frame = document.createElement('section');
     frame.className = 'page'; frame.dataset.page = String(index);
     frame.dataset.width = String(width); frame.dataset.height = String(height);
+    const trim = pageBox(index, width, height); if (trim) frame.dataset.box = JSON.stringify(trim);
     frame.setAttribute('aria-label', `${index + 1} / ${count}`);
     frame.appendChild(svg); fragment.appendChild(frame);
   }
@@ -323,6 +324,7 @@ async function render() {
   if (options.spread && fragment.childElementCount === 1) {
     const only = fragment.firstElementChild, spacer = document.createElement('div');
     spacer.className = 'page-spacer'; spacer.dataset.width = only.dataset.width; spacer.dataset.height = only.dataset.height;
+    if (only.dataset.box) spacer.dataset.box = only.dataset.box;
     Object.assign(spacer.style, { flex: 'none', visibility: 'hidden' });
     fragment.appendChild(spacer);
   }
@@ -378,17 +380,53 @@ function highlightBoxes(boxes) {
   const W = window.innerWidth || 1, H = window.innerHeight || 1;
   markRects((boxes || []).map(b => ({ left: b.x * W, top: b.y * H, width: b.w * W, height: b.h * H, right: (b.x + b.w) * W, bottom: (b.y + b.h) * H })));
 }
+// FReader: 여백 줄이기 — 쪽 여백을 대부분 잘라 내고 본문(머리말·꼬리말 포함)을 화면에 크게 보여 줌
+const TRIM_KEEP_X = 0.25;
+const pageBoxCache = new Map();
+function pageBox(index, width, height) {
+  if (pageBoxCache.has(index)) return pageBoxCache.get(index);
+  let box = null;
+  try {
+    const info = JSON.parse(doc.getPageInfo(index));
+    // 엔진이 알려 준 쪽 크기와 그림 크기가 다르면 비율을 맞춤
+    const k = info.width > 0 ? width / info.width : 1;
+    const left = Number(info.bodyLeft ?? info.marginLeft) || 0, right = Number(info.bodyRight) || (info.width - (Number(info.marginRight) || 0));
+    let top = Number(info.marginTop) || 0, bottom = info.height - (Number(info.marginBottom) || 0);
+    if (info.headerArea) top = Math.min(top, Number(info.headerArea.y));
+    if (info.footerArea) bottom = Math.max(bottom, Number(info.footerArea.y) + Number(info.footerArea.height));
+    if (right - left > 16 && bottom - top > 16) box = { x: left * k, y: Math.max(0, top - 6) * k, w: (right - left) * k, h: (Math.min(info.height, bottom + 6) - Math.max(0, top - 6)) * k };
+  } catch (_) {}
+  pageBoxCache.set(index, box);
+  return box;
+}
+function trimBox(frame) {
+  const W = Number(frame.dataset.width), H = Number(frame.dataset.height);
+  let b = null; try { b = frame.dataset.box ? JSON.parse(frame.dataset.box) : null; } catch (_) {}
+  if (!b || options.trimMargins === false) return { x: 0, y: 0, w: W, h: H };
+  const x0 = b.x * (1 - TRIM_KEEP_X), x1 = W - Math.max(0, W - b.x - b.w) * (1 - TRIM_KEEP_X);
+  return { x: x0, y: b.y, w: Math.max(16, x1 - x0), h: Math.max(16, b.h) };
+}
 function fitPages() {
   const frames = [...host.children];
   if (!frames.length) return;
-  const width = host.clientWidth, height = host.clientHeight;
-  const totalWidth = frames.reduce((total, frame) => total + Number(frame.dataset.width), 0);
-  const maxHeight = Math.max(...frames.map(frame => Number(frame.dataset.height)));
-  const scale = Math.max(0.01, Math.min((width - (frames.length - 1) * 8) / totalWidth, height / maxHeight));
-  for (const frame of frames) {
-    frame.style.width = `${Number(frame.dataset.width) * scale}px`;
-    frame.style.height = `${Number(frame.dataset.height) * scale}px`;
-  }
+  const boxes = frames.map(trimBox);
+  const trimming = boxes.some((b, i) => b.w < Number(frames[i].dataset.width) - 0.5 || b.h < Number(frames[i].dataset.height) - 0.5);
+  const pad = trimming ? 0.96 : 1; // 잘라 낸 쪽은 화면 끝에 딱 붙지 않게 살짝 띄움
+  const availW = host.clientWidth - (frames.length - 1) * 8, availH = host.clientHeight;
+  const totalWidth = boxes.reduce((total, b) => total + b.w, 0);
+  const maxHeight = Math.max(...boxes.map(b => b.h));
+  const scale = Math.max(0.01, Math.min(availW * pad / totalWidth, availH * pad / maxHeight));
+  frames.forEach((frame, i) => {
+    const b = boxes[i], W = Number(frame.dataset.width), H = Number(frame.dataset.height);
+    const slotW = Math.min(W * scale, availW * b.w / totalWidth), slotH = Math.min(H * scale, availH);
+    const clamp = (v, lo) => Math.min(0, Math.max(lo, v));
+    const tx = clamp((slotW - b.w * scale) / 2 - b.x * scale, slotW - W * scale);
+    const ty = clamp((slotH - b.h * scale) / 2 - b.y * scale, slotH - H * scale);
+    frame.style.width = `${slotW}px`;
+    frame.style.height = `${slotH}px`;
+    const svg = frame.firstElementChild;
+    if (svg && svg.localName === 'svg') Object.assign(svg.style, { position: 'absolute', left: `${tx}px`, top: `${ty}px`, width: `${W * scale}px`, height: `${H * scale}px` });
+  });
 }
 function highlightSelection() {
   const selection = window.getSelection();
@@ -416,7 +454,7 @@ function releaseDocument() {
     vhost?.remove(); vhost = null; vSlots = []; vTops = []; host.style.display = '';
   }
   if (doc) { doc.free(); doc = null; }
-  layoutCache.clear(); searchState = { query: '', results: [], current: -1 };
+  layoutCache.clear(); pageBoxCache.clear(); searchState = { query: '', results: [], current: -1 };
   if (incoming) incoming.fill(0);
   incoming = null; received = 0; count = 0; page = 0;
   for (const entry of new Set([...cache.values(), ...activeEntries])) releaseEntry(entry);

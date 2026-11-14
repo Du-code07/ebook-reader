@@ -313,6 +313,10 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
                 widget.category == 'epub'
                     ? _t('책에 들어 있는 원래 글꼴', 'The book\'s own fonts', '书中自带的字体', '本に含まれる元のフォント')
                     : _t('앱 기본 글꼴', 'App default font', '应用默认字体', 'アプリの既定フォント')),
+            // EPUB: 앱에 들어 있는 만년필 글씨 (영어 글자만 바뀜)
+            if (widget.category == 'epub')
+              _fontChoice(cs, UserFonts.builtinPen, _t('만년필 글씨 (영어)', 'Fountain pen (English)', '钢笔字（英文）', '万年筆（英語）'),
+                  _t('Petit Formal Script · 영어 글자만 바뀌어요', 'Petit Formal Script · English letters only', 'Petit Formal Script · 仅英文字母', 'Petit Formal Script · 英字のみ')),
             for (final family in {for (final e in _fonts) UserFonts.familyOf(e)})
               _fontChoice(
                 cs,

@@ -168,6 +168,9 @@ class HwpViewer extends StatefulWidget {
   final double initialProgress;
   final String theme;
   final bool spread;
+
+  /// 한글·워드: 여백 줄이기
+  final bool trimMargins;
   final bool rtl;
   final ValueChanged<int> onLoaded;
   final void Function(int page, int pageCount, String position, double progress)
@@ -197,6 +200,7 @@ class HwpViewer extends StatefulWidget {
     this.initialProgress = 0,
     required this.theme,
     required this.spread,
+    this.trimMargins = true,
     required this.rtl,
     required this.onLoaded,
     required this.onLocation,
@@ -268,6 +272,8 @@ class _HwpViewerState extends State<HwpViewer> {
     // 쪽 뒤 바탕: 한글·워드는 뷰어 배경 설정(라이트=흰색, 다크=검은색)을 따름 (문서 자체 배경색이 있으면 그 색이 먼저)
     if (_isWord || _isHwp) 'backdrop': widget.theme == 'dark' ? '#000000' : '#ffffff',
     'spread': widget.spread,
+    // 한글·워드: 여백 줄이기 (쪽 여백을 잘라 내고 본문을 크게)
+    if (_isWord || _isHwp) 'trimMargins': widget.trimMargins,
     'rtl': widget.rtl,
     'position': widget.initialPosition,
     'progress': widget.initialProgress,
@@ -526,6 +532,7 @@ class _HwpViewerState extends State<HwpViewer> {
     if (_loaded &&
         (oldWidget.theme != widget.theme ||
             oldWidget.spread != widget.spread ||
+            oldWidget.trimMargins != widget.trimMargins ||
             oldWidget.rtl != widget.rtl ||
             oldWidget.vertical != widget.vertical)) {
       unawaited(_invoke('configure', [_options]));

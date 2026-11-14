@@ -195,7 +195,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ),
         // 표지형을 골랐을 때만: 책갈피를 잡아당기지 않고 누르기만 해도 즐겨찾기 (기본은 잡아당기기)
         SheetToggle(
-          icon: Icons.touch_app_outlined,
+          icon: Icons.bookmark_remove_outlined,
           label: _t('책갈피 터치로 즐겨찾기', 'Tap bookmark to favorite', '轻触书签即可收藏', 'しおりをタップしてお気に入り'),
           subtitle: _t('당기지 않고 터치로 즐겨찾기', 'Tap instead of pulling', '无需下拉，轻触即可收藏', '引っ張らずにタップでお気に入り'),
           value: FavoriteRibbon.animationOff.value,

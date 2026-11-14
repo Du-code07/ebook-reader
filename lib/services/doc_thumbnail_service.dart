@@ -166,6 +166,7 @@ class DocThumbnailService {
     final options = <String, Object?>{
       'theme': 'white',
       'spread': false,
+      'trimMargins': false, // 표지 그림은 여백까지 쪽 전체
       'rtl': false,
       'position': null,
       'progress': 0.0,

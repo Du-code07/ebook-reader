@@ -106,6 +106,16 @@ class StorageService {
     tapGuideOff = prefs.getBool('tap_guide_off_v104') ?? false;
     Anim.off.value = prefs.getBool('anim_off_v109') ?? false;
     pageCurl = prefs.getBool('page_curl_v109') ?? true;
+    trimMargins = prefs.getBool('trim_margins_v117') ?? true;
+  }
+
+  /// 한글·워드: 여백 줄이기 (쪽 여백을 잘라 내고 글씨를 크게. 기본 켜짐)
+  static bool trimMargins = true;
+
+  static Future<void> setTrimMargins(bool on) async {
+    trimMargins = on;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('trim_margins_v117', on);
   }
 
   /// 슬라이드로 넘길 때 책처럼 넘기기 (기본 켜짐)
@@ -117,7 +127,7 @@ class StorageService {
     await prefs.setBool('page_curl_v109', on);
   }
 
-  /// 애니메이션 멈추기 (앱 전체)
+  /// 애니메이션 끄기 (앱 전체)
   static Future<void> setAnimOff(bool off) async {
     Anim.off.value = off;
     final prefs = await SharedPreferences.getInstance();

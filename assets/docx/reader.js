@@ -384,7 +384,9 @@ async function preparePages(html, current) {
         for (let c = Math.max(0, first); c <= Math.min(columns - 1, last); c++) columnImages[c].add(img.dataset.resource);
       }
     }
-    for (let column = 0; column < columns; column++) result.push({ source, column, width, height, bodyWidth, columnStride, sectionPageCount: columns, images: [...columnImages[column]] });
+    // FReader: 본문 자리 (여백 줄이기에서 이 자리가 화면에 크게 오도록 맞춤)
+    const box = { x: margin[3], y: margin[0], w: bodyWidth, h: bodyHeight };
+    for (let column = 0; column < columns; column++) result.push({ source, column, width, height, bodyWidth, columnStride, sectionPageCount: columns, box, images: [...columnImages[column]] });
   }
   pages = result; outlineBlockCache = null;
 }
@@ -502,6 +504,7 @@ async function render() {
     const entry = pages[index], frame = document.createElement('section');
     frame.className = 'page'; frame.dataset.page = String(index);
     frame.dataset.width = String(entry.width); frame.dataset.height = String(entry.height);
+    if (entry.box) frame.dataset.box = JSON.stringify(entry.box);
     frame.setAttribute('aria-label', `${index + 1} / ${pages.length}`);
     const source = used.has(entry.source) ? entry.source.cloneNode(true) : entry.source; used.add(entry.source);
     preparePageSource(source, entry, index);
@@ -511,6 +514,7 @@ async function render() {
   if (options.spread && fragment.childElementCount === 1) {
     const only = fragment.firstElementChild, spacer = document.createElement('div');
     spacer.className = 'page-spacer'; spacer.dataset.width = only.dataset.width; spacer.dataset.height = only.dataset.height;
+    if (only.dataset.box) spacer.dataset.box = only.dataset.box;
     Object.assign(spacer.style, { flex: 'none', visibility: 'hidden' });
     fragment.appendChild(spacer);
   }
@@ -590,7 +594,7 @@ function renderNoteAreas(frames = realFrames()) {
       seen.add(key); items.push([ref.dataset.note, notes[key]]);
     }
     if (!items.length) continue;
-    const scale = frame.getBoundingClientRect().width / Number(frame.dataset.width) || 1;
+    const scale = Number(frame.dataset.scale) || frame.getBoundingClientRect().width / Number(frame.dataset.width) || 1;
     let contentBottom = clip.top;
     for (const el of clipEl.querySelectorAll('x-p, table, img')) {
       for (const r of el.getClientRects()) if (inside(r)) contentBottom = Math.max(contentBottom, Math.min(r.bottom, clip.bottom));
@@ -633,16 +637,38 @@ function highlightBoxes(boxes) {
 }
 // FReader: 모든 쪽의 크기 [너비, 높이] (스크롤 보기에서 쪽 자리를 먼저 잡아 두고 그림은 차례로 채움)
 function pageSizes() { return pages.map(p => [Number(p.width) || 0, Number(p.height) || 0]); }
+// FReader: 여백 줄이기 — 쪽 여백을 대부분 잘라 내고 본문을 화면에 크게 보여 줌 (글씨가 커지고 빈 곳이 줄어듦)
+// 좌우 여백은 1/4, 위아래 여백은 머리말·꼬리말이 남도록 절반쯤 남김
+const TRIM_KEEP_X = 0.25, TRIM_KEEP_Y = 0.55;
+function trimBox(frame) {
+  const W = Number(frame.dataset.width), H = Number(frame.dataset.height);
+  let b = null; try { b = frame.dataset.box ? JSON.parse(frame.dataset.box) : null; } catch (_) {}
+  if (!b || options.trimMargins === false || !(b.w > 16 && b.h > 16)) return { x: 0, y: 0, w: W, h: H };
+  const x0 = b.x * (1 - TRIM_KEEP_X), x1 = W - Math.max(0, W - b.x - b.w) * (1 - TRIM_KEEP_X);
+  const y0 = b.y * (1 - TRIM_KEEP_Y), y1 = H - Math.max(0, H - b.y - b.h) * (1 - TRIM_KEEP_Y);
+  return { x: x0, y: y0, w: Math.max(16, x1 - x0), h: Math.max(16, y1 - y0) };
+}
 function fitPages() {
   const frames = [...host.children]; if (!frames.length) return;
-  const totalWidth = frames.reduce((sum, f) => sum + Number(f.dataset.width), 0);
-  const height = Math.max(...frames.map(f => Number(f.dataset.height)));
-  const scale = Math.max(0.01, Math.min((host.clientWidth - 8 * (frames.length - 1)) / totalWidth, host.clientHeight / height));
-  for (const frame of frames) {
-    frame.style.width = `${Number(frame.dataset.width) * scale}px`;
-    frame.style.height = `${Number(frame.dataset.height) * scale}px`;
-    if (frame.firstElementChild) frame.firstElementChild.style.transform = `scale(${scale})`;
-  }
+  const boxes = frames.map(trimBox);
+  const trimming = boxes.some((b, i) => b.w < Number(frames[i].dataset.width) - 0.5 || b.h < Number(frames[i].dataset.height) - 0.5);
+  const pad = trimming ? 0.96 : 1; // 잘라 낸 쪽은 화면 끝에 딱 붙지 않게 살짝 띄움
+  const availW = host.clientWidth - 8 * (frames.length - 1), availH = host.clientHeight;
+  const totalWidth = boxes.reduce((sum, b) => sum + b.w, 0);
+  const height = Math.max(...boxes.map(b => b.h));
+  const scale = Math.max(0.01, Math.min(availW * pad / totalWidth, availH * pad / height));
+  frames.forEach((frame, i) => {
+    const b = boxes[i], W = Number(frame.dataset.width), H = Number(frame.dataset.height);
+    // 쪽 자리: 화면에서 이 쪽이 쓸 수 있는 만큼 (종이가 더 크면 그만큼 잘림)
+    const slotW = Math.min(W * scale, availW * b.w / totalWidth), slotH = Math.min(H * scale, availH);
+    const clamp = (v, lo) => Math.min(0, Math.max(lo, v));
+    const tx = clamp((slotW - b.w * scale) / 2 - b.x * scale, slotW - W * scale);
+    const ty = clamp((slotH - b.h * scale) / 2 - b.y * scale, slotH - H * scale);
+    frame.style.width = `${slotW}px`;
+    frame.style.height = `${slotH}px`;
+    frame.dataset.scale = String(scale);
+    if (frame.firstElementChild) frame.firstElementChild.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  });
 }
 // FReader: 쪽 뒤 바탕 = 문서 자체 배경색(있으면) > 앱 테마 색(흰색/검은색). 쪽 사이 간격 줄은 고정 색
 function applyBackdrop() {

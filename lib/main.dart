@@ -2445,8 +2445,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         content: Text(message),
         action: SnackBarAction(
           label: _tr('열기', 'Open', '打开', '開く'),
+          // 밝은 테마: 시그니처 색 단추 + 흰 글자 / 다크: 다크 테마 바탕색 단추 + 흰 글자
           textColor: Colors.white,
-          backgroundColor: AppColors.of(context),
+          backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2C2C30) : AppColors.of(context),
           onPressed: () {
             if (mounted && file.existsSync()) _openFile(file);
           },
@@ -3558,6 +3559,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             width: 18,
                             height: 27,
                             extraHitArea: 22, // 표지를 누르려다 파일이 열리지 않도록 누르는 범위를 넓게
+                            tapNeedsSetting: true,
                             onTap: () => _toggleFavorite(file),
                           ),
                         ),
@@ -4077,15 +4079,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     height: 42,
                     child: FloatingActionButton.extended(
                       heroTag: 'fab_batch_favorite',
-                      backgroundColor: AppColors.of(context),
-                      foregroundColor: AppColors.onSig(context),
+                      // 즐겨찾기 책갈피와 같은 노란색
+                      backgroundColor: const Color(0xFFFFCA28),
+                      foregroundColor: Colors.black87,
                       extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
                       extendedIconLabelSpacing: 6,
                       onPressed: _selectedFilePaths.isNotEmpty ? _favoriteSelectedFilesBatch : null,
                       icon: Icon(allFav ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined, size: 16),
                       label: Text(
-                        '${_tr("즐겨찾기", "Favorite", "收藏", "お気に入り")} (${_selectedFilePaths.length})',
-                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, shadows: AppColors.sigShadows(context)),
+                        '${allFav ? _tr("즐겨찾기 해제", "Unfavorite", "取消收藏", "お気に入り解除") : _tr("즐겨찾기", "Favorite", "收藏", "お気に入り")} (${_selectedFilePaths.length})',
+                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
                       ),
                     ),
                   );
