@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
 import 'package:archive/archive.dart';
+import 'package:archive/archive_io.dart';
 import 'package:flutter/material.dart';
 import 'services/app_messenger.dart';
 import 'package:flutter/services.dart';
@@ -24,6 +25,7 @@ import 'widgets/morph_icons.dart';
 import 'widgets/viewer_dialogs.dart';
 import 'widgets/ui_scale.dart';
 import 'widgets/app_colors.dart';
+import 'services/library_nav.dart';
 import 'services/storage_service.dart';
 import 'services/system_bars.dart';
 import 'services/user_fonts.dart';
@@ -44,6 +46,12 @@ Future<void> _readStatusBarHeight() async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 데이터 지우기 중 '모든 파일 접근'을 끄면 안드로이드가 앱을 다시 시작함 → 이어서 바로 지움
+  if (await StorageService.takePendingClearData()) {
+    try {
+      await const MethodChannel('ebook_reader/pdf_renderer').invokeMethod('clearAppData');
+    } catch (_) {}
+  }
   // 상태표시줄 본래 높이 (태블릿에서 상단바를 이만큼 항상 내려 둠)
   await _readStatusBarHeight();
   PaintingBinding.instance.imageCache.maximumSize = 3000;
@@ -109,9 +117,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    // '완전 다크 모드'는 없앰: 예전에 고른 경우 다크 모드로
-    // 없어진 테마(완전 다크·밝은 다크)는 다크로
-    _themeMode = widget.initialThemeMode == 'black' || widget.initialThemeMode == 'dim' ? 'dark' : widget.initialThemeMode;
+    // 없어진 테마(완전 다크·밝은 다크·서재)는 다크로
+    _themeMode = const ['black', 'dim', 'library'].contains(widget.initialThemeMode) ? 'dark' : widget.initialThemeMode;
     _appLang = widget.initialLang;
     _needsLanguage = widget.needsLanguage;
     WidgetsBinding.instance.addObserver(this);
@@ -190,7 +197,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   ThemeData _appTheme(Brightness b, {String variant = 'dark'}) {
     final String? appFont = UserFonts.appFontName.value;
     // 앱 대표 색: 연두색 — 고른 것·켜짐·버튼 '바탕'에만 (글씨·아이콘은 기본 색), 연두 바탕 위 글씨는 흰색
-    final Color sig = variant == 'library' ? const Color(0xFF3F6B4F) : (b == Brightness.light ? AppColors.signature : AppColors.signatureDark);
+    final Color sig = b == Brightness.light ? AppColors.signature : AppColors.signatureDark;
     Color mark = b == Brightness.light ? sig : const Color(0xFFE6E6E9);
     // 색이 섞이지 않은 무채색 바탕 (예전 연두빛 바탕 대신): 라이트는 완전 흰색
     var scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF8A8A8A), brightness: b, dynamicSchemeVariant: DynamicSchemeVariant.monochrome);
@@ -232,28 +239,6 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         secondary: const Color(0xFF5E6166),
         secondaryContainer: sig,
         onSecondaryContainer: AppColors.onSignature,
-      );
-    } else if (variant == 'library') {
-      // 서재: 짙은 호두나무 책장 바탕 + 미색 종이 글씨, 대표 색은 초록 독서등(뱅커스 램프) 색
-      mark = const Color(0xFFA9D1B2);
-      scheme = scheme.copyWith(
-        surface: const Color(0xFF2A211B),
-        onSurface: const Color(0xFFEFE4D2),
-        onSurfaceVariant: const Color(0xFFC7B59C),
-        surfaceContainerLowest: const Color(0xFF211A15),
-        surfaceContainerLow: const Color(0xFF30261F),
-        surfaceContainer: const Color(0xFF372B23),
-        surfaceContainerHigh: const Color(0xFF40332A),
-        surfaceContainerHighest: const Color(0xFF4A3B30),
-        outline: const Color(0xFF8A765F),
-        outlineVariant: const Color(0xFF5A4A3C),
-        primary: const Color(0xFFE8D5B5),
-        onPrimary: const Color(0xFF2A211B),
-        secondary: const Color(0xFFD9C3A0),
-        primaryContainer: sig,
-        onPrimaryContainer: Colors.white,
-        secondaryContainer: sig,
-        onSecondaryContainer: Colors.white,
       );
     } else {
       // 다크: 대표 색 자리에는 회색 (글꼴 찾기 단추 바탕과 같은 색), 그 위 글씨는 흰색
@@ -333,11 +318,11 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       title: 'FReader',
       // 테마를 바꿀 때 색을 서서히 섞는 동안 화면 전체를 매번 다시 그려 느려짐 → 바로 바꿈
       themeAnimationDuration: Duration.zero,
-      themeMode: _themeMode == 'dark' || _themeMode == 'library'
+      themeMode: _themeMode == 'dark'
           ? ThemeMode.dark
           : (_themeMode == 'light' || _themeMode == 'comfort' ? ThemeMode.light : ThemeMode.system),
       theme: _appTheme(Brightness.light, variant: _themeMode == 'comfort' ? 'comfort' : 'light'),
-      darkTheme: _appTheme(Brightness.dark, variant: _themeMode == 'library' ? 'library' : 'dark'),
+      darkTheme: _appTheme(Brightness.dark, variant: 'dark'),
       builder: (context, child) {
         // 상태표시줄을 내려 화면 위에 보이는 동안에는 그 높이만큼 위쪽 여백을 늘려
         // 상단바(SafeArea를 쓰는 곳 모두)가 함께 내려와 겹치지 않게 한다
@@ -548,7 +533,7 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.settings_outlined),
                 title: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
-                desc: _tr('앱 테마(라이트·다크·편안한 모드·서재), 언어, 파일 표시 방식(목록형·표지형, 형식·그룹 숨기기), 페이지 기억하기, 탭 가이드라인 끄기, 글꼴(한글·워드·EPUB·앱 글꼴, 글꼴 찾기), 사용 설명서가 있어요',
+                desc: _tr('앱 테마(라이트·다크·편안한 모드), 언어, 파일 표시 방식(목록형·표지형, 형식·그룹 숨기기), 페이지 기억하기, 탭 가이드라인 끄기, 글꼴(한글·워드·EPUB·앱 글꼴, 글꼴 찾기), 사용 설명서가 있어요',
                     'App theme (light, dark, comfort, library), language, file display (list/cover, hide extensions or groups), remember last page, turn off the tap guide, fonts (HWP·Word, EPUB and app fonts, Find Fonts), and this manual',
                     '包含应用主题（浅色·深色·舒适·书房）、语言、文件显示方式（列表·封面，隐藏格式·分组）、记住页面、关闭点击指引、字体（韩文·Word、EPUB、应用字体，查找字体）和使用说明书',
                     'アプリのテーマ(ライト・ダーク・快適・書斎)、言語、ファイル表示(リスト・表紙、形式・グループを隠す)、ページを記憶、タップガイドをオフ、フォント(ハングル・Word・EPUB・アプリ、フォント検索)、取扱説明書があります')),
@@ -611,7 +596,7 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: QuillInkIcon(color: cs.onSurface, size: 22),
                 title: _tr('메모 도구 모음', 'Memo Toolbar', '笔记工具栏', 'メモツールバー'),
-                desc: _tr('펜(한 번 더 누르면 굵기·색상), 획 지우개(한 번 더 누르면 종류), 손으로 글씨 쓰기, 되돌리기·다시 실행, 필기 전체 지우기, 완료가 있어요\n고른 도구는 연두색으로 표시돼요\nS펜으로 쓰는 동안에는 쪽이 넘어가지 않아요',
+                desc: _tr('펜(한 번 더 누르면 굵기·색상), 획 지우개(한 번 더 누르면 종류), 손으로 그리기, 되돌리기·다시 실행, 전체 지우기, 완료가 있어요\n고른 도구는 연두색으로 표시돼요\nS펜으로 쓰는 동안에는 쪽이 넘어가지 않아요',
                     'Pen (tap again for width and color), stroke eraser (tap again for type), finger writing, undo / redo, clear all and done\nThe selected tool is highlighted in green\nWriting with the S Pen never turns the page',
                     '有笔（再点一次调粗细·颜色）、笔画橡皮擦（再点一次选类型）、手指书写、撤销·重做、清除全部手写、完成\n所选工具以绿色显示\n用 S Pen 书写时不会翻页',
                     'ペン(もう一度でペンの太さ・色)、消しゴム(もう一度で種類)、指で手書き、元に戻す・やり直し、手書きを全消去、完了があります\n選んだツールは黄緑で表示されます\nSペンで書いている間はページがめくれません')),
@@ -1055,7 +1040,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   String _localizeGroupName(String g) {
     if (g == '전체') return _tr('전체', 'All', '全部', 'すべて');
     if (g == '미분류') return _tr('미분류', 'Uncategorized', '未分类', '未分類');
-    if (g == 'PDF/문서') return _tr('PDF/문서', 'PDF/Docs', 'PDF/文档', 'PDF/文書');
     return g;
   }
 
@@ -1083,6 +1067,34 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   static const MethodChannel _openFileChannel = MethodChannel('ebook_reader/open_file');
   bool _takingExternal = false;
 
+  /// 파일 앞부분을 보고 형식을 알아냄 (모르면 null)
+  Future<String?> _sniffFileType(File f) async {
+    try {
+      final raf = await f.open();
+      final head = await raf.read(8);
+      await raf.close();
+      if (head.length >= 4 && head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46) return 'pdf';
+      if (head.length >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF) return 'jpg';
+      if (head.length >= 4 && head[0] == 0x89 && head[1] == 0x50 && head[2] == 0x4E && head[3] == 0x47) return 'png';
+      if (head.length >= 2 && head[0] == 0x50 && head[1] == 0x4B) {
+        // ZIP으로 묶인 형식: 안에 든 파일 이름으로 구별
+        final input = InputFileStream(f.path);
+        final archive = ZipDecoder().decodeBuffer(input);
+        final List<String> names = [for (final ArchiveFile e in archive.files) e.name];
+        final mimetype = archive.findFile('mimetype');
+        final String mt = mimetype == null ? '' : String.fromCharCodes(mimetype.content as List<int>).trim();
+        await input.close();
+        if (mt == 'application/epub+zip') return 'epub';
+        if (mt.contains('hwp') || names.any((n) => n.startsWith('Contents/'))) return 'hwpx';
+        if (names.any((n) => n.startsWith('word/'))) return 'docx';
+        if (names.any((n) => n.startsWith('xl/'))) return 'xlsx';
+        if (names.any((n) => n.startsWith('ppt/'))) return 'pptx';
+        if (names.isNotEmpty && names.every((n) => n.endsWith('/') || RegExp(r'\.(jpe?g|png|webp|gif)$', caseSensitive: false).hasMatch(n))) return 'cbz';
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// 연결 앱으로 받은 파일: 서재에 넣고(같은 파일이 있으면 그것을) 바로 엶
   Future<void> _takeExternalFile() async {
     if (_takingExternal || !mounted) return;
@@ -1090,10 +1102,21 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     try {
       final String? path = await _openFileChannel.invokeMethod<String>('take').catchError((_) => null);
       if (path == null || !mounted) return;
-      final src = File(path);
+      File src = File(path);
       if (!await src.exists()) return;
-      final String name = src.path.split(Platform.pathSeparator).last;
-      final String ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+      String name = src.path.split(Platform.pathSeparator).last;
+      String ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+      // 이름에 형식이 없거나 모르는 형식이면 파일 내용으로 알아봄 (PDF·EPUB·워드·한글·엑셀·PPT·만화)
+      if (!_supportedExts.contains(ext)) {
+        final sniffed = await _sniffFileType(src);
+        if (sniffed != null) {
+          final base = name.contains('.') ? name.substring(0, name.lastIndexOf('.')) : name;
+          final renamed = File('${src.parent.path}/$base.$sniffed');
+          src = await src.rename(renamed.path);
+          name = '$base.$sniffed';
+          ext = sniffed;
+        }
+      }
       if (!_supportedExts.contains(ext)) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(_tr('열 수 없는 파일 형식이에요', 'This file type is not supported', '不支持此文件格式', 'このファイル形式は開けません'))));
@@ -1118,6 +1141,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         await src.delete();
       } catch (_) {}
       if (!mounted) return;
+      // 서재로 돌아오면 [전체]에서 새 파일이 보이게
+      setState(() {
+        _selectedGroup = '전체';
+        _favoritesOnly = false;
+      });
       // 다른 파일을 보던 중이면 서재로 돌아와서 엶
       Navigator.of(context).popUntil((r) => r.isFirst);
       await _openFile(target);
@@ -1295,9 +1323,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         if (name.startsWith('thumb_v36_') && name.endsWith('.jpg')) {
           final k = name.substring('thumb_v36_'.length, name.length - 4);
           existingThumbBySafeKey[k] = entity.path;
-        } else if (name.startsWith('thumb_d2_') && name.endsWith('.jpg')) {
+        } else if ((name.startsWith('thumb_d2_') || name.startsWith('thumb_d3_')) && name.endsWith('.jpg')) {
           final k = name.substring('thumb_d2_'.length, name.length - 4);
-          existingDocThumbBySafeKey[k] = entity.path;
+          // 한글(HWP)은 깨져 보이던 옛 표지(d2) 대신 다시 그린 표지(d3)만 씀
+          if (name.startsWith('thumb_d3_')) {
+            existingDocThumbBySafeKey[k] = entity.path;
+          } else {
+            existingDocThumbBySafeKey.putIfAbsent(k, () => entity.path);
+          }
         } else if (name.startsWith('thumb_s3_') && name.endsWith('.jpg')) {
           final k = name.substring('thumb_s3_'.length, name.length - 4);
           existingSlideThumbBySafeKey[k] = entity.path;
@@ -1336,7 +1369,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           : ext == 'epub'
               ? existingEpubThumbBySafeKey[safeKey]
               : DocThumbnailService.supportedExts.contains(ext)
-              ? existingDocThumbBySafeKey[safeKey]
+              // 한글(HWP)은 깨져 보이던 옛 표지(d2)는 쓰지 않고 다시 그림(d3)
+              ? ((ext == 'hwp' && !(existingDocThumbBySafeKey[safeKey]?.contains('thumb_d3_') ?? false)) ? null : existingDocThumbBySafeKey[safeKey])
               : existingThumbBySafeKey[safeKey];
       if (existingThumbPath != null) {
         _cacheThumbnailFromFileSync(path, existingThumbPath);
@@ -1419,7 +1453,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       final thumbPath = isSlideType
           ? '$thumbDirPath/thumb_s3_$safeKey.jpg'
           : isDocType
-              ? '$thumbDirPath/thumb_d2_$safeKey.jpg'
+              // 한글(HWP) 표지는 v115부터 첫 쪽을 직접 그려 새로 만듦(d3) — 옛 표지는 글자가 깨져 보였음
+              ? (ext == 'hwp' ? '$thumbDirPath/thumb_d3_$safeKey.jpg' : '$thumbDirPath/thumb_d2_$safeKey.jpg')
               : ext == 'epub'
                   ? '$thumbDirPath/thumb_e1_$safeKey.jpg'
                   : '$thumbDirPath/thumb_v36_$safeKey.jpg';
@@ -1435,6 +1470,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         // 예전 버전이 만든 (흐릴 수 있는) 표지는 지운다
         for (final old in [
           File('$thumbDirPath/thumb_v36_$safeKey.jpg'),
+          if (ext == 'hwp') File('$thumbDirPath/thumb_d2_$safeKey.jpg'),
+          if (ext == 'hwp') File('$thumbDirPath/thumb_d2_$safeKey.jpg.low'),
           if (isSlideType) File('$thumbDirPath/thumb_d2_$safeKey.jpg'),
           if (isSlideType) File('$thumbDirPath/thumb_d2_$safeKey.jpg.low'),
         ]) {
@@ -2188,7 +2225,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
     int currentStep = 0;
     final int totalSteps = orderedPdfs.length;
-    String progressStatus = _tr('PDF 합칠 준비 중...', 'Preparing PDFs...', '正在准备 PDF...', 'PDFを準備中...');
+    String progressStatus = _tr('PDF 준비 중...', 'Preparing PDFs...', '正在准备 PDF...', 'PDFを準備中...');
     StateSetter? progressSetState;
 
     _pdfChannel.setMethodCallHandler((call) async {
@@ -2403,7 +2440,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     } catch (_) {}
   }
 
+  /// 지금 화면에 보이는 파일 목록 (파일 화면의 이전·다음 파일 순서로 씀)
+  List<File> _visibleBooksNow = const [];
+
   Future<void> _openFile(File file) async {
+    // 이전·다음 파일 이동은 지금 보이는 목록 순서대로 (검색 결과에서 열면 그 그룹 순서로)
+    LibraryNav.order = _searchOpen ? const [] : [for (final f in _visibleBooksNow) f.path];
     _closeSearch(); // 파일을 열면 검색은 처음 상태로
     final rawName = file.path.split(Platform.pathSeparator).last;
     final displayName = _formatDisplayFileName(rawName);
@@ -2503,6 +2545,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           ElevatedButton(
             onPressed: () async {
               final text = controller.text.trim();
+              // 이미 있는 그룹 이름(전체·미분류 포함)이면 만들지 않고 알림
+              if (text == '전체' || text == '미분류' || _groups.contains(text)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(_tr('같은 이름의 그룹이 있어요', 'A group with that name already exists', '已有同名分组', '同じ名前のグループがあります'))),
+                );
+                return;
+              }
               if (text.isNotEmpty) {
                 await StorageService.addGroup(text);
                 created = text;
@@ -2836,9 +2885,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   Future<bool> _confirmDeleteGroup(String groupName) async {
     if (groupName == '전체') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_tr('"전체" 기본 보기는 삭제할 수 없어요', '"All" group cannot be deleted', '无法删除“全部”默认分组', '「すべて」は削除できません'))),
-      );
+      // '전체'는 편집 메뉴가 없어 실제로는 여기까지 오지 않음 (안전장치: 알림 없이 무시)
       return false;
     }
 
@@ -3577,6 +3624,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             : _selectedGroup == '전체'
             ? _allBooks
             : _allBooks.where((f) => (_bookGroupMap[f.path] ?? '미분류') == _selectedGroup).toList();
+    _visibleBooksNow = filteredBooks;
 
     return PopScope(
       canPop: !_isSelectionMode && !_searchOpen && !_favoritesOnly,
@@ -3839,8 +3887,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                 const SizedBox(width: 6),
                                 Text(
                                   isFavorite
-                                      ? _tr('북마크 해제', 'Remove Bookmark', '取消书签', 'ブックマーク解除')
-                                      : _tr('북마크', 'Bookmark', '书签', 'ブックマーク'),
+                                      ? _tr('즐겨찾기 해제', 'Remove Favorite', '取消收藏', 'お気に入り解除')
+                                      : _tr('즐겨찾기', 'Favorite', '收藏', 'お気に入り'),
                                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                                 ),
                               ],

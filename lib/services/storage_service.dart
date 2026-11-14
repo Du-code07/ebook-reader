@@ -204,7 +204,7 @@ class StorageService {
   }
 
   /// 앱 테마 설정값 → 지금 실제로 어두운 화면인지
-  static bool isDarkFor(String mode) => mode == 'dark' || mode == 'black' || mode == 'dim' || mode == 'library' ||
+  static bool isDarkFor(String mode) => mode == 'dark' || mode == 'black' || mode == 'dim' || mode == 'library' || // 없어진 테마는 다크로 봄
       (mode == 'system' && WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark);
 
 
@@ -235,6 +235,31 @@ class StorageService {
   }
 
   /// 아직 언어를 고른 적이 없는지 (앱 처음 시작 시 언어 선택 화면 표시용)
+  /// 비밀번호가 걸린 문서 (쪽 화면 저장·먼저 띄우기를 하지 않음)
+  static Future<void> markProtectedDoc(String path) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('protected_docs_v115') ?? <String>[];
+    if (!list.contains(path)) await prefs.setStringList('protected_docs_v115', [...list, path]);
+  }
+
+  static Future<bool> isProtectedDoc(String path) async {
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getStringList('protected_docs_v115') ?? const <String>[]).contains(path);
+  }
+
+  /// 데이터 지우기: 설정 화면에서 권한을 끄러 간 사이 앱이 다시 시작되면 이어서 지우기 위한 표시
+  static Future<void> setPendingClearData(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('pending_clear_data_v115', v);
+  }
+
+  static Future<bool> takePendingClearData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getBool('pending_clear_data_v115') ?? false;
+    if (v) await prefs.remove('pending_clear_data_v115');
+    return v;
+  }
+
   /// 처음 시작할 때 '앱 접근 권한 안내'를 본 적 있는지
   static Future<void> markPermissionGuideShown() async {
     final prefs = await SharedPreferences.getInstance();

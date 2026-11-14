@@ -10,7 +10,11 @@ class QuickArcMenuItem {
     required this.tooltip,
     required this.onTap,
     this.closeAfterTap = false,
+    this.enabled = true,
   });
+
+  /// 잠긴 기능(쓸 수 없을 때)은 투명하게 보이고 눌리지 않음
+  final bool enabled;
 
   final Widget icon;
   final String tooltip;
@@ -261,14 +265,19 @@ class _QuickArcMenuState extends State<QuickArcMenu>
                           clipBehavior: Clip.antiAlias,
                           child: InkWell(
                             customBorder: const CircleBorder(),
-                            onTap: () {
-                              item.onTap();
-                              if (item.closeAfterTap) _close();
-                            },
+                            onTap: item.enabled
+                                ? () {
+                                    item.onTap();
+                                    if (item.closeAfterTap) _close();
+                                  }
+                                : null,
                             child: Center(
-                              child: SizedBox.square(
-                                dimension: _itemIconSize,
-                                child: FittedBox(fit: BoxFit.contain, child: item.icon),
+                              child: Opacity(
+                                opacity: item.enabled ? 1 : 0.3,
+                                child: SizedBox.square(
+                                  dimension: _itemIconSize,
+                                  child: FittedBox(fit: BoxFit.contain, child: item.icon),
+                                ),
                               ),
                             ),
                           ),
@@ -520,12 +529,17 @@ class QuickToolBar extends StatelessWidget {
                   height: 52,
                   child: IconButton(
                     padding: EdgeInsets.zero,
-                    icon: IconTheme.merge(data: const IconThemeData(color: Colors.white, size: 20), child: it.icon),
+                    icon: Opacity(
+                      opacity: it.enabled ? 1 : 0.3,
+                      child: IconTheme.merge(data: const IconThemeData(color: Colors.white, size: 20), child: it.icon),
+                    ),
                     tooltip: it.tooltip,
-                    onPressed: () {
-                      it.onTap();
-                      if (it.closeAfterTap) onClose?.call();
-                    },
+                    onPressed: it.enabled
+                        ? () {
+                            it.onTap();
+                            if (it.closeAfterTap) onClose?.call();
+                          }
+                        : null,
                   ),
                 ),
             ],

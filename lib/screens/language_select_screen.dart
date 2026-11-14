@@ -175,7 +175,7 @@ class ThemeSelectScreen extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onConfirmed;
 
-  static const List<String> options = ['system', 'light', 'dark', 'comfort', 'library'];
+  static const List<String> options = ['system', 'light', 'dark', 'comfort'];
 
   @override
   State<ThemeSelectScreen> createState() => _ThemeSelectScreenState();
@@ -189,7 +189,6 @@ class _ThemeSelectScreenState extends State<ThemeSelectScreen> {
   String _label(String mode) => switch (mode) {
         'dark' => t('다크 모드', 'Dark mode', '深色模式', 'ダークモード'),
         'comfort' => t('편안한 모드', 'Comfort mode', '护眼模式', '目に優しいモード'),
-        'library' => t('서재', 'Library', '书房', '書斎'),
         'light' => t('라이트 모드', 'Light mode', '浅色模式', 'ライトモード'),
         _ => t('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト'),
       };
@@ -197,7 +196,6 @@ class _ThemeSelectScreenState extends State<ThemeSelectScreen> {
   static IconData _icon(String mode) => switch (mode) {
         'dark' => Icons.dark_mode_outlined,
         'comfort' => Icons.wb_incandescent_outlined,
-        'library' => Icons.local_library_outlined,
         'light' => Icons.light_mode_outlined,
         _ => Icons.brightness_auto_outlined,
       };

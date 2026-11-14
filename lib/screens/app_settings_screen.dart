@@ -103,9 +103,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
 
   String _themeLabel(String mode) => switch (mode) {
         'dark' => _t('다크 모드', 'Dark mode', '深色模式', 'ダークモード'),
-        'black' => _t('완전 다크 모드 (검정)', 'Pure black mode', '纯黑模式', '完全ダーク（黒）'),
         'comfort' => _t('편안한 모드', 'Comfort mode', '护眼模式', '目に優しいモード'),
-        'library' => _t('서재', 'Library', '书房', '書斎'),
         'light' => _t('라이트 모드', 'Light mode', '浅色模式', 'ライトモード'),
         _ => _t('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト'),
       };
@@ -119,7 +117,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ChoiceOption('light', _themeLabel('light'), icon: Icons.light_mode_outlined),
         ChoiceOption('dark', _themeLabel('dark'), icon: Icons.dark_mode_outlined),
         ChoiceOption('comfort', _themeLabel('comfort'), icon: Icons.wb_incandescent_outlined),
-        ChoiceOption('library', _themeLabel('library'), icon: Icons.local_library_outlined),
       ],
       current: _themeMode,
     );
@@ -156,7 +153,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       current: _viewMode,
       toggleIcon: Icons.visibility_off_outlined,
       toggleLabel: _t('파일 형식 숨기기', 'Hide file type', '隐藏文件类型', 'ファイル形式を隠す'),
-      toggleSubtitle: _t('.pdf, .epub 등', '.pdf, .epub, etc', '.pdf、.epub 等', '.pdf、.epub など'),
+      toggleSubtitle: _t('.docx, .pdf 등', '.docx, .pdf, etc', '.docx、.pdf 等', '.docx、.pdf など'),
       toggleValue: _hideExt,
       onChanged: (r) async {
         final (mode, hide) = r;
@@ -200,7 +197,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         SheetToggle(
           icon: Icons.bookmark_remove_outlined,
           label: _t('책갈피 애니메이션 끄기', 'Turn off bookmark animation', '关闭书签动画', 'しおりのアニメーションをオフ'),
-          subtitle: _t('잡아당기지 않고 누르면 바로 북마크', 'Tap to bookmark instead of pulling', '点击即可添加书签，无需下拉', '引っ張らずにタップでブックマーク'),
+          subtitle: _t('잡아당기지 않고 누르면 바로 즐겨찾기', 'Tap to bookmark instead of pulling', '点击即可添加书签，无需下拉', '引っ張らずにタップでブックマーク'),
           value: FavoriteRibbon.animationOff.value,
           onlyFor: 'grid',
           onChanged: (v) async {
@@ -223,7 +220,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         SheetToggle(
           icon: Icons.filter_none_outlined,
           label: _t('페이지 수 숨기기', 'Hide page count', '隐藏页数', 'ページ数を隠す'),
-          subtitle: _t('파일 아래 읽은 쪽 (예: 6/983)', 'Pages under each file (e.g., 6/983)', '文件下方的页数', 'ファイルの下のページ数'),
+          subtitle: _t('파일 아래 (페이지 수)', 'Under each file (page count)', '文件下方的页数', 'ファイルの下のページ数'),
           value: _hidePages,
           onChanged: (v) async {
             if (!mounted) return;
@@ -273,7 +270,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_t('캐시 지우기', 'Clear Cache', '清除缓存', 'キャッシュを削除')),
-        content: Text(_t('미리 그려 둔 쪽·목차 같은 임시 파일을 지울까요?\n파일·메모·설정은 그대로예요',
+        content: Text(_t('다시 만들 수 있는 임시 파일만 지워요\n지우면 파일을 열 때 조금 느려져요',
             'Delete temporary files such as pre-rendered pages and contents?\nYour files, notes and settings stay',
             '要删除预先渲染的页面、目录等临时文件吗？\n文件、笔记和设置不受影响',
             '事前に描いたページ・目次などの一時ファイルを削除しますか？\nファイル・メモ・設定はそのままです')),
@@ -340,6 +337,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       );
       if (go == null || !mounted) return;
       if (go) {
+        // 권한을 끄면 안드로이드가 앱을 끄고 다시 시작함 → 다시 시작할 때 이어서 지움
+        await StorageService.setPendingClearData(true);
         final back = Completer<void>();
         final listener = AppLifecycleListener(onResume: () {
           if (!back.isCompleted) back.complete();
@@ -448,8 +447,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                 icon: Icons.motion_photos_off_outlined,
                 title: _t('애니메이션 멈추기', 'Stop Animations', '停止动画', 'アニメーションを停止'),
                 subtitle: off
-                    ? _t('버튼·창·페이지 넘김이 움직임 없이 바로 바뀌어요', 'Buttons, windows and page turns change instantly', '按钮、窗口和翻页立即切换，没有动画', 'ボタン・ウィンドウ・ページめくりが動きなしですぐ切り替わります')
-                    : _t('버튼·창·페이지 넘김에 움직임을 보여 줘요', 'Shows motion for buttons, windows and page turns', '按钮、窗口和翻页显示动画', 'ボタン・ウィンドウ・ページめくりに動きを表示します'),
+                    ? _t('버튼·창이 움직임 없이 바로 바뀌어요', 'Buttons, windows and page turns change instantly', '按钮、窗口和翻页立即切换，没有动画', 'ボタン・ウィンドウ・ページめくりが動きなしですぐ切り替わります')
+                    : _t('버튼·창에 움직임을 보여 줘요', 'Shows motion for buttons, windows and page turns', '按钮、窗口和翻页显示动画', 'ボタン・ウィンドウ・ページめくりに動きを表示します'),
                 onTap: () => StorageService.setAnimOff(!off),
                 trailing: Switch(value: off, onChanged: StorageService.setAnimOff),
               ),
@@ -472,7 +471,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               title: _t('페이지 기억하기', 'Remember Last Page', '记住页面', 'ページを記憶'),
               subtitle: _rememberPage
                   ? _t('마지막으로 읽던 쪽부터 열어요', 'Opens where you left off', '从上次阅读的页面打开', '最後に読んだページから開きます')
-                  : _t('처음부터 열어요 (다시 켜면 끄기 전 쪽부터)', 'Opens from the start (turn on to resume where you were)', '从头打开（重新开启后从关闭前的页面继续）', '最初から開きます（再びオンにすると前のページから）'),
+                  : _t('처음부터 열어요', 'Opens from the start (turn on to resume where you were)', '从头打开（重新开启后从关闭前的页面继续）', '最初から開きます（再びオンにすると前のページから）'),
               onTap: () => _setRememberPage(!_rememberPage),
               trailing: Switch(value: _rememberPage, onChanged: _setRememberPage),
             ),

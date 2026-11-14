@@ -386,7 +386,15 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         if (name.isNullOrBlank()) name = uri.lastPathSegment?.substringAfterLast('/')
         var safe = (name ?: "file").replace(Regex("[\\/:*?\"<>|]"), "_").trim().ifEmpty { "file" }
         if (!safe.contains('.')) {
-            val ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mime ?: contentResolver.getType(uri))
+            val m = (mime ?: contentResolver.getType(uri))?.lowercase()
+            // 안드로이드가 모르는 형식(한글·만화 등)은 직접 확장자를 붙임
+            val ext = when (m) {
+                "application/x-hwp", "application/hwp", "application/haansofthwp", "application/vnd.hancom.hwp" -> "hwp"
+                "application/x-hwpx", "application/hwp+zip", "application/haansofthwpx", "application/vnd.hancom.hwpx" -> "hwpx"
+                "application/x-cbz", "application/vnd.comicbook+zip" -> "cbz"
+                "application/epub+zip" -> "epub"
+                else -> android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(m)
+            }
             if (ext != null) safe = "$safe.$ext"
         }
         val dir = File(cacheDir, "incoming").apply { mkdirs() }
@@ -1526,9 +1534,9 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             val channelId = "freader_prep_v2"
             if (Build.VERSION.SDK_INT >= 26) {
                 try { nm.deleteNotificationChannel("freader_prep") } catch (_: Throwable) {}
-                if (nm.getNotificationChannel(channelId) == null) {
-                    val ch = android.app.NotificationChannel(channelId, "스크롤 보기 준비", android.app.NotificationManager.IMPORTANCE_DEFAULT)
-                    ch.description = "스크롤 보기 준비가 끝나면 알려 줘요"
+                // 예전에 만든 알림 이름도 앱 이름으로 바꿔 둠 (같은 번호로 다시 만들면 이름만 바뀜)
+                if (nm.getNotificationChannel(channelId) == null || nm.getNotificationChannel(channelId)?.name != "FReader") {
+                    val ch = android.app.NotificationChannel(channelId, "FReader", android.app.NotificationManager.IMPORTANCE_DEFAULT)
                     ch.setSound(null, null)
                     ch.enableVibration(false)
                     nm.createNotificationChannel(ch)

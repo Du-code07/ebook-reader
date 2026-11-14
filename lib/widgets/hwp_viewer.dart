@@ -176,6 +176,9 @@ class HwpViewer extends StatefulWidget {
   final VoidCallback onCancelled;
   /// 쪽 안의 그림까지 다 그려졌을 때 (워드·한글)
   final ValueChanged<int>? onPageReady;
+
+  /// 비밀번호가 걸린 문서일 때 (앱은 이 문서의 쪽 화면을 저장해 두지 않음)
+  final VoidCallback? onPasswordNeeded;
   /// 파워포인트: 지금 슬라이드에서 남은 애니메이션 단계 수 (위치가 바뀔 때마다)
   final ValueChanged<int>? onStepsLeft;
   final ValueChanged<List<String>>? onSheetNames;
@@ -200,6 +203,7 @@ class HwpViewer extends StatefulWidget {
     required this.onError,
     required this.onCancelled,
     this.onPageReady,
+    this.onPasswordNeeded,
     this.onStepsLeft,
     this.onSheetNames,
     this.vertical = false,
@@ -238,9 +242,7 @@ class _HwpViewerState extends State<HwpViewer> {
       try {
         await rootBundle.load(asset);
       } catch (_) {
-        final folder = asset.contains('/') ? asset.substring(0, asset.lastIndexOf('/')) : asset;
-        _reportError('앱 안에 표시 파일($asset)이 없어요\nGitHub에 $folder 폴더가 올라가 있는지, '
-            'pubspec.yaml이 새 버전인지 확인한 뒤 다시 빌드해 주세요');
+        _reportError('$_format 문서를 표시하지 못했어요');
         return;
       }
     }
@@ -296,7 +298,7 @@ class _HwpViewerState extends State<HwpViewer> {
     _timeout?.cancel();
     _timeout = Timer(const Duration(minutes: 5), () {
       _reportError(
-        '$_format 문서 표시 시간이 초과됐어요\nAndroid System WebView와 파일 상태를 확인해 주세요',
+        '$_format 문서를 표시하지 못했어요',
       );
     });
   }
@@ -458,6 +460,7 @@ class _HwpViewerState extends State<HwpViewer> {
         if (_loaded) widget.onPageReady?.call((event['page'] as num?)?.toInt() ?? -1);
         break;
       case 'password':
+        widget.onPasswordNeeded?.call();
         unawaited(_requestPassword(event['incorrect'] == true));
         break;
       case 'error':
@@ -612,7 +615,8 @@ class _HwpViewerState extends State<HwpViewer> {
           // 슬라이드→스크롤로 바꾸면 스크롤이 먹통이 됐었음. 그래서 목록은 그대로 두고, 누를 때마다 지금 보기 방식을 확인함
           gestureRecognizers: {
             Factory<OneSequenceGestureRecognizer>(() => _ModeEagerRecognizer(() => mounted && (_isSpreadsheet || widget.vertical))),
-            Factory<LongPressGestureRecognizer>(() => LongPressGestureRecognizer(duration: const Duration(milliseconds: 350))),
+            // 엑셀: 칸을 길게 눌러 고르는 동작은 문서 화면이 직접 받음 (워드·한글의 글 고르기는 앱이 직접 해서 필요 없음)
+            if (_isSpreadsheet) Factory<LongPressGestureRecognizer>(() => LongPressGestureRecognizer(duration: const Duration(milliseconds: 350))),
           },
           initialUrlRequest: URLRequest(url: WebUri(_entry)),
           initialSettings: InAppWebViewSettings(
@@ -697,7 +701,7 @@ class _HwpViewerState extends State<HwpViewer> {
         if (!_loaded)
           ValueListenableBuilder<double?>(
             valueListenable: _loadProgress,
-            builder: (context, p, _) => FileLoadingView(label: AppI18n.t(StorageService.appLangNotifier.value, ko: '파일 여는 중', en: 'Opening file', zh: '正在打开文件', ja: 'ファイルを開いています'), progress: p, background: widget.theme == 'dark' ? const Color(0xFF1E1E1E) : Colors.white),
+            builder: (context, p, _) => FileLoadingView(label: AppI18n.t(StorageService.appLangNotifier.value, ko: '파일 여는 중…', en: 'Opening file…', zh: '正在打开文件…', ja: 'ファイルを開いています…'), progress: p, background: widget.theme == 'dark' ? const Color(0xFF1E1E1E) : Colors.white),
           ),
       ],
     );

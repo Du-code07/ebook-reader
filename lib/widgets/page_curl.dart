@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
-import 'app_colors.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 책처럼 넘기기
@@ -37,12 +36,54 @@ class BookCurlDrag extends ChangeNotifier {
     this.canTurn,
     this.paperOf,
     this.waitForPage,
+    this.beforeAfterCapture,
   }) {
     _anim = AnimationController(vsync: vsync)..addListener(_onTick);
   }
 
   /// 넘긴 뒤 새 쪽이 다 그려질 때까지 덮개를 걷지 않음 (EPUB: 장이 바뀔 때 잠깐 빈 화면이 보이는 것 막기)
   final bool Function()? waitForPage;
+
+  /// 넘긴 뒤 새 쪽 그림을 찍기 전에 기다릴 일 (문서: 새 쪽이 다 그려졌다는 알림)
+  final Future<void> Function()? beforeAfterCapture;
+
+  /// 그림이 한 가지 색뿐인지 (아직 그려지지 않은 빈 화면: 검정·흰색·종이색)
+  static Future<bool> looksBlank(ui.Image img) async {
+    try {
+      const int n = 24;
+      final rec = ui.PictureRecorder();
+      Canvas(rec).drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+          Rect.fromLTWH(0, 0, n.toDouble(), n.toDouble()), Paint()..filterQuality = FilterQuality.low);
+      final small = await rec.endRecording().toImage(n, n);
+      final data = await small.toByteData(format: ui.ImageByteFormat.rawRgba);
+      small.dispose();
+      if (data == null) return false;
+      double sum = 0, sq = 0;
+      final int px = n * n;
+      for (int i = 0; i < px; i++) {
+        final double l = 0.3 * data.getUint8(i * 4) + 0.59 * data.getUint8(i * 4 + 1) + 0.11 * data.getUint8(i * 4 + 2);
+        sum += l;
+        sq += l * l;
+      }
+      final double mean = sum / px;
+      final double sd = math.sqrt(math.max(0, sq / px - mean * mean));
+      return sd < 1.5;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 빈 화면이 찍히면 조금 기다렸다가 다시 찍음 (최대 [tries]번). 끝까지 비면 마지막 것을 그대로 씀
+  Future<ui.Image?> _captureSolid({int tries = 4, int gapMs = 120}) async {
+    ui.Image? img;
+    for (int i = 0; i < tries; i++) {
+      img?.dispose();
+      img = await capture();
+      if (img == null || !await looksBlank(img)) return img;
+      await Future<void>.delayed(Duration(milliseconds: gapMs));
+    }
+    return img;
+  }
 
   /// 넘어가는 종이 자리 (층 기준 좌표). 모르면 null → 화면 전체(두 쪽 보기는 절반)를 종이로 봄
   final Future<BookPaper?> Function(bool spread, bool fromRight, Size size)? paperOf;
@@ -174,7 +215,12 @@ class BookCurlDrag extends ChangeNotifier {
     final Future<BookPaper?>? paperAsk = paperOf?.call(spread, right, size).catchError((_) => null);
 
     ui.Image? img = pre == null ? null : await pre;
-    img ??= await capture();
+    // 미리 찍은 그림이 빈 화면(아직 그려지기 전)이면 다시 찍음
+    if (img != null && await looksBlank(img)) {
+      img.dispose();
+      img = null;
+    }
+    img ??= await _captureSolid();
     final BookPaper? found = paperAsk == null ? null : await paperAsk;
     if (gen != _gen) {
       img?.dispose();
@@ -213,21 +259,33 @@ class BookCurlDrag extends ChangeNotifier {
     if (gen != _gen) return;
     if (turned) {
       // 넘긴 뒤 새 쪽 그림: 들린 자리와(두 쪽 보기는) 넘어가는 장 뒷면에 씀.
-      // 새 쪽이 늦게 그려지면(그림 파일·EPUB 장 바뀜) 처음 찍은 게 빈 화면·이전 쪽일 수 있어 조금 뒤에 다시 찍어 바꿔 끼움
-      int round = 0;
-      for (final int wait in const [32, 260, 600]) {
+      // 새 쪽이 다 그려지길 기다린 뒤 찍고, 빈 화면(검정·흰색)이 찍히면 버리고 다시 찍음 (아직 없으면 종이색으로 보임)
+      try {
+        await (beforeAfterCapture?.call() ?? Future<void>.value()).timeout(const Duration(milliseconds: 1500));
+      } catch (_) {}
+      if (gen != _gen || image == null) return;
+      bool good = false;
+      for (final int wait in const [16, 120, 200, 300, 400, 500]) {
         await Future<void>.delayed(Duration(milliseconds: wait));
         if (gen != _gen || image == null) return;
         await SchedulerBinding.instance.endOfFrame;
         final a = await capture();
-        if (gen == _gen && image != null && a != null) {
+        if (a == null) continue;
+        if (await looksBlank(a)) {
+          a.dispose();
+          continue;
+        }
+        if (gen == _gen && image != null) {
           final old = after.value;
           after.value = a;
           old?.dispose();
         } else {
-          a?.dispose();
+          a.dispose();
+          return;
         }
-        if (++round == 2 && !(_afterReady?.isCompleted ?? true)) _afterReady!.complete();
+        if (good) break; // 한 번 더 찍어(늦게 그려지는 그림) 바꿔 끼운 뒤 끝
+        good = true;
+        if (!(_afterReady?.isCompleted ?? true)) _afterReady!.complete();
       }
     }
     if (!(_afterReady?.isCompleted ?? true)) _afterReady!.complete();
@@ -274,21 +332,21 @@ class BookCurlDrag extends ChangeNotifier {
     _from = point;
     _to = commit ? _target : corner;
     final double dist = (_to.dx - _from.dx).abs() / math.max(1.0, (corner.dx - _target.dx).abs());
-    _anim.duration = Anim.ms((160 + 380 * dist).round());
+    _anim.duration = Duration(milliseconds: (160 + 380 * dist).round()); // '애니메이션 멈추기'와 상관없이 움직임
     _anim.value = 0;
     await _anim.animateTo(1, curve: Curves.easeOutCubic);
     if (gen != _gen) return;
     final bool turned = await (_turning ?? Future<bool>.value(false));
     if (gen != _gen) return;
     if (commit && turned && (waitForPage?.call() ?? false)) {
-      await (_afterReady?.future ?? Future<void>.value()).timeout(const Duration(milliseconds: 900), onTimeout: () {});
+      await (_afterReady?.future ?? Future<void>.value()).timeout(const Duration(milliseconds: 1600), onTimeout: () {});
       if (gen != _gen) return;
     }
     if (commit && !turned) {
       // 넘길 쪽이 없었음: 제자리로 되돌림
       _from = point;
       _to = corner;
-      _anim.duration = Anim.ms(320);
+      _anim.duration = const Duration(milliseconds: 320);
       _anim.value = 0;
       await _anim.animateTo(1, curve: Curves.easeOutCubic);
       if (gen != _gen) return;
@@ -433,7 +491,9 @@ class BookCurlPainter extends CustomPainter {
     final double sx = pp.spine;
     final double w = size.width, h = size.height;
     final Rect full = Offset.zero & size;
-    final Rect src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
+    // 화면 그림의 맨 아래 한두 줄이 어둡게 찍히는 기기가 있어(아래 검은 줄) 살짝 잘라 씀
+    Rect srcOf(ui.Image im) => Rect.fromLTWH(0, 0, im.width.toDouble(), math.max(1.0, im.height - 2.0));
+    final Rect src = srcOf(image);
     final paint = Paint()..filterQuality = FilterQuality.medium;
     final Rect page = pp.page;
     final Offset c0 = Offset(fromRight ? page.right : page.left, bottom ? page.bottom : page.top);
@@ -486,7 +546,7 @@ class BookCurlPainter extends CustomPainter {
       canvas.clipPath(flapLeaf);
       canvas.drawRect(page, Paint()..color = back.withValues(alpha: 1));
       final na = after;
-      if (na != null) canvas.drawImageRect(na, Rect.fromLTWH(0, 0, na.width.toDouble(), na.height.toDouble()), full, paint);
+      if (na != null) canvas.drawImageRect(na, srcOf(na), full, paint);
       canvas.drawRect(page, Paint()..shader = ui.Gradient.linear(p0, p0 + n * sw, [k(0x59000000), const Color(0x00000000)]));
       if (spread) canvas.drawRect(
         page,
@@ -514,7 +574,7 @@ class BookCurlPainter extends CustomPainter {
         ..[15] = 1;
       canvas.transform(mirror);
       _ground(canvas, full);
-      canvas.drawImageRect(a, Rect.fromLTWH(0, 0, a.width.toDouble(), a.height.toDouble()), full, paint);
+      canvas.drawImageRect(a, srcOf(a), full, paint);
     } else {
       // 새 쪽 그림이 아직 없으면 종이 뒷면 (앞면 글자가 흐리게 비침)
       _ground(canvas, full);

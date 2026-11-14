@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'docx_layout_hints.dart';
+import 'user_fonts.dart';
 
 /// 한글(HWP·HWPX)·워드(DOCX·DOC) 서재 표지(첫 페이지) 만들기.
 ///
@@ -28,8 +29,10 @@ class DocThumbnailService {
       if (embedded != null && embedded.length <= 64) embedded = null;
     } catch (_) {}
     final lowRes = File('$outPath.low');
+    // 한글(HWP)의 미리보기 그림은 흑백 점무늬로 줄여 저장된 것이 많아 글자가 깨져 보임 → 첫 쪽을 직접 그린 것을 먼저 씀
+    final bool ditheredHwp = path.toLowerCase().endsWith('.hwp') && embedded != null && !(embedded[0] == 0x89 && embedded[1] == 0x50);
     // 오래된 한글 파일의 미리보기 그림은 아주 작아서(예: 177×250) 서재 표지로 늘리면 흐리다 → 충분히 클 때만 그대로 쓴다
-    if (embedded != null && (imageWidth(embedded) ?? 0) >= minSharpWidth) {
+    if (embedded != null && !ditheredHwp && (imageWidth(embedded) ?? 0) >= minSharpWidth) {
       await File(outPath).writeAsBytes(embedded, flush: true);
       if (lowRes.existsSync()) lowRes.deleteSync();
       return true;
@@ -212,7 +215,10 @@ class DocThumbnailService {
       if (capturing) return;
       capturing = true;
       fallbackCapture?.cancel();
-      // 글꼴·그림이 다 그려질 시간을 조금 준다
+      // 글꼴·그림이 다 그려질 시간을 조금 준다 (글꼴이 늦게 오면 글자가 깨져 찍히므로 글꼴 준비도 기다림)
+      try {
+        await web?.callAsyncJavaScript(functionBody: 'if (document.fonts) { await document.fonts.ready; } return 1;').timeout(const Duration(seconds: 3));
+      } catch (_) {}
       await Future<void>.delayed(Duration(milliseconds: isSlides ? 300 : 700));
       if (isSlides) {
         // 슬라이드는 캔버스에 그려지므로 화면 캡처 대신 캔버스 그림을 그대로 받는다 (캡처하면 흰 화면만 찍히는 기기가 있음)
@@ -256,7 +262,11 @@ class DocThumbnailService {
         javaScriptHandlersForMainFrameOnly: true,
         javaScriptHandlersOriginAllowList: {_origin},
         useShouldOverrideUrlLoading: true,
-        webViewAssetLoader: WebViewAssetLoader(pathHandlers: [AssetsPathHandler(path: '/assets/')]),
+        webViewAssetLoader: WebViewAssetLoader(pathHandlers: [
+          AssetsPathHandler(path: '/assets/'),
+          // 문서 화면과 같은 글꼴 폴더 (넣어 둔 글꼴로 그려야 표지 글자가 문서와 같음)
+          if (UserFonts.cachedDirPath != null) InternalStoragePathHandler(path: UserFonts.urlPath, directory: UserFonts.cachedDirPath!),
+        ]),
       ),
       onWebViewCreated: (controller) {
         web = controller;

@@ -180,8 +180,8 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
   List<(String, String)> get _builtIn => [
         ('나눔고딕 · 나눔명조 · 나눔고딕코딩', _t('원래 글꼴 그대로', 'Shown as the original font', '按原字体显示', '元のフォントのまま')),
         ('고운바탕 · 고운돋움', _t('원래 글꼴 그대로', 'Shown as the original font', '按原字体显示', '元のフォントのまま')),
-        ('Arial · Times New Roman · Courier New', _t('글자 폭이 같은 무료 글꼴로', 'Replaced by free fonts of the same widths', '换成字宽相同的免费字体', '文字幅が同じ無料フォントで')),
-        ('Calibri · Cambria', _t('글자 폭이 같은 무료 글꼴로', 'Replaced by free fonts of the same widths', '换成字宽相同的免费字体', '文字幅が同じ無料フォントで')),
+        ('Arial · Times New Roman · Courier New', _t('글자 폭이 같은 글꼴로', 'Replaced by free fonts of the same widths', '换成字宽相同的免费字体', '文字幅が同じ無料フォントで')),
+        ('Calibri · Cambria', _t('글자 폭이 같은 글꼴로', 'Replaced by free fonts of the same widths', '换成字宽相同的免费字体', '文字幅が同じ無料フォントで')),
         (_t('그 밖의 한글 글꼴 (맑은 고딕, 바탕, 굴림, 돋움 등)', 'Other Korean fonts (Malgun Gothic, Batang, Gulim, Dotum, …)', '其他韩文字体（Malgun Gothic、Batang、Gulim、Dotum 等）', 'その他の韓国語フォント（Malgun Gothic・Batang・Gulim・Dotum など）'),
             _t('본고딕·본명조로 대신 보여 줘요 (글꼴을 넣으면 그 글꼴로)', 'Shown in Noto Sans/Serif KR (or the font you add)', '用 Noto Sans/Serif KR 代替显示（添加字体后使用该字体）', 'Noto Sans/Serif KR で代わりに表示（追加するとそのフォントで）')),
       ];
@@ -210,7 +210,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
         _ => _t(
             '한글·워드 문서에 쓰인 글꼴(예: 맑은 고딕, 함초롬바탕)이 휴대폰에 없으면 다른 글꼴로 바뀌어 글과 사진 배치가 밀릴 수 있어요. '
                 '가지고 있는 글꼴 파일을 넣으면 같은 이름의 글꼴 대신 그 파일로 보여 줘요\n넣은 글꼴은 이 기기 안에서만 쓰여요\n'
-                'Arial·Times New Roman·Courier New·Calibri·Cambria는 글자 폭이 같은 무료 글꼴로 자동으로 바꿔 보여 줘요',
+                'Arial·Times New Roman·Courier New·Calibri·Cambria는 글자 폭이 같은 글꼴로 자동으로 바꿔 보여 줘요',
             'If a font used in a document (e.g. Malgun Gothic) is missing on this phone, another font is used and text or pictures may shift. '
                 'Add font files you own and they will be used for fonts with the same name. Added fonts stay on this device.\n'
                 'Arial, Times New Roman, Courier New, Calibri and Cambria are automatically replaced with free fonts of the same widths.',

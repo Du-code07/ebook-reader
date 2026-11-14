@@ -8,6 +8,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import '../services/library_nav.dart';
 import '../services/storage_service.dart';
 import '../services/system_bars.dart';
 import '../services/pdf_outline_service.dart';
@@ -390,6 +391,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     super.initState();
     SystemBars.enterViewer(); // 파일 열람 중에는 상태표시줄·내비게이션 바를 모두 숨김
     WidgetsBinding.instance.addObserver(this);
+    _loadNeighborFiles();
     _initMedia();
   }
 
@@ -682,66 +684,36 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   /// 8. 같은 그룹 내의 이전(step: -1) 또는 다음(step: 1) 파일로 즉시 이동
-  Future<void> _openAdjacentFileInSameGroup(int step) async {
-    final currentPath = widget.files.first.path;
-    final currentGroup = await StorageService.getBookGroup(currentPath);
-    final favs = await StorageService.getFavoriteBooks();
-    final dir = await getApplicationDocumentsDirectory();
-    const supportedExts = [
-      'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
-      'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt', 'xlsx', 'xlsm', 'xls',
-    ];
-    const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
+  // 이전·다음 파일: 서재 목록을 한 줄로 세워(정렬 설정 그대로) 앞뒤 파일이 있을 때만 이동. 없으면 단추가 잠김
+  String? _prevFilePath, _nextFilePath;
 
-    final allFiles = <File>[];
-    for (final e in dir.listSync()) {
-      if (e is File) {
-        final lower = e.path.toLowerCase();
-        if (lower.endsWith('_translated.epub') || lower.endsWith('.converted.epub') || lower.endsWith('_converted.epub')) continue;
-        final ext = lower.split('.').last;
-        if (supportedExts.contains(ext)) {
-          final grp = await StorageService.getBookGroup(e.path);
-          if (grp == currentGroup) {
-            allFiles.add(e);
-          }
-        }
+  Future<void> _loadNeighborFiles() async {
+    final paths = widget.files.map((f) => f.path).toList();
+    final set = paths.toSet();
+    Future<String?> walk(String from, int step) async {
+      final list = await LibraryNav.listFor(from);
+      int i = list.indexOf(from);
+      if (i < 0) return null;
+      // 지금 함께 보고 있는 파일(여러 장 이미지)은 건너뜀
+      for (i += step; i >= 0 && i < list.length; i += step) {
+        if (!set.contains(list[i]) && File(list[i]).existsSync()) return list[i];
       }
+      return null;
     }
 
-    allFiles.sort((a, b) {
-      final aFav = favs.contains(a.path);
-      final bFav = favs.contains(b.path);
-      if (aFav != bFav) return aFav ? -1 : 1;
-      return _naturalCompare(
-        a.path.split(Platform.pathSeparator).last,
-        b.path.split(Platform.pathSeparator).last,
-      );
+    final prev = await walk(paths.first, -1);
+    final next = await walk(paths.last, 1);
+    if (!mounted) return;
+    setState(() {
+      _prevFilePath = prev;
+      _nextFilePath = next;
     });
+  }
 
-    final currentPathsSet = widget.files.map((f) => f.path).toSet();
-    final curIdx = allFiles.indexWhere((f) => f.path == currentPath);
-    if (curIdx == -1 || allFiles.length <= currentPathsSet.length) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('현재 그룹("$currentGroup")에 이동할 다른 파일이 없어요'),
-            duration: const Duration(seconds: 1),
-          ),
-        );
-      }
-      return;
-    }
-
-    File? targetFile;
-    for (int i = 1; i < allFiles.length; i++) {
-      final idx = (curIdx + step * i + allFiles.length * 10) % allFiles.length;
-      final candidate = allFiles[idx];
-      if (!currentPathsSet.contains(candidate.path)) {
-        targetFile = candidate;
-        break;
-      }
-    }
-
+  Future<void> _openAdjacentFileInSameGroup(int step) async {
+    const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
+    final String? target = step < 0 ? _prevFilePath : _nextFilePath;
+    final File? targetFile = target == null ? null : File(target);
     if (targetFile == null || !mounted) return;
 
     final nextName = targetFile.path.split(Platform.pathSeparator).last;
@@ -759,7 +731,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => ReaderScreen(filePath: targetFile!.path, bookTitle: nextName),
+          builder: (_) => ReaderScreen(filePath: targetFile.path, bookTitle: nextName),
         ),
       );
 
@@ -768,7 +740,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         context,
         MaterialPageRoute(
           builder: (_) => UniversalMediaReaderScreen(
-            files: [targetFile!],
+            files: [targetFile],
             title: nextName,
             isPdf: true,
           ),
@@ -779,7 +751,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         context,
         MaterialPageRoute(
           builder: (_) => UniversalMediaReaderScreen(
-            files: [targetFile!],
+            files: [targetFile],
             title: nextName,
             isPdf: false,
           ),
@@ -790,7 +762,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         context,
         MaterialPageRoute(
           builder: (_) => UniversalMediaReaderScreen(
-            files: [targetFile!],
+            files: [targetFile],
             title: nextName,
             isPdf: false,
           ),
@@ -1045,13 +1017,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   : ListView.builder(
                 itemCount: _pdfToc.length,
                 itemBuilder: (context, index) {
-                  final item = outline ? _pdfToc[index] : null;
-                  final int page = item == null ? index : (item['page'] as int);
-                  final int level = item == null ? 1 : (item['level'] as int);
+                  final item = _pdfToc[index]; // 목차가 없으면 위에서 '표시할 목차가 없어요'를 보여 줌
+                  final int page = item['page'] as int;
+                  final int level = item['level'] as int;
                   return ListTile(
                     contentPadding: EdgeInsets.only(left: 16.0 + (level - 1).clamp(0, 4) * 18.0, right: 16),
                     title: Text(
-                      item == null ? _tr('${index + 1}쪽', 'Page ${index + 1}', '第${index + 1}页', '${index + 1}ページ') : (item['title'] as String),
+                      item['title'] as String,
                       style: outline ? TextStyle(fontSize: level <= 1 ? 15.5 : 14, fontWeight: level <= 1 ? FontWeight.w700 : FontWeight.w400) : null,
                     ),
                     trailing: outline ? Text('${page + 1}', style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)) : null,
@@ -1431,7 +1403,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       MemoToolButton(
         // 손가락 끝에서 선이 그어지는 모양 (펜 아이콘과 같은 높이)
         iconBuilder: (c) => FingerDrawIcon(color: c, size: 22),
-        label: _tr('손으로 글씨 쓰기', 'Finger Writing', '手指书写', '指で手書き'),
+        label: _tr('손으로 그리기', 'Finger Writing', '手指书写', '指で手書き'),
         active: _allowFingerDrawing,
         onTap: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
       ),
@@ -1470,7 +1442,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       MemoToolButton(
         icon: Icons.delete_sweep_outlined,
         color: Colors.redAccent,
-        label: _tr('필기 전체 지우기', 'Clear All Strokes', '清空全部手写', '手書きを全消去'),
+        label: _tr('전체 지우기', 'Clear All Strokes', '清空全部手写', '手書きを全消去'),
         onTap: () async {
           final bool isSpreadNow = _isSpreadActive(context);
           final int firstPage = isSpreadNow ? ((_currentPage ~/ 2) * 2) : _currentPage;
@@ -1789,57 +1761,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
-  Future<void> _showMemoTextDialog() async {
-    final currentNote = _memoNotesByPage[_currentPage] ?? '';
-    final ctrl = TextEditingController(text: currentNote);
-
-    await showPopDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('${_currentPage + 1}페이지 메모'),
-        content: TextField(
-          controller: ctrl,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            hintText: 'S펜이나 키보드로 간단한 메모를 남겨보세요',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          if ((_memoStrokesByPage[_currentPage]?.isNotEmpty ?? false) || currentNote.isNotEmpty)
-            TextButton(
-              onPressed: () async {
-                await StorageService.savePageMemoStrokes(_bookKey, _currentPage, []);
-                await StorageService.savePageMemoNote(_bookKey, _currentPage, '');
-                setState(() {
-                  _memoStrokesByPage.remove(_currentPage);
-                  _memoNotesByPage.remove(_currentPage);
-                });
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('메모/필기 모두 지우기', style: TextStyle(color: Colors.redAccent)),
-            ),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
-          ElevatedButton(
-            onPressed: () async {
-              final text = ctrl.text.trim();
-              await StorageService.savePageMemoNote(_bookKey, _currentPage, text);
-              setState(() {
-                if (text.isEmpty) {
-                  _memoNotesByPage.remove(_currentPage);
-                } else {
-                  _memoNotesByPage[_currentPage] = text;
-                }
-              });
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: Text(_tr('저장', 'Save', '保存', '保存')),
-          ),
-        ],
-      ),
-    );
-  }
-
   /// 뷰어 표시 설정 항목 제목: 관련 아이콘 + 문구 (줄바꿈돼도 아이콘이 문구 앞에 붙어 있음)
   Widget _settingsHeader(IconData icon, String text, {bool isTitle = false}) {
     if (isTitle) return Text(text, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800));
@@ -2035,7 +1956,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 SettingGroup(
                   children: [
                     SettingToggle(
-                      label: Text(_tr('스크롤 막대·도구 모음을 왼쪽에', 'Scroll bar & toolbox on the left', '滚动条和工具箱放在左侧', 'スクロールバー・ツールボックスを左に')),
+                      label: Text(_tr('스크롤 막대·도구 모음을 왼쪽으로', 'Scroll bar & toolbox on the left', '滚动条和工具箱放在左侧', 'スクロールバー・ツールボックスを左に')),
                       selected: _quickMenuSide == 'left',
                       onSelected: (val) async {
                         final side = val ? 'left' : 'right';
@@ -2274,7 +2195,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   DateTime? _curlDownTime;
   bool _curlMulti = false;
 
-  bool get _curlOn => StorageService.pageCurl && _useSwipeTurn && !_pageModeScroll && !Anim.off.value;
+  // '애니메이션 멈추기'를 켜도 책처럼 넘기기는 그대로
+  bool get _curlOn => StorageService.pageCurl && _useSwipeTurn && !_pageModeScroll;
 
   void _syncCurlSwipe() => setState(() {});
 
@@ -2340,7 +2262,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     final strokes = _memoStrokesByPage[pageIndex] ?? [];
-    final memoNote = _memoNotesByPage[pageIndex] ?? '';
     final imgSize = _pageImageSizes[pageIndex];
 
     return LayoutBuilder(
@@ -2494,38 +2415,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
               ),
 
-            if (memoNote.isNotEmpty)
-              Positioned(
-                left: drawLeft + 12.0,
-                top: drawTop + 12.0,
-                child: GestureDetector(
-                  onTap: _showMemoTextDialog,
-                  child: Container(
-                    constraints: const BoxConstraints(maxWidth: 220),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.amber.shade200.withValues(alpha: 0.95),
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.edit_note, size: 14, color: Colors.black87),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            memoNote,
-                            style: const TextStyle(color: Colors.black87, fontSize: 12),
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
           ],
         );
       },
@@ -2929,12 +2818,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 19),
         tooltip: _tr('이전 파일로 이동', 'Previous File', '上一个文件', '前のファイル'),
         onTap: () => _openAdjacentFileInSameGroup(-1),
+        enabled: _prevFilePath != null,
         closeAfterTap: true,
       ),
       QuickArcMenuItem(
         icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 19),
         tooltip: _tr('다음 파일로 이동', 'Next File', '下一个文件', '次のファイル'),
         onTap: () => _openAdjacentFileInSameGroup(1),
+        enabled: _nextFilePath != null,
         closeAfterTap: true,
       ),
       QuickArcMenuItem(
@@ -3090,7 +2981,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     if (_isPreparingPages || _pageController == null) {
       return Scaffold(
         backgroundColor: _backdrop(context),
-        body: FileLoadingView(label: _tr('파일 여는 중', 'Opening file', '正在打开文件', 'ファイルを開いています'), dark: Theme.of(context).brightness == Brightness.dark),
+        body: FileLoadingView(label: _tr('파일 여는 중…', 'Opening file…', '正在打开文件', 'ファイルを開いています'), dark: Theme.of(context).brightness == Brightness.dark),
       );
     }
 

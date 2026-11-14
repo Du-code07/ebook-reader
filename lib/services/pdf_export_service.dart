@@ -122,7 +122,7 @@ ExportProgressController showExportProgress(BuildContext context, ExportTr tr, {
               children: [
                 ExportFileIcon(size: 24, color: Theme.of(ctx).colorScheme.primary),
                 const SizedBox(width: 8),
-                Expanded(child: Text(tr('PDF로 내보내는 중', 'Exporting to PDF', '正在导出为 PDF', 'PDFに書き出し中'))),
+                Expanded(child: Text(tr('PDF로 내보내는 중…', 'Exporting to PDF…', '正在导出为 PDF', 'PDFに書き出し中'))),
               ],
             ),
             content: Column(
