@@ -27,6 +27,7 @@ import '../widgets/find_in_file_bar.dart';
 import 'reader_screen.dart';
 import '../widgets/pop_dialog.dart';
 import '../widgets/page_curl.dart';
+import '../widgets/text_select.dart';
 
 /// 1. S펜 전용 즉시 승리 제스처 인식기 (Eager Stylus Gesture Recognizer):
 /// S펜(stylus / invertedStylus)이 화면에 닿는 순간(PointerDown) 즉시 GestureArena에서 승리(accepted)를 선언하여
@@ -275,6 +276,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _vSwipeEnabled(PointerEvent e) =>
       _useSwipeUpTurn &&
       !_isTouchLocked &&
+      !_textSel.active &&
       _currentZoomScale <= 1.03 &&
       !(_isMemoMode && (_allowFingerDrawing || isStylusPointer(e)));
 
@@ -284,6 +286,19 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   bool _canStepPage(int dir) => _totalPages > 1 && _stepTarget(dir) != _currentPage;
+
+  /// 앞뒤 쪽 그림을 미리 읽어 둠: 처음 넘기는 쪽도 넘기는 순간 바로 그려져
+  /// (책처럼 넘기기에서 아직 안 읽은 쪽이 비어 투명하게 보이던 문제)
+  void _precacheAround(int page) {
+    if (!mounted || _imagePages.isEmpty) return;
+    final int step = _lastIsSpreadMode ? 2 : 1;
+    final int base = _lastIsSpreadMode ? (page ~/ 2) * 2 : page;
+    for (int i = base - step; i < base + step * 2; i++) {
+      if (i < 0 || i >= _imagePages.length) continue;
+      _ensurePageDimensionLoaded(i);
+      precacheImage(FileImage(_imagePages[i]), context).catchError((_) {});
+    }
+  }
 
   Future<void> _stepPageInstant(int dir) async {
     _goToPage(_stepTarget(dir), smoothAnimation: false);
@@ -882,6 +897,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         if (_currentPage + 1 < _imagePages.length) {
           _ensurePageDimensionLoaded(_currentPage + 1);
         }
+        WidgetsBinding.instance.addPostFrameCallback((_) => _precacheAround(_currentPage));
       }
 
       _bindHardwareButtons();
@@ -1254,6 +1270,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   void _onViewerTap(Offset local) {
     if (_pinchSeen) return;
+    // 글을 골라 둔 상태면 누르기는 고른 것을 지우기만 함
+    if (_textSel.active) {
+      _textSel.clear();
+      return;
+    }
     final bool zoomed = _currentZoomScale > 1.03 || (_pageModeScroll && _scrollCtrl.zoomed);
     final now = DateTime.now();
     if (_tapTimer != null && _lastTapAt != null && now.difference(_lastTapAt!).inMilliseconds < 320 && (local - _lastTapPos).distance < 60) {
@@ -2105,20 +2126,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         );
       }
     }
-    final curl = _curlImg;
-    if (curl != null) {
-      children.add(Positioned.fill(child: PageCurlOverlay(image: curl, progress: _curlCtrl, fromRight: _curlFromRight, paper: _backdrop(context))));
-    }
     children.add(Positioned.fill(child: BookCurlLayer(drag: _book, paper: _backdrop(context))));
+    // 길게 눌러 고른 글: 바탕·손잡이·[복사 | 모두 선택 | 공유] 막대
+    children.add(Positioned.fill(child: SizedBox.expand(key: _textLayerKey, child: PageTextSelectLayer(sel: _textSel, tr: _tr))));
     return Stack(fit: StackFit.expand, clipBehavior: Clip.hardEdge, children: children);
   }
 
   // ── 종이처럼 말아 넘기기 (슬라이드) ──
   final GlobalKey _curlKey = GlobalKey();
-  late final AnimationController _curlCtrl = AnimationController(vsync: this);
-  ui.Image? _curlImg;
-  bool _curlFromRight = true;
-  bool _curlBusy = false;
 
   // 두 쪽 보기: 책처럼 넘기기 (손가락을 따라 모서리부터 말려 넘어감)
   late final BookCurlDrag _book = BookCurlDrag(
@@ -2131,7 +2146,108 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     },
     isRtl: () => _isMangaRtlMode,
     canTurn: _canStepPage,
+    paperOf: (spread, fromRight, size) async => _curlPaper(spread, fromRight, size),
   );
+
+  /// 넘어가는 쪽(종이)의 자리: 쪽 그림이 화면에 맞춰 놓인 네모 (빈 여백은 넘어가지 않음)
+  /// 쪽 그림이 [box] 안에 맞춰 놓인 네모 ([side] -1: 두 쪽 보기 왼쪽, 1: 오른쪽, 0: 가운데)
+  Rect? _pageRectIn(int index, Rect box, int side) {
+    final s = _pageImageSizes[index];
+    if (s == null || s.width <= 0 || s.height <= 0) return null;
+    final f = applyBoxFit(BoxFit.contain, s, box.size).destination;
+    final double top = box.top + (box.height - f.height) / 2;
+    // 두 쪽 보기: 왼쪽 쪽은 가운데 쪽(오른쪽)으로, 오른쪽 쪽은 가운데 쪽(왼쪽)으로 2만큼 띄워 붙음
+    final double left = side == -1
+        ? box.right - f.width - 2.0
+        : side == 1
+            ? box.left + 2.0
+            : box.left + (box.width - f.width) / 2;
+    return Rect.fromLTWH(left, top, f.width, f.height);
+  }
+
+  /// 지금 화면에 보이는 쪽들 (쪽 번호, 화면 위 자리)
+  List<(int, Rect)> _visiblePageRects(Size size) {
+    if (!_lastIsSpreadMode) {
+      final r = _pageRectIn(_currentPage, Offset.zero & size, 0);
+      return r == null ? const [] : [(_currentPage, r)];
+    }
+    final double half = size.width / 2;
+    final int first = (_currentPage ~/ 2) * 2;
+    final int leftIdx = _isMangaRtlMode ? first + 1 : first;
+    final int rightIdx = _isMangaRtlMode ? first : first + 1;
+    final out = <(int, Rect)>[];
+    // 읽는 순서대로 (오른쪽→왼쪽 책은 오른쪽 쪽부터)
+    final order = _isMangaRtlMode ? [(rightIdx, 1), (leftIdx, -1)] : [(leftIdx, -1), (rightIdx, 1)];
+    for (final (idx, side) in order) {
+      if (idx < 0 || idx >= _totalPages) continue;
+      final r = _pageRectIn(idx, side == -1 ? Rect.fromLTWH(0, 0, half, size.height) : Rect.fromLTWH(half, 0, half, size.height), side);
+      if (r != null) out.add((idx, r));
+    }
+    return out;
+  }
+
+  // ── 길게 눌러 글 고르기 (PDF, 내보낸 PDF 포함) ──
+  final PageTextSelection _textSel = PageTextSelection();
+  final GlobalKey _textLayerKey = GlobalKey();
+  final Map<int, List<Map<String, Object?>>> _textLineCache = {};
+  int _textSelGen = 0;
+
+  Offset? _textLocal(Offset global) {
+    final box = _textLayerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box.globalToLocal(global);
+  }
+
+  Future<void> _startTextSelect(Offset global) async {
+    if (_isMemoMode || _isTouchLocked || _activeTouchPointerIds.length >= 2 || _currentZoomScale > 1.03 || _pageModeScroll) return;
+    final box = _textLayerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final int gen = ++_textSelGen;
+    final pages = _visiblePageRects(box.size);
+    final lines = <SelLine>[];
+    for (final (idx, rect) in pages) {
+      var ls = _textLineCache[idx];
+      if (ls == null) {
+        final got = await _pdfLines(widget.files.first.path, idx, idx + 1, false);
+        ls = got.isEmpty ? const <Map<String, Object?>>[] : got.first.lines;
+        _textLineCache[idx] = ls;
+      }
+      for (final l in ls) {
+        double v(String k) => (l[k] as num?)?.toDouble() ?? 0;
+        final String t = '${l['t'] ?? ''}';
+        if (t.trim().isEmpty) continue;
+        lines.add(SelLine(t, Rect.fromLTRB(rect.left + v('x0') * rect.width, rect.top + v('y') * rect.height, rect.left + v('x1') * rect.width, rect.top + (v('y') + v('h')) * rect.height)));
+      }
+    }
+    if (!mounted || gen != _textSelGen) return;
+    final local = _textLocal(global);
+    _textSel.lines = lines;
+    if (local != null && _textSel.selectWordAt(local)) {
+      HapticFeedback.selectionClick();
+      return;
+    }
+    // 글자 정보가 없는 쪽(그림·스캔본)이나 지원하지 않는 기기: 그림 속 글자를 읽어 복사하는 창
+    HapticFeedback.selectionClick();
+    _openTextCopySheet();
+  }
+
+  BookPaper? _curlPaper(bool spread, bool fromRight, Size size) {
+    Rect? fit(int index, Rect box, int side) => _pageRectIn(index, box, side);
+
+    if (!spread) {
+      final r = fit(_currentPage, Offset.zero & size, 0);
+      if (r == null) return null;
+      return BookPaper(r, fromRight ? r.left : r.right);
+    }
+    final double half = size.width / 2;
+    final int first = (_currentPage ~/ 2) * 2;
+    // 읽기 방향이 오른쪽→왼쪽이면 오른쪽에 앞 쪽
+    final int leftIdx = _isMangaRtlMode ? first + 1 : first;
+    final int rightIdx = _isMangaRtlMode ? first : first + 1;
+    final r = fromRight ? fit(rightIdx, Rect.fromLTWH(half, 0, half, size.height), 1) : fit(leftIdx, Rect.fromLTWH(0, 0, half, size.height), -1);
+    if (r == null) return null;
+    return BookPaper(r, half);
+  }
 
   void _curlTrackMove(PointerMoveEvent e) {
     if (_book.tracking) {
@@ -2139,16 +2255,19 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       return;
     }
     final start = _curlDownPos, t0 = _curlDownTime;
-    if (start == null || t0 == null || _curlMulti || _book.busy || _curlBusy) return;
-    if (!_curlOn || !_lastIsSpreadMode) return;
+    if (start == null || t0 == null || _curlMulti || _book.busy) return;
+    if (!_curlOn || _textSel.active) return;
     if (_isTouchLocked || _currentZoomScale > 1.03 || _vPageSwipe.offset != 0) return;
     if (_isMemoMode && (e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus || _allowFingerDrawing)) return;
     final Offset d = e.position - start;
+    // 옆으로 움직이기 시작하면 그때 지금 쪽을 찍어 둠 (그냥 누르기만 할 때는 찍지 않음)
+    if (_curlPre == null && d.dx.abs() >= 5 && d.dx.abs() > d.dy.abs()) _curlPre = _curlCapture();
     if (d.dx.abs() < 16 || d.dx.abs() < d.dy.abs() * 1.2) return;
-    if (DateTime.now().difference(t0).inMilliseconds > 600) return;
+    // 길게 누르기(글 고르기, 0.5초)와 겹치지 않게
+    if (DateTime.now().difference(t0).inMilliseconds > 450) return;
     final pre = _curlPre;
     _curlPre = null;
-    _book.begin(start, e.position, pre);
+    _book.begin(start, e.position, pre, spread: _lastIsSpreadMode);
   }
   Future<ui.Image?>? _curlPre;
   Offset? _curlDownPos;
@@ -2169,18 +2288,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     _curlMulti = false;
     _curlDownPos = e.position;
     _curlDownTime = DateTime.now();
-    // 손가락이 닿을 때 미리 지금 쪽을 찍어 둠 (밀고 뗐을 때 바로 말기 시작)
-    if (_curlOn && !_curlBusy && !_book.busy) {
-      final old = _curlPre;
-      _curlPre = _curlCapture();
-      old?.then((i) => i?.dispose());
-    }
+    // 지난 손동작에서 찍어 두고 쓰지 않은 그림은 버림 (새 그림은 손가락이 옆으로 움직이기 시작할 때 찍음)
+    final stale = _curlPre;
+    _curlPre = null;
+    stale?.then((i) => i?.dispose());
   }
 
   Future<ui.Image?> _curlCapture() async {
     try {
       final boundary = _curlKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      return await boundary?.toImage(pixelRatio: MediaQuery.devicePixelRatioOf(context) * 0.75);
+      return await boundary?.toImage(pixelRatio: MediaQuery.devicePixelRatioOf(context));
     } catch (_) {
       return null;
     }
@@ -2197,53 +2314,24 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     if (start == null || t0 == null || _curlMulti || !_curlOn) return;
     if (_isTouchLocked || _currentZoomScale > 1.03 || _vPageSwipe.offset != 0) return;
     if (_isMemoMode && (e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus || _allowFingerDrawing)) return;
-    if (DateTime.now().difference(t0).inMilliseconds > 600) return;
+    // 길게 누르기(글 고르기, 0.5초)와 겹치지 않게
+    if (DateTime.now().difference(t0).inMilliseconds > 450) return;
     final Offset d = e.position - start;
     if (d.dx.abs() < 40 || d.dx.abs() < d.dy.abs() * 1.2) return;
     _curlTurn(d.dx);
   }
 
-  /// 지금 쪽을 그림으로 붙잡고 → 실제 쪽은 바로 넘긴 뒤 → 붙잡은 그림을 종이처럼 말아 치움
-  Future<void> _curlTurn(double dx) async {
+  /// 손가락으로 끌지 않고 빠르게 밀었을 때: 한 번에 책처럼 넘김
+  void _curlTurn(double dx) {
+    final pre = _curlPre;
+    _curlPre = null;
     final int dir = ((dx < 0) != _isMangaRtlMode) ? 1 : -1;
-    if (_curlBusy || _book.busy || !_canStepPage(dir)) return;
-    if (_lastIsSpreadMode) {
-      // 두 쪽 보기: 책처럼 한 장이 넘어감
-      final pre = _curlPre;
-      _curlPre = null;
-      final size = MediaQuery.sizeOf(context);
-      _book.autoTurn(dx, pre, Offset(dx < 0 ? size.width * 0.9 : size.width * 0.1, size.height * 0.8));
+    if (_book.busy || !_canStepPage(dir)) {
+      pre?.then((i) => i?.dispose());
       return;
     }
-    _curlBusy = true;
-    try {
-      final pre = _curlPre;
-      _curlPre = null;
-      ui.Image? img = pre == null ? null : await pre;
-      img ??= await _curlCapture();
-      if (!mounted) {
-        img?.dispose();
-        return;
-      }
-      if (img == null) {
-        await _stepPageInstant(dir);
-        return;
-      }
-      _curlCtrl.value = 0;
-      setState(() {
-        _curlImg = img;
-        _curlFromRight = dx < 0;
-      });
-      await WidgetsBinding.instance.endOfFrame;
-      await _stepPageInstant(dir);
-      if (!mounted) return;
-      await _curlCtrl.animateTo(1, duration: Anim.ms(420), curve: Curves.easeInOutCubic);
-      if (!mounted) return;
-      setState(() => _curlImg = null);
-      img.dispose();
-    } finally {
-      _curlBusy = false;
-    }
+    final size = MediaQuery.sizeOf(context);
+    _book.autoTurn(dx, pre, Offset(dx < 0 ? size.width * 0.9 : size.width * 0.1, size.height * 0.8), spread: _lastIsSpreadMode);
   }
 
   Widget _buildSinglePagePanel(int pageIndex, {int spreadSide = 0}) {
@@ -2814,8 +2902,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     SystemBars.leaveViewer();
     _vPageSwipe.dispose();
-    _curlCtrl.dispose();
     _book.dispose();
+    _textSel.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     // 서재로 완전히 복귀할 때 방향이 초기화됨
     _zoomController.dispose();
@@ -3113,10 +3201,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   behavior: HitTestBehavior.translucent,
                   onTapUp: (d) => _onViewerTap(d.localPosition),
                   // PDF: 길게 누르면 그 쪽의 글을 고르고 복사하는 창 (그림으로만 된 쪽은 그림 속 글자를 읽음)
-                  onLongPress: _isPdfFile ? () {
+                  // PDF: 길게 누르면 그 자리의 낱말을 고르고 손잡이로 범위를 조절 → [복사 | 모두 선택 | 공유]
+                  // (글자 정보가 없는 쪽은 그림 속 글자를 읽어 복사하는 창)
+                  onLongPressStart: _isPdfFile ? (d) {
                     if (_isMemoMode || _isTouchLocked || _activeTouchPointerIds.length >= 2 || _currentZoomScale > 1.03) return;
-                    HapticFeedback.selectionClick();
-                    _openTextCopySheet();
+                    if (_pageModeScroll) {
+                      HapticFeedback.selectionClick();
+                      _openTextCopySheet();
+                      return;
+                    }
+                    _startTextSelect(d.globalPosition);
+                  } : null,
+                  onLongPressMoveUpdate: _isPdfFile ? (d) {
+                    final local = _textLocal(d.globalPosition);
+                    if (local != null && _textSel.active) _textSel.extendTo(local);
                   } : null,
                   // 위/아래로 밀 때 페이지 영역이 손가락을 따라 움직임
                   // 사진·PDF 쪽은 원래 크기·선명도 그대로 (앱 화면을 크게 보여 줄 때도)
@@ -3142,12 +3240,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       actualPage = (_totalPages - 1).clamp(0, _totalPages - 1).toInt();
                     }
                     _zoomController.value = Matrix4.identity();
+                    _textSel.clear();
                     setState(() {
                       _currentZoomScale = 1.0;
                       _currentPage = actualPage;
                     });
                     _ensurePageDimensionLoaded(actualPage);
                     if (actualPage + 1 < _totalPages) _ensurePageDimensionLoaded(actualPage + 1);
+                    _precacheAround(actualPage);
                     StorageService.saveLastPosition(_bookKey, actualPage.toString());
                     StorageService.saveProgress(_bookKey, (actualPage + 1) / _totalPages);
                     StorageService.savePageLabel(_bookKey, '${actualPage + 1}/$_totalPages');

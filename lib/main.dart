@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'screens/pdf_and_image_viewer.dart';
 import 'screens/reader_screen.dart';
 import 'screens/language_select_screen.dart';
+import 'screens/permission_guide_screen.dart';
 import 'screens/app_settings_screen.dart';
 import 'widgets/sheet_pull_to_close.dart';
 import 'widgets/file_type_icon.dart';
@@ -24,6 +25,7 @@ import 'widgets/viewer_dialogs.dart';
 import 'widgets/ui_scale.dart';
 import 'widgets/app_colors.dart';
 import 'services/storage_service.dart';
+import 'services/system_bars.dart';
 import 'services/user_fonts.dart';
 import 'services/pdf_export_service.dart' show ExportFileIcon;
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart' show EpubBookServer;
@@ -100,6 +102,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   late String _appLang;
   late bool _needsLanguage;
   bool _needsTheme = false; // 처음 시작: 언어를 고른 다음 앱 테마 고르기
+  bool _needsPermGuide = false; // 처음 시작: 테마 다음 앱 접근 권한 안내
   late final AnimationController _rotationAnimController;
   late final Animation<double> _rotationFadeAnim;
   late final Animation<double> _rotationScaleAnim;
@@ -282,6 +285,9 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
             })
           : null,
       extensions: [SigColors(sig: sig, mark: mark)],
+      // 애니메이션 멈추기: 누를 때 퍼지는 물결·단추 색 바뀜도 바로
+      splashFactory: Anim.off.value ? NoSplash.splashFactory : null,
+      iconButtonTheme: Anim.off.value ? IconButtonThemeData(style: IconButton.styleFrom(animationDuration: Duration.zero, splashFactory: NoSplash.splashFactory)) : null,
       fontFamily: appFont,
       iconTheme: IconThemeData(size: 21, color: scheme.onSurface),
       // 상단바 아이콘: 테마 글자색 (다크·밝은 다크에서도 보이게)
@@ -403,8 +409,16 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
               onChanged: _changeThemeMode,
               onConfirmed: (mode) {
                 _changeThemeMode(mode);
-                setState(() => _needsTheme = false);
+                setState(() {
+                  _needsTheme = false;
+                  _needsPermGuide = true;
+                });
               },
+            )
+          : _needsPermGuide
+          ? PermissionGuideScreen(
+              lang: _appLang,
+              onDone: () => setState(() => _needsPermGuide = false),
             )
           : BookshelfScreen(
               isDarkMode: _isDarkMode,
@@ -1057,8 +1071,59 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   @override
   void initState() {
     super.initState();
-    _loadLibrary();
+    _loadLibrary().then((_) => _takeExternalFile());
     StorageService.listSwipeOff.addListener(_onListSwipeSetting);
+    // 다른 앱에서 '연결 앱'으로 이 앱을 골라 연 파일 (앱이 이미 켜져 있을 때 알림이 옴)
+    _openFileChannel.setMethodCallHandler((call) async {
+      if (call.method == 'ping') _takeExternalFile();
+      return null;
+    });
+  }
+
+  static const MethodChannel _openFileChannel = MethodChannel('ebook_reader/open_file');
+  bool _takingExternal = false;
+
+  /// 연결 앱으로 받은 파일: 서재에 넣고(같은 파일이 있으면 그것을) 바로 엶
+  Future<void> _takeExternalFile() async {
+    if (_takingExternal || !mounted) return;
+    _takingExternal = true;
+    try {
+      final String? path = await _openFileChannel.invokeMethod<String>('take').catchError((_) => null);
+      if (path == null || !mounted) return;
+      final src = File(path);
+      if (!await src.exists()) return;
+      final String name = src.path.split(Platform.pathSeparator).last;
+      final String ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+      if (!_supportedExts.contains(ext)) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(_tr('열 수 없는 파일 형식이에요', 'This file type is not supported', '不支持此文件格式', 'このファイル形式は開けません'))));
+        return;
+      }
+      final appDir = await getApplicationDocumentsDirectory();
+      final int len = await src.length();
+      final String base = name.substring(0, name.length - ext.length - 1);
+      File target = File('${appDir.path}/$name');
+      int n = 2;
+      // 같은 이름·같은 크기면 이미 넣어 둔 파일, 이름만 같으면 '(2)'처럼 새 이름으로
+      while (await target.exists() && await target.length() != len) {
+        target = File('${appDir.path}/$base ($n).$ext');
+        n++;
+      }
+      if (!await target.exists()) {
+        await src.copy(target.path);
+        await StorageService.setBookGroup(target.path, '미분류');
+        await _loadLibrary();
+      }
+      try {
+        await src.delete();
+      } catch (_) {}
+      if (!mounted) return;
+      // 다른 파일을 보던 중이면 서재로 돌아와서 엶
+      Navigator.of(context).popUntil((r) => r.isFirst);
+      await _openFile(target);
+    } finally {
+      _takingExternal = false;
+    }
   }
 
   void _onListSwipeSetting() {
@@ -3498,6 +3563,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   @override
   Widget build(BuildContext context) {
+    SystemBars.stableTop(context); // 서재는 상태표시줄이 보이므로 그 높이를 기억 (파일 화면 본문 자리용)
     final String query = _searchQuery.trim().toLowerCase();
     String nameOf(File f) => f.path.split(Platform.pathSeparator).last;
     final List<File> filteredBooks = _searchOpen

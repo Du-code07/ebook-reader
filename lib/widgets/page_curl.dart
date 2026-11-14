@@ -4,146 +4,27 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 
 import 'app_colors.dart';
 
-/// 종이처럼 말아 넘기기: 넘기기 직전 화면 그림([image])이 접힌 선을 따라 말려 넘어가고,
-/// 그 아래로 이미 넘어간 새 쪽이 보인다. 말린 뒷면에는 글자가 거울처럼 흐리게 비친다.
-/// [fromRight]: 오른쪽 가장자리부터 말림(다음 쪽 방향으로 민 경우), false면 왼쪽부터
-class PageCurlOverlay extends StatelessWidget {
-  const PageCurlOverlay({super.key, required this.image, required this.progress, required this.fromRight, this.paper});
-
-  final ui.Image image;
-  final Animation<double> progress;
-  final bool fromRight;
-
-  /// 종이 뒷면 색 (없으면 그림 가장자리 색에 가까운 흰색)
-  final Color? paper;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color back = paper ?? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2A2A2C) : const Color(0xFFF7F5F0));
-    return IgnorePointer(
-      child: AnimatedBuilder(
-        animation: progress,
-        builder: (context, _) => CustomPaint(
-          size: Size.infinite,
-          painter: PageCurlPainter(image: image, t: progress.value, fromRight: fromRight, back: back),
-        ),
-      ),
-    );
-  }
-}
-
-class PageCurlPainter extends CustomPainter {
-  PageCurlPainter({required this.image, required this.t, required this.fromRight, required this.back});
-
-  final ui.Image image;
-  final double t;
-  final bool fromRight;
-  final Color back;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (size.isEmpty) return;
-    final Rect page = Offset.zero & size;
-    final Rect src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
-    final paint = Paint()..filterQuality = FilterQuality.low;
-
-    // 접는 선: n·q = c (n은 말려 나가는 쪽을 가리킴). 위쪽 모서리가 먼저 말리도록 살짝 기울임
-    const double tilt = 0.32;
-    final Offset n = fromRight ? Offset(math.cos(tilt), -math.sin(tilt)) : Offset(-math.cos(tilt), -math.sin(tilt));
-    double dot(Offset q) => q.dx * n.dx + q.dy * n.dy;
-    final corners = [page.topLeft, page.topRight, page.bottomLeft, page.bottomRight];
-    final double hi = corners.map(dot).reduce(math.max);
-    final double lo = corners.map(dot).reduce(math.min);
-    final double c = hi - (hi - lo + 2) * t.clamp(0.0, 1.0);
-
-    // 접는 선을 기준으로 남는 쪽(n·q <= c) 다각형
-    Path half(bool keep) {
-      final double big = (size.width + size.height) * 4;
-      final Offset dir = Offset(-n.dy, n.dx); // 선의 방향
-      final Offset p0 = n * c; // 선 위의 한 점
-      final Offset a = p0 + dir * big, b = p0 - dir * big;
-      final Offset away = n * (keep ? -big : big);
-      return Path()
-        ..moveTo(a.dx, a.dy)
-        ..lineTo(b.dx, b.dy)
-        ..lineTo(b.dx + away.dx, b.dy + away.dy)
-        ..lineTo(a.dx + away.dx, a.dy + away.dy)
-        ..close();
-    }
-
-    final Path keep = half(true);
-    final Path gone = half(false);
-
-    // 1) 아직 넘어가지 않은 부분
-    canvas.save();
-    canvas.clipRect(page);
-    canvas.clipPath(keep);
-    canvas.drawImageRect(image, src, page, paint);
-    canvas.restore();
-
-    // 2) 새로 드러난 쪽 위, 접힌 선 근처의 그림자
-    {
-      final Offset p0 = n * c;
-      final shadow = Paint()
-        ..shader = ui.Gradient.linear(p0, p0 + n * 34, [const Color(0x55000000), const Color(0x00000000)]);
-      canvas.save();
-      canvas.clipRect(page);
-      canvas.clipPath(gone);
-      canvas.drawRect(page, shadow);
-      canvas.restore();
-    }
-
-    // 3) 말린 뒷면: 넘어간 부분을 접는 선으로 뒤집어 그린 것 (뒷면이라 글자가 흐리게 거울처럼)
-    final Float64List m = Float64List(16)
-      ..[0] = 1 - 2 * n.dx * n.dx
-      ..[1] = -2 * n.dx * n.dy
-      ..[4] = -2 * n.dx * n.dy
-      ..[5] = 1 - 2 * n.dy * n.dy
-      ..[10] = 1
-      ..[12] = 2 * c * n.dx
-      ..[13] = 2 * c * n.dy
-      ..[15] = 1;
-    canvas.save();
-    canvas.clipRect(page);
-    canvas.clipPath(keep);
-    // 뒷면 그림자 (말린 종이가 아래 쪽에 드리우는 그림자)
-    final Path flap = Path()..addRect(page);
-    final Path flapShape = Path.combine(PathOperation.intersect, flap.transform(m), keep);
-    canvas.drawShadow(flapShape, Colors.black, 6, false);
-    canvas.transform(m);
-    canvas.clipRect(page);
-    canvas.drawImageRect(image, src, page, paint);
-    canvas.drawRect(page, Paint()..color = back.withValues(alpha: 0.86));
-    canvas.restore();
-
-    // 4) 말린 종이의 둥근 느낌: 접는 선 쪽이 밝고 바깥으로 갈수록 살짝 어두워짐
-    {
-      final Offset p0 = n * c;
-      final shade = Paint()
-        ..shader = ui.Gradient.linear(p0, p0 - n * 90, [const Color(0x14000000), const Color(0x00FFFFFF), const Color(0x1A000000)], [0.0, 0.35, 1.0]);
-      canvas.save();
-      canvas.clipRect(page);
-      canvas.clipPath(flapShape);
-      canvas.drawRect(page, shade);
-      canvas.restore();
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant PageCurlPainter old) => old.t != t || old.image != image || old.fromRight != fromRight || old.back != back;
-}
-
-
 // ─────────────────────────────────────────────────────────────────────────────
-// 두 쪽 보기: 책처럼 넘기기
-// 손가락을 따라 아래(또는 위) 모서리부터 비스듬히 말려 올라가고, 책등(가운데)에 붙은 채로
-// 반대쪽으로 넘어간다. 넘어가는 장의 뒷면에는 다음 쪽이 보이고, 들린 자리에는 실제 새 쪽이 드러난다.
+// 책처럼 넘기기
+// 손가락을 따라 아래(또는 위) 모서리부터 비스듬히 말려 올라가고, 책등에 붙은 채로 넘어간다.
+// - 두 쪽 보기: 책등은 가운데. 넘어가는 장의 뒷면에 다음 쪽이 보임
+// - 한 쪽 보기: 책등은 화면 반대편 끝. 뒷면은 종이 뒷면(글자가 흐리게 비침)
+// 들린 자리에는 실제 새 쪽이 드러난다.
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum _BookPhase { idle, waiting, dragging, settling }
+
+/// 넘어가는 종이 한 장의 자리: [page]는 넘어가는 쪽(종이)의 네모, [spine]은 그 종이가 붙어 있는 책등의 x
+/// (빈 여백은 넘어가지 않고 그대로 있음)
+class BookPaper {
+  const BookPaper(this.page, this.spine);
+  final Rect page;
+  final double spine;
+}
 
 /// 책처럼 넘기기의 손가락 추적과 마무리 움직임을 맡음 (화면마다 하나)
 class BookCurlDrag extends ChangeNotifier {
@@ -153,9 +34,13 @@ class BookCurlDrag extends ChangeNotifier {
     required this.turn,
     required this.isRtl,
     this.canTurn,
+    this.paperOf,
   }) {
     _anim = AnimationController(vsync: vsync)..addListener(_onTick);
   }
+
+  /// 넘어가는 종이 자리 (층 기준 좌표). 모르면 null → 화면 전체(두 쪽 보기는 절반)를 종이로 봄
+  final Future<BookPaper?> Function(bool spread, bool fromRight, Size size)? paperOf;
 
   /// 지금 화면을 그림으로 찍음
   final Future<ui.Image?> Function() capture;
@@ -179,8 +64,12 @@ class BookCurlDrag extends ChangeNotifier {
   final ValueNotifier<ui.Image?> after = ValueNotifier<ui.Image?>(null);
   bool fromRight = true;
   bool bottom = true;
+  bool spread = true;
   Offset point = Offset.zero;
   Size size = Size.zero;
+
+  /// 지금 넘어가는 종이 자리
+  BookPaper paper = const BookPaper(Rect.zero, 0);
 
   int _dir = 1;
   Offset _start = Offset.zero;
@@ -206,22 +95,30 @@ class BookCurlDrag extends ChangeNotifier {
     return box.globalToLocal(global);
   }
 
-  double get _sx => size.width / 2;
-  double get _pw => fromRight ? size.width - _sx : _sx;
-  Offset get corner => Offset(fromRight ? size.width : 0, bottom ? size.height : 0);
+  /// 기본 종이 자리: 두 쪽 보기는 화면 절반(책등은 가운데), 한 쪽 보기는 화면 전체(책등은 반대편 끝)
+  static BookPaper defaultPaper(bool spread, bool fromRight, Size size) {
+    final double w = size.width, h = size.height;
+    if (!spread) return BookPaper(Offset.zero & size, fromRight ? 0.0 : w);
+    return BookPaper(fromRight ? Rect.fromLTRB(w / 2, 0, w, h) : Rect.fromLTRB(0, 0, w / 2, h), w / 2);
+  }
+
+  double get _sx => paper.spine;
+  double get _pw => (corner.dx - _sx).abs();
+  Offset get corner => Offset(fromRight ? paper.page.right : paper.page.left, bottom ? paper.page.bottom : paper.page.top);
   Offset get _target => Offset(2 * _sx - corner.dx, corner.dy);
 
   /// 책등에 붙은 종이가 갈 수 있는 곳으로 모서리 위치를 제한
   Offset _constrain(Offset q) {
-    final double h = size.height;
+    final Rect pg = paper.page;
+    final double h = pg.height;
     final Offset a1 = Offset(_sx, corner.dy);
     Offset d = q - a1;
     if (d.distance > _pw) q = a1 + d / d.distance * _pw;
-    final Offset a2 = Offset(_sx, h - corner.dy);
+    final Offset a2 = Offset(_sx, bottom ? pg.top : pg.bottom);
     final double r2 = math.sqrt(_pw * _pw + h * h);
     d = q - a2;
     if (d.distance > r2) q = a2 + d / d.distance * r2;
-    final double y = bottom ? math.min(q.dy, h) : math.max(q.dy, 0.0);
+    final double y = bottom ? math.min(q.dy, pg.bottom) : math.max(q.dy, pg.top);
     return Offset(q.dx, y);
   }
 
@@ -238,13 +135,13 @@ class BookCurlDrag extends ChangeNotifier {
     x = fromRight ? x.clamp(t.dx, c.dx) : x.clamp(c.dx, t.dx);
     final double p = _progressOf(x);
     // 똑바로 밀어도 모서리가 살짝 들려 비스듬히 말리도록
-    final double lift = size.height * 0.14 * math.sin(math.pi * p);
+    final double lift = paper.page.height * (spread ? 0.14 : 0.10) * math.sin(math.pi * p);
     final double y = c.dy + (f.dy - _start.dy) + (bottom ? -lift : lift);
     return _constrain(Offset(x, y));
   }
 
   /// 손가락이 가로로 끌리기 시작함. [pre]: 손가락이 닿을 때 미리 찍어 둔 그림 (넘겨받아 정리까지 맡음)
-  Future<void> begin(Offset globalStart, Offset globalNow, Future<ui.Image?>? pre) async {
+  Future<void> begin(Offset globalStart, Offset globalNow, Future<ui.Image?>? pre, {bool spread = true}) async {
     if (_phase != _BookPhase.idle) {
       pre?.then((i) => i?.dispose());
       return;
@@ -262,16 +159,25 @@ class BookCurlDrag extends ChangeNotifier {
     _turning = null;
     _dir = dir;
     fromRight = right;
+    this.spread = spread;
     _startTime = DateTime.now();
     _start = _toLocal(globalStart);
     _finger = _toLocal(globalNow);
-    bottom = _start.dy > size.height * 0.5;
+    paper = defaultPaper(spread, right, size);
+    bottom = _start.dy > paper.page.center.dy;
+    // 실제 종이 자리 (빈 여백은 넘어가지 않게). 그림을 찍는 동안 함께 알아봄
+    final Future<BookPaper?>? paperAsk = paperOf?.call(spread, right, size).catchError((_) => null);
 
     ui.Image? img = pre == null ? null : await pre;
     img ??= await capture();
+    final BookPaper? found = paperAsk == null ? null : await paperAsk;
     if (gen != _gen) {
       img?.dispose();
       return;
+    }
+    if (found != null && found.page.width > 20 && found.page.height > 20) {
+      paper = found;
+      bottom = _start.dy > paper.page.center.dy;
     }
     if (img == null || size.isEmpty) {
       img?.dispose();
@@ -299,17 +205,22 @@ class BookCurlDrag extends ChangeNotifier {
     if (_released != null && _phase == _BookPhase.waiting) _settle(_released!);
     final bool turned = await _turning!;
     if (gen != _gen) return;
-    if (turned) {
-      await Future<void>.delayed(const Duration(milliseconds: 16)); // 새 쪽이 그려질 시간
-      if (gen != _gen) return;
-      capture().then((a) {
-        if (gen == _gen && image != null) {
-          after.value?.dispose();
+    if (turned && spread) {
+      // 넘어가는 장 뒷면에 보일 새 쪽: 새 쪽 그림이 늦게 그려지면(그림 파일·EPUB) 처음 찍은 게 이전 쪽일 수 있어
+      // 조금 뒤에 한 번 더 찍어 바꿔 끼움
+      for (final int wait in const [32, 260]) {
+        await Future<void>.delayed(Duration(milliseconds: wait));
+        if (gen != _gen || image == null) return;
+        await SchedulerBinding.instance.endOfFrame;
+        final a = await capture();
+        if (gen == _gen && image != null && a != null) {
+          final old = after.value;
           after.value = a;
+          old?.dispose();
         } else {
           a?.dispose();
         }
-      });
+      }
     }
   }
 
@@ -340,8 +251,8 @@ class BookCurlDrag extends ChangeNotifier {
   }
 
   /// 손가락 없이 한 번에 넘김 (끌기가 시작되지 않은 빠른 밀기)
-  void autoTurn(double dx, Future<ui.Image?>? pre, Offset globalStart) {
-    begin(globalStart, globalStart + Offset(dx.sign * 20, 0), pre); // 첫 기다림 전까지는 바로 실행됨
+  void autoTurn(double dx, Future<ui.Image?>? pre, Offset globalStart, {bool spread = true}) {
+    begin(globalStart, globalStart + Offset(dx.sign * 20, 0), pre, spread: spread); // 첫 기다림 전까지는 바로 실행됨
     if (tracking && image == null) _released = true;
   }
 
@@ -380,7 +291,7 @@ class BookCurlDrag extends ChangeNotifier {
     final Offset q = Offset.lerp(_from, _to, e)!;
     // 넘어가는 동안 모서리가 살짝 들렸다가 내려앉음
     final double span = (_to.dx - _from.dx).abs() / math.max(1.0, (corner.dx - _target.dx).abs());
-    final double lift = size.height * 0.10 * span * math.sin(math.pi * e);
+    final double lift = paper.page.height * 0.10 * span * math.sin(math.pi * e);
     point = _constrain(q + Offset(0, bottom ? -lift : lift));
     notifyListeners();
   }
@@ -411,10 +322,31 @@ class BookCurlDrag extends ChangeNotifier {
 
 /// 화면 위에 깔리는 책처럼 넘기기 층 (넘기지 않을 때는 아무것도 그리지 않음)
 class BookCurlLayer extends StatelessWidget {
-  BookCurlLayer({required this.drag, this.paper}) : super(key: drag.layerKey);
+  BookCurlLayer({required this.drag, this.paper, this.texture}) : super(key: drag.layerKey);
 
   final BookCurlDrag drag;
   final Color? paper;
+
+  /// 종이 질감 배경 (종이색 테마): 찍은 그림의 빈 곳 밑에 깔아 넘기는 종이가 비쳐 보이지 않게
+  final ui.Image? texture;
+
+  static ui.Image? _paper;
+  static Future<ui.Image?>? _paperLoading;
+
+  /// 종이 질감 그림 (한 번만 읽어 둠)
+  static ui.Image? paperTexture(VoidCallback onReady) {
+    if (_paper != null) return _paper;
+    _paperLoading ??= () async {
+      try {
+        final data = await rootBundle.load('assets/textures/paper.jpg');
+        final codec = await ui.instantiateImageCodec(data.buffer.asUint8List(), targetWidth: 1080);
+        _paper = (await codec.getNextFrame()).image;
+      } catch (_) {}
+      return _paper;
+    }();
+    _paperLoading!.then((_) => onReady());
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -427,7 +359,7 @@ class BookCurlLayer extends StatelessWidget {
           if (img == null) return const SizedBox.expand();
           return CustomPaint(
             size: Size.infinite,
-            painter: BookCurlPainter(image: img, after: drag.after.value, point: drag.point, fromRight: drag.fromRight, bottom: drag.bottom, back: back),
+            painter: BookCurlPainter(image: img, after: drag.after.value, point: drag.point, fromRight: drag.fromRight, bottom: drag.bottom, back: back, spread: drag.spread, ground: texture, paper: drag.paper),
           );
         },
       ),
@@ -435,10 +367,31 @@ class BookCurlLayer extends StatelessWidget {
   }
 }
 
-/// 두 쪽 보기 책 넘김 그림: [point]는 들려 올라간 모서리가 지금 있는 곳
+/// 책 넘김 그림: [point]는 들려 올라간 모서리가 지금 있는 곳
 /// 접힌 선은 원래 모서리와 [point]를 잇는 선의 수직이등분선. 그 바깥 부분이 뒤집혀 넘어감
 class BookCurlPainter extends CustomPainter {
-  BookCurlPainter({required this.image, required this.after, required this.point, required this.fromRight, required this.bottom, required this.back});
+  BookCurlPainter({required this.image, required this.after, required this.point, required this.fromRight, required this.bottom, required this.back, this.spread = true, this.ground, this.paper});
+
+  /// 넘어가는 종이 자리 (없으면 화면 전체, 두 쪽 보기는 절반)
+  final BookPaper? paper;
+
+  /// 찍은 그림 밑에 까는 바탕 그림 (종이 질감). 없으면 [back] 색으로 칠함
+  final ui.Image? ground;
+
+  /// 찍은 그림의 빈(투명한) 곳으로 아래 화면이 비치지 않게 바탕을 먼저 깔아 둠
+  void _ground(Canvas canvas, Rect r) {
+    final g = ground;
+    if (g == null) {
+      canvas.drawRect(r, Paint()..color = back.withValues(alpha: 1));
+      return;
+    }
+    final Size gs = Size(g.width.toDouble(), g.height.toDouble());
+    final fit = applyBoxFit(BoxFit.cover, gs, r.size);
+    canvas.drawImageRect(g, Alignment.center.inscribe(fit.source, Offset.zero & gs), r, Paint()..filterQuality = FilterQuality.low);
+  }
+
+  /// 두 쪽 보기(책등이 가운데)인지, 한 쪽 보기(책등이 화면 끝)인지
+  final bool spread;
 
   final ui.Image image;
   final ui.Image? after;
@@ -460,21 +413,24 @@ class BookCurlPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
-    final double w = size.width, h = size.height, sx = w / 2;
+    final BookPaper pp = (paper != null && !paper!.page.isEmpty) ? paper! : BookCurlDrag.defaultPaper(spread, fromRight, size);
+    final double sx = pp.spine;
+    final double w = size.width, h = size.height;
     final Rect full = Offset.zero & size;
     final Rect src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
-    final paint = Paint()..filterQuality = FilterQuality.low;
-    final Offset c0 = Offset(fromRight ? w : 0, bottom ? h : 0);
+    final paint = Paint()..filterQuality = FilterQuality.medium;
+    final Rect page = pp.page;
+    final Offset c0 = Offset(fromRight ? page.right : page.left, bottom ? page.bottom : page.top);
     final Offset v = c0 - point;
     final double len = v.distance;
     if (len < 0.5) {
+      _ground(canvas, full);
       canvas.drawImageRect(image, src, full, paint);
       return;
     }
     final Offset n = v / len; // 모서리 쪽을 가리킴
     final Offset mid = (c0 + point) / 2;
     final double c = n.dx * mid.dx + n.dy * mid.dy;
-    final Rect page = fromRight ? Rect.fromLTRB(sx, 0, w, h) : Rect.fromLTRB(0, 0, sx, h);
     // 다 넘어갈 즈음엔 그림자·윤기를 걷어 새 쪽과 똑같아지게
     final double prog = ((c0.dx - point.dx) / (2 * c0.dx - 2 * sx)).clamp(0.0, 1.0);
     final double fade = ((1 - prog) * 5).clamp(0.0, 1.0);
@@ -501,6 +457,7 @@ class BookCurlPainter extends CustomPainter {
     // 1) 아직 그대로인 부분 (넘기기 전 화면)
     canvas.save();
     canvas.clipPath(rest);
+    _ground(canvas, full);
     canvas.drawImageRect(image, src, full, paint);
     canvas.restore();
 
@@ -511,7 +468,7 @@ class BookCurlPainter extends CustomPainter {
       canvas.save();
       canvas.clipPath(flapLeaf);
       canvas.drawRect(page, Paint()..shader = ui.Gradient.linear(p0, p0 + n * sw, [k(0x59000000), const Color(0x00000000)]));
-      canvas.drawRect(
+      if (spread) canvas.drawRect(
         page,
         Paint()
           ..shader = ui.Gradient.linear(Offset(sx, 0), Offset(fromRight ? sx + 26 : sx - 26, 0), [k(0x24000000), const Color(0x00000000)]),
@@ -526,7 +483,7 @@ class BookCurlPainter extends CustomPainter {
     canvas.save();
     canvas.transform(r);
     canvas.clipPath(flapLeaf);
-    final a = after;
+    final a = spread ? after : null;
     if (a != null) {
       // 뒷면 = 넘긴 뒤 반대편에 오는 새 쪽. 책등을 기준으로 한 번 더 뒤집어 그리면 제자리에 바로 놓임
       final Float64List mirror = Float64List(16)
@@ -536,9 +493,11 @@ class BookCurlPainter extends CustomPainter {
         ..[12] = 2 * sx
         ..[15] = 1;
       canvas.transform(mirror);
+      _ground(canvas, full);
       canvas.drawImageRect(a, Rect.fromLTWH(0, 0, a.width.toDouble(), a.height.toDouble()), full, paint);
     } else {
       // 새 쪽 그림이 아직 없으면 종이 뒷면 (앞면 글자가 흐리게 비침)
+      _ground(canvas, full);
       canvas.drawImageRect(image, src, full, paint);
       canvas.drawRect(full, Paint()..color = back.withValues(alpha: 0.88));
     }
@@ -547,7 +506,7 @@ class BookCurlPainter extends CustomPainter {
     // 4) 둥글게 말린 느낌: 접힌 선 쪽이 어둡다가 밝게 빛나고 바깥으로 갈수록 살짝 어두워짐
     {
       final Offset p0 = n * c;
-      final double cw = math.min(_pwOf(w) * 0.9, math.max(24.0, len * 0.55));
+      final double cw = math.min((c0.dx - sx).abs() * 0.9, math.max(24.0, len * 0.55));
       canvas.save();
       canvas.clipPath(flapScreen);
       canvas.drawRect(
@@ -564,9 +523,7 @@ class BookCurlPainter extends CustomPainter {
     }
   }
 
-  double _pwOf(double w) => w / 2;
-
   @override
   bool shouldRepaint(covariant BookCurlPainter old) =>
-      old.point != point || old.image != image || old.after != after || old.fromRight != fromRight || old.bottom != bottom || old.back != back;
+      old.point != point || old.image != image || old.after != after || old.fromRight != fromRight || old.bottom != bottom || old.back != back || old.spread != spread || old.ground != ground || old.paper?.page != paper?.page || old.paper?.spine != paper?.spine;
 }

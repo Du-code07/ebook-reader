@@ -1,3 +1,4 @@
+import 'dart:async';
 import '../widgets/favorite_ribbon.dart';
 import '../widgets/file_type_icon.dart';
 import 'user_fonts_screen.dart';
@@ -304,10 +305,10 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_t('데이터 지우기', 'Clear Data', '清除数据', 'データを削除')),
-        content: Text(_t('앱에 넣은 파일·메모·북마크·설정이 모두 지워지고 되돌릴 수 없어요\n지운 뒤 앱이 닫혀요',
-            'All files, notes, bookmarks and settings in the app will be deleted and cannot be restored\nThe app will close afterwards',
-            '应用中的所有文件、笔记、书签和设置都将被删除且无法恢复\n删除后应用将关闭',
-            'アプリ内のファイル・メモ・ブックマーク・設定がすべて削除され、元に戻せません\n削除後アプリが閉じます')),
+        content: Text(_t('앱에 넣은 파일·메모·북마크·설정이 모두 지워지고 되돌릴 수 없어요\n허용해 둔 접근 권한도 해제되고, 지운 뒤 앱이 닫혀요',
+            'All files, notes, bookmarks and settings in the app will be deleted and cannot be restored\nGranted permissions are revoked and the app will close afterwards',
+            '应用中的所有文件、笔记、书签和设置都将被删除且无法恢复\n已授予的权限也将被撤销，删除后应用将关闭',
+            'アプリ内のファイル・メモ・ブックマーク・設定がすべて削除され、元に戻せません\n許可した権限も解除され、削除後アプリが閉じます')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('취소', 'Cancel', '取消', 'キャンセル'))),
           ElevatedButton(
@@ -320,6 +321,35 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     );
     if (ok != true || !mounted) return;
     const ch = MethodChannel('ebook_reader/pdf_renderer');
+    // '모든 파일 접근'은 앱이 스스로 끌 수 없어서 안드로이드 설정 화면에서 끄고 돌아오게 함
+    final bool allFiles = await ch.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
+    if (allFiles && mounted) {
+      final go = await showPopDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(_t('파일 접근 권한 끄기', 'Turn Off File Access', '关闭文件访问权限', 'ファイルアクセス権限をオフ')),
+          content: Text(_t('모든 파일 접근 권한은 안드로이드 설정에서 직접 꺼야 해요\n설정에서 끄고 돌아오면 데이터를 지울게요',
+              'All-files access must be turned off in Android settings\nTurn it off and come back to clear the data',
+              '所有文件访问权限需要在安卓设置中手动关闭\n关闭后返回即可清除数据',
+              'すべてのファイルへのアクセスはAndroidの設定でオフにする必要があります\nオフにして戻るとデータを削除します')),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('그냥 지우기', 'Clear Anyway', '直接清除', 'そのまま削除'))),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_t('설정 열기', 'Open Settings', '打开设置', '設定を開く'))),
+          ],
+        ),
+      );
+      if (go == null || !mounted) return;
+      if (go) {
+        final back = Completer<void>();
+        final listener = AppLifecycleListener(onResume: () {
+          if (!back.isCompleted) back.complete();
+        });
+        await ch.invokeMethod('requestFontScan').catchError((_) => null);
+        await back.future;
+        listener.dispose();
+        if (!mounted) return;
+      }
+    }
     final done = await ch.invokeMethod<bool>('clearAppData').catchError((_) => false) ?? false;
     if (!done && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('데이터를 지우지 못했어요', 'Could not clear data', '无法清除数据', 'データを削除できませんでした'))));
@@ -490,7 +520,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             _item(
               icon: Icons.delete_forever_outlined,
               title: _t('데이터 지우기', 'Clear Data', '清除数据', 'データを削除'),
-              subtitle: _t('파일·메모·설정을 모두 지우고 처음 상태로', 'Delete all files, notes and settings and start over', '删除所有文件、笔记和设置，恢复初始状态', 'ファイル・メモ・設定をすべて削除して初期状態に'),
+              subtitle: _t('파일·메모·설정·접근 권한을 모두 지우고 처음 상태로', 'Delete all files, notes, settings and permissions and start over', '删除所有文件、笔记、设置和权限，恢复初始状态', 'ファイル・メモ・設定・権限をすべて削除して初期状態に'),
               onTap: _clearData,
             ),
             _section(_t('도움말', 'Help', '帮助', 'ヘルプ')),

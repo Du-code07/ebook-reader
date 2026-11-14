@@ -278,6 +278,23 @@ function selectRange(a, b) {
   try { viewer?.setSelection(`${colName(left)}${top}:${colName(right)}${bottom}`); } catch {}
 }
 function cancelPress() { if (press) clearTimeout(press.timer); press = null; }
+// FReader: [모두 선택] — 글이 있는 칸 전체를 고르고 다시 막대를 띄움
+function selectAllCells() {
+  if (!viewer) return;
+  try {
+    viewer.setSelection('A1:GR5000');
+    const ctx = viewer.getSelectionContext({ maxTextCharacters: 200000 });
+    let maxR = 1, maxC = 1;
+    for (const c of ctx?.cells || []) {
+      if (String(c.displayText ?? '').trim() === '') continue;
+      maxR = Math.max(maxR, c.address.row); maxC = Math.max(maxC, c.address.col);
+    }
+    selectRange({ row: 1, col: 1 }, { row: maxR, col: maxC });
+    const text = selectedText();
+    const hb = host.getBoundingClientRect();
+    if (text) emit('copyText', { text, x: hb.width / 2, y: Math.min(hb.height / 3, 160) });
+  } catch {}
+}
 function selectedText() {
   try {
     const ctx = viewer?.getSelectionContext({ maxTextCharacters: 200000 });
@@ -342,7 +359,8 @@ function endPointer(event) {
     }
     if (wasActive && event.type === 'pointerup') {
       const text = selectedText();
-      if (text) emit('copyText', { text });
+      const hb = host.getBoundingClientRect();
+      if (text) emit('copyText', { text, x: event.clientX - hb.left, y: event.clientY - hb.top });
       pointers.delete(event.pointerId);
       if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId);
       rebaseGesture();
@@ -372,7 +390,7 @@ function destroy() {
   closeViewer(); wipe(incoming); incoming = null; received = 0; events = [];
 }
 window.freaderXlsx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
-  search, showSearchResult, clearSearch, selectSheet, zoomBy, resetZoom,
+  search, showSearchResult, clearSearch, selectSheet, zoomBy, resetZoom, selectAllCells,
   getState: () => ({ ready: !disposed, loaded, page: viewer?.sheetIndex || 0, count: viewer?.sheetCount || 0,
     sheets: viewer?.sheetNames || [], viewport: viewer?.getViewportOffset() || { x: 0, y: 0 }, scale: viewer?.getScale() || 1,
     received, awaitingPassword, format: options.format, maxBytes: MAX_BYTES }) };

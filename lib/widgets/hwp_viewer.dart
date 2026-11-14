@@ -3,12 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
+import 'text_select.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import '../services/user_fonts.dart';
 import '../services/storage_service.dart';
 import 'viewer_dialogs.dart';
-import 'text_copy_sheet.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../services/docx_layout_hints.dart';
@@ -403,14 +403,17 @@ class _HwpViewerState extends State<HwpViewer> {
         break;
       case 'selectionCleared':
         widget.controller.cellSelected = false;
+        _cellBar.hide();
         break;
       case 'scrollMetrics':
         double n(Object? v) => v is num ? v.toDouble() : 0;
         widget.onScrollMetrics?.call(n(event['top']), n(event['height']), n(event['client']));
         break;
+      // 엑셀: 칸을 길게 눌러 고른 뒤 손을 떼면 [복사 | 모두 선택 | 공유] 막대
       case 'copyText':
         final text = (event['text'] ?? '').toString();
-        if (text.trim().isNotEmpty) unawaited(showTextCopySheet(context, text: text, tr: _tr));
+        if (text.trim().isEmpty) break;
+        _showCellBar(text, event['x'], event['y']);
         break;
       case 'loaded':
         setState(() => _loaded = true);
@@ -527,6 +530,7 @@ class _HwpViewerState extends State<HwpViewer> {
 
   @override
   void dispose() {
+    _cellBar.hide();
     _disposed = true;
     _generation++;
     _timeout?.cancel();
@@ -540,6 +544,33 @@ class _HwpViewerState extends State<HwpViewer> {
 
   String _tr(String ko, String en, String zh, String ja) =>
       AppI18n.t(StorageService.appLangNotifier.value, ko: ko, en: en, zh: zh, ja: ja);
+
+  final FloatingSelectionBar _cellBar = FloatingSelectionBar();
+
+  /// 엑셀에서 고른 칸들 위에 막대를 띄움 ([x], [y]: 문서 화면 기준 누른 자리, 화면 크기 대비 아님)
+  void _showCellBar(String text, Object? x, Object? y) {
+    if (!mounted) return;
+    final box = context.findRenderObject() as RenderBox?;
+    final Offset local = Offset((x as num?)?.toDouble() ?? 0, (y as num?)?.toDouble() ?? 0);
+    final Offset global = box == null ? local : box.localToGlobal(local);
+    _cellBar.show(
+      context,
+      global,
+      tr: _tr,
+      onCopy: () {
+        _cellBar.hide();
+        copyText(context, text, _tr);
+      },
+      onSelectAll: () {
+        _cellBar.hide();
+        unawaited(_invoke('selectAllCells', []));
+      },
+      onShare: () {
+        _cellBar.hide();
+        shareText(text);
+      },
+    );
+  }
 
   Future<void> _clearSelection() async {
     try {
@@ -589,9 +620,9 @@ class _HwpViewerState extends State<HwpViewer> {
               ],
             ),
           ),
-          // 글을 길게 눌러 고르면 EPUB과 같은 메뉴: 형광펜 칠하기 / 글자 복사(복사 창). 누른 뒤 선택 표시는 지움
+          // 글을 길게 눌러 고르면 휴대폰 기본 메뉴(복사 | 모두 선택 | 공유)와 형광펜 칠하기
           contextMenu: ContextMenu(
-            settings: ContextMenuSettings(hideDefaultSystemContextMenuItems: true),
+            settings: ContextMenuSettings(hideDefaultSystemContextMenuItems: false),
             menuItems: [
               ContextMenuItem(
                 id: 1,
@@ -599,19 +630,6 @@ class _HwpViewerState extends State<HwpViewer> {
                 action: () async {
                   await _invoke('highlightSelection', []);
                   await _clearSelection();
-                },
-              ),
-              ContextMenuItem(
-                id: 2,
-                title: _tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
-                action: () async {
-                  String text = '';
-                  try {
-                    final r = await _web?.evaluateJavascript(source: 'String(window.getSelection ? window.getSelection().toString() : "")');
-                    text = r is String ? r : '';
-                  } catch (_) {}
-                  await _clearSelection();
-                  if (mounted && text.trim().isNotEmpty) await showTextCopySheet(context, text: text, tr: _tr);
                 },
               ),
             ],

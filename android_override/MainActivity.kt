@@ -59,6 +59,12 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private val EVENT_CHANNEL = "ebook_reader/volume_events"
     private val PDF_CHANNEL = "ebook_reader/pdf_renderer"
 
+    /// 매니페스트에 적어 둔 권한인지 (적지 않은 권한을 반납하려 하면 오류)
+    private fun declaredPermission(name: String): Boolean = try {
+        val info = packageManager.getPackageInfo(packageName, android.content.pm.PackageManager.GET_PERMISSIONS)
+        info.requestedPermissions?.contains(name) == true
+    } catch (_: Throwable) { false }
+
     private fun fontScanAllowed(): Boolean =
         if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
         else checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -342,6 +348,79 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
+    // ── 연결 앱으로 열기: 받은 파일을 앱 임시 폴더로 복사해 두고 Flutter에 알림 ──
+    private var openChannel: MethodChannel? = null
+    private var pendingOpenPath: String? = null
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleViewIntent(intent)
+    }
+
+    private fun handleViewIntent(intent: android.content.Intent?) {
+        if (intent == null || intent.action != android.content.Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        // 화면을 다시 만들 때(회전 등) 같은 파일을 또 열지 않게
+        intent.action = null
+        Thread {
+            val path = try { copyIncoming(uri, intent.type) } catch (_: Throwable) { null }
+            runOnUiThread {
+                if (path != null) {
+                    pendingOpenPath = path
+                    openChannel?.invokeMethod("ping", null)
+                }
+            }
+        }.start()
+    }
+
+    private fun copyIncoming(uri: android.net.Uri, mime: String?): String? {
+        var name: String? = null
+        if (uri.scheme == "content") {
+            try {
+                contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) name = c.getString(0)
+                }
+            } catch (_: Throwable) {}
+        }
+        if (name.isNullOrBlank()) name = uri.lastPathSegment?.substringAfterLast('/')
+        var safe = (name ?: "file").replace(Regex("[\\/:*?\"<>|]"), "_").trim().ifEmpty { "file" }
+        if (!safe.contains('.')) {
+            val ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mime ?: contentResolver.getType(uri))
+            if (ext != null) safe = "$safe.$ext"
+        }
+        val dir = File(cacheDir, "incoming").apply { mkdirs() }
+        val out = File(dir, safe)
+        val input = if (uri.scheme == "file") java.io.FileInputStream(File(uri.path ?: return null)) else contentResolver.openInputStream(uri)
+        input?.use { inp -> FileOutputStream(out).use { o -> inp.copyTo(o) } } ?: return null
+        return out.absolutePath
+    }
+
+    // ── 처음 시작 '앱 접근 권한 안내'의 [계속]: 카메라(와 안드로이드 12 이하 저장소 읽기) 허용 묻기 ──
+    private var pendingPermResult: MethodChannel.Result? = null
+
+    private fun requestStartupPermissions(result: MethodChannel.Result) {
+        val want = mutableListOf<String>()
+        if (declaredPermission(android.Manifest.permission.CAMERA)) want.add(android.Manifest.permission.CAMERA)
+        if (Build.VERSION.SDK_INT <= 32) want.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        val ask = want.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (ask.isEmpty()) {
+            result.success(true)
+            return
+        }
+        pendingPermResult?.success(false)
+        pendingPermResult = result
+        requestPermissions(ask.toTypedArray(), 4712)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 4712) {
+            pendingPermResult?.success(true)
+            pendingPermResult = null
+        }
+    }
+
     override fun onPostResume() {
         super.onPostResume()
         hideSystemStatusBar()
@@ -408,6 +487,20 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
             }
 
+        // 다른 앱(내 파일 등)에서 '연결 앱'으로 이 앱을 골라 연 파일
+        openChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ebook_reader/open_file").also { ch ->
+            ch.setMethodCallHandler { call, result ->
+                if (call.method == "take") {
+                    val path = pendingOpenPath
+                    pendingOpenPath = null
+                    result.success(path)
+                } else {
+                    result.notImplemented()
+                }
+            }
+        }
+        handleViewIntent(intent)
+
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL)
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -438,9 +531,30 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     }
                     result.success(true)
                 } catch (e: Throwable) { result.success(false) }
+            } else if (call.method == "shareText") {
+                // 고른 글을 다른 앱으로 보내기 (안드로이드 공유 창)
+                val text = call.argument<String>("text") ?: ""
+                try {
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_TEXT, text)
+                    }
+                    startActivity(android.content.Intent.createChooser(send, null))
+                    result.success(true)
+                } catch (_: Throwable) { result.success(false) }
+            } else if (call.method == "requestStartupPermissions") {
+                requestStartupPermissions(result)
             } else if (call.method == "clearAppData") {
                 // 앱 설정 > 데이터 지우기: 안드로이드 설정의 '데이터 삭제'와 같음 (앱이 바로 닫힘)
+                // 허용해 둔 권한(알림·카메라·저장소 읽기)도 함께 해제 (지우기는 권한을 처음 상태로 되돌리고, 13 이상은 직접 반납까지)
                 try {
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        val granted = listOf(
+                            android.Manifest.permission.POST_NOTIFICATIONS,
+                            android.Manifest.permission.CAMERA,
+                        ).filter { declaredPermission(it) && checkSelfPermission(it) == android.content.pm.PackageManager.PERMISSION_GRANTED }
+                        if (granted.isNotEmpty()) try { revokeSelfPermissionsOnKill(granted) } catch (_: Throwable) {}
+                    }
                     val am = getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
                     result.success(am.clearApplicationUserData())
                 } catch (e: Throwable) { result.success(false) }
@@ -767,7 +881,7 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                             val out = java.io.ByteArrayOutputStream()
                             // 배경이 투명(종이 질감 위)이면 투명도를 살리는 PNG로
                             if (transparent) bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
-                            else bmp.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                            else bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
                             bmp.recycle()
                             val bytes = out.toByteArray()
                             runOnUiThread { result.success(bytes) }
@@ -988,7 +1102,8 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             }
             accelerometer?.let {
                 sensorManager?.unregisterListener(this, it)
-                sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+                // 흔들기 감지는 빠를 필요가 없어 UI 빠르기로 (배터리 절약)
+                sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
             }
         } catch (_: Exception) {}
     }

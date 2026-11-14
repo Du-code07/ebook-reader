@@ -235,6 +235,12 @@ class StorageService {
   }
 
   /// 아직 언어를 고른 적이 없는지 (앱 처음 시작 시 언어 선택 화면 표시용)
+  /// 처음 시작할 때 '앱 접근 권한 안내'를 본 적 있는지
+  static Future<void> markPermissionGuideShown() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('perm_guide_shown_v113', true);
+  }
+
   static Future<bool> needsLanguageSelection() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('app_language_code') == null;

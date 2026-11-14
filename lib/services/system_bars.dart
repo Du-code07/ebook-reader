@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 
 /// 서재(첫 화면)에서는 상태표시줄(과 버튼식 내비게이션 바)을 늘 보이고,
@@ -39,5 +42,18 @@ class SystemBars {
         await _channel.invokeMethod('setViewerStatusBar', {'show': show});
       } catch (_) {}
     }();
+  }
+
+  /// 상태표시줄이 보일 때의 위쪽 여백 (가로·세로 따로). 서재에서 본 값을 기억해 둠
+  static final Map<Orientation, double> _statusTop = {};
+
+  /// 상태표시줄을 보였다 숨겼다 해도 바뀌지 않는 위쪽 여백.
+  /// 메뉴를 열 때 상태표시줄이 나타나며 본문 자리가 바뀌면 책 화면이 다시 그려지며 깜빡이므로 이 값을 씀
+  static double stableTop(BuildContext context) {
+    final Orientation o = MediaQuery.orientationOf(context);
+    final double cur = MediaQuery.paddingOf(context).top;
+    final double v = math.max(_statusTop[o] ?? 0.0, cur);
+    _statusTop[o] = v;
+    return v;
   }
 }

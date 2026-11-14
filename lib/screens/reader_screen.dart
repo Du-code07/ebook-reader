@@ -1638,7 +1638,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// EPUB·TXT 본문이 시작하는 높이: 상단바(위 여백 + 버튼 줄 48) 아래로 살짝 띄움
   double get _readerTextTop {
-    final double barBottom = MediaQuery.paddingOf(context).top + 48.0;
+    // 메뉴를 열 때 상태표시줄이 나타나도 본문 자리가 그대로이도록 (바뀌면 책 화면이 다시 그려지며 깜빡임)
+    final double barBottom = SystemBars.stableTop(context) + 48.0;
     // TXT는 화면 안쪽에 자체 여백(32)이 있어 그만큼 덜 내린다
     return _isTxt ? math.max(12.0, barBottom + 10.0 - TxtPageDocument.margin) : barBottom + 10.0;
   }
@@ -2818,11 +2819,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (_isTxt) {
         final boundary = _txtCaptureKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
         if (boundary == null) return null;
-        return await boundary.toImage(pixelRatio: MediaQuery.devicePixelRatioOf(context) * 0.75);
+        return await boundary.toImage(pixelRatio: MediaQuery.devicePixelRatioOf(context));
       }
       final bytes = await _pdfChannel.invokeMethod<Uint8List>(
         'snapshotWebView',
-        {'background': _isPaperTheme ? 0 : _getBgColor().toARGB32(), 'scale': 0.75},
+        {'background': _isPaperTheme ? 0 : _getBgColor().toARGB32(), 'scale': 1.0},
       );
       if (bytes == null) return null;
       final codec = await ui.instantiateImageCodec(bytes);
@@ -2953,10 +2954,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   // ── 종이처럼 말아 넘기기 (슬라이드) ──
-  late final AnimationController _curlCtrl = AnimationController(vsync: this);
-  ui.Image? _curlImg;
-  bool _curlFromRight = true;
-  bool _curlBusy = false;
 
   bool get _curlOn =>
       StorageService.pageCurl && _useSwipeTurn && !_pageModeScroll && !Anim.off.value && !_isSpreadsheet && !_slideShow;
@@ -2971,7 +2968,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   // 손가락이 닿을 때 미리 찍어 둔 화면 (밀고 뗐을 때 바로 말기 시작하게)
   Future<ui.Image?>? _curlPre;
-  DateTime? _curlPreAt;
   // 두 쪽 보기: 책처럼 넘기기 (손가락을 따라 모서리부터 말려 넘어감)
   late final BookCurlDrag _book = BookCurlDrag(
     vsync: this,
@@ -2981,25 +2977,44 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       return _vTurnAndWait(dir);
     },
     isRtl: () => _isMangaRtlMode,
+    // 마지막(첫) 쪽에서는 넘기는 모습도 보이지 않음
+    canTurn: _canTurnSwipe,
+    paperOf: _curlPaper,
   );
 
-  /// 손가락이 가로로 끌리기 시작하면 두 쪽 보기는 책처럼 손가락을 따라 넘김
+  /// 넘어가는 쪽(종이)의 자리: 워드·한글·PPT는 화면에 놓인 쪽 네모 (빈 여백은 넘어가지 않음).
+  /// EPUB·TXT는 화면 전체가 종이
+  Future<BookPaper?> _curlPaper(bool spread, bool fromRight, Size size) async {
+    if (!_isOfflineDocument || _isTxt) return null;
+    final Rect? f = await _hwpController.pageRect().timeout(const Duration(milliseconds: 300), onTimeout: () => null);
+    if (f == null) return null;
+    final Rect r = Rect.fromLTWH(f.left * size.width, f.top * size.height, f.width * size.width, f.height * size.height);
+    if (!spread) return BookPaper(r, fromRight ? r.left : r.right);
+    // 두 쪽 보기: 두 쪽을 합친 네모의 가운데가 책등 (쪽 사이 틈 8)
+    final double cx = r.center.dx;
+    final Rect page = fromRight ? Rect.fromLTRB(cx + 4, r.top, r.right, r.bottom) : Rect.fromLTRB(r.left, r.top, cx - 4, r.bottom);
+    return BookPaper(page, cx);
+  }
+
+  /// 손가락이 가로로 끌리기 시작하면 책처럼 손가락을 따라 넘김
   void _bookTrackMove(PointerMoveEvent e) {
     if (_book.tracking) {
       _book.update(e.position);
       return;
     }
     final start = _swipeStartPos, t0 = _swipeStartTime;
-    if (start == null || t0 == null || _book.busy || _curlBusy) return;
-    if (!_curlOn || !_bookmarkSpreadNow || _swipeMultiTouch || _swipeActivePointers != 1) return;
+    if (start == null || t0 == null || _book.busy) return;
+    if (!_curlOn || _swipeMultiTouch || _swipeActivePointers != 1) return;
     if (_isTouchLocked || _epubZoomScale > 1.03 || _hasTextSelection) return;
     if (_isMemoMode && (_isStylusEvent(e) || _allowFingerDrawing)) return;
     final Offset d = e.position - start;
+    // 옆으로 움직이기 시작하면 그때 지금 화면을 찍어 둠 (그냥 누르기만 할 때는 찍지 않아 배터리·버벅임 절약)
+    if (_curlPre == null && d.dx.abs() >= 5 && d.dx.abs() > d.dy.abs()) _curlPrecapture();
     if (d.dx.abs() < 16 || d.dx.abs() < d.dy.abs() * 1.2) return;
     if (DateTime.now().difference(t0).inMilliseconds > 400) return; // 길게 눌러 끄는 건 글 선택
     final pre = _curlPre;
     _curlPre = null;
-    _book.begin(start, e.position, pre);
+    _book.begin(start, e.position, pre, spread: _bookmarkSpreadNow);
   }
 
   Future<ui.Image?> _captureForCurl() async {
@@ -3008,7 +3023,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       try {
         final bytes = await _epubController.takeScreenshot().timeout(const Duration(milliseconds: 900));
         if (bytes != null && bytes.isNotEmpty && mounted) {
-          final codec = await ui.instantiateImageCodec(bytes, targetWidth: (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context) * 0.75).round());
+          final codec = await ui.instantiateImageCodec(bytes, targetWidth: (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context)).round());
           return (await codec.getNextFrame()).image;
         }
       } catch (_) {}
@@ -3018,69 +3033,26 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// 손가락이 닿으면 미리 지금 화면을 찍어 둠 (종이처럼 넘기기가 켜져 있을 때만)
   void _curlPrecapture() {
-    if (!_curlOn || _curlBusy || _book.busy) return;
+    if (!_curlOn || _book.busy) return;
     final old = _curlPre;
     _curlPre = _captureForCurl();
-    _curlPreAt = DateTime.now();
     old?.then((i) => i?.dispose());
   }
 
-  /// 지금 화면을 그림으로 붙잡고 → 실제 화면은 바로 넘긴 뒤 → 붙잡은 그림을 종이처럼 말아 치움
-  /// (두 쪽 보기면 책처럼 가운데를 축으로 한 장이 넘어감)
-  Future<void> _curlTurn(double dx) async {
-    final bool next = (dx < 0) != _isMangaRtlMode;
-    if (_curlBusy || _book.busy) return;
-    if (_bookmarkSpreadNow) {
-      // 두 쪽 보기: 책처럼 한 장이 넘어감
-      final pre = _curlPre;
-      _curlPre = null;
-      final size = MediaQuery.sizeOf(context);
-      _book.autoTurn(dx, pre, Offset(dx < 0 ? size.width * 0.9 : size.width * 0.1, size.height * 0.8));
+  /// 손가락으로 끌지 않고 빠르게 밀었을 때: 한 번에 책처럼 넘김
+  void _curlTurn(double dx) {
+    final pre = _curlPre;
+    _curlPre = null;
+    if (_book.busy || !mounted) {
+      pre?.then((i) => i?.dispose());
       return;
     }
-    _curlBusy = true;
-    try {
-      ui.Image? img;
-      final pre = _curlPre;
-      final preAt = _curlPreAt;
-      _curlPre = null;
-      if (pre != null && preAt != null && DateTime.now().difference(preAt).inMilliseconds < 2500) {
-        img = await pre;
-      } else {
-        pre?.then((i) => i?.dispose());
-      }
-      img ??= await _captureForCurl();
-      if (!mounted) {
-        img?.dispose();
-        return;
-      }
-      if (img == null) {
-        (next ? _readerNext : _readerPrevious)();
-        return;
-      }
-      _curlCtrl.value = 0;
-      setState(() {
-        _curlImg = img;
-        _curlFromRight = dx < 0;
-      });
-      await WidgetsBinding.instance.endOfFrame;
-      final bool turned = await _vTurnAndWait(next ? 1 : -1);
-      if (!mounted) return;
-      if (turned) {
-        await Future<void>.delayed(const Duration(milliseconds: 16)); // 새 쪽이 그려질 시간
-        await _curlCtrl.animateTo(1, duration: Anim.ms(420), curve: Curves.easeInOutCubic);
-      }
-      if (!mounted) return;
-      setState(() => _curlImg = null);
-      img.dispose();
-    } finally {
-      _curlBusy = false;
-    }
+    final size = MediaQuery.sizeOf(context);
+    _book.autoTurn(dx, pre, Offset(dx < 0 ? size.width * 0.9 : size.width * 0.1, size.height * 0.8), spread: _bookmarkSpreadNow);
   }
 
   Widget _vSwipeStage(Widget content, double screenHeight) {
     final snap = _vSnap;
-    final curl = _curlImg;
     return Stack(
       fit: StackFit.expand,
       clipBehavior: Clip.none,
@@ -3091,11 +3063,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             offset: Offset(0, _vPageSwipe.offset),
             child: IgnorePointer(child: RawImage(image: snap, fit: BoxFit.fill)),
           ),
-        if (curl != null)
-          Positioned.fill(
-            child: PageCurlOverlay(image: curl, progress: _curlCtrl, fromRight: _curlFromRight, paper: _isPaperTheme ? null : _getBgColor()),
+        Positioned.fill(
+          child: BookCurlLayer(
+            drag: _book,
+            paper: _isPaperTheme ? null : _getBgColor(),
+            texture: _isPaperTheme ? BookCurlLayer.paperTexture(() => mounted ? setState(() {}) : null) : null,
           ),
-        Positioned.fill(child: BookCurlLayer(drag: _book, paper: _isPaperTheme ? null : _getBgColor())),
+        ),
       ],
     );
   }
@@ -3141,7 +3115,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_isMemoMode && _isStylusEvent(e)) return;
     _swipeActivePointers++;
     if (_swipeActivePointers == 1) {
-      _curlPrecapture();
+      // 지난 손동작에서 찍어 두고 쓰지 않은 그림은 버림 (새 그림은 손가락이 옆으로 움직이기 시작할 때 찍음)
+      final stale = _curlPre;
+      _curlPre = null;
+      stale?.then((i) => i?.dispose());
       _swipeMultiTouch = false;
       _swipeHandledByDrag = false;
       _swipeScaleStarted = false;
@@ -3872,7 +3849,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       }).catchError((_) => null);
     }
     _vPageSwipe.dispose();
-    _curlCtrl.dispose();
     _book.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     _epubLoadWatchdog?.cancel();
@@ -4431,9 +4407,9 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       fontSize: _fontSize,
                       theme: _buildTheme(),
                     ),
-                    // 글을 길게 눌러 고르면: 형광펜 칠하기 / 글자 복사(다른 파일과 같은 복사 창). 누른 뒤에는 선택 표시를 지움
+                    // 글을 길게 눌러 고르면: 휴대폰 기본 메뉴(복사 | 모두 선택 | 공유)와 형광펜 칠하기
                     selectionContextMenu: EpubContextMenu(
-                      hideDefaultSystemItems: true,
+                      hideDefaultSystemItems: false,
                       items: [
                         EpubContextMenuItem(
                           id: 1,
@@ -4446,15 +4422,6 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                               );
                             }
                             _clearEpubSelection();
-                          },
-                        ),
-                        EpubContextMenuItem(
-                          id: 2,
-                          title: _tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
-                          action: () {
-                            final text = _selectedText;
-                            _clearEpubSelection();
-                            if (mounted && text.trim().isNotEmpty) showTextCopySheet(context, text: text, tr: _tr);
                           },
                         ),
                       ],
