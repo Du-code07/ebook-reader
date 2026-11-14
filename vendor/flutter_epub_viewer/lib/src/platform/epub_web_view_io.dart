@@ -36,9 +36,9 @@ class IoEpubWebViewController implements EpubWebViewController {
 
   final InAppWebViewController _controller;
 
-  /// FReader: 종이처럼 넘기기용 화면 그림 (하드웨어 가속 화면도 그대로 찍힘)
+  /// FReader: 책처럼 넘기기용 화면 그림 (하드웨어 가속 화면도 그대로 찍힘)
   @override
-  Future<Uint8List?> takeScreenshot({double quality = 0.88}) async {
+  Future<Uint8List?> takeScreenshot({double quality = 0.95}) async {
     try {
       return await _controller.takeScreenshot(
         screenshotConfiguration: ScreenshotConfiguration(compressFormat: CompressFormat.JPEG, quality: (quality * 100).round()),
