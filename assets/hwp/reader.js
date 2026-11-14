@@ -345,15 +345,19 @@ async function finishPage(serial, entries) {
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   if (disposed || serial !== renderSerial) return;
   emit('pageReady', { page, position: `hwp:${page}` });
+  // FReader: 넘기기 전에 다음 쪽(두 쪽 보기면 두 쪽)과 이전 쪽을 미리 만들어 둠 → 넘길 때 빈 화면이 덜 보임
   setTimeout(() => {
     if (disposed || serial !== renderSerial || !doc) return;
-    const ahead = page + (options.spread ? 2 : 1);
+    const span = options.spread ? 2 : 1;
+    const order = [];
+    for (let i = 0; i < span; i++) order.push(page + span + i);
+    for (let i = 1; i <= span; i++) order.push(page - i);
     try {
-      for (let index = ahead; index < Math.min(count, ahead + (options.spread ? 2 : 1)); index++) {
-        if (!cache.has(index)) void decodeEntry(svgForPage(index));
+      for (const index of order) {
+        if (index >= 0 && index < count && !cache.has(index)) void decodeEntry(svgForPage(index));
       }
     } catch (_) {}
-  }, 350);
+  }, 120);
 }
 // 지금 보이는 쪽(들)이 화면에서 차지하는 자리 (화면 크기 대비 0~1) — 스크롤 보기용 쪽 그림 자르기
 // FReader: 두 쪽 보기의 홀수 마지막 쪽은 왼쪽에 놓고 오른쪽은 빈 자리(page-spacer)로 채움 → 실제 쪽만 셈
