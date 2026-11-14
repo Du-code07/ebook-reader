@@ -48,33 +48,56 @@ class BookCurlDrag extends ChangeNotifier {
   final Future<void> Function()? beforeAfterCapture;
 
   /// 그림이 한 가지 색뿐인지 (아직 그려지지 않은 빈 화면: 검정·흰색·종이색)
+  /// 글자가 적은 쪽도 빈 화면으로 잘못 보지 않도록 점을 흐리게 하지 않고 그대로 뽑아
+  /// 바탕색과 확실히 다른 점이 몇 개라도 있으면 그려진 화면으로 봄
   static Future<bool> looksBlank(ui.Image img) async {
     try {
-      const int n = 24;
+      // 긴 쪽 256점 (약 10화소마다 한 점): 가는 글자·밑줄도 놓치지 않을 만큼 촘촘하게
+      final double longSide = math.max(img.width, img.height).toDouble();
+      final int nw = math.max(8, (img.width / longSide * 256).round());
+      final int nh = math.max(8, (img.height / longSide * 256).round());
       final rec = ui.PictureRecorder();
       Canvas(rec).drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
-          Rect.fromLTWH(0, 0, n.toDouble(), n.toDouble()), Paint()..filterQuality = FilterQuality.low);
-      final small = await rec.endRecording().toImage(n, n);
+          Rect.fromLTWH(0, 0, nw.toDouble(), nh.toDouble()), Paint()..filterQuality = FilterQuality.none);
+      final small = await rec.endRecording().toImage(nw, nh);
       final data = await small.toByteData(format: ui.ImageByteFormat.rawRgba);
       small.dispose();
       if (data == null) return false;
-      double sum = 0, sq = 0;
-      final int px = n * n;
-      for (int i = 0; i < px; i++) {
-        final double l = 0.3 * data.getUint8(i * 4) + 0.59 * data.getUint8(i * 4 + 1) + 0.11 * data.getUint8(i * 4 + 2);
-        sum += l;
-        sq += l * l;
+      final int px = nw * nh;
+      // 바탕색: 고르게 뽑은 점들에서 가장 흔한 밝기
+      final Map<int, int> votes = {};
+      for (int i = 0; i < px; i += 61) {
+        final int l = _lum(data, i) >> 3;
+        votes[l] = (votes[l] ?? 0) + 1;
       }
-      final double mean = sum / px;
-      final double sd = math.sqrt(math.max(0, sq / px - mean * mean));
-      return sd < 1.5;
+      int base = 0, best = -1;
+      votes.forEach((k, v) {
+        if (v > best) {
+          best = v;
+          base = k;
+        }
+      });
+      final int baseLum = base * 8 + 4;
+      int differ = 0;
+      for (int i = 0; i < px; i++) {
+        if ((_lum(data, i) - baseLum).abs() > 28) {
+          differ++;
+          if (differ > 12) return false;
+        }
+      }
+      return true;
     } catch (_) {
       return false;
     }
   }
 
+  static int _lum(ByteData d, int i) {
+    final int o = i * 4;
+    return (77 * d.getUint8(o) + 150 * d.getUint8(o + 1) + 29 * d.getUint8(o + 2)) >> 8;
+  }
+
   /// 빈 화면이 찍히면 조금 기다렸다가 다시 찍음 (최대 [tries]번). 끝까지 비면 마지막 것을 그대로 씀
-  Future<ui.Image?> _captureSolid({int tries = 4, int gapMs = 120}) async {
+  Future<ui.Image?> _captureSolid({int tries = 3, int gapMs = 80}) async {
     ui.Image? img;
     for (int i = 0; i < tries; i++) {
       img?.dispose();
@@ -265,16 +288,28 @@ class BookCurlDrag extends ChangeNotifier {
       } catch (_) {}
       if (gen != _gen || image == null) return;
       bool good = false;
-      for (final int wait in const [16, 120, 200, 300, 400, 500]) {
-        await Future<void>.delayed(Duration(milliseconds: wait));
-        if (gen != _gen || image == null) return;
+      ui.Image? lastBlank;
+      for (final int wait in const [0, 60, 120, 180, 260, 360]) {
+        if (wait > 0) await Future<void>.delayed(Duration(milliseconds: wait));
+        if (gen != _gen || image == null) {
+          lastBlank?.dispose();
+          return;
+        }
         await SchedulerBinding.instance.endOfFrame;
         final a = await capture();
         if (a == null) continue;
         if (await looksBlank(a)) {
-          a.dispose();
+          if (good) {
+            a.dispose();
+            break;
+          }
+          // 정말 빈 쪽일 수도 있어 마지막 것은 남겨 둠
+          lastBlank?.dispose();
+          lastBlank = a;
           continue;
         }
+        lastBlank?.dispose();
+        lastBlank = null;
         if (gen == _gen && image != null) {
           final old = after.value;
           after.value = a;
@@ -283,9 +318,17 @@ class BookCurlDrag extends ChangeNotifier {
           a.dispose();
           return;
         }
-        if (good) break; // 한 번 더 찍어(늦게 그려지는 그림) 바꿔 끼운 뒤 끝
-        good = true;
         if (!(_afterReady?.isCompleted ?? true)) _afterReady!.complete();
+        // 늦게 그려지는 그림이 있을 수 있어 손가락으로 끄는 중일 때만 한 번 더 찍어 바꿔 끼움 (넘어가는 움직임 중엔 찍지 않아 끊김 없음)
+        if (good || _phase != _BookPhase.dragging) break;
+        good = true;
+      }
+      if (lastBlank != null) {
+        if (gen == _gen && image != null && after.value == null) {
+          after.value = lastBlank;
+        } else {
+          lastBlank.dispose();
+        }
       }
     }
     if (!(_afterReady?.isCompleted ?? true)) _afterReady!.complete();
@@ -332,14 +375,14 @@ class BookCurlDrag extends ChangeNotifier {
     _from = point;
     _to = commit ? _target : corner;
     final double dist = (_to.dx - _from.dx).abs() / math.max(1.0, (corner.dx - _target.dx).abs());
-    _anim.duration = Duration(milliseconds: (160 + 380 * dist).round()); // '애니메이션 멈추기'와 상관없이 움직임
+    _anim.duration = Duration(milliseconds: (160 + 380 * dist).round()); // '애니메이션 끄기'와 상관없이 움직임
     _anim.value = 0;
     await _anim.animateTo(1, curve: Curves.easeOutCubic);
     if (gen != _gen) return;
     final bool turned = await (_turning ?? Future<bool>.value(false));
     if (gen != _gen) return;
     if (commit && turned && (waitForPage?.call() ?? false)) {
-      await (_afterReady?.future ?? Future<void>.value()).timeout(const Duration(milliseconds: 1600), onTimeout: () {});
+      await (_afterReady?.future ?? Future<void>.value()).timeout(const Duration(milliseconds: 1200), onTimeout: () {});
       if (gen != _gen) return;
     }
     if (commit && !turned) {
@@ -545,6 +588,7 @@ class BookCurlPainter extends CustomPainter {
       canvas.save();
       canvas.clipPath(flapLeaf);
       canvas.drawRect(page, Paint()..color = back.withValues(alpha: 1));
+      _ground(canvas, full); // 종이 질감(세피아): 새 쪽 그림의 투명한 곳 밑에도 깔림
       final na = after;
       if (na != null) canvas.drawImageRect(na, srcOf(na), full, paint);
       canvas.drawRect(page, Paint()..shader = ui.Gradient.linear(p0, p0 + n * sw, [k(0x59000000), const Color(0x00000000)]));

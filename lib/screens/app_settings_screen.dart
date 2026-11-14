@@ -193,11 +193,11 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             await widget.onChangeHideThumbnails?.call(v);
           },
         ),
-        // 표지형을 골랐을 때만: 책갈피를 잡아당겨 북마크하는 움직임 끄기
+        // 표지형을 골랐을 때만: 책갈피를 잡아당기지 않고 누르기만 해도 즐겨찾기 (기본은 잡아당기기)
         SheetToggle(
-          icon: Icons.bookmark_remove_outlined,
-          label: _t('책갈피 애니메이션 끄기', 'Turn off bookmark animation', '关闭书签动画', 'しおりのアニメーションをオフ'),
-          subtitle: _t('잡아당기지 않고 누르면 바로 즐겨찾기', 'Tap to bookmark instead of pulling', '点击即可添加书签，无需下拉', '引っ張らずにタップでブックマーク'),
+          icon: Icons.touch_app_outlined,
+          label: _t('책갈피 터치로 즐겨찾기', 'Tap bookmark to favorite', '轻触书签即可收藏', 'しおりをタップしてお気に入り'),
+          subtitle: _t('당기지 않고 터치로 즐겨찾기', 'Tap instead of pulling', '无需下拉，轻触即可收藏', '引っ張らずにタップでお気に入り'),
           value: FavoriteRibbon.animationOff.value,
           onlyFor: 'grid',
           onChanged: (v) async {
@@ -319,36 +319,56 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     if (ok != true || !mounted) return;
     const ch = MethodChannel('ebook_reader/pdf_renderer');
     // '모든 파일 접근'은 앱이 스스로 끌 수 없어서 안드로이드 설정 화면에서 끄고 돌아오게 함
-    final bool allFiles = await ch.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
-    if (allFiles && mounted) {
+    bool asked = false;
+    while (mounted) {
+      final bool allFiles = await ch.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
+      if (!allFiles) break;
       final go = await showPopDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(_t('파일 접근 권한 끄기', 'Turn Off File Access', '关闭文件访问权限', 'ファイルアクセス権限をオフ')),
-          content: Text(_t('모든 파일 접근 권한은 안드로이드 설정에서 직접 꺼야 해요\n설정에서 끄고 돌아오면 데이터를 지울게요',
-              'All-files access must be turned off in Android settings\nTurn it off and come back to clear the data',
-              '所有文件访问权限需要在安卓设置中手动关闭\n关闭后返回即可清除数据',
-              'すべてのファイルへのアクセスはAndroidの設定でオフにする必要があります\nオフにして戻るとデータを削除します')),
+          content: Text(asked
+              ? _t('모든 파일 접근 권한이 아직 켜져 있어요\n설정에서 끄고 돌아오면 데이터를 지울게요',
+                  'All-files access is still on\nTurn it off in settings and come back to clear the data',
+                  '所有文件访问权限仍处于开启状态\n在设置中关闭后返回即可清除数据',
+                  'すべてのファイルへのアクセスがまだオンです\n設定でオフにして戻るとデータを削除します')
+              : _t('모든 파일 접근 권한은 안드로이드 설정에서 직접 꺼야 해요\n설정에서 끄고 돌아오면 데이터를 지울게요',
+                  'All-files access must be turned off in Android settings\nTurn it off and come back to clear the data',
+                  '所有文件访问权限需要在安卓设置中手动关闭\n关闭后返回即可清除数据',
+                  'すべてのファイルへのアクセスはAndroidの設定でオフにする必要があります\nオフにして戻るとデータを削除します')),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('그냥 지우기', 'Clear Anyway', '直接清除', 'そのまま削除'))),
             ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_t('설정 열기', 'Open Settings', '打开设置', '設定を開く'))),
           ],
         ),
       );
-      if (go == null || !mounted) return;
-      if (go) {
-        // 권한을 끄면 안드로이드가 앱을 끄고 다시 시작함 → 다시 시작할 때 이어서 지움
-        await StorageService.setPendingClearData(true);
-        final back = Completer<void>();
-        final listener = AppLifecycleListener(onResume: () {
-          if (!back.isCompleted) back.complete();
-        });
-        await ch.invokeMethod('requestFontScan').catchError((_) => null);
-        await back.future;
-        listener.dispose();
-        if (!mounted) return;
+      if (go == null || !mounted) {
+        await StorageService.setPendingClearData(false);
+        return;
       }
+      if (!go) break;
+      asked = true;
+      // 권한을 끄면 안드로이드가 앱을 끄고 다시 시작할 수 있음 → 다시 시작할 때 이어서 지움
+      await StorageService.setPendingClearData(true);
+      // 설정 화면으로 실제로 넘어갔다가(앱이 가려짐) 다시 돌아왔을 때만 이어 감
+      // (설정 화면을 여는 순간 잠깐 생기는 '돌아옴' 신호에 속지 않게)
+      final back = Completer<void>();
+      bool left = false;
+      final listener = AppLifecycleListener(
+        onHide: () => left = true,
+        onPause: () => left = true,
+        onResume: () {
+          if (left && !back.isCompleted) back.complete();
+        },
+      );
+      await ch.invokeMethod('requestFontScan').catchError((_) => null);
+      await back.future;
+      listener.dispose();
+      // 설정에서 바뀐 권한이 앱에 반영될 틈
+      await Future<void>.delayed(const Duration(milliseconds: 300));
     }
+    if (!mounted) return;
+    await StorageService.setPendingClearData(false);
     final done = await ch.invokeMethod<bool>('clearAppData').catchError((_) => false) ?? false;
     if (!done && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('데이터를 지우지 못했어요', 'Could not clear data', '无法清除数据', 'データを削除できませんでした'))));
@@ -440,15 +460,13 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               subtitle: languageOptionLabel(_langSetting),
               onTap: _pickLanguage,
             ),
-            // 애니메이션 멈추기: 앱 전체의 움직임을 바로 바뀌게
+            // 애니메이션 끄기: 앱 전체의 움직임을 바로 바뀌게
             ValueListenableBuilder<bool>(
               valueListenable: Anim.off,
               builder: (context, off, _) => _item(
                 icon: Icons.motion_photos_off_outlined,
-                title: _t('애니메이션 멈추기', 'Stop Animations', '停止动画', 'アニメーションを停止'),
-                subtitle: off
-                    ? _t('버튼·창이 움직임 없이 바로 바뀌어요', 'Buttons, windows and page turns change instantly', '按钮、窗口和翻页立即切换，没有动画', 'ボタン・ウィンドウ・ページめくりが動きなしですぐ切り替わります')
-                    : _t('버튼·창에 움직임을 보여 줘요', 'Shows motion for buttons, windows and page turns', '按钮、窗口和翻页显示动画', 'ボタン・ウィンドウ・ページめくりに動きを表示します'),
+                title: _t('애니메이션 끄기', 'Turn Off Animations', '关闭动画', 'アニメーションをオフ'),
+                subtitle: _t('버튼·창이 움직임 없이 바로 바뀌어요', 'Buttons and windows change instantly without motion', '按钮和窗口立即切换，没有动画', 'ボタン・ウィンドウが動きなしですぐ切り替わります'),
                 onTap: () => StorageService.setAnimOff(!off),
                 trailing: Switch(value: off, onChanged: StorageService.setAnimOff),
               ),
@@ -469,18 +487,14 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             _item(
               icon: Icons.bookmark_added_outlined,
               title: _t('페이지 기억하기', 'Remember Last Page', '记住页面', 'ページを記憶'),
-              subtitle: _rememberPage
-                  ? _t('마지막으로 읽던 쪽부터 열어요', 'Opens where you left off', '从上次阅读的页面打开', '最後に読んだページから開きます')
-                  : _t('처음부터 열어요', 'Opens from the start (turn on to resume where you were)', '从头打开（重新开启后从关闭前的页面继续）', '最初から開きます（再びオンにすると前のページから）'),
+              subtitle: _t('마지막으로 읽던 쪽으로 열어요', 'Opens at the page you last read', '打开到上次阅读的页面', '最後に読んだページで開きます'),
               onTap: () => _setRememberPage(!_rememberPage),
               trailing: Switch(value: _rememberPage, onChanged: _setRememberPage),
             ),
             _item(
               icon: Icons.touch_app_outlined,
               title: _t('탭 가이드라인 끄기', 'Turn Off Tap Guide', '关闭点击指引', 'タップガイドをオフ'),
-              subtitle: _tapGuideOff
-                  ? _t('파일을 열 때 화면 구역 안내를 보여 주지 않아요', 'The tap zone guide is not shown when opening files', '打开文件时不显示点击区域指引', 'ファイルを開くときにタップゾーンの案内を表示しません')
-                  : _t('파일을 열 때마다 화면을 누르는 구역(메뉴·이전·다음)을 보여 줘요', 'Shows the tap zones (menu, previous, next) every time a file opens', '每次打开文件时显示点击区域（菜单、上一页、下一页）', 'ファイルを開くたびにタップする区域（メニュー・前・次）を表示します'),
+              subtitle: _t('파일을 열 때마다 탭 구역 안내를 보여 주지 않아요', 'Does not show the tap zone guide each time a file opens', '每次打开文件时不显示点击区域指引', 'ファイルを開くたびにタップ区域の案内を表示しません'),
               onTap: () => _setTapGuideOff(!_tapGuideOff),
               trailing: Switch(value: _tapGuideOff, onChanged: _setTapGuideOff),
             ),

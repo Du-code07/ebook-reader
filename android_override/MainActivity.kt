@@ -330,6 +330,16 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 알림 기능은 없앴음: 예전에 만들어 둔 알림 항목(안드로이드 설정 > 알림)도 지움
+        if (Build.VERSION.SDK_INT >= 26) {
+            try {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                nm.cancelAll()
+                for (id in listOf("freader_prep", "freader_prep_v2")) {
+                    try { nm.deleteNotificationChannel(id) } catch (_: Throwable) {}
+                }
+            } catch (_: Throwable) {}
+        }
         hideSystemStatusBar(alsoHideNavBar = true)
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 250L)
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 600L)
@@ -574,7 +584,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 try {
                     if (Build.VERSION.SDK_INT >= 33) {
                         val granted = listOf(
-                            android.Manifest.permission.POST_NOTIFICATIONS,
                             android.Manifest.permission.CAMERA,
                         ).filter { declaredPermission(it) && checkSelfPermission(it) == android.content.pm.PackageManager.PERMISSION_GRANTED }
                         if (granted.isNotEmpty()) try { revokeSelfPermissionsOnKill(granted) } catch (_: Throwable) {}
@@ -805,20 +814,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         runOnUiThread { result.error("CROP_ERR", e.message, null) }
                     }
                 }.start()
-            } else if (call.method == "requestNotificationPermission") {
-                // 안드로이드 13 이상: 알림 허용을 한 번 물음 (이미 허용했거나 거절했으면 조용히)
-                if (Build.VERSION.SDK_INT >= 33 &&
-                    checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                    try { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 4711) } catch (_: Throwable) {}
-                }
-                result.success(null)
-            } else if (call.method == "showNotification") {
-                // 휴대폰 상태 표시줄 알림 (누르면 앱으로). 알림을 쓸 수 없으면 false
-                val title = call.argument<String>("title") ?: "FReader"
-                val text = call.argument<String>("text") ?: ""
-                val id = (call.argument<Number>("id") ?: 1).toInt()
-                val vibrate = call.argument<Boolean>("vibrate") ?: true
-                result.success(postStatusNotification(title, text, id, vibrate))
             } else if (call.method == "captureScrollPage") {
                 // 스크롤 보기 준비용 숨은 문서 화면(주소에 freaderScroll=1)을 바로 그림으로:
                 // 화면(UI) 스레드에서는 그리기만 하고, 자르기·여백 걷기·저장은 다른 스레드에서 (화면이 버벅이지 않게)
@@ -871,6 +866,36 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
                 wake(window.decorView)
                 result.success(count)
+            } else if (call.method == "snapshotWebViewRaw") {
+                // 책처럼 넘기기용: 압축하지 않은 화소(RGBA) 그대로 넘김 → PNG·JPEG 압축 시간이 없고 투명한 곳(종이 질감 위)도 살아 있음
+                val webView = findLargestWebView(window.decorView)
+                if (webView == null || webView.width <= 0 || webView.height <= 0) {
+                    result.error("NO_WEBVIEW", "WebView not found", null)
+                    return@setMethodCallHandler
+                }
+                try {
+                    val bg = (call.argument<Number>("background") ?: 0).toLong().toInt()
+                    val bmp = Bitmap.createBitmap(webView.width, webView.height, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    if (bg != 0) canvas.drawColor(bg)
+                    canvas.translate(-webView.scrollX.toFloat(), -webView.scrollY.toFloat())
+                    webView.draw(canvas)
+                    Thread {
+                        try {
+                            val buf = java.nio.ByteBuffer.allocate(bmp.byteCount)
+                            bmp.copyPixelsToBuffer(buf)
+                            val w = bmp.width
+                            val h = bmp.height
+                            bmp.recycle()
+                            val out = hashMapOf<String, Any>("w" to w, "h" to h, "px" to buf.array())
+                            runOnUiThread { result.success(out) }
+                        } catch (e: Throwable) {
+                            runOnUiThread { result.error("CAPTURE_ERR", e.message, null) }
+                        }
+                    }.start()
+                } catch (e: Throwable) {
+                    result.error("CAPTURE_ERR", e.message, null)
+                }
             } else if (call.method == "snapshotWebView") {
                 // 위로 밀어 넘길 때 지금 페이지를 잠깐 붙잡아 두는 그림 (JPEG 바이트, 빈 곳은 배경색)
                 val webView = findLargestWebView(window.decorView)
@@ -1526,63 +1551,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     // ── PDF 내보내기 ──────────────────────────────────────────────────────────
 
     /** 화면에 보이는 WebView 중 가장 큰 것 (EPUB 본문) */
-    private fun postStatusNotification(title: String, text: String, id: Int, vibrate: Boolean): Boolean {
-        return try {
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            if (Build.VERSION.SDK_INT >= 24 && !nm.areNotificationsEnabled()) return false
-            // 알림 자체는 소리·진동 없이, 진동은 앱이 직접 (앱 설정 '알림 진동'을 따르고, 무음 모드에서도 느낄 수 있게)
-            val channelId = "freader_prep_v2"
-            if (Build.VERSION.SDK_INT >= 26) {
-                try { nm.deleteNotificationChannel("freader_prep") } catch (_: Throwable) {}
-                // 예전에 만든 알림 이름도 앱 이름으로 바꿔 둠 (같은 번호로 다시 만들면 이름만 바뀜)
-                if (nm.getNotificationChannel(channelId) == null || nm.getNotificationChannel(channelId)?.name != "FReader") {
-                    val ch = android.app.NotificationChannel(channelId, "FReader", android.app.NotificationManager.IMPORTANCE_DEFAULT)
-                    ch.setSound(null, null)
-                    ch.enableVibration(false)
-                    nm.createNotificationChannel(ch)
-                }
-            }
-            val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-                addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-            }
-            val pi = if (launch != null) android.app.PendingIntent.getActivity(
-                this, id, launch,
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) android.app.PendingIntent.FLAG_IMMUTABLE else 0)
-            ) else null
-            val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, channelId)
-                    else @Suppress("DEPRECATION") android.app.Notification.Builder(this)
-            b.setSmallIcon(android.R.drawable.stat_sys_download_done)
-                .setContentTitle(title)
-                .setContentText(text)
-                .setStyle(android.app.Notification.BigTextStyle().bigText(text))
-                .setAutoCancel(true)
-                .setShowWhen(true)
-            if (pi != null) b.setContentIntent(pi)
-            nm.notify(id, b.build())
-            if (vibrate) vibrateOnce()
-            true
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    private fun vibrateOnce() {
-        try {
-            val pattern = longArrayOf(0, 180, 110, 180)
-            val v: android.os.Vibrator? = if (Build.VERSION.SDK_INT >= 31) {
-                (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager)?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION") getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
-            }
-            if (v == null || !v.hasVibrator()) return
-            if (Build.VERSION.SDK_INT >= 26) {
-                v.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
-            } else {
-                @Suppress("DEPRECATION") v.vibrate(pattern, -1)
-            }
-        } catch (_: Throwable) {}
-    }
-
     private fun findScrollWebView(root: View, tag: String? = null): WebView? {
         if (root is WebView) {
             val url = try { root.url } catch (_: Throwable) { null }

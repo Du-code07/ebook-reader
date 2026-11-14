@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
-import 'package:archive/archive.dart';
 import 'package:archive/archive_io.dart';
 import 'package:flutter/material.dart';
 import 'services/app_messenger.dart';
@@ -1726,18 +1725,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
     await _loadLibrary();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _tr(
-              '${importedFiles.length}개의 파일이 서재에 추가됐어요',
-              'Added ${importedFiles.length} file(s) to bookshelf',
-              '已添加 ${importedFiles.length} 个文件到书架',
-              '${importedFiles.length}個のファイルが追加されました',
-            ),
-          ),
-        ),
+      final msg = _tr(
+        '${importedFiles.length}개의 파일이 서재에 추가됐어요',
+        'Added ${importedFiles.length} file(s) to bookshelf',
+        '已添加 ${importedFiles.length} 个文件到书架',
+        '${importedFiles.length}個のファイルが追加されました',
       );
+      if (importedFiles.length == 1) {
+        // 파일 하나만 넣었으면 바로 열 수 있게
+        _showCreatedSnack(msg, importedFiles.first);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      }
     }
   }
 
@@ -2063,17 +2062,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     await _loadLibrary();
     if (mounted) {
       final grpDisplay = _localizeGroupName(targetGroup);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _tr(
-              'cbz 파일이 [$grpDisplay]에 만들어졌어요\n($safeTitle.cbz)',
-              'cbz file created in [$grpDisplay]\n($safeTitle.cbz)',
-              'cbz 文件已创建于 [$grpDisplay]\n($safeTitle.cbz)',
-              'cbzファイルが [$grpDisplay] に作成されました\n($safeTitle.cbz)',
-            ),
-          ),
+      _showCreatedSnack(
+        _tr(
+          'cbz 파일이 [$grpDisplay]에 만들어졌어요\n($safeTitle.cbz)',
+          'cbz file created in [$grpDisplay]\n($safeTitle.cbz)',
+          'cbz 文件已创建于 [$grpDisplay]\n($safeTitle.cbz)',
+          'cbzファイルが [$grpDisplay] に作成されました\n($safeTitle.cbz)',
         ),
+        outFile,
       );
     }
   }
@@ -2296,17 +2292,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
       if (mounted) {
         final grpDisplay = _localizeGroupName(targetGroup);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _tr(
-                'PDF 파일이 [$grpDisplay]에 만들어졌어요\n($safeTitle.pdf)',
-                'PDF file created in [$grpDisplay]\n($safeTitle.pdf)',
-                'PDF 文件已创建于 [$grpDisplay]\n($safeTitle.pdf)',
-                'PDFファイルが [$grpDisplay] に作成されました\n($safeTitle.pdf)',
-              ),
-            ),
+        _showCreatedSnack(
+          _tr(
+            'PDF 파일이 [$grpDisplay]에 만들어졌어요\n($safeTitle.pdf)',
+            'PDF file created in [$grpDisplay]\n($safeTitle.pdf)',
+            'PDF 文件已创建于 [$grpDisplay]\n($safeTitle.pdf)',
+            'PDFファイルが [$grpDisplay] に作成されました\n($safeTitle.pdf)',
           ),
+          outFile,
         );
       }
     } catch (e) {
@@ -2442,6 +2435,25 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   /// 지금 화면에 보이는 파일 목록 (파일 화면의 이전·다음 파일 순서로 씀)
   List<File> _visibleBooksNow = const [];
+
+  /// 파일을 만들었다·넣었다는 아래 알림 + 오른쪽 끝 [열기]
+  void _showCreatedSnack(String message, File file) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: SnackBarAction(
+          label: _tr('열기', 'Open', '打开', '開く'),
+          textColor: Colors.white,
+          backgroundColor: AppColors.of(context),
+          onPressed: () {
+            if (mounted && file.existsSync()) _openFile(file);
+          },
+        ),
+      ),
+    );
+  }
 
   Future<void> _openFile(File file) async {
     // 이전·다음 파일 이동은 지금 보이는 목록 순서대로 (검색 결과에서 열면 그 그룹 순서로)
@@ -2985,6 +2997,26 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       _isSelectionMode = false;
     });
 
+    await _loadLibrary();
+  }
+
+  /// 고른 파일들을 즐겨찾기: 모두 이미 즐겨찾기면 빼고, 아니면 모두 넣음
+  Future<void> _favoriteSelectedFilesBatch() async {
+    if (_selectedFilePaths.isEmpty) return;
+    final paths = Set<String>.of(_selectedFilePaths);
+    final bool on = !paths.every(_favoritePaths.contains);
+    await StorageService.setFavoriteBooks(paths, on);
+    if (!mounted) return;
+    setState(() {
+      _favoritePaths = Set<String>.of(_favoritePaths);
+      if (on) {
+        _favoritePaths.addAll(paths);
+      } else {
+        _favoritePaths.removeAll(paths);
+      }
+      _selectedFilePaths.clear();
+      _isSelectionMode = false;
+    });
     await _loadLibrary();
   }
 
@@ -4029,9 +4061,36 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         ),
       ),
       floatingActionButton: _isSelectionMode
-          ? Row(
+          // 좁은 휴대폰에서 단추 세 개가 넘치지 않게 필요하면 살짝 줄여 맞춤
+          ? ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width - 32),
+              child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // 즐겨찾기 (고른 파일이 모두 즐겨찾기면 해제)
+                Builder(builder: (context) {
+                  final bool allFav = _selectedFilePaths.isNotEmpty && _selectedFilePaths.every(_favoritePaths.contains);
+                  return SizedBox(
+                    height: 42,
+                    child: FloatingActionButton.extended(
+                      heroTag: 'fab_batch_favorite',
+                      backgroundColor: AppColors.of(context),
+                      foregroundColor: AppColors.onSig(context),
+                      extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
+                      extendedIconLabelSpacing: 6,
+                      onPressed: _selectedFilePaths.isNotEmpty ? _favoriteSelectedFilesBatch : null,
+                      icon: Icon(allFav ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined, size: 16),
+                      label: Text(
+                        '${_tr("즐겨찾기", "Favorite", "收藏", "お気に入り")} (${_selectedFilePaths.length})',
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, shadows: AppColors.sigShadows(context)),
+                      ),
+                    ),
+                  );
+                }),
+                const SizedBox(width: 8),
                 SizedBox(
                   height: 42,
                   child: FloatingActionButton.extended(
@@ -4066,6 +4125,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   ),
                 ),
               ],
+            ),
+            ),
             )
           : _buildAddFab(),
       ),

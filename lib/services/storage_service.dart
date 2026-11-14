@@ -96,13 +96,13 @@ class AppI18n {
 class StorageService {
   static final ValueNotifier<String> appLangNotifier = ValueNotifier<String>('ko');
   static final ValueNotifier<bool?> desiredLandscapeNotifier = ValueNotifier<bool?>(null);
-  // 페이지 기억하기 (기본 켜짐). 끄면 읽던 자리를 새로 저장하지 않고 처음부터 보여 주며,
+  // 페이지 기억하기 (기본 꺼짐). 끄면 읽던 자리를 새로 저장하지 않고 처음부터 보여 주며,
   // 다시 켜면 끄기 전에 저장해 둔 자리를 그대로 보여 준다
-  static bool rememberPage = true;
+  static bool rememberPage = false;
 
   static Future<void> loadRememberPage() async {
     final prefs = await SharedPreferences.getInstance();
-    rememberPage = prefs.getBool('remember_page_v89') ?? true;
+    rememberPage = prefs.getBool('remember_page_v116') ?? false;
     tapGuideOff = prefs.getBool('tap_guide_off_v104') ?? false;
     Anim.off.value = prefs.getBool('anim_off_v109') ?? false;
     pageCurl = prefs.getBool('page_curl_v109') ?? true;
@@ -136,7 +136,7 @@ class StorageService {
   static Future<void> setRememberPage(bool on) async {
     rememberPage = on;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('remember_page_v89', on);
+    await prefs.setBool('remember_page_v116', on);
   }
 
   // 도구 모음 형태: 'arc'(반원, 기본) / 'bar'(아래 가로 바)
@@ -331,12 +331,12 @@ class StorageService {
   /// 표지형: 책갈피를 잡아당겨 북마크하는 움직임 끄기
   static Future<void> setRibbonAnimationOff(bool off) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('ribbon_anim_off_v95', off);
+    await prefs.setBool('ribbon_tap_v116', off);
   }
 
   static Future<bool> getRibbonAnimationOff() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('ribbon_anim_off_v95') ?? false;
+    return prefs.getBool('ribbon_tap_v116') ?? false;
   }
 
   /// 사용자가 고른 표지 그림: 파일 경로 → 표지 그림 경로
@@ -412,6 +412,18 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     final list = prefs.getStringList('favorite_book_paths') ?? [];
     return list.toSet();
+  }
+
+  /// 여러 파일을 한꺼번에 즐겨찾기에 넣거나(on) 뺌
+  static Future<void> setFavoriteBooks(Iterable<String> paths, bool on) async {
+    final prefs = await SharedPreferences.getInstance();
+    final favs = (prefs.getStringList('favorite_book_paths') ?? []).toSet();
+    if (on) {
+      favs.addAll(paths);
+    } else {
+      favs.removeAll(paths);
+    }
+    await prefs.setStringList('favorite_book_paths', favs.toList());
   }
 
   static Future<bool> toggleFavoriteBook(String bookPath) async {

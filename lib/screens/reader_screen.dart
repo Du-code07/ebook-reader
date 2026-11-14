@@ -1366,7 +1366,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (file == null || file.existsSync()) return;
     final serial = ++_snapCaptureSerial;
     Future<void>.delayed(const Duration(milliseconds: 400), () async {
-      if (!mounted || serial != _snapCaptureSerial || page != _docPage) return;
+      // 책처럼 넘기는 중에는 화면 저장이 끼어들면 버벅이므로 다 넘어간 뒤에 저장
+      for (int i = 0; i < 12 && mounted && _book.busy; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+      if (!mounted || serial != _snapCaptureSerial || page != _docPage || _book.busy) return;
       // 넘기는 중·확대 중·필기 중·다른 화면이 덮고 있을 때는 저장하지 않음
       if (_vPeekActive || _vPageSwipe.isAnimating || _vPageSwipe.isVerticalGesture || _snapShown != null) return;
       if (_epubZoomScale > 1.03 || _isStylusDown || _activeStrokePoints.isNotEmpty || _slideShow || _isExporting || _findOpen) return;
@@ -3128,8 +3132,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<ui.Image?> _captureForCurl() async {
+    // 워드·한글·EPUB: 문서 화면의 화소를 압축 없이 그대로 받음 (빠르고, 종이 질감 위의 투명한 곳도 살아 있음)
+    if (!_isTxt) {
+      final raw = await _rawWebViewShot();
+      if (raw != null) {
+        if (_isOfflineDocument || !await BookCurlDrag.looksBlank(raw)) return raw;
+        raw.dispose(); // EPUB은 네이티브 그리기로 빈 그림이 나올 때가 있어 아래 방법으로
+      }
+    }
     if (!_isOfflineDocument) {
-      // EPUB: 책 화면(WebView)이 직접 찍은 그림 (네이티브 그리기로는 빈 그림이 나올 때가 있어서)
+      // EPUB: 책 화면(WebView)이 직접 찍은 그림
       try {
         final bytes = await _epubController.takeScreenshot().timeout(const Duration(milliseconds: 900));
         if (bytes != null && bytes.isNotEmpty && mounted) {
@@ -3139,6 +3151,23 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       } catch (_) {}
     }
     return _vCaptureCurrent();
+  }
+
+  Future<ui.Image?> _rawWebViewShot() async {
+    try {
+      final r = await _pdfChannel
+          .invokeMethod<Map>('snapshotWebViewRaw', {'background': _isPaperTheme ? 0 : _getBgColor().toARGB32()})
+          .timeout(const Duration(milliseconds: 1500));
+      if (r == null) return null;
+      final int w = (r['w'] as num).toInt(), h = (r['h'] as num).toInt();
+      final Uint8List px = r['px'] as Uint8List;
+      if (w <= 0 || h <= 0 || px.length < w * h * 4) return null;
+      final done = Completer<ui.Image>();
+      ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, done.complete);
+      return await done.future.timeout(const Duration(milliseconds: 1500));
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 손가락이 닿으면 미리 지금 화면을 찍어 둠 (종이처럼 넘기기가 켜져 있을 때만)
@@ -3176,7 +3205,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         Positioned.fill(
           child: BookCurlLayer(
             drag: _book,
-            paper: _isPaperTheme ? null : _getBgColor(),
+            // 넘어가는 종이 뒷면·빈 곳 색: 지금 보는 배경색 (세피아면 세피아. 앱이 다크여도 검게 보이지 않게)
+            paper: _getBgColor(),
             texture: _isPaperTheme ? BookCurlLayer.paperTexture(() => mounted ? setState(() {}) : null) : null,
           ),
         ),

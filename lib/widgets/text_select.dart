@@ -126,8 +126,37 @@ class PageTextSelection extends ChangeNotifier {
   bool hitsControls(Offset p) {
     if (!active) return false;
     if (barBand?.contains(p) ?? false) return true;
-    return (p - startHandle).distance < 36 || (p - endHandle).distance < 36;
+    if ((p - startHandle).distance < 36 || (p - endHandle).distance < 36) return true;
+    return hitsSelection(p);
   }
+
+  /// 고른 글(파란 바탕) 위를 눌렀는지
+  bool hitsSelection(Offset p) => highlightRects.any((r) => r.inflate(10).contains(p));
+
+  /// 고른 글을 잡고 끌 때 움직일 손잡이 (true: 앞, false: 뒤)
+  bool? _bodyStart;
+
+  /// 고른 글을 잡고 끌기 시작: 누른 곳에서 가까운 손잡이를 잡음
+  void beginBodyDrag(Offset p) {
+    if (!active) return;
+    _bodyStart = (p - startHandle).distance < (p - endHandle).distance;
+  }
+
+  /// 고른 글을 잡고 끄는 중: 잡은 손잡이를 손가락 자리로
+  void bodyDragTo(Offset p) {
+    final b = _bodyStart;
+    if (b == null || !active) return;
+    moveHandle(b, p);
+    // 앞 손잡이를 뒤 손잡이 너머로 끌면 순서가 바뀌므로 다시 고름
+    final (sl, sc, el, ec) = _range;
+    final h = hit(p);
+    if (h != null) {
+      if (h.$1 == sl && h.$2 == sc) _bodyStart = true;
+      if (h.$1 == el && h.$2 == ec) _bodyStart = false;
+    }
+  }
+
+  void endBodyDrag() => _bodyStart = null;
 
   /// 낱말 상자들(읽는 순서)을 줄로 묶음: 같은 높이에서 오른쪽으로 이어지는 낱말은 한 줄
   static List<SelLine> linesFromWords(List<SelLine> words) {
@@ -355,6 +384,25 @@ class PageTextSelectLayer extends StatelessWidget {
             clipBehavior: Clip.none,
             children: [
               IgnorePointer(child: CustomPaint(size: Size.infinite, painter: _HighlightPainter(rects))),
+              // 고른 글(파란 바탕)을 잡고 끌면 가까운 쪽 손잡이가 따라와 범위를 고침 (지우지 않음)
+              Positioned.fill(
+                key: const ValueKey('sel-body'),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.deferToChild,
+                  onPanStart: (d) {
+                    final box = context.findRenderObject() as RenderBox?;
+                    if (box != null) sel.beginBodyDrag(box.globalToLocal(d.globalPosition));
+                  },
+                  onPanUpdate: (d) {
+                    final box = context.findRenderObject() as RenderBox?;
+                    if (box != null) sel.bodyDragTo(box.globalToLocal(d.globalPosition));
+                  },
+                  onPanEnd: (_) => sel.endBodyDrag(),
+                  onPanCancel: sel.endBodyDrag,
+                  // 고른 글 자리만 손가락을 받음 (나머지 화면은 그대로 아래로 전달)
+                  child: CustomPaint(size: Size.infinite, painter: _BodyHit([for (final r in rects) r.inflate(10)])),
+                ),
+              ),
               handle(true, s),
               handle(false, e),
               Positioned(
@@ -394,6 +442,20 @@ class PageTextSelectLayer extends StatelessWidget {
       },
     );
   }
+}
+
+class _BodyHit extends CustomPainter {
+  _BodyHit(this.rects);
+  final List<Rect> rects;
+
+  @override
+  void paint(Canvas canvas, Size size) {}
+
+  @override
+  bool hitTest(Offset position) => rects.any((r) => r.contains(position));
+
+  @override
+  bool shouldRepaint(covariant _BodyHit old) => false;
 }
 
 class _HighlightPainter extends CustomPainter {
