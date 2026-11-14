@@ -1292,6 +1292,7 @@ function renderBook(data, opts, loadToken) {
     var currentTouchY = null;
     var hasMoved = false; // Track if touch has moved significantly (swipe vs tap)
     var touchStartTime = null; // Track when touch started
+    var longSelDrag = false, earlyMove = false; // FReader: 길게 눌러 끄는 글 고르기
 
     // Helper function to calculate normalized touch coordinates (0-1 range)
     // Uses the same logic as selection coordinate calculation
@@ -1461,6 +1462,7 @@ function renderBook(data, opts, loadToken) {
           currentTouchX = touchStartX;
           currentTouchY = touchStartY;
           touchStartTime = Date.now();
+          longSelDrag = false; earlyMove = false;
           hasMoved = false; // Reset movement flag
         }
         // Don't preventDefault yet - wait to see if it's a tap or swipe
@@ -1472,6 +1474,7 @@ function renderBook(data, opts, loadToken) {
           currentTouchX = touchStartX;
           currentTouchY = touchStartY;
           touchStartTime = Date.now();
+          longSelDrag = false; earlyMove = false;
           hasMoved = false;
         }
       }
@@ -1517,6 +1520,13 @@ function renderBook(data, opts, loadToken) {
     }
 
     doc.addEventListener('touchmove', function (e) {
+      // FReader: 길게 누른 채로 끌면(글 고르기) 브라우저가 고른 범위를 늘리도록 막지 않음
+      if (!longSelDrag && !earlyMove && touchStartTime !== null && e.touches && e.touches.length) {
+        var m0 = e.touches[0];
+        if (Date.now() - touchStartTime >= 350) longSelDrag = true;
+        else if (Math.abs(m0.clientX - touchStartX) + Math.abs(m0.clientY - touchStartY) > 10) earlyMove = true;
+      }
+      if (longSelDrag) return;
       if (hasActiveSelection()) {
         // Update position
         if (e.touches && e.touches.length > 0 && touchStartX !== null) {
@@ -1567,7 +1577,7 @@ function renderBook(data, opts, loadToken) {
         // Ignore errors in callback
       }
 
-      if (hasActiveSelection()) {
+      if (hasActiveSelection() && !longSelDrag) {
         // Check if this was a tap (no significant movement) or a swipe
         if (touchStartX !== null && currentTouchX !== null && touchStartTime !== null) {
           var deltaX = Math.abs(currentTouchX - touchStartX);
@@ -1593,6 +1603,7 @@ function renderBook(data, opts, loadToken) {
         }
       }
       // Reset tracking
+      longSelDrag = false; earlyMove = false;
       touchStartX = null;
       touchStartY = null;
       currentTouchX = null;
@@ -3208,6 +3219,8 @@ function detectSwipe(el, func) {
       swipe_det.blocked = false; // Don't block yet - wait to see if it's a tap
       swipe_det.hasMoved = false;
       swipe_det.touchStartTime = Date.now();
+      swipe_det.longDrag = false;
+      swipe_det.early = false;
       if (e.touches && e.touches.length > 0) {
         var t = e.touches[0];
         swipe_det.sX = t.clientX;
@@ -3220,6 +3233,8 @@ function detectSwipe(el, func) {
       swipe_det.blocked = false;
       swipe_det.hasMoved = false;
       swipe_det.touchStartTime = Date.now();
+      swipe_det.longDrag = false;
+      swipe_det.early = false;
       var t = e.touches[0];
       swipe_det.sX = t.clientX;
       swipe_det.sY = t.clientY;
@@ -3230,6 +3245,14 @@ function detectSwipe(el, func) {
   ele.addEventListener('touchmove', function (e) {
     if (!e.touches || e.touches.length !== 1) swipe_det.blocked = true;
     if (swipe_det.blocked || swipe_det.touchStartTime === null) return;
+    // FReader: 길게 누른 뒤 끄는 건 글 고르기 → 넘기기로 보지 않고 브라우저에 맡김 (막으면 고른 글이 사라짐)
+    if (!swipe_det.longDrag && !swipe_det.early && e.touches && e.touches.length) {
+      var t0 = e.touches[0];
+      var dd = Math.abs(t0.clientX - swipe_det.sX) + Math.abs(t0.clientY - swipe_det.sY);
+      if (Date.now() - swipe_det.touchStartTime >= 350) swipe_det.longDrag = true;
+      else if (dd > 10) swipe_det.early = true;
+    }
+    if (swipe_det.longDrag) return;
     // If selection exists, check if it's a swipe
     if (hasActiveSelection()) {
       var t = e.touches[0];
@@ -3268,6 +3291,13 @@ function detectSwipe(el, func) {
   }, { capture: true, passive: false }); // Use options object with passive: false
   ele.addEventListener('touchend', function (e) {
     if (swipe_det.touchStartTime === null) return;
+    if (swipe_det.longDrag) {
+      // FReader: 길게 눌러 끌어 고른 뒤 손을 뗌 → 넘기지도, 막지도 않음
+      swipe_det.longDrag = false;
+      swipe_det.touchStartTime = null;
+      swipe_det.blocked = false;
+      return;
+    }
     if (!swipe_det.blocked && e.changedTouches && e.changedTouches.length) {
       swipe_det.eX = e.changedTouches[0].clientX;
       swipe_det.eY = e.changedTouches[0].clientY;

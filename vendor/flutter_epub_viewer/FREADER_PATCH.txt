@@ -32,3 +32,8 @@ FReader v51 viewport and swipe patch
 - Use chapter-local swipe state and client coordinates; cancel multi-touch and
   cancelled gestures. Reset navigation wrappers when reusing the same WebView.
 - Existing EPUB content, UI, native transport and licenses are unchanged.
+
+FReader v116 selection patch
+- epubView.js: a touch that stays still for 350ms (long-press text selection)
+  and then moves is left to the browser so the selection can be extended by
+  dragging; it is no longer blocked as a swipe (blocking cleared the selection).
