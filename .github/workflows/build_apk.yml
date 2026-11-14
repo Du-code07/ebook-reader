@@ -137,14 +137,7 @@ jobs:
             if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
               sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET"/>' "$MANIFEST"
             fi
-            # 스크롤 보기 준비가 끝나면 휴대폰 상태 표시줄로 알림 (안드로이드 13 이상은 처음 한 번 허용을 물음)
-            if ! grep -q 'android.permission.POST_NOTIFICATIONS' "$MANIFEST"; then
-              sed -i '/<application/i\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' "$MANIFEST"
-            fi
-            # 준비가 끝났을 때 진동 (앱 설정 '알림 진동')
-            if ! grep -q 'android.permission.VIBRATE' "$MANIFEST"; then
-              sed -i '/<application/i\    <uses-permission android:name="android.permission.VIBRATE"/>' "$MANIFEST"
-            fi
+            # (알림 기능은 없앴음: 알림·진동 권한을 넣지 않음)
             # 글꼴 찾기: 기기 저장소의 글꼴 파일 읽기 (안드로이드 12 이하) / 모든 파일 접근 (안드로이드 11 이상, 설정 화면에서 허용)
             if ! grep -q 'android.permission.READ_EXTERNAL_STORAGE' "$MANIFEST"; then
               sed -i '/<application/i\    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>' "$MANIFEST"
