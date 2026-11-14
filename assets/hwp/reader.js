@@ -319,6 +319,13 @@ async function render() {
     frame.setAttribute('aria-label', `${index + 1} / ${count}`);
     frame.appendChild(svg); fragment.appendChild(frame);
   }
+  // FReader: 두 쪽 보기에서 마지막 쪽이 홀로 남으면 책처럼 왼쪽에 두고 오른쪽은 비워 둠
+  if (options.spread && fragment.childElementCount === 1) {
+    const only = fragment.firstElementChild, spacer = document.createElement('div');
+    spacer.className = 'page-spacer'; spacer.dataset.width = only.dataset.width; spacer.dataset.height = only.dataset.height;
+    Object.assign(spacer.style, { flex: 'none', visibility: 'hidden' });
+    fragment.appendChild(spacer);
+  }
   if (serial !== renderSerial || disposed) return;
   host.replaceChildren(fragment);
   const previousEntries = activeEntries; activeEntries = nextEntries;
@@ -349,13 +356,23 @@ async function finishPage(serial, entries) {
   }, 350);
 }
 // 지금 보이는 쪽(들)이 화면에서 차지하는 자리 (화면 크기 대비 0~1) — 스크롤 보기용 쪽 그림 자르기
+// FReader: 두 쪽 보기의 홀수 마지막 쪽은 왼쪽에 놓고 오른쪽은 빈 자리(page-spacer)로 채움 → 실제 쪽만 셈
+function realFrames() { return [...host.children].filter(f => f.classList.contains('page')); }
 function pageRect() {
-  const frames = [...host.children]; if (!frames.length) return null;
+  const frames = realFrames(); if (!frames.length) return null;
   let l = 1e9, t = 1e9, r = -1e9, b = -1e9;
-  for (const f of frames) { const q = f.getBoundingClientRect(); l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom); }
-  const W = window.innerWidth || 1, H = window.innerHeight || 1;
+  const W = window.innerWidth || 1, H = window.innerHeight || 1, list = [];
+  for (const f of frames) {
+    const q = f.getBoundingClientRect(); l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom);
+    list.push({ x: q.left / W, y: q.top / H, w: q.width / W, h: q.height / H });
+  }
   if (!(r > l && b > t)) return null;
-  return { x: Math.max(0, l / W), y: Math.max(0, t / H), w: Math.min(1, (r - l) / W), h: Math.min(1, (b - t) / H) };
+  return { x: Math.max(0, l / W), y: Math.max(0, t / H), w: Math.min(1, (r - l) / W), h: Math.min(1, (b - t) / H), frames: list };
+}
+// FReader: 앱에서 고른 글에 형광펜 (화면 크기 대비 0~1 네모들)
+function highlightBoxes(boxes) {
+  const W = window.innerWidth || 1, H = window.innerHeight || 1;
+  markRects((boxes || []).map(b => ({ left: b.x * W, top: b.y * H, width: b.w * W, height: b.h * H, right: (b.x + b.w) * W, bottom: (b.y + b.h) * H })));
 }
 function fitPages() {
   const frames = [...host.children];
@@ -372,7 +389,10 @@ function fitPages() {
 function highlightSelection() {
   const selection = window.getSelection();
   if (!selection?.rangeCount || selection.isCollapsed) return;
-  const rects = [...selection.getRangeAt(0).getClientRects()];
+  markRects([...selection.getRangeAt(0).getClientRects()]);
+  selection.removeAllRanges();
+}
+function markRects(rects) {
   for (const frame of pageFrames()) {
     const svg = frame.firstElementChild, bounds = svg.getBoundingClientRect();
     const scale = Number(frame.dataset.width) / bounds.width;
@@ -383,7 +403,6 @@ function highlightSelection() {
       svg.appendChild(rect);
     }
   }
-  selection.removeAllRanges();
 }
 function releaseDocument() {
   renderSerial++;
@@ -407,7 +426,7 @@ const resizeObserver = new ResizeObserver(fitPages); resizeObserver.observe(host
 let vertical = false, vhost = null, vSlots = [], vTops = [], vRaf = 0, vMetricsTimer = 0;
 const vMounted = new Map(); // 쪽 번호 → { frame, entry }
 const V_GAP = 12;
-function pageFrames() { return vertical ? [...vMounted.values()].map(m => m.frame) : [...host.children]; }
+function pageFrames() { return vertical ? [...vMounted.values()].map(m => m.frame) : realFrames(); }
 const vResize = new ResizeObserver(() => { if (vertical) vLayout(true); });
 function setVertical(on) {
   on = !!on;
@@ -670,7 +689,7 @@ function applySearchHighlights() {
 /** 지금 화면에 보이는 글과 그 위치 (화면 크기 대비 0~1) — 내보낸 PDF에 보이지 않는 글자 층을 넣는 데 씀 */
 function visibleTextBoxes() {
   const W = innerWidth || 1, H = innerHeight || 1, out = [];
-  for (const frame of host.children) {
+  for (const frame of pageFrames()) {
     const index = Number(frame.dataset.page), svg = frame.firstElementChild;
     if (!svg || !Number.isFinite(index)) continue;
     const r = svg.getBoundingClientRect(), vw = Number(frame.dataset.width) || r.width;
@@ -753,7 +772,7 @@ function pageSizes() {
   }
   return out;
 }
-window.freaderHwp = { beginDocument, pageSizes, setVertical, scrollToRatio: vScrollToRatio, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
+window.freaderHwp = { highlightBoxes, beginDocument, pageSizes, setVertical, scrollToRatio: vScrollToRatio, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes, pageRect,
   getState: () => ({ ready: readyReported, page, count, cachedPages: cache.size, cachedBytes, received, spread: options.spread, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });

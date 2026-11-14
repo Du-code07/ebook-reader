@@ -507,6 +507,13 @@ async function render() {
     preparePageSource(source, entry, index);
     frame.appendChild(source); fragment.appendChild(frame);
   }
+  // FReader: 두 쪽 보기에서 마지막 쪽이 홀로 남으면 책처럼 왼쪽에 두고 오른쪽은 비워 둠
+  if (options.spread && fragment.childElementCount === 1) {
+    const only = fragment.firstElementChild, spacer = document.createElement('div');
+    spacer.className = 'page-spacer'; spacer.dataset.width = only.dataset.width; spacer.dataset.height = only.dataset.height;
+    Object.assign(spacer.style, { flex: 'none', visibility: 'hidden' });
+    fragment.appendChild(spacer);
+  }
   host.replaceChildren(fragment); fitPages();
   renderNoteAreas();
   applySearchHighlights();
@@ -567,7 +574,7 @@ async function prefetchNearby(serial) {
   }
 }
 // FReader: 이 쪽에 보이는 각주 번호의 본문을 쪽 아래에 표시 (Word처럼 본문 아래, 자리가 없으면 아래 여백)
-function renderNoteAreas(frames = [...host.children]) {
+function renderNoteAreas(frames = realFrames()) {
   const notes = options.docxLayout?.notes;
   for (const frame of frames) {
     const source = frame.firstElementChild; if (!source) continue;
@@ -606,13 +613,23 @@ function renderNoteAreas(frames = [...host.children]) {
   }
 }
 // 지금 보이는 쪽(들)이 화면에서 차지하는 자리 (화면 크기 대비 0~1) — 스크롤 보기용 쪽 그림 자르기
+// FReader: 두 쪽 보기의 홀수 마지막 쪽은 왼쪽에 놓고 오른쪽은 빈 자리(page-spacer)로 채움 → 실제 쪽만 셈
+function realFrames() { return [...host.children].filter(f => f.classList.contains('page')); }
 function pageRect() {
-  const frames = [...host.children]; if (!frames.length) return null;
+  const frames = realFrames(); if (!frames.length) return null;
   let l = 1e9, t = 1e9, r = -1e9, b = -1e9;
-  for (const f of frames) { const q = f.getBoundingClientRect(); l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom); }
-  const W = window.innerWidth || 1, H = window.innerHeight || 1;
+  const W = window.innerWidth || 1, H = window.innerHeight || 1, list = [];
+  for (const f of frames) {
+    const q = f.getBoundingClientRect(); l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom);
+    list.push({ x: q.left / W, y: q.top / H, w: q.width / W, h: q.height / H });
+  }
   if (!(r > l && b > t)) return null;
-  return { x: Math.max(0, l / W), y: Math.max(0, t / H), w: Math.min(1, (r - l) / W), h: Math.min(1, (b - t) / H) };
+  return { x: Math.max(0, l / W), y: Math.max(0, t / H), w: Math.min(1, (r - l) / W), h: Math.min(1, (b - t) / H), frames: list };
+}
+// FReader: 앱에서 고른 글에 형광펜 (화면 크기 대비 0~1 네모들)
+function highlightBoxes(boxes) {
+  const W = window.innerWidth || 1, H = window.innerHeight || 1;
+  markRects((boxes || []).map(b => ({ left: b.x * W, top: b.y * H, width: b.w * W, height: b.h * H, right: (b.x + b.w) * W, bottom: (b.y + b.h) * H })));
 }
 // FReader: 모든 쪽의 크기 [너비, 높이] (스크롤 보기에서 쪽 자리를 먼저 잡아 두고 그림은 차례로 채움)
 function pageSizes() { return pages.map(p => [Number(p.width) || 0, Number(p.height) || 0]); }
@@ -624,7 +641,7 @@ function fitPages() {
   for (const frame of frames) {
     frame.style.width = `${Number(frame.dataset.width) * scale}px`;
     frame.style.height = `${Number(frame.dataset.height) * scale}px`;
-    frame.firstElementChild.style.transform = `scale(${scale})`;
+    if (frame.firstElementChild) frame.firstElementChild.style.transform = `scale(${scale})`;
   }
 }
 // FReader: 쪽 뒤 바탕 = 문서 자체 배경색(있으면) > 앱 테마 색(흰색/검은색). 쪽 사이 간격 줄은 고정 색
@@ -659,16 +676,19 @@ function progress(value) { return display(Math.round(Math.max(0, Math.min(1, Num
 function highlightSelection() {
   const selection = window.getSelection();
   if (!selection?.rangeCount || selection.isCollapsed) return;
+  markRects([...selection.getRangeAt(0).getClientRects()]);
+  selection.removeAllRanges();
+}
+function markRects(rects) {
   for (const frame of pageFrames()) {
     const bounds = frame.getBoundingClientRect();
-    for (const rect of selection.getRangeAt(0).getClientRects()) {
+    for (const rect of rects) {
       if (rect.width < 1 || rect.height < 1 || rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1) continue;
       const mark = document.createElement('span');
       Object.assign(mark.style, { position: 'absolute', pointerEvents: 'none', background: '#ffc107', opacity: '.35', left: `${rect.left - bounds.left}px`, top: `${rect.top - bounds.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
       frame.appendChild(mark);
     }
   }
-  selection.removeAllRanges();
 }
 function destroy() {
   disposed = true; generation++; clearInterval(bridgeTimer); resizeObserver.disconnect();
@@ -682,7 +702,7 @@ let vertical = false, vhost = null, vSlots = [], vTops = [], vRaf = 0, vMetricsT
 const vMounted = new Map(); // 쪽 번호 → { frame, source, original, entry }
 const vOwner = new Map(); // 원래 글 덩어리 → 그것을 쓰고 있는 쪽 번호 (다른 쪽은 복사본)
 const V_GAP = 12;
-function pageFrames() { return vertical ? [...vMounted.values()].map(m => m.frame) : [...host.children]; }
+function pageFrames() { return vertical ? [...vMounted.values()].map(m => m.frame) : realFrames(); }
 const vResize = new ResizeObserver(() => { if (vertical) vLayout(true); });
 function setVertical(on) {
   on = !!on;
@@ -1038,7 +1058,7 @@ function outlineBlocks() {
 /** 지금 화면에 보이는 글(낱말)과 그 위치 (화면 크기 대비 0~1) — 내보낸 PDF에 보이지 않는 글자 층을 넣는 데 씀 */
 function visibleTextBoxes() {
   const W = innerWidth || 1, H = innerHeight || 1, out = [];
-  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT), range = document.createRange();
+  const walker = document.createTreeWalker(vertical && vhost ? vhost : host, NodeFilter.SHOW_TEXT), range = document.createRange();
   for (let node = walker.nextNode(); node && out.length < 20000; node = walker.nextNode()) {
     const data = node.data;
     if (!data.trim() || !node.parentElement) continue;
@@ -1076,7 +1096,7 @@ function headingCandidates() {
   return outlineBlockCache.filter(b => !b.cell && (b.head || b.text).length <= 100 && (NUMBERED_START.test(b.head || b.text) || b.boldRatio >= 0.5))
     .slice(0, 3000).map(b => ({ title: b.head || b.text, page: b.page, bold: b.bold, boldRatio: b.boldRatio, centered: b.centered, fs: b.fs, body }));
 }
-window.freaderDocx = { beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy, setVertical, scrollToRatio: vScrollToRatio,
+window.freaderDocx = { highlightBoxes, beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy, setVertical, scrollToRatio: vScrollToRatio,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes, pageRect, pageSizes,
   getState: () => ({ ready, page, count: pages.length, received, spread: options.spread, awaitingPassword, unavailableImages, imageCacheBytes, cachedImages: imageCache.size, visibleImages: activeImagePaths.size, maxBytes: MAX_BYTES, format: detectedFormat }) };
 window.addEventListener('pagehide', destroy, { once: true });

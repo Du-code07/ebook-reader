@@ -90,6 +90,25 @@ class HwpReaderController {
     return rect.width > 0.05 && rect.height > 0.05 ? rect : null;
   }
 
+  /// 지금 화면에 보이는 쪽들의 자리 (화면 크기 대비 0~1, 왼쪽부터). 두 쪽 보기의 빈 자리는 빠짐
+  Future<List<Rect>> pageFrames() async {
+    final r = await _query?.call('pageRect', []);
+    if (r is! Map || r['frames'] is! List) return const [];
+    double v(Object? x) => (x as num?)?.toDouble() ?? 0;
+    final out = [
+      for (final f in r['frames'] as List)
+        if (f is Map) Rect.fromLTWH(v(f['x']), v(f['y']), v(f['w']), v(f['h'])),
+    ]..sort((a, b) => a.left.compareTo(b.left));
+    return out;
+  }
+
+  /// 앱에서 고른 글에 형광펜 (화면 크기 대비 0~1 네모들)
+  Future<void> highlightBoxes(List<Rect> boxes) async {
+    await _invoke?.call('highlightBoxes', [
+      [for (final b in boxes) {'x': b.left, 'y': b.top, 'w': b.width, 'h': b.height}],
+    ]);
+  }
+
   /// 지금 화면에 보이는 글과 위치 [{t, x, y, w, h}] (화면 크기 대비 0~1) — 내보낸 PDF의 글자 층용
   Future<List<Map<String, Object?>>> visibleTextBoxes() async {
     final result = await _query?.call('visibleTextBoxes', []);
@@ -620,9 +639,10 @@ class _HwpViewerState extends State<HwpViewer> {
               ],
             ),
           ),
-          // 글을 길게 눌러 고르면 휴대폰 기본 메뉴(복사 | 모두 선택 | 공유)와 형광펜 칠하기
+          // 워드·한글의 글 고르기는 앱이 직접 함 (화면 위 [복사 | 모두 선택 | 공유 | 형광펜] 막대).
+          // 혹시 휴대폰 기본 메뉴가 뜨더라도 기기마다 섞여 나오는 엉뚱한 항목은 숨김
           contextMenu: ContextMenu(
-            settings: ContextMenuSettings(hideDefaultSystemContextMenuItems: false),
+            settings: ContextMenuSettings(hideDefaultSystemContextMenuItems: true),
             menuItems: [
               ContextMenuItem(
                 id: 1,

@@ -31,12 +31,15 @@ Future<void> copyText(BuildContext context, String text, String Function(String 
 
 /// 고른 글 위에 뜨는 어두운 막대: 복사 | 모두 선택 | 공유
 class SelectionActionBar extends StatelessWidget {
-  const SelectionActionBar({super.key, required this.tr, required this.onCopy, required this.onSelectAll, required this.onShare});
+  const SelectionActionBar({super.key, required this.tr, required this.onCopy, required this.onSelectAll, required this.onShare, this.onHighlight});
 
   final String Function(String ko, String en, String zh, String ja) tr;
   final VoidCallback onCopy;
   final VoidCallback? onSelectAll;
   final VoidCallback onShare;
+
+  /// 형광펜 칠하기 (문서에서만)
+  final VoidCallback? onHighlight;
 
   @override
   Widget build(BuildContext context) {
@@ -61,6 +64,7 @@ class SelectionActionBar extends StatelessWidget {
           if (onSelectAll != null) ...[divider(), button(tr('모두 선택', 'Select all', '全选', 'すべて選択'), onSelectAll!)],
           divider(),
           button(tr('공유', 'Share', '分享', '共有'), onShare),
+          if (onHighlight != null) ...[divider(), button(tr('형광펜', 'Highlight', '荧光笔', 'マーカー'), onHighlight!)],
         ],
       ),
     );
@@ -115,6 +119,41 @@ class SelLine {
 /// 글자 위치를 아는 쪽(PDF)에서 길게 눌러 글 고르기
 class PageTextSelection extends ChangeNotifier {
   List<SelLine> lines = const [];
+
+  /// 막대가 놓인 띠 (층이 그릴 때 정함) — 이 안이나 손잡이 근처를 누르면 고른 글을 지우지 않음
+  Rect? barBand;
+
+  bool hitsControls(Offset p) {
+    if (!active) return false;
+    if (barBand?.contains(p) ?? false) return true;
+    return (p - startHandle).distance < 36 || (p - endHandle).distance < 36;
+  }
+
+  /// 낱말 상자들(읽는 순서)을 줄로 묶음: 같은 높이에서 오른쪽으로 이어지는 낱말은 한 줄
+  static List<SelLine> linesFromWords(List<SelLine> words) {
+    final out = <SelLine>[];
+    String text = '';
+    Rect? cur;
+    for (final w in words) {
+      if (w.text.trim().isEmpty || w.rect.isEmpty) continue;
+      final c = cur;
+      if (c != null) {
+        final double h = math.max(1.0, c.height);
+        final bool sameRow = (w.rect.center.dy - c.center.dy).abs() < h * 0.5;
+        final double gap = w.rect.left - c.right;
+        if (sameRow && gap > -h * 0.5 && gap < h * 3) {
+          text += gap > h * 0.12 ? ' ${w.text}' : w.text;
+          cur = c.expandToInclude(w.rect);
+          continue;
+        }
+        out.add(SelLine(text, c));
+      }
+      text = w.text;
+      cur = w.rect;
+    }
+    if (cur != null) out.add(SelLine(text, cur));
+    return out;
+  }
   int _aLine = -1, _aChar = 0, _bLine = -1, _bChar = 0;
 
   bool get active => _aLine >= 0 && lines.isNotEmpty;
@@ -267,7 +306,10 @@ class PageTextSelection extends ChangeNotifier {
 
 /// [PageTextSelection]을 그리는 층: 고른 글 바탕, 손잡이 두 개, 막대
 class PageTextSelectLayer extends StatelessWidget {
-  const PageTextSelectLayer({super.key, required this.sel, required this.tr, this.onDone});
+  const PageTextSelectLayer({super.key, required this.sel, required this.tr, this.onDone, this.onHighlight});
+
+  /// 형광펜 칠하기: 고른 부분의 네모들(이 층 기준)을 받음. 없으면 단추를 숨김
+  final void Function(List<Rect> rects)? onHighlight;
 
   final PageTextSelection sel;
   final String Function(String ko, String en, String zh, String ja) tr;
@@ -308,6 +350,7 @@ class PageTextSelectLayer extends StatelessWidget {
         return LayoutBuilder(builder: (context, c) {
           // 막대: 고른 글 위 (자리가 없으면 아래)
           final double barTop = bounds.top - 60 > 8 ? bounds.top - 60 : math.min(c.maxHeight - 56, bounds.bottom + 30);
+          sel.barBand = Rect.fromLTWH(0, barTop - 6, c.maxWidth, 60);
           return Stack(
             clipBehavior: Clip.none,
             children: [
@@ -334,6 +377,14 @@ class PageTextSelectLayer extends StatelessWidget {
                       shareText(t);
                       onDone?.call();
                     },
+                    onHighlight: onHighlight == null
+                        ? null
+                        : () {
+                            final r = sel.highlightRects;
+                            sel.clear();
+                            onHighlight!(r);
+                            onDone?.call();
+                          },
                   ),
                 ),
               ),

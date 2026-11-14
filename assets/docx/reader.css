@@ -82,3 +82,6 @@ body { --gap: #e2e2e6; }
 #vpages .vslot { position: relative; margin: 0 0 12px 0; background: var(--file-page, white); overflow: hidden; box-shadow: 0 12px 0 0 var(--gap); }
 #vpages .vslot:last-child { box-shadow: none; }
 body[data-theme="dark"] #vpages .vslot { background: var(--file-page, #1e1e1e); }
+
+/* FReader: 글 고르기는 앱이 직접 함 (휴대폰 기본 글 선택은 SVG·여러 겹 글에서 엉뚱하게 잡혀서 끔) */
+.page, #vpages { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }

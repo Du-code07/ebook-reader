@@ -404,21 +404,37 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         if (declaredPermission(android.Manifest.permission.CAMERA)) want.add(android.Manifest.permission.CAMERA)
         if (Build.VERSION.SDK_INT <= 32) want.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
         val ask = want.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
-        if (ask.isEmpty()) {
-            result.success(true)
-            return
-        }
         pendingPermResult?.success(false)
         pendingPermResult = result
+        if (ask.isEmpty()) {
+            askAllFilesAccess()
+            return
+        }
         requestPermissions(ask.toTypedArray(), 4712)
+    }
+
+    // 파일 열람: 안드로이드 11 이상은 '모든 파일 접근'을 설정 화면에서 켜야 함 → 그 화면을 열고, 돌아오면 끝
+    private var waitingAllFiles = false
+
+    private fun askAllFilesAccess() {
+        if (Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) {
+            try {
+                val i = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    android.net.Uri.parse("package:$packageName"))
+                try { startActivity(i) } catch (_: Throwable) {
+                    startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                }
+                waitingAllFiles = true
+                return
+            } catch (_: Throwable) {}
+        }
+        pendingPermResult?.success(true)
+        pendingPermResult = null
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 4712) {
-            pendingPermResult?.success(true)
-            pendingPermResult = null
-        }
+        if (requestCode == 4712) askAllFilesAccess()
     }
 
     override fun onPostResume() {
@@ -1298,6 +1314,12 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     override fun onResume() {
         super.onResume()
         isActivityResumed = true
+        if (waitingAllFiles) {
+            // '모든 파일 접근' 설정 화면에서 돌아옴 (켰든 안 켰든 다음으로)
+            waitingAllFiles = false
+            pendingPermResult?.success(true)
+            pendingPermResult = null
+        }
         hideSystemStatusBar(alsoHideNavBar = true)
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 250L)
         scheduleStatusBarReHide()

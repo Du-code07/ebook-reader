@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -35,9 +36,13 @@ class BookCurlDrag extends ChangeNotifier {
     required this.isRtl,
     this.canTurn,
     this.paperOf,
+    this.waitForPage,
   }) {
     _anim = AnimationController(vsync: vsync)..addListener(_onTick);
   }
+
+  /// 넘긴 뒤 새 쪽이 다 그려질 때까지 덮개를 걷지 않음 (EPUB: 장이 바뀔 때 잠깐 빈 화면이 보이는 것 막기)
+  final bool Function()? waitForPage;
 
   /// 넘어가는 종이 자리 (층 기준 좌표). 모르면 null → 화면 전체(두 쪽 보기는 절반)를 종이로 봄
   final Future<BookPaper?> Function(bool spread, bool fromRight, Size size)? paperOf;
@@ -200,15 +205,17 @@ class BookCurlDrag extends ChangeNotifier {
     await SchedulerBinding.instance.endOfFrame;
     if (gen != _gen) return;
     // 덮개(넘기기 전 그림)를 씌운 채로 실제 화면을 넘겨 둠 → 들린 자리에 새 쪽이 드러남
+    _afterReady = Completer<void>();
     _turning = turn(dir);
     // 그림이 준비되기 전에 이미 손을 뗐으면 바로 마무리 움직임 시작
     if (_released != null && _phase == _BookPhase.waiting) _settle(_released!);
     final bool turned = await _turning!;
     if (gen != _gen) return;
-    if (turned && spread) {
-      // 넘어가는 장 뒷면에 보일 새 쪽: 새 쪽 그림이 늦게 그려지면(그림 파일·EPUB) 처음 찍은 게 이전 쪽일 수 있어
-      // 조금 뒤에 한 번 더 찍어 바꿔 끼움
-      for (final int wait in const [32, 260]) {
+    if (turned) {
+      // 넘긴 뒤 새 쪽 그림: 들린 자리와(두 쪽 보기는) 넘어가는 장 뒷면에 씀.
+      // 새 쪽이 늦게 그려지면(그림 파일·EPUB 장 바뀜) 처음 찍은 게 빈 화면·이전 쪽일 수 있어 조금 뒤에 다시 찍어 바꿔 끼움
+      int round = 0;
+      for (final int wait in const [32, 260, 600]) {
         await Future<void>.delayed(Duration(milliseconds: wait));
         if (gen != _gen || image == null) return;
         await SchedulerBinding.instance.endOfFrame;
@@ -220,9 +227,14 @@ class BookCurlDrag extends ChangeNotifier {
         } else {
           a?.dispose();
         }
+        if (++round == 2 && !(_afterReady?.isCompleted ?? true)) _afterReady!.complete();
       }
     }
+    if (!(_afterReady?.isCompleted ?? true)) _afterReady!.complete();
   }
+
+  /// 새 쪽이 다 그려졌을 즈음(두 번째로 찍은 뒤) 끝나는 기다림. [waitForPage]일 때 마무리 전에 기다림
+  Completer<void>? _afterReady;
 
   /// 손가락이 움직임
   void update(Offset global) {
@@ -268,6 +280,10 @@ class BookCurlDrag extends ChangeNotifier {
     if (gen != _gen) return;
     final bool turned = await (_turning ?? Future<bool>.value(false));
     if (gen != _gen) return;
+    if (commit && turned && (waitForPage?.call() ?? false)) {
+      await (_afterReady?.future ?? Future<void>.value()).timeout(const Duration(milliseconds: 900), onTimeout: () {});
+      if (gen != _gen) return;
+    }
     if (commit && !turned) {
       // 넘길 쪽이 없었음: 제자리로 되돌림
       _from = point;
@@ -461,12 +477,16 @@ class BookCurlPainter extends CustomPainter {
     canvas.drawImageRect(image, src, full, paint);
     canvas.restore();
 
-    // 2) 들린 자리(실제 새 쪽이 비침): 접힌 선 근처와 책등 쪽에 그림자
+    // 2) 들린 자리: 넘긴 뒤 찍은 새 쪽 그림(아직 없으면 종이색). 실제 화면은 비치지 않게 함
+    //    (EPUB은 장이 바뀌는 동안 실제 화면이 잠깐 비어 검게 보일 수 있음)
     {
       final Offset p0 = n * c;
       final double sw = math.min(56.0, math.max(14.0, len * 0.35));
       canvas.save();
       canvas.clipPath(flapLeaf);
+      canvas.drawRect(page, Paint()..color = back.withValues(alpha: 1));
+      final na = after;
+      if (na != null) canvas.drawImageRect(na, Rect.fromLTWH(0, 0, na.width.toDouble(), na.height.toDouble()), full, paint);
       canvas.drawRect(page, Paint()..shader = ui.Gradient.linear(p0, p0 + n * sw, [k(0x59000000), const Color(0x00000000)]));
       if (spread) canvas.drawRect(
         page,

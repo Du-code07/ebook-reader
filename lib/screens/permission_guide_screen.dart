@@ -17,7 +17,7 @@ class PermissionGuideScreen extends StatelessWidget {
   String t(String ko, String en, String zh, String ja) => AppI18n.t(lang, ko: ko, en: en, zh: zh, ja: ja);
 
   Future<void> _continue() async {
-    // 카메라(와 안드로이드 12 이하의 저장소 읽기) 허용을 물음. 모든 파일 접근은 파일 찾기를 쓸 때 설정 화면에서 허용
+    // 카메라(와 안드로이드 12 이하의 저장소 읽기) 허용을 묻고, 이어서 '모든 파일 접근' 설정 화면을 엶 (돌아오면 다음으로)
     try {
       await _channel.invokeMethod('requestStartupPermissions');
     } catch (_) {}
@@ -105,8 +105,7 @@ class PermissionGuideScreen extends StatelessWidget {
                   item(
                     Icons.photo_camera_rounded,
                     t('카메라', 'Camera', '相机', 'カメラ'),
-                    t('문서를 촬영해 이미지 파일로 추가하는 데 사용해요', 'Used to photograph documents and add them as image files',
-                        '用于拍摄文档并添加为图片文件', '文書を撮影して画像ファイルとして追加するのに使います'),
+                    t('문서를 스캔하는 데 사용해요', 'Used to scan documents', '用于扫描文档', '文書のスキャンに使います'),
                   ),
                   const SizedBox(height: 4),
                   Row(

@@ -18,6 +18,7 @@ import '../services/heading_rules.dart';
 import '../services/outline_cache.dart';
 import '../widgets/outline_progress.dart';
 import '../widgets/text_copy_sheet.dart';
+import '../widgets/text_select.dart';
 import '../services/page_snapshot_service.dart';
 import '../services/user_fonts.dart';
 import '../services/epub_validation.dart';
@@ -1189,6 +1190,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final relocation = ++_docRelocation;
     if (page != _docPage) _lastReadyPage = -1;
     if (_snapShownPage != null && _snapShownPage != page) _snapShow(page);
+    if (page != _docPage) _docSel.clear();
     setState(() {
       _docPage = page;
       _docPageCount = pageCount;
@@ -2659,6 +2661,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       !_isTouchLocked &&
       _epubZoomScale <= 1.03 &&
       !_hasTextSelection &&
+      !_docSel.active && !_docPressSelecting && !_docDownOnControls &&
       !(_isMemoMode && isStylusPointer(e));
 
   // ── 위/아래로 밀 때 다음(이전) 장 미리 보기 ──
@@ -2700,7 +2703,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ? page < _docPageCount - 1 || (mine ? _vBaseStepsLeft : _pptStepsLeft) > 0
             : page > 0 || _posOrder(mine ? _vBasePos : _currentCfi) % 100000 > 0;
       }
-      return dir > 0 ? page < _docPageCount - 1 : page > 0;
+      // 두 쪽 보기는 두 쪽씩 넘어가므로, 다음 두 쪽의 첫 쪽이 있어야 넘길 수 있음
+      final int step = _bookmarkSpreadNow ? 2 : 1;
+      return dir > 0 ? page + step <= _docPageCount - 1 : page > 0;
     }
     if (!_isOfflineDocument) {
       // EPUB: 책의 마지막(첫) 화면에서는 더 넘길 곳이 없다
@@ -2956,7 +2961,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   // ── 종이처럼 말아 넘기기 (슬라이드) ──
 
   bool get _curlOn =>
-      StorageService.pageCurl && _useSwipeTurn && !_pageModeScroll && !Anim.off.value && !_isSpreadsheet && !_slideShow;
+      StorageService.pageCurl && _useSwipeTurn && !_pageModeScroll && !Anim.off.value && !_isSpreadsheet && !_slideShow && !_isPresentation; // PPT는 책처럼 넘기지 않음
 
   /// 종이처럼 넘기기 설정이 바뀌면 EPUB 책 화면 스스로의 밀어 넘기기를 끄고/켬
   void _syncCurlSwipe() {
@@ -2980,20 +2985,132 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     // 마지막(첫) 쪽에서는 넘기는 모습도 보이지 않음
     canTurn: _canTurnSwipe,
     paperOf: _curlPaper,
+    // EPUB은 장이 바뀔 때 새 쪽이 늦게 그려지므로 다 그려진 뒤에 덮개를 걷음
+    waitForPage: () => !_isOfflineDocument,
   );
 
   /// 넘어가는 쪽(종이)의 자리: 워드·한글·PPT는 화면에 놓인 쪽 네모 (빈 여백은 넘어가지 않음).
   /// EPUB·TXT는 화면 전체가 종이
   Future<BookPaper?> _curlPaper(bool spread, bool fromRight, Size size) async {
     if (!_isOfflineDocument || _isTxt) return null;
-    final Rect? f = await _hwpController.pageRect().timeout(const Duration(milliseconds: 300), onTimeout: () => null);
-    if (f == null) return null;
-    final Rect r = Rect.fromLTWH(f.left * size.width, f.top * size.height, f.width * size.width, f.height * size.height);
-    if (!spread) return BookPaper(r, fromRight ? r.left : r.right);
-    // 두 쪽 보기: 두 쪽을 합친 네모의 가운데가 책등 (쪽 사이 틈 8)
-    final double cx = r.center.dx;
-    final Rect page = fromRight ? Rect.fromLTRB(cx + 4, r.top, r.right, r.bottom) : Rect.fromLTRB(r.left, r.top, cx - 4, r.bottom);
-    return BookPaper(page, cx);
+    final frames = await _hwpController.pageFrames().timeout(const Duration(milliseconds: 300), onTimeout: () => const <Rect>[]);
+    if (frames.isEmpty) return null;
+    Rect px(Rect f) => Rect.fromLTWH(f.left * size.width, f.top * size.height, f.width * size.width, f.height * size.height);
+    final pages = frames.map(px).toList();
+    if (!spread) {
+      final r = pages.first;
+      return BookPaper(r, fromRight ? r.left : r.right);
+    }
+    // 두 쪽 보기: 책등은 두 쪽 사이 (한 쪽만 남은 마지막이면 그 쪽의 안쪽 가장자리)
+    final double spine = pages.length >= 2
+        ? (pages[0].right + pages[1].left) / 2
+        : (pages[0].center.dx < size.width / 2 ? pages[0].right + 4 : pages[0].left - 4);
+    final cand = pages.where((r) => fromRight ? r.center.dx > spine : r.center.dx < spine);
+    if (cand.isEmpty) return null;
+    return BookPaper(cand.first, spine);
+  }
+
+
+  // ── 글 고르기 ──
+  final FloatingSelectionBar _pageBar = FloatingSelectionBar();
+
+  // 워드·한글: 휴대폰 기본 글 선택은 여러 겹으로 놓인 글(한글은 SVG)에서 엉뚱한 곳부터 잡히고 튀어서,
+  // 화면의 낱말 자리를 받아 앱이 직접 고름 (0.45초 누르면 낱말, 그대로 끌면 범위, 손잡이로 고침)
+  final PageTextSelection _docSel = PageTextSelection();
+  final GlobalKey _docSelKey = GlobalKey();
+  Timer? _docPressTimer;
+  bool _docPressSelecting = false;
+  bool _docDownOnControls = false;
+
+  bool get _docSelectable => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_isPresentation;
+
+  Offset? _docLocal(Offset global) {
+    final box = _docSelKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box.globalToLocal(global);
+  }
+
+  void _docSelDown(PointerDownEvent e) {
+    _docPressTimer?.cancel();
+    _docPressSelecting = false;
+    if (!_docSelectable || _isMemoMode || _isTouchLocked) return;
+    final local = _docLocal(e.position);
+    _docDownOnControls = local != null && _docSel.hitsControls(local);
+    if (_docDownOnControls) return;
+    final Offset at = e.position;
+    _docPressTimer = Timer(const Duration(milliseconds: 450), () {
+      if (!mounted || _swipeStartPos == null || _swipeMultiTouch || _swipeFirstMoveTime != null || _book.busy) return;
+      _docPressSelecting = true;
+      _startDocSelect(at);
+    });
+  }
+
+  Future<void> _startDocSelect(Offset global) async {
+    final box = _docSelKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final size = box.size;
+    final raw = await _hwpController.visibleTextBoxes();
+    if (!mounted) return;
+    double v(Object? x) => (x as num?)?.toDouble() ?? 0;
+    final words = <SelLine>[
+      for (final b in raw)
+        SelLine('${b['t'] ?? ''}', Rect.fromLTWH(v(b['x']) * size.width, v(b['y']) * size.height, v(b['w']) * size.width, v(b['h']) * size.height)),
+    ];
+    _docSel.lines = PageTextSelection.linesFromWords(words);
+    final local = box.globalToLocal(global);
+    if (_docSel.selectWordAt(local)) {
+      HapticFeedback.selectionClick();
+    } else {
+      _docPressSelecting = false;
+    }
+  }
+
+  /// 손을 떼지 않고 끌면 범위를 늘림 (스크롤 보기는 화면이 같이 움직이므로 손잡이로만)
+  bool _docSelMove(PointerMoveEvent e) {
+    final start = _swipeStartPos;
+    if (_docPressSelecting) {
+      final l = _docLocal(e.position);
+      if (l != null && !_pageModeScroll && _docSel.active) _docSel.extendTo(l);
+      return true;
+    }
+    if (start != null && (e.position - start).distance > 12) _docPressTimer?.cancel();
+    if (_docSel.active) {
+      if (_docDownOnControls) return true; // 손잡이를 끄는 중
+      // 다른 곳을 밀면(넘기기·스크롤) 고른 글은 지움
+      if (start != null && (e.position - start).distance > 12) _docSel.clear();
+    }
+    return false;
+  }
+
+  void _docHighlight(List<Rect> rects) {
+    final box = _docSelKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final s = box.size;
+    _hwpController.highlightBoxes([for (final r in rects) Rect.fromLTWH(r.left / s.width, r.top / s.height, r.width / s.width, r.height / s.height)]);
+  }
+
+  /// EPUB [모두 선택]: 지금 보이는 쪽의 글 전체를 골라 [복사 | 공유] 막대를 띄움
+  Future<void> _epubSelectAllPage() async {
+    _clearEpubSelection();
+    String text = '';
+    try {
+      text = (await _epubController.extractCurrentPageText()).text?.trim() ?? '';
+    } catch (_) {}
+    if (!mounted || text.isEmpty) return;
+    final size = MediaQuery.sizeOf(context);
+    _pageBar.show(
+      context,
+      Offset(size.width / 2, size.height * 0.3),
+      tr: _tr,
+      onCopy: () {
+        _pageBar.hide();
+        copyText(context, text, _tr);
+      },
+      onShare: () {
+        _pageBar.hide();
+        shareText(text);
+      },
+    );
   }
 
   /// 손가락이 가로로 끌리기 시작하면 책처럼 손가락을 따라 넘김
@@ -3003,7 +3120,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       return;
     }
     final start = _swipeStartPos, t0 = _swipeStartTime;
-    if (start == null || t0 == null || _book.busy) return;
+    if (start == null || t0 == null || _book.busy || _docSel.active || _docPressSelecting) return;
     if (!_curlOn || _swipeMultiTouch || _swipeActivePointers != 1) return;
     if (_isTouchLocked || _epubZoomScale > 1.03 || _hasTextSelection) return;
     if (_isMemoMode && (_isStylusEvent(e) || _allowFingerDrawing)) return;
@@ -3070,6 +3187,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             texture: _isPaperTheme ? BookCurlLayer.paperTexture(() => mounted ? setState(() {}) : null) : null,
           ),
         ),
+        // 워드·한글: 길게 눌러 고른 글 — 바탕·손잡이·[복사 | 모두 선택 | 공유 | 형광펜] 막대
+        if (_docSelectable)
+          Positioned.fill(
+            child: SizedBox.expand(
+              key: _docSelKey,
+              child: PageTextSelectLayer(sel: _docSel, tr: _tr, onHighlight: _docHighlight),
+            ),
+          ),
       ],
     );
   }
@@ -3115,6 +3240,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_isMemoMode && _isStylusEvent(e)) return;
     _swipeActivePointers++;
     if (_swipeActivePointers == 1) {
+      _docSelDown(e);
       // 지난 손동작에서 찍어 두고 쓰지 않은 그림은 버림 (새 그림은 손가락이 옆으로 움직이기 시작할 때 찍음)
       final stale = _curlPre;
       _curlPre = null;
@@ -3127,11 +3253,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _swipeFirstMoveTime = null;
     } else {
       _swipeMultiTouch = true;
+      _docPressTimer?.cancel();
       if (_book.tracking) _book.end(cancel: true); // 두 손가락: 넘기기 취소
     }
   }
 
   void _swipeTrackMove(PointerMoveEvent e) {
+    if (_docSelMove(e)) return; // 글 고르는 중: 넘기지 않음
     _bookTrackMove(e);
     final start = _swipeStartPos;
     if (start == null || _swipeFirstMoveTime != null) return;
@@ -3150,6 +3278,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final startTime = _swipeStartTime;
     _swipeStartPos = null;
     _swipeStartTime = null;
+    _docPressTimer?.cancel();
+    if (_docPressSelecting || _docDownOnControls) {
+      // 길게 눌러 고른 뒤 손을 뗌 / 손잡이를 놓음: 넘기지 않음
+      _docPressSelecting = false;
+      _docDownOnControls = false;
+      return;
+    }
     if (_book.tracking) {
       // 책처럼 넘기는 중: 손을 뗀 곳에 따라 넘기거나 되돌림
       _book.end(cancel: cancelled || _swipeMultiTouch);
@@ -3307,6 +3442,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final duration = DateTime.now().difference(_pointerDownTime!).inMilliseconds;
 
     // 그림 위에서 글을 골라 둔 상태: 탭은 메뉴를 열지 않고 고른 글만 지움 (복사 버튼은 먼저 처리됨)
+    // 워드·한글에서 글을 골라 둔 상태 / 모두 선택 막대: 탭은 메뉴를 열지 않고 고른 것만 지움
+    if (_docSel.active || _pageBar.shown) {
+      final local = _docLocal(event.position);
+      if (distance < 24.0 && duration < 380 && !(local != null && _docSel.hitsControls(local))) {
+        _docSel.clear();
+        _pageBar.hide();
+      }
+      _pointerDownPosition = null;
+      _pointerDownTime = null;
+      return;
+    }
     if (WordSelectionLayer.active.value) {
       if (distance < 24.0 && duration < 380 && !WordSelectionLayer.containsGlobal(event.position)) {
         WordSelectionLayer.clearAll();
@@ -3850,6 +3996,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
     _vPageSwipe.dispose();
     _book.dispose();
+    _docPressTimer?.cancel();
+    _docSel.dispose();
+    _pageBar.hide();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     _epubLoadWatchdog?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -4408,9 +4557,33 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       theme: _buildTheme(),
                     ),
                     // 글을 길게 눌러 고르면: 휴대폰 기본 메뉴(복사 | 모두 선택 | 공유)와 형광펜 칠하기
+                    // 휴대폰 기본 메뉴는 기기마다 'false'·'앱 관리' 같은 엉뚱한 항목이 섞여 나와서 직접 만든 메뉴만 씀
                     selectionContextMenu: EpubContextMenu(
-                      hideDefaultSystemItems: false,
+                      hideDefaultSystemItems: true,
                       items: [
+                        EpubContextMenuItem(
+                          id: 2,
+                          title: _tr('복사', 'Copy', '复制', 'コピー'),
+                          action: () {
+                            final t = _selectedText;
+                            _clearEpubSelection();
+                            copyText(context, t, _tr);
+                          },
+                        ),
+                        EpubContextMenuItem(
+                          id: 3,
+                          title: _tr('모두 선택', 'Select all', '全选', 'すべて選択'),
+                          action: () => _epubSelectAllPage(),
+                        ),
+                        EpubContextMenuItem(
+                          id: 4,
+                          title: _tr('공유', 'Share', '分享', '共有'),
+                          action: () {
+                            final t = _selectedText;
+                            _clearEpubSelection();
+                            shareText(t);
+                          },
+                        ),
                         EpubContextMenuItem(
                           id: 1,
                           title: _tr('형광펜 칠하기', 'Highlight', '荧光笔', 'マーカー'),
