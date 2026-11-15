@@ -30,6 +30,14 @@ if 'FREADER_OPEN_WITH' not in s:
           '<data android:mimeType="application/octet-stream"/>' + pats + '</intent-filter>')
     i = s.index('</activity>')
     s = s[:i] + f1 + f2 + s[i:]
+# 문서 스캔: 스캔 카메라 화면 + 찍은 사진을 넘기는 통로
+if 'DocumentCameraActivity' not in s:
+    scan = ('<activity android:name=".DocumentCameraActivity" android:screenOrientation="portrait" '
+            'android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" android:exported="false"/>'
+            '<provider android:name=".ScanFileProvider" android:authorities="${applicationId}.scanprovider" '
+            'android:exported="false" android:grantUriPermissions="true"/>')
+    i = s.rindex('</application>')
+    s = s[:i] + scan + s[i:]
 # 공유: 앱 안 파일을 다른 앱에 넘기는 통로 (FileProvider)
 if 'freader.fileprovider' not in s:
     prov = ('<provider android:name="androidx.core.content.FileProvider" '

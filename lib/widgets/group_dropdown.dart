@@ -125,6 +125,7 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
   late List<String> _groups = List.of(widget.route.groups);
   Offset _grab = Offset.zero;
   final Map<String, GlobalKey> _nameKeys = {};
+  final GlobalKey _panelKey = GlobalKey();
 
   GroupDropdownRoute get r => widget.route;
 
@@ -165,7 +166,8 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
                   child: Text(label,
                       key: _nameKeys.putIfAbsent(value, GlobalKey.new),
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 15, color: fg, fontWeight: sel ? FontWeight.w700 : FontWeight.w500, shadows: sel ? AppColors.sigShadows(context) : null)),
+                      // 위 그룹 이름 칸(칩)과 같은 글꼴·굵기·크기
+                      style: (Theme.of(context).textTheme.labelLarge ?? const TextStyle()).copyWith(color: fg, shadows: sel ? AppColors.sigShadows(context) : null)),
                 ),
               ),
               if (sel) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(Icons.check, size: 18, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context))),
@@ -180,10 +182,18 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
   Future<void> _groupMenu(BuildContext rowContext, String g) async {
     HapticFeedback.selectionClick();
     final nameCtx = _nameKeys[g]?.currentContext ?? rowContext;
+    // 편집 버튼은 그룹 목록 위가 아니라 목록 오른쪽 바깥에 놓음
+    double? besideLeft;
+    final panelBox = _panelKey.currentContext?.findRenderObject() as RenderBox?;
+    final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
+    if (panelBox != null && panelBox.hasSize) {
+      besideLeft = panelBox.localToGlobal(Offset(panelBox.size.width, 0), ancestor: overlayBox).dx + 10;
+    }
+    if (!mounted) return;
     final action = await showScaleMenu<String>(nameCtx, [
       ('rename', r.renameLabel, Icons.edit_outlined, null),
       ('delete', r.deleteLabel, Icons.delete_outline, Colors.redAccent),
-    ], beside: true);
+    ], beside: true, besideLeft: besideLeft);
     if (!mounted || action == null) return;
     if (action == 'rename') {
       final name = await r.onRename(g);
@@ -271,6 +281,7 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
       },
     );
     return Material(
+      key: _panelKey,
       color: cs.surfaceContainerHigh,
       elevation: 6,
       borderRadius: BorderRadius.circular(14),

@@ -165,9 +165,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _pageModeScroll = false;
   final ContinuousPageController _scrollCtrl = ContinuousPageController();
 
-  /// 두 쪽을 나란히 보여 줄 때인가 (스크롤 모드는 쪽이 바뀌지 않음)
+  /// 두 쪽을 나란히 보여 줄 때인가 (스크롤 모드는 쪽이 바뀌지 않음, EPUB은 늘 한 페이지)
   bool _spreadFor(bool isLandscape) =>
-      !_isSpreadsheet && !_pageModeScroll && !_slideShow && (_pageDisplay == 'two' || (_pageDisplay == 'auto' && isLandscape));
+      !_isEpub && !_isSpreadsheet && !_pageModeScroll && !_slideShow && (_pageDisplay == 'two' || (_pageDisplay == 'auto' && isLandscape));
   bool _isMangaRtlMode = false;
   int _fontSize = 18;
   List<EpubChapter> _chapters = [];

@@ -653,7 +653,7 @@ function fitPages() {
   const boxes = frames.map(trimBox);
   const trimming = boxes.some((b, i) => b.w < Number(frames[i].dataset.width) - 0.5 || b.h < Number(frames[i].dataset.height) - 0.5);
   const pad = trimming ? 0.96 : 1; // 잘라 낸 쪽은 화면 끝에 딱 붙지 않게 살짝 띄움
-  const availW = host.clientWidth - 8 * (frames.length - 1), availH = host.clientHeight;
+  const availW = host.clientWidth - (8 / 3) * (frames.length - 1), availH = host.clientHeight;
   const totalWidth = boxes.reduce((sum, b) => sum + b.w, 0);
   const height = Math.max(...boxes.map(b => b.h));
   const scale = Math.max(0.01, Math.min(availW * pad / totalWidth, availH * pad / height));

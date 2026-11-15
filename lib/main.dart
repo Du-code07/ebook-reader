@@ -8,6 +8,7 @@ import 'services/app_messenger.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'screens/document_scanner_screen.dart';
 import 'screens/pdf_and_image_viewer.dart';
 import 'screens/reader_screen.dart';
 import 'screens/language_select_screen.dart';
@@ -496,6 +497,13 @@ class UserManualScreen extends StatelessWidget {
                     '点右下角[添加文件]可选择添加文件、合并 PDF、合并图片（打包为 CBZ）',
                     '右下の[ファイル追加]から、ファイル追加・PDF結合・画像結合(CBZにまとめる)を選べます')),
             _row(context,
+                icon: const Icon(Icons.document_scanner_outlined),
+                title: _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'),
+                desc: _tr('[파일 추가] 맨 위 [문서 스캔]으로 카메라로 문서를 여러 장 찍고, 스캔본처럼 선명하게 보정(필터·진하기·회전·자르기)해 PDF 한 개로 만들어요',
+                    'Use [Scan Document] at the top of [Add Files] to photograph pages, clean them up like a scan (filters, darkness, rotate, crop) and save them as one PDF',
+                    '在[添加文件]最上方的[扫描文档]中用相机拍摄多页，像扫描件一样清晰校正（滤镜、浓度、旋转、裁剪）后合成一个 PDF',
+                    '[ファイル追加]の一番上の[文書スキャン]で書類を複数枚撮影し、スキャンのように補正(フィルター・濃さ・回転・切り抜き)して1つのPDFにします')),
+            _row(context,
                 icon: GroupStackIcon(size: 19, spread: false, color: cs.onSurface),
                 title: _tr('그룹', 'Groups', '分组', 'グループ'),
                 desc: _tr('[그룹] 단추를 누르면 그룹 목록이 펼쳐져요\n맨 위 [전체]·[즐겨찾기]는 고정이고, 그룹은 ≡ 손잡이를 끌어 순서를 바꾸고, 꾹 눌러 이름 수정·그룹 삭제를 해요\n지운 그룹의 파일은 미분류로 옮겨져 [전체]에서 볼 수 있어요\n맨 아래 [+ 그룹 추가]로 새 그룹을 만들어요',
@@ -853,7 +861,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                 child: byName != forName
                     ? const SizedBox(width: double.infinity, height: 0)
                     : Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        // 위 기준 줄(누를 때 회색으로 칠해지는 칸)과 맞닿지 않게 살짝 띄움
+                        padding: const EdgeInsets.only(top: 6, bottom: 10),
                         child: SettingGroup(children: [
                           SettingOption(
                             label: Text(forName ? _tr('오름차순', 'Ascending', '升序', '昇順') : _tr('최신순', 'Newest', '最新', '新しい順')),
@@ -2602,6 +2611,32 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   bool _fabOpen = false; // 파일 추가 버튼을 눌러 세 가지 메뉴가 펼쳐진 상태
 
   /// 파일 추가 버튼: 누르면 위로 [파일 추가 / PDF 병합 / 이미지 병합] 세 버튼이 펼쳐짐
+  /// 문서 스캔: 카메라로 찍어 보정한 뒤 PDF 한 개로 만들어 지금 그룹에 넣음
+  Future<void> _openDocumentScanner() async {
+    final targetGroup = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
+    final File? createdPdf = await Navigator.push<File?>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DocumentScannerScreen(appLang: widget.appLang, targetGroup: targetGroup),
+      ),
+    );
+    if (createdPdf == null || !await createdPdf.exists() || !mounted) return;
+    await StorageService.setBookGroup(createdPdf.path, targetGroup);
+    await _loadLibrary();
+    if (!mounted) return;
+    final fileName = createdPdf.path.split(Platform.pathSeparator).last;
+    final grpDisplay = _localizeGroupName(targetGroup);
+    _showCreatedSnack(
+      _tr(
+        '스캔 PDF 파일이 [$grpDisplay]에 만들어졌어요\n($fileName)',
+        'Scanned PDF created in [$grpDisplay]\n($fileName)',
+        '扫描 PDF 已创建于 [$grpDisplay]\n($fileName)',
+        'スキャンPDFが [$grpDisplay] に作成されました\n($fileName)',
+      ),
+      createdPdf,
+    );
+  }
+
   Widget _buildAddFab() {
     final cs = Theme.of(context).colorScheme;
     Widget action(String tag, IconData icon, String label, VoidCallback onTap) => Padding(
@@ -2617,7 +2652,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               onTap();
             },
             icon: Icon(icon),
-            label: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+            // 회색 버튼 글씨에는 그림자 없음 (테마의 흰 글씨 그림자를 덮어씀)
+            label: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, shadows: <Shadow>[])),
           ),
         );
     return Column(
@@ -2633,6 +2669,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             if (t <= 0.001) return const SizedBox.shrink();
             // 위에서 아래 순서
             final items = <Widget>[
+              // 문서 스캔: 파일 추가 버튼 위
+              action('fab_scan_doc', Icons.document_scanner_outlined, _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner),
               // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
               action('fab_add_plain', Icons.create_new_folder_outlined, _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
               action('fab_merge_pdf', Icons.picture_as_pdf_outlined, _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),

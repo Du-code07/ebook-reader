@@ -138,11 +138,14 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
 /// 누른 자리에서 하나씩 차례로 빠져나오고(앞 버튼 뒤에 숨어 있다가) 닫을 때는 거꾸로 들어감.
 /// 빨간 색을 준 항목(삭제)은 빨간 바탕에 흰 아이콘·글씨
 class ActionButtonsRoute<T> extends PopupRoute<T> {
-  ActionButtonsRoute({required this.anchor, required this.items, this.barrierLabel, this.beside = false});
+  ActionButtonsRoute({required this.anchor, required this.items, this.barrierLabel, this.beside = false, this.besideLeft});
 
   final Rect anchor;
   final List<ScaleMenuItem<T>> items;
   final bool beside;
+
+  /// 옆에 띄울 때 버튼 왼쪽 끝 자리 (그룹 목록 오른쪽 바깥). 없으면 누른 이름 바로 오른쪽
+  final double? besideLeft;
 
   @override
   final String? barrierLabel;
@@ -169,7 +172,7 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
     final bool alignRight = !beside && anchor.center.dx > screen.width / 2;
     final bool above = !beside && anchor.bottom + 6 + total > screen.height - pad.bottom - 8 && anchor.top - 6 - total > pad.top;
     final double edgeX = beside
-        ? math.min(anchor.right + 16, screen.width - 8 - 150)
+        ? math.min(besideLeft ?? anchor.right + 16, screen.width - 8 - 150)
         : alignRight ? math.min(screen.width - 8, anchor.right) : math.max(8.0, anchor.left);
     final double edgeY = beside
         ? math.max(pad.top + 8, math.min(anchor.top - 4, screen.height - pad.bottom - 8 - total))
@@ -271,7 +274,7 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
 }
 
 /// [anchorContext] 위치에서 편집 버튼들을 하나씩 빠져나오게 띄우고 고른 값을 돌려줌 (닫으면 null)
-Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> items, {bool beside = false, bool compact = false}) {
+Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> items, {bool beside = false, bool compact = false, double? besideLeft}) {
   final box = anchorContext.findRenderObject() as RenderBox?;
   if (box == null || !box.hasSize) return Future.value(null);
   // 메뉴가 놓이는 화면 기준 좌표 (태블릿처럼 앱을 크게 보여 줄 때도 누른 자리에 맞게)
@@ -283,6 +286,7 @@ Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> i
       barrierLabel: MaterialLocalizations.of(anchorContext).modalBarrierDismissLabel,
       items: items,
       beside: beside,
+      besideLeft: besideLeft,
     ),
   );
 }

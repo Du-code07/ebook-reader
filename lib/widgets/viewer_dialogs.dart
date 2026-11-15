@@ -36,7 +36,7 @@ Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) 
   );
 }
 
-/// 고르기 창 (페이지 표시·화면 회전): 제목 + 설명 + 아이콘 카드 목록 + 아래 [확인]
+/// 고르기 창 (페이지 표시·화면 회전): 제목 + 설명 + 아이콘 카드 목록. 누르면 고르고, 창이 닫힐 때 적용
 Widget _choiceDialogBody<T>(
   BuildContext context, {
   required String title,
@@ -44,8 +44,6 @@ Widget _choiceDialogBody<T>(
   required List<(T, Widget, String, String)> options,
   required T selected,
   required ValueChanged<T> onTap,
-  required String okLabel,
-  required VoidCallback onOk,
 }) {
   final cs = Theme.of(context).colorScheme;
   final bool dark = Theme.of(context).brightness == Brightness.dark;
@@ -64,7 +62,7 @@ Widget _choiceDialogBody<T>(
     child: ConstrainedBox(
       constraints: BoxConstraints(maxWidth: math.min(460, MediaQuery.sizeOf(context).width - 40)),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 28, 22, 22),
+        padding: const EdgeInsets.fromLTRB(22, 28, 22, 10),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -134,19 +132,6 @@ Widget _choiceDialogBody<T>(
                   ),
                 ),
               ),
-            const SizedBox(height: 6),
-            SizedBox(
-              height: 54,
-              child: FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: ink,
-                  foregroundColor: cs.onPrimary,
-                  shape: const StadiumBorder(),
-                ),
-                onPressed: onOk,
-                child: Text(okLabel, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-              ),
-            ),
           ],
         ),
       ),
@@ -154,7 +139,7 @@ Widget _choiceDialogBody<T>(
   );
 }
 
-/// 문서 + 톱니 (자동)
+/// 자동 (페이지 표시): 귀퉁이가 접힌 문서 + 줄 + 오른쪽 아래 톱니
 class _AutoPageIcon extends StatelessWidget {
   const _AutoPageIcon();
 
@@ -162,35 +147,118 @@ class _AutoPageIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final it = IconTheme.of(context);
     final double sz = it.size ?? 28;
-    return SizedBox.square(
-      dimension: sz,
-      child: Stack(
-        children: [
-          Icon(Icons.description_outlined, size: sz),
-          Positioned(
-            right: -sz * 0.06,
-            bottom: -sz * 0.06,
-            child: Container(
-              decoration: const BoxDecoration(shape: BoxShape.circle),
-              child: Icon(Icons.settings_outlined, size: sz * 0.48),
-            ),
-          ),
-        ],
-      ),
-    );
+    return CustomPaint(size: Size.square(sz), painter: _AutoPagePainter(it.color ?? Theme.of(context).colorScheme.onSurface));
   }
 }
 
-/// 페이지 표시: 한 페이지 / 두 페이지 / 자동. 누르면 바로 적용 ([onChanged]), [확인]으로 닫음
+class _AutoPagePainter extends CustomPainter {
+  _AutoPagePainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double u = size.width / 24; // 24칸 기준
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8 * u
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round;
+    canvas.saveLayer(Offset.zero & size, Paint());
+    // 문서: 오른쪽 위 귀퉁이가 접힘
+    final doc = Path()
+      ..moveTo(5 * u, 3 * u)
+      ..lineTo(13.5 * u, 3 * u)
+      ..lineTo(18.5 * u, 8 * u)
+      ..lineTo(18.5 * u, 20 * u)
+      ..quadraticBezierTo(18.5 * u, 21 * u, 17.5 * u, 21 * u)
+      ..lineTo(6 * u, 21 * u)
+      ..quadraticBezierTo(5 * u, 21 * u, 5 * u, 20 * u)
+      ..lineTo(5 * u, 4 * u)
+      ..quadraticBezierTo(5 * u, 3 * u, 6 * u, 3 * u);
+    canvas.drawPath(doc, stroke);
+    final fold = Path()
+      ..moveTo(13.5 * u, 3 * u)
+      ..lineTo(13.5 * u, 8 * u)
+      ..lineTo(18.5 * u, 8 * u);
+    canvas.drawPath(fold, stroke);
+    // 글줄
+    for (final (double y, double x2) in [(11.0, 15.5), (14.5, 13.0), (18.0, 11.0)]) {
+      canvas.drawLine(Offset(8 * u, y * u), Offset(x2 * u, y * u), stroke);
+    }
+    // 톱니 자리 비우기 (문서 선과 겹치지 않게)
+    final Offset c = Offset(18.2 * u, 18.2 * u);
+    canvas.drawCircle(c, 5.6 * u, Paint()..blendMode = BlendMode.clear);
+    // 톱니: 둥근 몸통 + 이 8개 + 가운데 구멍
+    final fill = Paint()..color = color;
+    final double rBody = 3.4 * u;
+    for (int i = 0; i < 8; i++) {
+      canvas.save();
+      canvas.translate(c.dx, c.dy);
+      canvas.rotate(i * math.pi / 4);
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(0, -rBody - 0.6 * u), width: 2.1 * u, height: 2.4 * u), Radius.circular(0.5 * u)), fill);
+      canvas.restore();
+    }
+    canvas.drawCircle(c, rBody, fill);
+    canvas.drawCircle(c, 1.4 * u, Paint()..blendMode = BlendMode.clear);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_AutoPagePainter old) => old.color != color;
+}
+
+/// 세로 고정·가로 고정: 휴대폰 테두리 + 위 스피커 + 아래 동그라미
+class _PhoneIcon extends StatelessWidget {
+  const _PhoneIcon({required this.landscape});
+  final bool landscape;
+
+  @override
+  Widget build(BuildContext context) {
+    final it = IconTheme.of(context);
+    final double sz = it.size ?? 28;
+    return CustomPaint(size: Size.square(sz), painter: _PhonePainter(it.color ?? Theme.of(context).colorScheme.onSurface, landscape));
+  }
+}
+
+class _PhonePainter extends CustomPainter {
+  _PhonePainter(this.color, this.landscape);
+  final Color color;
+  final bool landscape;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double u = size.width / 24;
+    if (landscape) {
+      // 세로 모양을 왼쪽으로 돌려 가로로 (스피커가 왼쪽)
+      canvas.translate(size.width / 2, size.height / 2);
+      canvas.rotate(-math.pi / 2);
+      canvas.translate(-size.width / 2, -size.height / 2);
+    }
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8 * u
+      ..strokeCap = StrokeCap.round;
+    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(6.5 * u, 2.5 * u, 17.5 * u, 21.5 * u), Radius.circular(2.6 * u)), stroke);
+    canvas.drawLine(Offset(10.3 * u, 5.4 * u), Offset(13.7 * u, 5.4 * u), stroke);
+    canvas.drawCircle(Offset(12 * u, 18.4 * u), 1.05 * u, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_PhonePainter old) => old.color != color || old.landscape != landscape;
+}
+
+/// 페이지 표시: 한 페이지 / 두 페이지 / 자동. 누르면 고르고, 창이 닫힐 때 바뀌었으면 적용 ([onChanged])
 Future<void> showPageDisplayDialog(
   BuildContext context, {
   required String current,
   required ViewerTr tr,
   required ValueChanged<String> onChanged,
   bool scrollMode = false,
-}) {
+}) async {
   String selected = current;
-  return _centerDialog<void>(context, (ctx) {
+  await _centerDialog<void>(context, (ctx) {
     return StatefulBuilder(
       builder: (ctx, setState) => _choiceDialogBody<String>(
         ctx,
@@ -202,21 +270,17 @@ Future<void> showPageDisplayDialog(
           ('auto', const _AutoPageIcon(), tr('자동', 'Auto', '自动', '自動'), tr('화면이 넓으면 두 페이지, 좁으면 한 페이지', 'Two pages on wide screens, one on narrow', '屏幕宽时双页，窄时单页', '画面が広いと2ページ、狭いと1ページ')),
         ],
         selected: selected,
-        onTap: (v) {
-          setState(() => selected = v);
-          onChanged(v);
-        },
-        okLabel: tr('확인', 'OK', '确定', 'OK'),
-        onOk: () => Navigator.of(ctx).pop(),
+        onTap: (v) => setState(() => selected = v),
       ),
     );
   });
+  if (selected != current) onChanged(selected);
 }
 
-/// 화면 회전: 자동 / 세로 고정 / 가로 고정 ('auto' / 'portrait' / 'landscape'). '확인'을 누르면 돌려줌
-Future<String?> showRotationDialog(BuildContext context, {required String current, required ViewerTr tr}) {
+/// 화면 회전: 자동 / 세로 고정 / 가로 고정 ('auto' / 'portrait' / 'landscape'). 누르면 고르고, 창이 닫힐 때 바뀌었으면 돌려줌
+Future<String?> showRotationDialog(BuildContext context, {required String current, required ViewerTr tr}) async {
   String selected = current;
-  return _centerDialog<String>(context, (ctx) {
+  await _centerDialog<void>(context, (ctx) {
     return StatefulBuilder(
       builder: (ctx, setState) => _choiceDialogBody<String>(
         ctx,
@@ -225,7 +289,7 @@ Future<String?> showRotationDialog(BuildContext context, {required String curren
           for (final value in const ['auto', 'portrait', 'landscape'])
             (
               value,
-              Icon(rotationIcon(value)),
+              value == 'auto' ? Icon(rotationIcon(value)) : _PhoneIcon(landscape: value == 'landscape'),
               rotationLabel(value, tr),
               switch (value) {
                 'portrait' => tr('세로 화면으로 유지', 'Stays in portrait', '保持竖屏', '縦画面のまま'),
@@ -236,11 +300,10 @@ Future<String?> showRotationDialog(BuildContext context, {required String curren
         ],
         selected: selected,
         onTap: (v) => setState(() => selected = v),
-        okLabel: tr('확인', 'OK', '确定', 'OK'),
-        onOk: () => Navigator.of(ctx).pop(selected),
       ),
     );
   });
+  return selected == current ? null : selected;
 }
 
 IconData rotationIcon(String mode) => switch (mode) {
