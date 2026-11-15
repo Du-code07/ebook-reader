@@ -166,8 +166,8 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
                   child: Text(label,
                       key: _nameKeys.putIfAbsent(value, GlobalKey.new),
                       overflow: TextOverflow.ellipsis,
-                      // 위 그룹 이름 칸(칩)과 같은 글꼴·굵기·크기
-                      style: (Theme.of(context).textTheme.labelLarge ?? const TextStyle()).copyWith(color: fg, shadows: sel ? AppColors.sigShadows(context) : null)),
+                      // 위 그룹 이름 칸(칩)과 같은 글꼴·크기, 둘 다 굵게
+                      style: (Theme.of(context).textTheme.labelLarge ?? const TextStyle()).copyWith(color: fg, fontWeight: FontWeight.w700, shadows: sel ? AppColors.sigShadows(context) : null)),
                 ),
               ),
               if (sel) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(Icons.check, size: 18, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context))),

@@ -21,12 +21,13 @@ Widget popTransition(BuildContext context, Animation<double> animation, Widget c
   final Size screen = MediaQuery.sizeOf(context);
   final Offset center = screen.center(Offset.zero);
   final Offset origin = (from ?? TapOrigin.last ?? center) - center;
-  return AnimatedBuilder(
-    animation: animation,
-    child: child,
-    builder: (context, child) => Opacity(
-      opacity: fade.value.clamp(0.0, 1.0),
-      child: Transform.scale(scale: 0.12 + 0.88 * curved.value, origin: origin, child: child),
+  // 부드럽게: 흐려짐은 FadeTransition(창을 다시 그리지 않고 겹만 바꿈), 창 내용은 한 번만 그려 두고(RepaintBoundary) 크기만 바꿈
+  return FadeTransition(
+    opacity: fade,
+    child: AnimatedBuilder(
+      animation: curved,
+      child: RepaintBoundary(child: child),
+      builder: (context, child) => Transform.scale(scale: 0.12 + 0.88 * curved.value, origin: origin, child: child),
     ),
   );
 }

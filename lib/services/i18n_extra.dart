@@ -5,13 +5,11 @@ class I18nExtra {
   static const List<String> langs = ['fr', 'ru', 'es'];
 
   static const Map<String, List<String>> _exact = {
-    'Use [Scan Document] at the top of [Add Files] to photograph pages, clean them up like a scan (filters, darkness, rotate, crop) and save them as one PDF': ['Avec [Numériser un document] en haut de [Ajouter des fichiers], photographiez des pages, nettoyez-les comme un scan (filtres, intensité, rotation, rognage) et enregistrez-les en un seul PDF', 'Через [Сканировать документ] вверху [Добавить файлы] сфотографируйте страницы, улучшите их как скан (фильтры, насыщенность, поворот, обрезка) и сохраните одним PDF', 'Con [Escanear documento] arriba de [Añadir archivos], fotografía páginas, mejóralas como un escaneo (filtros, intensidad, girar, recortar) y guárdalas en un solo PDF'],
+    'Use [Scan Document], shown left of [Close] after tapping [Add Files], to photograph pages, clean them up like a scan (filters, darkness, rotate, crop) and save them as one PDF': ['Avec [Numériser un document], à gauche de [Fermer] après avoir touché [Ajouter des fichiers], photographiez des pages, nettoyez-les comme un scan (filtres, intensité, rotation, rognage) et enregistrez-les en un seul PDF', 'Через [Сканировать документ] слева от [Закрыть] (после нажатия [Добавить файлы]) сфотографируйте страницы, улучшите их как скан (фильтры, насыщенность, поворот, обрезка) и сохраните одним PDF', 'Con [Escanear documento], a la izquierda de [Cerrar] tras tocar [Añadir archivos], fotografía páginas, mejóralas como un escaneo (filtros, intensidad, girar, recortar) y guárdalas en un solo PDF'],
     'Scan Document': ['Numériser un document', 'Сканировать документ', 'Escanear documento'],
     'Document Scan': ['Numérisation de document', 'Сканирование документа', 'Escaneo de documento'],
     'Enhance': ['Améliorer', 'Улучшить', 'Mejorar'],
-    'Word Doc': ['Document Word', 'Документ Word', 'Documento Word'],
     'No Shadow': ['Sans ombre', 'Без теней', 'Sin sombras'],
-    'B&W': ['N&B', 'Ч/Б', 'B/N'],
     'Invert': ['Inverser', 'Инвертировать', 'Invertir'],
     'Original': ['Original', 'Оригинал', 'Original'],
     'Rename Scanned Document': ['Renommer le document numérisé', 'Переименовать скан', 'Renombrar documento escaneado'],

@@ -22,8 +22,11 @@ TapZone tapZoneAt(Offset local, Size size) {
 }
 
 /// 가운데에 뜨는 둥근 창 (페이지 표시·화면 회전 등 짧은 고르기)
-Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) {
+Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) async {
   final Offset? popFrom = TapOrigin.last; // 연 자리 (닫을 때 그 자리로 돌아감)
+  // 도구 모음이 닫히며 화면을 다시 그리는 프레임과 겹치지 않게, 그 프레임이 끝난 뒤 창을 띄움 (뜰 때 덜 버벅임)
+  await WidgetsBinding.instance.endOfFrame;
+  if (!context.mounted) return null;
   return showGeneralDialog<T>(
     context: context,
     barrierDismissible: true,
@@ -141,13 +144,15 @@ Widget _choiceDialogBody<T>(
 
 /// 자동 (페이지 표시): 귀퉁이가 접힌 문서 + 줄 + 오른쪽 아래 톱니
 class _AutoPageIcon extends StatelessWidget {
-  const _AutoPageIcon();
+  const _AutoPageIcon({this.size, this.color});
+  final double? size;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     final it = IconTheme.of(context);
-    final double sz = it.size ?? 28;
-    return CustomPaint(size: Size.square(sz), painter: _AutoPagePainter(it.color ?? Theme.of(context).colorScheme.onSurface));
+    final double sz = size ?? it.size ?? 24;
+    return CustomPaint(size: Size.square(sz), painter: _AutoPagePainter(color ?? it.color ?? Theme.of(context).colorScheme.onSurface));
   }
 }
 
@@ -210,43 +215,81 @@ class _AutoPagePainter extends CustomPainter {
 
 /// 세로 고정·가로 고정: 휴대폰 테두리 + 위 스피커 + 아래 동그라미
 class _PhoneIcon extends StatelessWidget {
-  const _PhoneIcon({required this.landscape});
-  final bool landscape;
+  const _PhoneIcon({required this.mode, this.size, this.color});
+  final String mode; // 'portrait' / 'landscape' / 'auto'
+  final double? size;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     final it = IconTheme.of(context);
-    final double sz = it.size ?? 28;
-    return CustomPaint(size: Size.square(sz), painter: _PhonePainter(it.color ?? Theme.of(context).colorScheme.onSurface, landscape));
+    final double sz = size ?? it.size ?? 24;
+    return CustomPaint(size: Size.square(sz), painter: _PhonePainter(color ?? it.color ?? Theme.of(context).colorScheme.onSurface, mode));
   }
 }
 
 class _PhonePainter extends CustomPainter {
-  _PhonePainter(this.color, this.landscape);
+  _PhonePainter(this.color, this.mode);
   final Color color;
-  final bool landscape;
+  final String mode;
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double u = size.width / 24;
-    if (landscape) {
-      // 세로 모양을 왼쪽으로 돌려 가로로 (스피커가 왼쪽)
-      canvas.translate(size.width / 2, size.height / 2);
-      canvas.rotate(-math.pi / 2);
-      canvas.translate(-size.width / 2, -size.height / 2);
-    }
-    final stroke = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.8 * u
-      ..strokeCap = StrokeCap.round;
+  void _phone(Canvas canvas, double u, Paint stroke) {
     canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(6.5 * u, 2.5 * u, 17.5 * u, 21.5 * u), Radius.circular(2.6 * u)), stroke);
     canvas.drawLine(Offset(10.3 * u, 5.4 * u), Offset(13.7 * u, 5.4 * u), stroke);
     canvas.drawCircle(Offset(12 * u, 18.4 * u), 1.05 * u, Paint()..color = color);
   }
 
   @override
-  bool shouldRepaint(_PhonePainter old) => old.color != color || old.landscape != landscape;
+  void paint(Canvas canvas, Size size) {
+    final double u = size.width / 24;
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8 * u
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final Offset c = size.center(Offset.zero);
+    if (mode == 'auto') {
+      // 자동: 세로 고정과 같은 휴대폰을 작게 기울이고, 양쪽에 도는 화살표
+      canvas.save();
+      canvas.translate(c.dx, c.dy);
+      canvas.rotate(math.pi / 4);
+      canvas.scale(0.66);
+      canvas.translate(-c.dx, -c.dy);
+      final thin = Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.8 * u / 0.66 * 0.85
+        ..strokeCap = StrokeCap.round;
+      _phone(canvas, u, thin);
+      canvas.restore();
+      final double r = 10.3 * u;
+      final rect = Rect.fromCircle(center: c, radius: r);
+      for (final double start in [190.0, 10.0]) {
+        final double a0 = start * math.pi / 180, sweep = 62 * math.pi / 180;
+        canvas.drawArc(rect, a0, sweep, false, stroke);
+        // 화살촉: 호 끝에서 도는 방향(시계 방향)으로
+        final double a1 = a0 + sweep;
+        final Offset tip = c + Offset(math.cos(a1), math.sin(a1)) * r;
+        final Offset back = Offset(math.sin(a1), -math.cos(a1)); // 도는 방향의 반대
+        for (final double t in [0.75, -0.75]) {
+          final Offset d = Offset(back.dx * math.cos(t) - back.dy * math.sin(t), back.dx * math.sin(t) + back.dy * math.cos(t));
+          canvas.drawLine(tip, tip + d * 2.8 * u, stroke);
+        }
+      }
+      return;
+    }
+    if (mode == 'landscape') {
+      // 세로 모양을 왼쪽으로 돌려 가로로 (스피커가 왼쪽)
+      canvas.translate(c.dx, c.dy);
+      canvas.rotate(-math.pi / 2);
+      canvas.translate(-c.dx, -c.dy);
+    }
+    _phone(canvas, u, stroke);
+  }
+
+  @override
+  bool shouldRepaint(_PhonePainter old) => old.color != color || old.mode != mode;
 }
 
 /// 페이지 표시: 한 페이지 / 두 페이지 / 자동. 누르면 고르고, 창이 닫힐 때 바뀌었으면 적용 ([onChanged])
@@ -265,9 +308,9 @@ Future<void> showPageDisplayDialog(
         title: tr('페이지 표시', 'Page Display', '页面显示', 'ページ表示'),
         subtitle: tr('탭·슬라이드 모드에서 적용돼요\n(스크롤 모드는 유지)', 'Applies in tap/slide mode\n(scroll mode stays the same)', '在点击/滑动模式下生效\n（滚动模式保持不变）', 'タップ・スライドモードで適用されます\n(スクロールモードはそのまま)'),
         options: [
-          ('one', const Icon(Icons.insert_drive_file_outlined), tr('한 페이지', 'One Page', '单页', '1ページ'), tr('한 번에 한 쪽씩 보기', 'One page at a time', '一次看一页', '1ページずつ表示')),
-          ('two', const Icon(Icons.menu_book_outlined), tr('두 페이지', 'Two Pages', '双页', '2ページ'), tr('양쪽 두 페이지를 나란히 보기', 'Two pages side by side', '两页并排显示', '2ページを並べて表示')),
-          ('auto', const _AutoPageIcon(), tr('자동', 'Auto', '自动', '自動'), tr('화면이 넓으면 두 페이지, 좁으면 한 페이지', 'Two pages on wide screens, one on narrow', '屏幕宽时双页，窄时单页', '画面が広いと2ページ、狭いと1ページ')),
+          ('one', pageDisplayGlyph('one'), tr('한 페이지', 'One Page', '单页', '1ページ'), tr('한 번에 한 쪽씩 보기', 'One page at a time', '一次看一页', '1ページずつ表示')),
+          ('two', pageDisplayGlyph('two'), tr('두 페이지', 'Two Pages', '双页', '2ページ'), tr('양쪽 두 페이지를 나란히 보기', 'Two pages side by side', '两页并排显示', '2ページを並べて表示')),
+          ('auto', pageDisplayGlyph('auto'), tr('자동', 'Auto', '自动', '自動'), tr('화면이 넓으면 두 페이지, 좁으면 한 페이지', 'Two pages on wide screens, one on narrow', '屏幕宽时双页，窄时单页', '画面が広いと2ページ、狭いと1ページ')),
         ],
         selected: selected,
         onTap: (v) => setState(() => selected = v),
@@ -289,7 +332,7 @@ Future<String?> showRotationDialog(BuildContext context, {required String curren
           for (final value in const ['auto', 'portrait', 'landscape'])
             (
               value,
-              value == 'auto' ? Icon(rotationIcon(value)) : _PhoneIcon(landscape: value == 'landscape'),
+              rotationGlyph(value),
               rotationLabel(value, tr),
               switch (value) {
                 'portrait' => tr('세로 화면으로 유지', 'Stays in portrait', '保持竖屏', '縦画面のまま'),
@@ -306,11 +349,9 @@ Future<String?> showRotationDialog(BuildContext context, {required String curren
   return selected == current ? null : selected;
 }
 
-IconData rotationIcon(String mode) => switch (mode) {
-      'portrait' => Icons.stay_current_portrait,
-      'landscape' => Icons.stay_current_landscape,
-      _ => Icons.screen_rotation,
-    };
+/// 화면 회전 아이콘 (설정 창과 도구 모음이 같은 모양): 자동 / 세로 고정 / 가로 고정
+Widget rotationGlyph(String mode, {double? size, Color? color}) =>
+    _PhoneIcon(mode: mode == 'portrait' || mode == 'landscape' ? mode : 'auto', size: size, color: color);
 
 String rotationLabel(String mode, ViewerTr tr) => switch (mode) {
       'portrait' => tr('세로 고정', 'Portrait Lock', '锁定竖屏', '縦に固定'),
@@ -318,11 +359,11 @@ String rotationLabel(String mode, ViewerTr tr) => switch (mode) {
       _ => tr('자동', 'Auto', '自动', '自動'),
     };
 
-/// 페이지 표시 아이콘
-IconData pageDisplayIcon(String mode) => switch (mode) {
-      'two' => Icons.menu_book,
-      'auto' => Icons.auto_stories_outlined,
-      _ => Icons.crop_portrait,
+/// 페이지 표시 아이콘 (설정 창과 도구 모음이 같은 모양): 한 페이지 / 두 페이지 / 자동
+Widget pageDisplayGlyph(String mode, {double? size, Color? color}) => switch (mode) {
+      'two' => Icon(Icons.menu_book_outlined, size: size, color: color),
+      'auto' => _AutoPageIcon(size: size, color: color),
+      _ => Icon(Icons.insert_drive_file_outlined, size: size, color: color),
     };
 
 /// 스크롤 모드: 쪽들을 간격 없이 세로로 이어 붙여 보여 주는 목록

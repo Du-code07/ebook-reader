@@ -168,6 +168,7 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
     final EdgeInsets pad = MediaQuery.paddingOf(context);
     const double rowH = 54; // 버튼 높이 46 + 사이 8
     const double boxW = 260; // 버튼들이 놓이는 자리 너비 (가장 긴 버튼도 들어가게)
+    const double sideSlide = 180; // 옆에 띄울 때 미끄러져 나오는 거리
     final double total = items.length * rowH;
     final bool alignRight = !beside && anchor.center.dx > screen.width / 2;
     final bool above = !beside && anchor.bottom + 6 + total > screen.height - pad.bottom - 8 && anchor.top - 6 - total > pad.top;
@@ -233,20 +234,25 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
               final int n = items.length;
               // 누른 자리에 가까운 버튼부터 차례로 (위로 펼치면 맨 아래 버튼이 먼저)
               final order = above ? [for (int i = n - 1; i >= 0; i--) i] : [for (int i = 0; i < n; i++) i];
-              final offsets = List<double>.filled(n, 0);
+              final offsets = List<Offset>.filled(n, Offset.zero);
               final shown = List<double>.filled(n, 0);
               double hidden = 0; // 앞 버튼이 아직 덜 나온 만큼 (그 뒤에 붙어 함께 움직임)
               for (int k = 0; k < n; k++) {
                 final int i = order[k];
                 final double raw = ((t - k * 0.22) / 0.56).clamp(0.0, 1.0);
                 final double p = (opening ? Curves.easeOutBack : Curves.easeOutCubic).transform(raw);
-                hidden += rowH * (1 - p);
-                offsets[i] = above ? hidden : -hidden;
+                if (beside) {
+                  // 옆에 띄울 때: 목록 오른쪽 가장자리 뒤에서 오른쪽으로 하나씩 미끄러져 나옴
+                  offsets[i] = Offset(-sideSlide * (1 - p), 0);
+                } else {
+                  hidden += rowH * (1 - p);
+                  offsets[i] = Offset(0, above ? hidden : -hidden);
+                }
                 shown[i] = raw;
               }
               // 누른 자리에서 먼 버튼부터 그려, 가까운 버튼 뒤에 숨어 있다가 빠져나옴
               final paintOrder = order.reversed.toList();
-              return SizedBox(
+              final Widget stack = SizedBox(
                 width: boxW,
                 height: total,
                 child: Stack(
@@ -258,19 +264,30 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
                         left: alignRight ? null : 0,
                         right: alignRight ? 0 : null,
                         child: Transform.translate(
-                          offset: Offset(0, offsets[i]),
+                          offset: offsets[i],
                           child: Opacity(opacity: (shown[i] * 3).clamp(0.0, 1.0), child: button(items[i])),
                         ),
                       ),
                   ],
                 ),
               );
+              // 옆에 띄울 때는 왼쪽 가장자리(목록 바로 옆)에서 잘라, 목록 뒤에서 나오는 것처럼 보이게 (그림자 자리는 남김)
+              return beside ? ClipRect(clipper: _LeftEdgeClipper(), child: stack) : stack;
             },
           ),
         ),
       ],
     );
   }
+}
+
+/// 왼쪽만 자르고 위·아래·오른쪽은 그림자가 보이게 넉넉히 둠
+class _LeftEdgeClipper extends CustomClipper<Rect> {
+  @override
+  Rect getClip(Size size) => Rect.fromLTRB(-2, -24, size.width + 40, size.height + 24);
+
+  @override
+  bool shouldReclip(_LeftEdgeClipper oldClipper) => false;
 }
 
 /// [anchorContext] 위치에서 편집 버튼들을 하나씩 빠져나오게 띄우고 고른 값을 돌려줌 (닫으면 null)

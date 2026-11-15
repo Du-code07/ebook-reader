@@ -499,10 +499,10 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.document_scanner_outlined),
                 title: _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'),
-                desc: _tr('[파일 추가] 맨 위 [문서 스캔]으로 카메라로 문서를 여러 장 찍고, 스캔본처럼 선명하게 보정(필터·진하기·회전·자르기)해 PDF 한 개로 만들어요',
-                    'Use [Scan Document] at the top of [Add Files] to photograph pages, clean them up like a scan (filters, darkness, rotate, crop) and save them as one PDF',
-                    '在[添加文件]最上方的[扫描文档]中用相机拍摄多页，像扫描件一样清晰校正（滤镜、浓度、旋转、裁剪）后合成一个 PDF',
-                    '[ファイル追加]の一番上の[文書スキャン]で書類を複数枚撮影し、スキャンのように補正(フィルター・濃さ・回転・切り抜き)して1つのPDFにします')),
+                desc: _tr('[파일 추가]를 누르면 [닫기] 왼쪽에 나오는 [문서 스캔]으로 카메라로 문서를 여러 장 찍고, 스캔본처럼 선명하게 보정(필터·진하기·회전·자르기)해 PDF 한 개로 만들어요',
+                    'Use [Scan Document], shown left of [Close] after tapping [Add Files], to photograph pages, clean them up like a scan (filters, darkness, rotate, crop) and save them as one PDF',
+                    '点[添加文件]后，在[关闭]左边出现的[扫描文档]中用相机拍摄多页，像扫描件一样清晰校正（滤镜、浓度、旋转、裁剪）后合成一个 PDF',
+                    '[ファイル追加]を押すと[閉じる]の左に出る[文書スキャン]で書類を複数枚撮影し、スキャンのように補正(フィルター・濃さ・回転・切り抜き)して1つのPDFにします')),
             _row(context,
                 icon: GroupStackIcon(size: 19, spread: false, color: cs.onSurface),
                 title: _tr('그룹', 'Groups', '分组', 'グループ'),
@@ -2639,8 +2639,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   Widget _buildAddFab() {
     final cs = Theme.of(context).colorScheme;
-    Widget action(String tag, IconData icon, String label, VoidCallback onTap) => Padding(
-          padding: const EdgeInsets.only(bottom: 10),
+    Widget action(String tag, IconData icon, String label, VoidCallback onTap, {double bottom = 10}) => Padding(
+          padding: EdgeInsets.only(bottom: bottom),
           child: FloatingActionButton.extended(
             heroTag: tag,
             elevation: 2,
@@ -2669,8 +2669,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             if (t <= 0.001) return const SizedBox.shrink();
             // 위에서 아래 순서
             final items = <Widget>[
-              // 문서 스캔: 파일 추가 버튼 위
-              action('fab_scan_doc', Icons.document_scanner_outlined, _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner),
               // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
               action('fab_add_plain', Icons.create_new_folder_outlined, _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
               action('fab_merge_pdf', Icons.picture_as_pdf_outlined, _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
@@ -2706,16 +2704,41 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             );
           },
         ),
-        FloatingActionButton.extended(
-          heroTag: 'fab_add_files',
-          onPressed: () {
-            _closeSearch();
-            setState(() => _fabOpen = !_fabOpen);
-          },
-          // 아이콘 움직임: [전체] 그룹 아이콘과 같은 빠르기·느낌 (기본 움직임)
-          icon: PlusCloseIcon(open: _fabOpen, size: 24),
-          label: Text(_fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
-              style: TextStyle(fontWeight: FontWeight.w800, shadows: AppColors.sigShadows(context))),
+        // 아래 줄: [문서 스캔] (펼쳤을 때만, [닫기] 버튼 뒤에서 왼쪽으로 빠져나옴) + [파일 추가/닫기]
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TweenAnimationBuilder<double>(
+              tween: Tween<double>(end: _fabOpen ? 1.0 : 0.0),
+              duration: Anim.ms(_fabOpen ? 420 : 300),
+              builder: (context, t, child) {
+                if (t <= 0.001) return const SizedBox.shrink();
+                final double p = (_fabOpen ? Curves.easeOutBack : Curves.easeOutCubic).transform(t.clamp(0.0, 1.0));
+                return IgnorePointer(
+                  ignoring: !_fabOpen,
+                  child: Transform.translate(
+                    offset: Offset(90 * (1 - p), 0),
+                    child: Opacity(opacity: (t * 3).clamp(0.0, 1.0), child: child),
+                  ),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: action('fab_scan_doc', Icons.document_scanner_outlined, _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner, bottom: 0),
+              ),
+            ),
+            FloatingActionButton.extended(
+              heroTag: 'fab_add_files',
+              onPressed: () {
+                _closeSearch();
+                setState(() => _fabOpen = !_fabOpen);
+              },
+              // 아이콘 움직임: [전체] 그룹 아이콘과 같은 빠르기·느낌 (기본 움직임)
+              icon: PlusCloseIcon(open: _fabOpen, size: 24),
+              label: Text(_fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
+                  style: TextStyle(fontWeight: FontWeight.w800, shadows: AppColors.sigShadows(context))),
+            ),
+          ],
         ),
       ],
     );
@@ -2765,7 +2788,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             labelPadding: const EdgeInsets.only(left: 4, right: 2),
             label: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 220),
-              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(shadows: AppColors.sigShadows(context))),
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, shadows: AppColors.sigShadows(context))),
             ),
             selected: true,
             onSelected: (_) {
@@ -3795,6 +3818,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                 IconButton(
                   icon: Badge(
                     isLabelVisible: _trashedBooks.isNotEmpty,
+                    // 빨간 숫자 동그라미는 작게
+                    largeSize: 13,
+                    padding: const EdgeInsets.symmetric(horizontal: 3.5),
+                    textStyle: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, height: 1.0),
                     label: Text('${_trashedBooks.length}'),
                     // 휴지통 창이 열려 있는 동안 뚜껑이 열림
                     child: TrashLidIcon(open: _trashPanelOpen),

@@ -621,9 +621,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   /// 지금 화면 회전 설정 아이콘
-  IconData get _rotationIconNow {
+  String get _rotationModeNow {
     final bool? want = StorageService.desiredLandscapeNotifier.value;
-    return rotationIcon(want == null ? 'auto' : (want ? 'landscape' : 'portrait'));
+    return want == null ? 'auto' : (want ? 'landscape' : 'portrait');
   }
 
   /// 페이지 표시 고르기 (한 페이지 / 두 페이지 / 자동)
@@ -2791,8 +2791,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         // 누르면 회전 설정 창 (자동 / 세로 고정 / 가로 고정). 아이콘은 고른 설정 모양, 고정이면 노란색
         icon: WiggleOnChange(
           trigger: _rotateTapCount,
-          child: Icon(
-            _rotationIconNow,
+          // 설정 창에서 고른 것과 같은 아이콘
+          child: rotationGlyph(
+            _rotationModeNow,
             color: StorageService.desiredLandscapeNotifier.value != null ? Colors.amber : Colors.white,
             size: 17,
           ),
@@ -2803,8 +2804,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ),
       QuickArcMenuItem(
         // 페이지 표시 (한 페이지 / 두 페이지 / 자동)
-        icon: Icon(
-          pageDisplayIcon(_pageDisplay),
+        // 설정 창에서 고른 것과 같은 아이콘
+        icon: pageDisplayGlyph(
+          _pageDisplay,
           color: _pageDisplay != 'one' ? Colors.amber : Colors.white,
           size: 17,
         ),

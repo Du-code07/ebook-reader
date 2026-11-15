@@ -141,6 +141,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   int _docPage = 0; // 문서의 현재 쪽 (0부터)
   int _docPageCount = 0; // 문서 전체 쪽 수
+  int _docLoadedPages = 0; // 다 읽어 들인 뒤의 전체 쪽 수 (1쪽뿐이면 두 페이지 보기를 쓰지 않음)
   int _docRelocation = 0;
   double _initialProgress = 0.0;
   final VolumeKeyService _volumeKeyService = VolumeKeyService();
@@ -165,9 +166,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _pageModeScroll = false;
   final ContinuousPageController _scrollCtrl = ContinuousPageController();
 
-  /// 두 쪽을 나란히 보여 줄 때인가 (스크롤 모드는 쪽이 바뀌지 않음, EPUB은 늘 한 페이지)
+  /// 두 쪽을 나란히 보여 줄 때인가 (스크롤 모드는 쪽이 바뀌지 않음, EPUB은 늘 한 페이지, 쪽이 하나뿐인 문서도 한 페이지)
   bool _spreadFor(bool isLandscape) =>
-      !_isEpub && !_isSpreadsheet && !_pageModeScroll && !_slideShow && (_pageDisplay == 'two' || (_pageDisplay == 'auto' && isLandscape));
+      !_isEpub && !_isSpreadsheet && _docLoadedPages != 1 && !_pageModeScroll && !_slideShow && (_pageDisplay == 'two' || (_pageDisplay == 'auto' && isLandscape));
   bool _isMangaRtlMode = false;
   int _fontSize = 18;
   List<EpubChapter> _chapters = [];
@@ -614,9 +615,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 지금 화면 회전 설정 아이콘
-  IconData get _rotationIconNow {
+  String get _rotationModeNow {
     final bool? want = StorageService.desiredLandscapeNotifier.value;
-    return rotationIcon(want == null ? 'auto' : (want ? 'landscape' : 'portrait'));
+    return want == null ? 'auto' : (want ? 'landscape' : 'portrait');
   }
 
   /// 페이지 표시 고르기 (한 페이지 / 두 페이지 / 자동)
@@ -1107,6 +1108,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     setState(() {
       _chapterLevels = const [];
       _docPageCount = pageCount;
+      _docLoadedPages = pageCount;
       _chapters = const [];
     });
     if (_isTxt || _isSpreadsheet) return;
@@ -4026,8 +4028,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         // 누르면 회전 설정 창 (자동 / 세로 고정 / 가로 고정). 아이콘은 고른 설정 모양, 고정이면 노란색
         icon: WiggleOnChange(
           trigger: _rotateTapCount,
-          child: Icon(
-            _rotationIconNow,
+          // 설정 창에서 고른 것과 같은 아이콘
+          child: rotationGlyph(
+            _rotationModeNow,
             color: StorageService.desiredLandscapeNotifier.value != null ? Colors.amber : Colors.white,
             size: 17,
           ),
@@ -4038,8 +4041,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       ),
       QuickArcMenuItem(
         // 페이지 표시 (한 페이지 / 두 페이지 / 자동)
-        icon: Icon(
-          pageDisplayIcon(_pageDisplay),
+        // 설정 창에서 고른 것과 같은 아이콘
+        icon: pageDisplayGlyph(
+          _pageDisplay,
           color: _pageDisplay != 'one' ? Colors.amber : Colors.white,
           size: 17,
         ),

@@ -23,7 +23,7 @@ class _ScanPageItem {
   String rawPath;
   // 4개 꼭짓점 [tlX, tlY, trX, trY, brX, brY, blX, blY] (0.0 ~ 1.0)
   List<double> quad;
-  String mode; // 'magic'|'noshadow'|'brighten'|'scan_bw'|'invert'|'original'
+  String mode; // 'magic'|'noshadow'|'invert'|'original'
   double contrast; // 0.0 ~ 1.0
   int rotation; // 0, 90, 180, 270
   String? processedPath;
@@ -95,12 +95,10 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
   String _tr(String ko, String en, String zh, String ja) => AppI18n.t(widget.appLang, ko: ko, en: en, zh: zh, ja: ja);
 
 
-  // 에코, 그레이스케일 제거 -> 6종 핵심 필터 구성
+  // 필터 4종 (워드 변환·흑백은 뺌)
   List<(String, String)> get _filterDefs => [
         ('magic', _tr('강화', 'Enhance', '增强', '強調')),
-        ('word_doc', _tr('워드 변환', 'Word Doc', '文档重绘', 'ワード変換')),
         ('noshadow', _tr('음영 제거', 'No Shadow', '去阴影', '影除去')),
-        ('scan_bw', _tr('흑백', 'B&W', '黑白', '白黒')),
         ('invert', _tr('반전', 'Invert', '反色', '反転')),
         ('original', _tr('원본', 'Original', '原图', '元の写真')),
       ];
@@ -889,11 +887,12 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
                           ),
                         ),
                       ),
+                      // 오른쪽 위 휴지통: 아이콘만 (바탕 동그라미 없음, 흰 종이·어두운 사진 위에서도 보이게 옅은 테두리 그림자)
                       Positioned(
-                        top: 12,
-                        left: 12,
+                        top: 6,
+                        right: 6,
                         child: Material(
-                          color: Colors.black54,
+                          color: Colors.transparent,
                           shape: const CircleBorder(),
                           child: InkWell(
                             customBorder: const CircleBorder(),
@@ -913,8 +912,9 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
                               padding: EdgeInsets.all(9),
                               child: Icon(
                                 Icons.delete_outline,
-                                color: Colors.white,
-                                size: 20,
+                                color: Color(0xDD000000),
+                                size: 24,
+                                shadows: [Shadow(color: Color(0xCCFFFFFF), blurRadius: 4)],
                               ),
                             ),
                           ),
