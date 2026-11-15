@@ -61,6 +61,12 @@ class BookCurlDrag extends ChangeNotifier {
   /// 다 넘어감: (방향, 떠나온 쪽 그림 — 받은 쪽이 dispose)
   final void Function(int dir, ui.Image left)? onCommitted;
 
+  /// 지금 쪽 종이 색 (넘기기 그림에서 알아냄). 종이 뒷면을 이 색으로 칠할 수 있음
+  Color? paperTone;
+
+  /// 종이 색을 알아낼지 (종이 뒷면을 쪽의 종이 색으로 칠하는 화면만)
+  bool wantPaperTone = false;
+
   /// 넘겨 둔 실제 화면이 다 그려져 비쳐 보여도 됨
   final ValueNotifier<bool> live = ValueNotifier<bool>(false);
   Completer<void>? _liveDone;
@@ -106,6 +112,49 @@ class BookCurlDrag extends ChangeNotifier {
       return true;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// 종이 색: 쪽 가장자리 쪽에서 가장 흔한 색 (흰 종이·검은 종이·누런 종이 등)
+  static Future<Color?> paperToneOf(ui.Image img, Rect region) async {
+    try {
+      const int n = 48;
+      final Rect src = region.intersect(Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()));
+      if (src.width < 8 || src.height < 8) return null;
+      final rec = ui.PictureRecorder();
+      Canvas(rec).drawImageRect(img, src, const Rect.fromLTWH(0, 0, n + 0.0, n + 0.0), Paint()..filterQuality = FilterQuality.none);
+      final small = await rec.endRecording().toImage(n, n);
+      final data = await small.toByteData(format: ui.ImageByteFormat.rawRgba);
+      small.dispose();
+      if (data == null) return null;
+      final Map<int, int> votes = {};
+      final Map<int, List<int>> sums = {};
+      for (int y = 0; y < n; y++) {
+        for (int x = 0; x < n; x++) {
+          // 가장자리 띠(바깥 1/6)만: 글·그림보다 종이 바탕이 많은 곳
+          if (x > n ~/ 6 && x < n - n ~/ 6 && y > n ~/ 6 && y < n - n ~/ 6) continue;
+          final int o = (y * n + x) * 4;
+          final int r = data.getUint8(o), g = data.getUint8(o + 1), b = data.getUint8(o + 2);
+          final int k = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+          votes[k] = (votes[k] ?? 0) + 1;
+          final sm = sums.putIfAbsent(k, () => [0, 0, 0]);
+          sm[0] += r;
+          sm[1] += g;
+          sm[2] += b;
+        }
+      }
+      int best = -1, bestK = 0;
+      votes.forEach((k, v) {
+        if (v > best) {
+          best = v;
+          bestK = k;
+        }
+      });
+      if (best <= 0) return null;
+      final sm = sums[bestK]!;
+      return Color.fromARGB(255, sm[0] ~/ best, sm[1] ~/ best, sm[2] ~/ best);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -306,7 +355,18 @@ class BookCurlDrag extends ChangeNotifier {
       }
     }
     image = img;
-    point = _released == null ? _fingerToPoint(_finger) : (reverse ? _target : corner);
+    // 종이 색은 넘기기를 늦추지 않도록 따로 알아내 오는 대로 씀
+    // (그림은 실제 화소 크기라 층 좌표의 종이 자리를 그림 좌표로 바꿔서)
+    paperTone = null;
+    if (wantPaperTone) {
+      final double sx = size.width > 0 ? img.width / size.width : 1, sy = size.height > 0 ? img.height / size.height : 1;
+      paperToneOf(img, Rect.fromLTRB(paper.page.left * sx, paper.page.top * sy, paper.page.right * sx, paper.page.bottom * sy)).then((c) {
+        if (gen != _gen || c == null) return;
+        paperTone = c;
+        notifyListeners();
+      });
+    }
+    point = _released == null ? _dragPoint() : (reverse ? _target : corner);
     if (_released == null) _phase = _BookPhase.dragging;
     notifyListeners();
     await SchedulerBinding.instance.endOfFrame;
@@ -328,6 +388,7 @@ class BookCurlDrag extends ChangeNotifier {
       if (gen != _gen) return;
       live.value = true;
       if (!(_liveDone?.isCompleted ?? true)) _liveDone!.complete();
+      _frontArrived();
       // 한 쪽 보기는 새 쪽 그림이 필요 없음 (뒷면은 종이). 두 쪽 보기만 넘어가는 장 뒷면에 쓸 그림을 찍음
       if (!spread) {
         if (!(_afterReady?.isCompleted ?? true)) _afterReady!.complete();
@@ -371,6 +432,7 @@ class BookCurlDrag extends ChangeNotifier {
           final old = after.value;
           after.value = a;
           old?.dispose();
+          _frontArrived();
         } else {
           a.dispose();
           return;
@@ -395,11 +457,25 @@ class BookCurlDrag extends ChangeNotifier {
   Completer<void>? _afterReady;
 
   /// 손가락이 움직임
+  /// 되돌아오기에서 들어올 이전 쪽이 아직 준비되지 않았으면 다 나가 있는 자리에 붙잡아 둠
+  /// (빈 종이가 먼저 보였다가 글이 나타나는 깜빡임 없게)
+  bool get _frontPending => reverse && after.value == null && !live.value;
+
+  Offset _dragPoint() => _frontPending ? _target : _fingerToPoint(_finger);
+
+  /// 이전 쪽이 준비됨: 붙잡아 둔 종이를 손가락 자리로
+  void _frontArrived() {
+    if (_phase == _BookPhase.dragging && reverse) {
+      point = _dragPoint();
+      notifyListeners();
+    }
+  }
+
   void update(Offset global) {
     if (!tracking) return;
     _finger = _toLocal(global);
     if (_phase == _BookPhase.dragging) {
-      point = _fingerToPoint(_finger);
+      point = _dragPoint();
       notifyListeners();
     }
   }
@@ -429,6 +505,12 @@ class BookCurlDrag extends ChangeNotifier {
   Future<void> _settle(bool commit) async {
     final int gen = _gen;
     _phase = _BookPhase.settling;
+    // 되돌아오기를 다 넘기는데 이전 쪽이 아직 준비 안 됨: 준비될 때까지 기다렸다가 들어옴 (깜빡임 없게)
+    if (commit && _frontPending) {
+      final Future<void>? wait = liveReady != null ? _liveDone?.future : _afterReady?.future;
+      await (wait ?? Future<void>.value()).timeout(const Duration(milliseconds: 1200), onTimeout: () {});
+      if (gen != _gen) return;
+    }
     _from = point;
     // 되돌아오기는 '넘김'이 모서리까지 덮는 것, '취소'가 다시 밖으로 나가는 것
     final Offset done = reverse ? corner : _target, undo = reverse ? _target : corner;
@@ -503,7 +585,10 @@ class BookCurlDrag extends ChangeNotifier {
 
 /// 화면 위에 깔리는 책처럼 넘기기 층 (넘기지 않을 때는 아무것도 그리지 않음)
 class BookCurlLayer extends StatelessWidget {
-  BookCurlLayer({required this.drag, this.paper, this.texture, this.backside, this.textureKey}) : super(key: drag.layerKey);
+  BookCurlLayer({required this.drag, this.paper, this.texture, this.backside, this.textureKey, this.backsideFromPaper = false}) : super(key: drag.layerKey);
+
+  /// 한 쪽 보기 종이 뒷면을 쪽의 종이 색(흰색·검은색·누런색 등)으로 (앱 테마와 상관없이)
+  final bool backsideFromPaper;
 
   /// 종이 질감이 실제로 깔린 화면(이 층보다 넓을 수 있음). 질감을 그 자리에 맞춰 그려 넘길 때 무늬가 어긋나지 않게
   final GlobalKey? textureKey;
@@ -554,7 +639,7 @@ class BookCurlLayer extends StatelessWidget {
           }
           return CustomPaint(
             size: Size.infinite,
-            painter: BookCurlPainter(image: img, after: drag.after.value, point: drag.point, fromRight: drag.fromRight, bottom: drag.bottom, back: back, spread: drag.spread, ground: texture, paper: drag.paper, reverse: drag.reverse, backside: backside, groundRect: groundRect, live: drag.live.value),
+            painter: BookCurlPainter(image: img, after: drag.after.value, point: drag.point, fromRight: drag.fromRight, bottom: drag.bottom, back: back, spread: drag.spread, ground: texture, paper: drag.paper, reverse: drag.reverse, backside: backsideFromPaper ? (drag.paperTone ?? Colors.white) : backside, groundRect: groundRect, live: drag.live.value),
           );
         },
       ),

@@ -28,7 +28,6 @@ import 'services/library_nav.dart';
 import 'services/storage_service.dart';
 import 'services/system_bars.dart';
 import 'services/user_fonts.dart';
-import 'services/pdf_export_service.dart' show ExportFileIcon;
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart' show EpubBookServer;
 import 'services/doc_thumbnail_service.dart';
 import 'widgets/pop_dialog.dart';
@@ -578,9 +577,9 @@ class UserManualScreen extends StatelessWidget {
                     '切换浅色·深色（EPUB 另有棕褐色）\n韩文·Word·TXT 按此设置，其他文件按应用主题；文件自带背景色时优先使用',
                     'ライト・ダークを切り替えます(EPUBはセピアも)\nハングル・Word・TXTはこの設定、それ以外はアプリのテーマに従い、ファイル自体の背景色があればそれが優先です')),
             _row(context,
-                icon: ExportFileIcon(size: 21, color: cs.onSurface),
-                title: _tr('파일 내보내기', 'Export File', '导出文件', 'ファイルを書き出す'),
-                desc: _tr('메모·필기와 목차를 넣은 PDF로 내보내요', 'Exports a PDF including your memos, handwriting and contents', '导出包含笔记、手写和目录的 PDF', 'メモ・手書きと目次を入れたPDFに書き出します')),
+                icon: const Icon(Icons.share_outlined),
+                title: _tr('공유', 'Share', '分享', '共有'),
+                desc: _tr('보고 있는 파일을 형식 그대로 다른 앱으로 보내요', 'Sends the open file to another app as it is', '将正在查看的文件按原格式发送到其他应用', '開いているファイルをそのままの形式で他のアプリに送ります')),
             _row(context,
                 icon: const Icon(Icons.tune),
                 title: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),

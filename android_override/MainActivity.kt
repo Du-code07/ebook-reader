@@ -866,6 +866,23 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
                 wake(window.decorView)
                 result.success(count)
+            } else if (call.method == "webVisualReady") {
+                // 문서 화면이 지금 상태를 실제로 화면에 그릴 준비가 됐을 때 알려 줌 (새 쪽이 다 그려지기 전의 빈 화면이 비치지 않게)
+                val webView = findLargestWebView(window.decorView)
+                if (webView == null || Build.VERSION.SDK_INT < 23) {
+                    result.success(false)
+                    return@setMethodCallHandler
+                }
+                var answered = false
+                try {
+                    webView.postVisualStateCallback(System.nanoTime(), object : android.webkit.WebView.VisualStateCallback() {
+                        override fun onComplete(requestId: Long) {
+                            if (!answered) { answered = true; result.success(true) }
+                        }
+                    })
+                } catch (e: Throwable) {
+                    if (!answered) { answered = true; result.success(false) }
+                }
             } else if (call.method == "pixelCopyRaw") {
                 // 문서 화면(WebView) 자리에 보이는 그대로를 GPU로 복사 (WebView를 다시 그리지 않아 화면이 멈추지 않음)
                 val webView = findLargestWebView(window.decorView)
@@ -1012,42 +1029,30 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 } catch (e: Throwable) {
                     result.error("CAPTURE_ERR", e.message, null)
                 }
-            } else if (call.method == "exportPdfWithMemos") {
-                // 페이지 그림 + 필기(+텍스트 메모)를 합쳐 PDF로 만들고 다운로드 폴더에 저장
-                @Suppress("UNCHECKED_CAST")
-                val pages = call.argument<List<Map<String, Any?>>>("pages")
-                val fileName = call.argument<String>("fileName") ?: "FReader_export.pdf"
-                val fallbackDir = call.argument<String>("fallbackDir")
-                // true: 다운로드 폴더에 저장하지 않고 임시 파일 경로를 돌려줌 (앱이 목차를 넣은 뒤 savePdfFile로 저장)
-                val keepTemp = call.argument<Boolean>("keepTemp") ?: false
-                if (pages == null || pages.isEmpty()) {
-                    result.error("INVALID_ARGS", "No pages", null)
-                    return@setMethodCallHandler
-                }
-                Thread {
-                    try {
-                        val saved = exportPdfWithMemos(pages, fileName, fallbackDir, keepTemp)
-                        runOnUiThread { result.success(saved) }
-                    } catch (e: Throwable) {
-                        runOnUiThread { result.error("EXPORT_ERR", e.message, null) }
-                    }
-                }.start()
-            } else if (call.method == "savePdfFile") {
-                // 임시 PDF를 다운로드/FReader 폴더에 저장하고 임시 파일은 지움
+            } else if (call.method == "shareFile") {
+                // 파일을 형식 그대로 다른 앱으로 공유 (안드로이드 공유 창)
                 val path = call.argument<String>("path") ?: ""
-                val fileName = call.argument<String>("fileName") ?: "FReader_export.pdf"
-                val fallbackDir = call.argument<String>("fallbackDir")
-                Thread {
-                    val src = File(path)
-                    try {
-                        val saved = savePdfToDownloads(src, fileName, fallbackDir)
-                        runOnUiThread { result.success(saved) }
-                    } catch (e: Throwable) {
-                        runOnUiThread { result.error("EXPORT_ERR", e.message, null) }
-                    } finally {
-                        src.delete()
+                val mime = call.argument<String>("mime") ?: "application/octet-stream"
+                val title = call.argument<String>("title") ?: "Share"
+                try {
+                    val f = File(path)
+                    if (!f.exists()) throw IllegalArgumentException("missing")
+                    val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.freader.fileprovider", f)
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = mime
+                        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                        putExtra(android.content.Intent.EXTRA_TITLE, f.name)
+                        clipData = android.content.ClipData.newRawUri(f.name, uri)
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                }.start()
+                    val chooser = android.content.Intent.createChooser(send, title).apply {
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(chooser)
+                    result.success(true)
+                } catch (e: Throwable) {
+                    result.success(false)
+                }
             } else if (call.method == "ocrLines") {
                 // 그림 속 글자 읽기 (기기 안에서만 처리): 줄마다 {t, x, y, w, h} (그림 크기 대비 0~1)
                 val path = call.argument<String>("path") ?: ""
@@ -1718,177 +1723,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         return best
     }
 
-    /** 너무 큰 그림은 메모리를 넘지 않게 줄여서 읽는다 (긴 변 최대 약 3200px) */
-    private fun decodePageBitmap(path: String): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(path, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 3200) sample *= 2
-        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        return BitmapFactory.decodeFile(path, opts)
-    }
-
-    private fun exportPdfWithMemos(pages: List<Map<String, Any?>>, fileName: String, fallbackDir: String?, keepTemp: Boolean = false): String {
-        val doc = PdfDocument()
-        val tmp = File(cacheDir, "export_${System.currentTimeMillis()}.pdf")
-        try {
-            val total = pages.size
-            for ((idx, page) in pages.withIndex()) {
-                val imagePath = page["image"] as? String ?: continue
-                val bmp = decodePageBitmap(imagePath) ?: continue
-                val w = bmp.width
-                val h = bmp.height
-                val info = PdfDocument.PageInfo.Builder(w, h, idx + 1).create()
-                val pdfPage = doc.startPage(info)
-                val canvas = pdfPage.canvas
-                canvas.drawColor(Color.WHITE)
-                canvas.drawBitmap(bmp, 0f, 0f, null)
-                bmp.recycle()
-
-                // 보이지 않는 글자 층: 그림 위 같은 자리에 글을 (거의) 투명하게 넣어 PDF에서 글 찾기·복사가 되게 함
-                @Suppress("UNCHECKED_CAST")
-                val texts = page["texts"] as? List<Map<String, Any?>> ?: emptyList()
-                if (texts.isNotEmpty()) {
-                    val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = 0x01FFFFFF // 완전 투명이면 PDF에 글이 남지 않아 아주 조금만 남김
-                        typeface = android.graphics.Typeface.DEFAULT
-                    }
-                    for (tb in texts) {
-                        val t = (tb["t"] as? String) ?: continue
-                        if (t.isBlank()) continue
-                        val bx = ((tb["x"] as? Number)?.toFloat() ?: continue) * w
-                        val by = ((tb["y"] as? Number)?.toFloat() ?: continue) * h
-                        val bw = ((tb["w"] as? Number)?.toFloat() ?: continue) * w
-                        val bh = ((tb["h"] as? Number)?.toFloat() ?: continue) * h
-                        if (bw <= 0.5f || bh <= 0.5f || bx > w || by > h) continue
-                        tp.textScaleX = 1f
-                        tp.textSize = bh * 0.82f
-                        val m = tp.measureText(t)
-                        if (m > 0f) tp.textScaleX = (bw / m).coerceIn(0.15f, 6f)
-                        canvas.drawText(t, bx, by + bh * 0.8f, tp)
-                    }
-                }
-
-                // 화면에서 그린 필기 굵기를 이 그림 크기에 맞게 키운다
-                val refWidth = (page["refWidth"] as? Number)?.toFloat() ?: 0f
-                val scale = if (refWidth > 1f) w / refWidth else 1f
-
-                @Suppress("UNCHECKED_CAST")
-                val strokes = page["strokes"] as? List<Map<String, Any?>> ?: emptyList()
-                for (st in strokes) {
-                    @Suppress("UNCHECKED_CAST")
-                    val xs = (st["x"] as? List<Number>) ?: continue
-                    @Suppress("UNCHECKED_CAST")
-                    val ys = (st["y"] as? List<Number>) ?: continue
-                    if (xs.isEmpty() || xs.size != ys.size) continue
-                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        style = Paint.Style.STROKE
-                        strokeCap = Paint.Cap.ROUND
-                        strokeJoin = Paint.Join.ROUND
-                        color = ((st["c"] as? Number)?.toLong() ?: 0xFFFFC107L).toInt()
-                        strokeWidth = ((st["w"] as? Number)?.toFloat() ?: 2f) * scale
-                    }
-                    val path = Path()
-                    path.moveTo(xs[0].toFloat() * w, ys[0].toFloat() * h)
-                    if (xs.size == 1) {
-                        path.lineTo(xs[0].toFloat() * w + 0.01f, ys[0].toFloat() * h)
-                    } else {
-                        for (i in 1 until xs.size) path.lineTo(xs[i].toFloat() * w, ys[i].toFloat() * h)
-                    }
-                    canvas.drawPath(path, paint)
-                }
-
-                // 텍스트 메모: 화면과 같은 노란 메모지 (왼쪽 위)
-                val note = (page["note"] as? String)?.trim().orEmpty()
-                if (note.isNotEmpty()) drawNoteBox(canvas, note, scale)
-
-                doc.finishPage(pdfPage)
-                val cur = idx + 1
-                mainHandler.post {
-                    try {
-                        pdfMethodChannel?.invokeMethod("onPdfExportProgress", mapOf("current" to cur, "total" to total))
-                    } catch (_: Exception) {}
-                }
-            }
-            FileOutputStream(tmp).use { doc.writeTo(it) }
-        } finally {
-            doc.close()
-        }
-        if (keepTemp) return tmp.absolutePath
-        try {
-            return savePdfToDownloads(tmp, fileName, fallbackDir)
-        } finally {
-            tmp.delete()
-        }
-    }
-
-    private fun drawNoteBox(canvas: Canvas, note: String, scale: Float) {
-        val pad = 12f * scale
-        val maxW = 220f * scale
-        val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xDD000000.toInt()
-            textSize = 12f * scale
-        }
-        val innerMax = (maxW - 20f * scale).toInt().coerceAtLeast(10)
-        val textW = minOf(innerMax.toFloat(), tp.measureText(note.replace('\n', ' '))).toInt().coerceAtLeast(10)
-        val layout = StaticLayout.Builder.obtain(note, 0, note.length, tp, textW)
-            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-            .setMaxLines(3)
-            .setEllipsize(TextUtils.TruncateAt.END)
-            .build()
-        val boxW = layout.width + 20f * scale
-        val boxH = layout.height + 12f * scale
-        val box = RectF(pad, pad, pad + boxW, pad + boxH)
-        val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xF2FFE082.toInt() }
-        val r = 8f * scale
-        canvas.drawRoundRect(box, r, r, bg)
-        canvas.save()
-        canvas.translate(pad + 10f * scale, pad + 6f * scale)
-        layout.draw(canvas)
-        canvas.restore()
-    }
-
-    /** 다운로드/FReader 폴더에 저장. 안드로이드 10 미만이면 앱 서재 폴더에 저장. 저장 위치를 돌려준다. */
-    private fun savePdfToDownloads(src: File, fileName: String, fallbackDir: String?): String {
-        val safeName = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FReader")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            val resolver = contentResolver
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                ?: throw IllegalStateException("Cannot create file in Downloads")
-            resolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out) } }
-                ?: throw IllegalStateException("Cannot write file in Downloads")
-            values.clear()
-            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-            // 같은 이름이 있으면 시스템이 이름 뒤에 (1) 등을 붙이므로 실제 이름을 다시 읽는다
-            var finalName = safeName
-            try {
-                resolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                    if (c.moveToFirst()) finalName = c.getString(0) ?: safeName
-                }
-            } catch (_: Exception) {}
-            return Environment.DIRECTORY_DOWNLOADS + "/FReader/" + finalName
-        }
-        val dir = File(fallbackDir ?: filesDir.absolutePath)
-        dir.mkdirs()
-        var out = File(dir, safeName)
-        var n = 1
-        while (out.exists()) {
-            out = File(dir, safeName.removeSuffix(".pdf") + " ($n).pdf")
-            n++
-        }
-        src.copyTo(out)
-        return out.absolutePath
-    }
-
-    // ── PDF 글자 검색 (안드로이드 15+, 또는 시스템 업데이트로 PDF 확장 13 이상인 11~14) ──
     private fun pdfSearchSupported(): Boolean {
         if (Build.VERSION.SDK_INT >= 35) return true
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false

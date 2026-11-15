@@ -30,4 +30,19 @@ if 'FREADER_OPEN_WITH' not in s:
           '<data android:mimeType="application/octet-stream"/>' + pats + '</intent-filter>')
     i = s.index('</activity>')
     s = s[:i] + f1 + f2 + s[i:]
+# 공유: 앱 안 파일을 다른 앱에 넘기는 통로 (FileProvider)
+if 'freader.fileprovider' not in s:
+    prov = ('<provider android:name="androidx.core.content.FileProvider" '
+            'android:authorities="${applicationId}.freader.fileprovider" android:exported="false" android:grantUriPermissions="true">'
+            '<meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/freader_share_paths"/></provider>')
+    i = s.rindex('</application>')
+    s = s[:i] + prov + s[i:]
+import os
+xml_dir = os.path.join(os.path.dirname(p), 'res', 'xml')
+os.makedirs(xml_dir, exist_ok=True)
+open(os.path.join(xml_dir, 'freader_share_paths.xml'), 'w', encoding='utf-8').write(
+    '<?xml version="1.0" encoding="utf-8"?>\n<paths>'
+    '<files-path name="files" path="."/><cache-path name="cache" path="."/>'
+    '<external-path name="external" path="."/><external-files-path name="external_files" path="."/>'
+    '<root-path name="root" path="."/></paths>\n')
 open(p, 'w', encoding='utf-8').write(s)

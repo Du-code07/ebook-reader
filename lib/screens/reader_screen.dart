@@ -34,7 +34,7 @@ import '../widgets/morph_icons.dart';
 import '../widgets/word_selection_layer.dart';
 import '../widgets/ui_scale.dart';
 import '../widgets/sheet_pull_to_close.dart';
-import '../services/pdf_export_service.dart';
+import '../services/file_share.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/vertical_page_swipe.dart';
 import '../widgets/after_route_transition.dart';
@@ -810,6 +810,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool get _docScrollActive => _pageModeScroll && _isTxt;
 
   void _readerNext() {
+    _navDir = 1;
     if (_docScrollActive) {
       _scrollCtrl.scrollByScreen(1);
       return;
@@ -837,6 +838,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   void _readerPrevious() {
+    _navDir = -1;
     if (_docScrollActive) {
       _scrollCtrl.scrollByScreen(-1);
       return;
@@ -1137,8 +1139,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final waiter = _relocateWaiter;
     if (waiter != null && !waiter.isCompleted) waiter.complete();
     final relocation = ++_docRelocation;
-    if (page != _docPage) _lastReadyPage = -1;
-    _dropIdleShot();
+    if (page != _docPage) {
+      _lastReadyPage = -1;
+      _onPositionChanging();
+    } else {
+      _dropIdleShot();
+    }
     if (_snapShownPage != null && _snapShownPage != page) _snapShow(page);
     if (page != _docPage) _docSel.clear();
     setState(() {
@@ -1199,10 +1205,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           initialProgress: _initialProgress,
           theme: _epubBgTheme,
           spread: _spreadFor(isLandscape),
-          trimMargins: StorageService.trimMargins,
           rtl: _isMangaRtlMode,
           // 한글·워드 스크롤 보기: 쪽을 세로로 늘어놓음 (내보내는 동안은 쪽 넘김 화면으로)
-          vertical: _docVertical && !_isExporting,
+          vertical: _docVertical,
           onScrollMetrics: (top, height, client) => _docScrollMetrics.value = [top, height, client],
           onLoaded: _onDocumentLoaded,
           onLocation: _onDocumentLocation,
@@ -1311,8 +1316,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       height: box.height.round(),
       spread: _snapSpread,
       rtl: _isMangaRtlMode,
-      // 여백 줄이기를 끈 화면은 따로 저장
-      theme: (_isWordOrHwp && !StorageService.trimMargins) ? '${_epubBgTheme}_full' : _epubBgTheme,
+      theme: _epubBgTheme,
     );
     return File('${dir.path}/$name');
   }
@@ -1378,7 +1382,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (!mounted || serial != _snapCaptureSerial || page != _docPage || _book.busy) return;
       // 넘기는 중·확대 중·필기 중·다른 화면이 덮고 있을 때는 저장하지 않음
       if (_vPeekActive || _vPageSwipe.isAnimating || _vPageSwipe.isVerticalGesture || _snapShown != null) return;
-      if (_epubZoomScale > 1.03 || _isStylusDown || _activeStrokePoints.isNotEmpty || _slideShow || _isExporting || _findOpen) return;
+      if (_epubZoomScale > 1.03 || _isStylusDown || _activeStrokePoints.isNotEmpty || _slideShow || _findOpen) return;
       try {
         final bytes = await _pdfChannel.invokeMethod<Uint8List>(
           'snapshotWebView',
@@ -1655,234 +1659,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// 5. 위 상황에서 진행바가 메모 도구모음 쪽에서 비켜 주는 폭 (메모 도구모음 폭 48 + 간격 8)
   static const double _memoBarSideInset = 54.0;
-
-  /// 페이지를 바꾸는 동작을 하고, 새 페이지로 옮겨졌다는 알림을 기다린다 (없으면 [timeout] 후 진행)
-  Future<void> _runAndWaitRelocate(VoidCallback action, Duration timeout) async {
-    final waiter = Completer<void>();
-    _relocateWaiter = waiter;
-    action();
-    await waiter.future.timeout(timeout, onTimeout: () {});
-    if (identical(_relocateWaiter, waiter)) _relocateWaiter = null;
-  }
-
-  /// 지금 보이는 본문을 그림 파일로 저장: EPUB·워드·한글은 WebView 캡처, TXT는 Flutter 화면 캡처
-  Future<void> _captureReaderView(String path, double dpr) async {
-    if (_isTxt) {
-      final boundary = _txtCaptureKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) throw Exception('TXT view not ready');
-      final image = await boundary.toImage(pixelRatio: dpr);
-      final png = await image.toByteData(format: ui.ImageByteFormat.png);
-      image.dispose();
-      if (png == null) throw Exception('PNG encode failed');
-      await File(path).writeAsBytes(png.buffer.asUint8List(), flush: true);
-      return;
-    }
-    await _pdfChannel.invokeMethod('captureWebView', {'path': path});
-  }
-
-  /// 본문 그림(WebView 캡처) + 그 페이지 필기를 합쳐 한 장의 그림으로 저장
-  Future<void> _composeEpubExportPage({
-    required String shotPath,
-    required String outPath,
-    required Size bodySize,
-    required Rect viewRect,
-    required double dpr,
-    required List<MemoStroke> strokes,
-  }) async {
-    final codec = await ui.instantiateImageCodec(await File(shotPath).readAsBytes());
-    final shot = (await codec.getNextFrame()).image;
-    final int w = (bodySize.width * dpr).round();
-    final int h = (bodySize.height * dpr).round();
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.drawRect(Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()), Paint()..color = _getBgColor());
-    canvas.drawImageRect(
-      shot,
-      Rect.fromLTWH(0, 0, shot.width.toDouble(), shot.height.toDouble()),
-      Rect.fromLTWH(viewRect.left * dpr, viewRect.top * dpr, viewRect.width * dpr, viewRect.height * dpr),
-      Paint()..filterQuality = FilterQuality.high,
-    );
-    // 화면의 필기 표시와 같은 방식 (본문 전체 영역 기준 비율 좌표)
-    for (final st in strokes) {
-      if (st.dxList.isEmpty) continue;
-      final paint = Paint()
-        ..color = Color(st.colorValue)
-        ..strokeWidth = st.strokeWidth * dpr
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = PaintingStyle.stroke;
-      final path = Path()..moveTo(st.dxList.first * w, st.dyList.first * h);
-      for (int i = 1; i < st.dxList.length; i++) {
-        path.lineTo(st.dxList[i] * w, st.dyList[i] * h);
-      }
-      if (st.dxList.length == 1) path.lineTo(st.dxList.first * w + 0.01, st.dyList.first * h);
-      canvas.drawPath(path, paint);
-    }
-    final picture = recorder.endRecording();
-    final image = await picture.toImage(w, h);
-    final png = await image.toByteData(format: ui.ImageByteFormat.png);
-    shot.dispose();
-    image.dispose();
-    picture.dispose();
-    if (png == null) throw Exception('PNG encode failed');
-    await File(outPath).writeAsBytes(png.buffer.asUint8List(), flush: true);
-  }
-
-  /// 파일 내보내기: 처음부터 끝까지 지금 보이는 모양(글자 크기·배경) 그대로 한 페이지씩 담고,
-  /// 각 페이지에 직접 쓴 필기를 겹쳐서 PDF 한 파일로 저장 (다운로드/FReader 폴더).
-  /// 끝나면 원래 읽던 위치로 돌아간다.
-  /// 파일 내보내기는 워드·한글 문서만 (EPUB·TXT는 제외)
-  bool get _canExport => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_isPresentation; // 워드·한글만 (PPT는 내보내기 없음)
-
-  Future<void> _exportToPdf() async {
-    if (!_canExport) return;
-    if (_isExporting) return;
-    final bodyBox = _epubBodyKey.currentContext?.findRenderObject() as RenderBox?;
-    final viewBox = _epubViewRectKey.currentContext?.findRenderObject() as RenderBox?;
-    if (bodyBox == null || viewBox == null || !bodyBox.hasSize || !viewBox.hasSize) return;
-    final double dpr = MediaQuery.devicePixelRatioOf(context);
-    final Size bodySize = bodyBox.size;
-    final Rect viewRect = viewBox.localToGlobal(Offset.zero, ancestor: bodyBox) & viewBox.size;
-    final String? savedCfi = _currentCfi;
-    final double savedProgress = _progress;
-
-    setState(() {
-      _isExporting = true;
-      _activeStrokePoints.clear();
-    });
-    final progress = showExportProgress(context, _tr, cancelable: true);
-    progress.update(_tr('처음 페이지로 이동 중…', 'Going to the first page…', '正在跳转到第一页…', '最初のページへ移動中…'), null);
-
-    final tmpDir = Directory('${(await getTemporaryDirectory()).path}/epub_export_${DateTime.now().millisecondsSinceEpoch}');
-    Object? error;
-    String? saved;
-    try {
-      await tmpDir.create(recursive: true);
-      await _runAndWaitRelocate(() => _readerProgress(0.0), const Duration(milliseconds: 2500));
-
-      final pages = <Map<String, Object?>>[];
-      final exportDocPages = <int>[]; // 내보낸 각 쪽이 문서의 몇 쪽인지 (목차 연결용)
-      String? lastCfi;
-      for (int i = 0; i < 5000; i++) {
-        if (progress.cancelled || !mounted) break;
-        // PPT: 슬라이드마다 애니메이션이 모두 끝난 모습으로 (다음 버튼은 애니메이션 단계를 넘기므로 쪽 번호로 이동)
-        if (_isPresentation) {
-          if (i >= _docPageCount) break;
-          _lastReadyPage = -1;
-          await _runAndWaitRelocate(() => _hwpController.display('$_documentPositionPrefix:$i:9999'), const Duration(milliseconds: 2500));
-          for (int w = 0; w < 120 && _lastReadyPage != i && mounted; w++) {
-            await Future<void>.delayed(const Duration(milliseconds: 50));
-          }
-        }
-        // 새 페이지가 다 그려지고 필기 정보가 바뀔 때까지 잠깐 기다림
-        await Future<void>.delayed(const Duration(milliseconds: 350));
-        // 워드·한글: 쪽 안 사진까지 다 채워질 때까지 기다림 (사진은 글자보다 늦게 채워짐)
-        if (_snapEligible) {
-          for (int w = 0; w < 120 && _lastReadyPage != _docPage && mounted; w++) {
-            await Future<void>.delayed(const Duration(milliseconds: 50));
-          }
-        }
-        final String? cfi = _currentCfi;
-        if (!_isPresentation && i > 0 && cfi == lastCfi) break; // 더 이상 넘어가지 않음 = 마지막 페이지
-        lastCfi = cfi;
-
-        final shotPath = '${tmpDir.path}/shot_$i.png';
-        await _captureReaderView(shotPath, dpr);
-        final strokes = await StorageService.getEpubLocationStrokes(widget.filePath, _currentPageLocationKey);
-        final pagePath = '${tmpDir.path}/page_${i.toString().padLeft(5, '0')}.png';
-        await _composeEpubExportPage(
-          shotPath: shotPath,
-          outPath: pagePath,
-          bodySize: bodySize,
-          viewRect: viewRect,
-          dpr: dpr,
-          strokes: strokes,
-        );
-        try {
-          await File(shotPath).delete();
-        } catch (_) {}
-        // 보이지 않는 글자 층 (내보낸 PDF에서도 글 찾기가 되게)
-        // 글 위치는 문서 화면(WebView) 기준이라, 내보낸 쪽 그림(본문 전체 영역) 기준으로 바꿔야 형광펜 자리가 맞음
-        List<Map<String, Object?>> boxes = const [];
-        try {
-          boxes = await _hwpController.visibleTextBoxes();
-        } catch (_) {}
-        final texts = [
-          for (final t in boxes)
-            {
-              ...t,
-              'x': (viewRect.left + ((t['x'] as num?) ?? 0) * viewRect.width) / bodySize.width,
-              'y': (viewRect.top + ((t['y'] as num?) ?? 0) * viewRect.height) / bodySize.height,
-              'w': ((t['w'] as num?) ?? 0) * viewRect.width / bodySize.width,
-              'h': ((t['h'] as num?) ?? 0) * viewRect.height / bodySize.height,
-            },
-        ];
-        exportDocPages.add(_docPage);
-        pages.add({'image': pagePath, 'texts': texts});
-        progress.update(
-          _tr('페이지 담는 중… ${i + 1}쪽 (${(_progress * 100).toStringAsFixed(0)}%)', 'Capturing pages… ${i + 1} (${(_progress * 100).toStringAsFixed(0)}%)',
-              '正在截取页面… 第${i + 1}页 (${(_progress * 100).toStringAsFixed(0)}%)', 'ページ取得中… ${i + 1}ページ (${(_progress * 100).toStringAsFixed(0)}%)'),
-          _progress.clamp(0.0, 1.0).toDouble(),
-        );
-        if (!_isPresentation) await _runAndWaitRelocate(() => _readerNext(), const Duration(milliseconds: 1500));
-      }
-
-      if (!progress.cancelled && pages.isNotEmpty) {
-        progress.update(_tr('PDF 만드는 중…', 'Building PDF…', '正在生成 PDF…', 'PDF作成中…'), null);
-        // 목차(책갈피): 지금 목차 항목의 쪽 → 내보낸 PDF의 쪽
-        final outline = <Map<String, Object>>[];
-        if (_chapterLevels.isNotEmpty && exportDocPages.isNotEmpty) {
-          for (int k = 0; k < _chapters.length; k++) {
-            final int docPage = int.tryParse(_chapters[k].href.split(':').last) ?? 0;
-            int at = 0;
-            for (int e = 0; e < exportDocPages.length; e++) {
-              if (exportDocPages[e] <= docPage) at = e;
-            }
-            outline.add({'title': _chapters[k].title.trim(), 'level': k < _chapterLevels.length ? _chapterLevels[k] : 1, 'page': at});
-          }
-        }
-        saved = await PdfExportService.buildPdf(
-          pages: pages,
-          outline: outline,
-          fileName: PdfExportService.exportFileName(widget.bookTitle, _tr),
-          onProgress: (cur, total) => progress.update(
-            _tr('PDF 만드는 중… $cur / $total', 'Building PDF… $cur / $total', '正在生成 PDF… $cur / $total', 'PDF作成中… $cur / $total'),
-            total > 0 ? cur / total : null,
-          ),
-        );
-      }
-    } catch (e) {
-      error = e;
-    } finally {
-      // 원래 읽던 위치로 돌아가기
-      if (savedCfi != null && savedCfi.isNotEmpty) {
-        _readerDisplay(savedCfi);
-      } else {
-        _readerProgress(savedProgress);
-      }
-      progress.close();
-      if (mounted) setState(() => _isExporting = false);
-      try {
-        await tmpDir.delete(recursive: true);
-      } catch (_) {}
-    }
-    if (saved != null || error != null) _showExportResult(saved, error);
-  }
-
-  void _showExportResult(String? savedPath, Object? error) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 5),
-        content: Text(
-          error == null
-              ? _tr('PDF로 내보냈어요: $savedPath', 'Exported to PDF: $savedPath', '已导出为 PDF：$savedPath', 'PDFに書き出しました: $savedPath')
-              : _tr('PDF 내보내기 실패: ', 'PDF export failed: ', 'PDF 导出失败：', 'PDF書き出し失敗: ') + exportErrorText(error, _tr),
-        ),
-      ),
-    );
-  }
 
   Future<void> _openPenSettings() {
     return showPenSettingsPanel(
@@ -2238,26 +2014,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   ],
                 ),
                 const SizedBox(height: 26),
-                // 한글·워드: 여백 줄이기 (쪽 여백을 잘라 내고 글씨를 크게)
-                if (_isWordOrHwp) ...[
-                  _settingsHeader(Icons.fit_screen_outlined, _tr('여백 줄이기', 'Trim Margins', '缩小页边距', '余白を詰める')),
-                  const SizedBox(height: 8),
-                  SettingGroup(
-                    children: [
-                      SettingToggle(
-                        label: Text(_tr('쪽 여백을 줄이고 글씨를 크게', 'Smaller margins, larger text', '缩小页边距、放大文字', '余白を詰めて文字を大きく')),
-                        selected: StorageService.trimMargins,
-                        onSelected: (val) async {
-                          await StorageService.setTrimMargins(val);
-                          if (!mounted) return;
-                          setState(() {});
-                          setModalState(() {});
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 26),
-                ],
                 // 왼손잡이: 스크롤 막대·도구 모음을 왼쪽에 (끄면 오른쪽)
                 _settingsHeader(Icons.back_hand_outlined, _tr('왼손잡이', 'Left-handed', '左手模式', '左利き')),
                 const SizedBox(height: 8),
@@ -2656,7 +2412,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   // PDF 내보내기용: 본문 전체 영역과 WebView 영역 위치
   final GlobalKey _epubBodyKey = GlobalKey();
   final GlobalKey _epubViewRectKey = GlobalKey();
-  bool _isExporting = false;
 
   bool _vSwipeEnabled(PointerEvent e) =>
       !_isSpreadsheet && _useSwipeUpTurn && !_pageModeScroll &&
@@ -2993,35 +2748,57 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     beforeAfterCapture: _waitTurnedPageReady,
     // 새 쪽 그림을 찍어 붙이지 않고, 넘겨 둔 실제 화면이 다 그려지면 그대로 비쳐 보이게 (부드럽고 바로 보임)
     liveReady: _curlLiveReady,
-    // 이전 쪽으로 되돌아올 때: 앞으로 넘기며 떠나온 쪽 그림을 바로 씀 (글이 깜빡이지 않게)
+    // 이전 쪽으로 되돌아올 때: 다음 쪽으로 넘어오며 떠나온 쪽 그림을 바로 씀 (글이 깜빡이지 않게)
     reverseFront: _takeBackShot,
-    onCommitted: _onCurlCommitted,
   )..addListener(_onBookCurlChanged);
 
-  // 앞으로 넘기며 떠나온 쪽 그림들 (최근 2장). key = 그 다음 쪽(넘겨서 도착한 쪽)의 자리
+  // 지나온 쪽 그림들 (최근 3장). key = 그 쪽에서 다음 쪽으로 넘어가 도착한 쪽의 자리
   final List<({ui.Image image, String? key})> _backShots = [];
+  int _navDir = 0; // 마지막 넘김 방향 (1 다음 쪽, -1 이전 쪽, 0 그 밖의 이동)
+  String? _posKey; // 지금 쪽의 자리 (마지막으로 찍어 둔 그림 기준)
 
-  void _onCurlCommitted(int dir, ui.Image left) {
-    if (dir > 0) {
-      _backShots.add((image: left, key: null)); // 도착한 쪽의 자리는 다 넘어간 뒤에 적음
-      while (_backShots.length > 2) {
+  /// 쪽이 바뀌기 직전: 다음 쪽으로 가면 지금 쪽 그림을 '되돌아올 때 쓸 그림'으로 보관, 이전 쪽으로 가면 다 쓴 것을 버림
+  void _onPositionChanging() {
+    final shot = _idleShot;
+    final key = _idleShotKey ?? _posKey;
+    if (_navDir > 0 && shot != null && _idleShotKey != null) {
+      // 자리를 아직 못 적은 것(아주 빨리 넘김)은 버림
+      _backShots.removeWhere((b) {
+        if (b.key != null) return false;
+        b.image.dispose();
+        return true;
+      });
+      _backShots.add((image: shot, key: null));
+      _idleShot = null; // 그림은 보관함으로 넘김
+      while (_backShots.length > 3) {
         _backShots.removeAt(0).image.dispose();
       }
+    } else if (_navDir < 0) {
+      if (_backShots.isNotEmpty && key != null && _backShots.last.key == key) _backShots.removeLast().image.dispose();
     } else {
-      left.dispose();
-      // 되돌아왔음: 쓴 그림은 버림
-      if (_backShots.isNotEmpty && _backShotUsed) _backShots.removeLast().image.dispose();
+      _dropBackShots();
     }
-    _backShotUsed = false;
+    _navDir = 0;
+    _dropIdleShot();
   }
 
-  bool _backShotUsed = false;
+  void _setIdleShot(ui.Image img, String key, List<Rect>? frames) {
+    _idleShot?.dispose();
+    _idleShot = img;
+    _idleShotKey = key;
+    _idleFrames = frames;
+    _posKey = key;
+    // 방금 다음 쪽으로 넘어와 자리를 못 적은 그림: 이 쪽이 도착한 쪽
+    if (_backShots.isNotEmpty && _backShots.last.key == null) {
+      final b = _backShots.removeLast();
+      _backShots.add((image: b.image, key: key));
+    }
+  }
 
   ui.Image? _takeBackShot() {
     if (_backShots.isEmpty) return null;
     final last = _backShots.last;
     if (last.key == null || last.key != _curlShotKey()) return null;
-    _backShotUsed = true;
     return last.image.clone();
   }
 
@@ -3034,16 +2811,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// 넘겨 둔 실제 화면이 다 그려질 때까지 기다림
   Future<void> _curlLiveReady() async {
-    if (_isOfflineDocument && !_isTxt) {
-      await _waitTurnedPageReady();
-    } else if (!_isTxt) {
-      // EPUB: 위치가 바뀐 뒤 책 화면이 새 쪽을 실제로 그릴 틈 (장이 바뀔 때 빈 화면이 비치지 않게)
+    if (_isTxt) {
       await SchedulerBinding.instance.endOfFrame;
-      await Future<void>.delayed(const Duration(milliseconds: 110));
+      return;
     }
-    // 화면에 실제로 올라올 때까지 한두 장면
+    if (_isOfflineDocument) {
+      await _waitTurnedPageReady();
+    } else {
+      await SchedulerBinding.instance.endOfFrame;
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+    }
+    // 책 화면이 지금 쪽을 실제로 그릴 준비가 될 때까지 (아직 그려지지 않은 흰 빈 곳이 비치지 않게)
+    try {
+      await _pdfChannel.invokeMethod('webVisualReady').timeout(const Duration(milliseconds: 900));
+    } catch (_) {}
     await SchedulerBinding.instance.endOfFrame;
-    await Future<void>.delayed(const Duration(milliseconds: 34));
   }
 
   // ── 손가락을 대자마자 넘기기 시작하도록: 가만히 읽는 동안 지금 쪽을 미리 찍어 둠 ──
@@ -3056,7 +2838,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   String _curlShotKey() {
     if (!mounted) return '';
     final size = MediaQuery.sizeOf(context);
-    return '${_currentCfi ?? ''}|$_docPage|${size.width.round()}x${size.height.round()}|${_getBgColor().toARGB32()}|$_bookmarkSpreadNow|$_lastReadyPage|${StorageService.trimMargins}';
+    return '${_currentCfi ?? ''}|$_docPage|${size.width.round()}x${size.height.round()}|${_getBgColor().toARGB32()}|$_bookmarkSpreadNow|$_lastReadyPage';
   }
 
   void _dropIdleShot() {
@@ -3084,21 +2866,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         img?.dispose();
         return;
       }
-      _idleShot?.dispose();
-      _idleShot = img;
-      _idleShotKey = key;
-      _idleFrames = (frames == null || frames.isEmpty) ? null : frames;
+      _setIdleShot(img, key, (frames == null || frames.isEmpty) ? null : frames);
     });
   }
 
   void _onBookCurlChanged() {
     final bool busy = _book.busy;
     if (_bookWasBusy && !busy) {
-      // 앞으로 넘긴 직후: 떠나온 쪽 그림에 도착한 쪽의 자리를 적어 둠
-      if (_backShots.isNotEmpty && _backShots.last.key == null) {
-        final b = _backShots.removeLast();
-        _backShots.add((image: b.image, key: _curlShotKey()));
-      }
       _scheduleIdleShot(); // 다 넘어간 뒤 새 쪽을 찍어 둠
     }
     _bookWasBusy = busy;
@@ -3283,7 +3057,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       !_hasTextSelection &&
       _activeStrokePoints.isEmpty &&
       !_findOpen &&
-      !_isExporting &&
       _epubZoomScale <= 1.03;
 
   /// 문서 화면 자리에 보이는 그대로를 GPU로 복사 (책 화면을 다시 그리지 않아 화면이 멈추지 않음)
@@ -3359,7 +3132,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final old = _curlPre;
     final shot = _idleShot;
     // 미리 찍어 둔 지금 쪽이 있으면 바로 씀 (찍는 동안 기다리지 않음)
-    _curlPre = (shot != null && _idleShotKey == _curlShotKey()) ? Future<ui.Image?>.value(shot.clone()) : _captureForCurl(screen: true);
+    final key = _curlShotKey();
+    _curlPre = (shot != null && _idleShotKey == key)
+        ? Future<ui.Image?>.value(shot.clone())
+        : _captureForCurl(screen: true).then((img) {
+            // 새로 찍은 지금 쪽도 보관 (되돌아올 때 쓸 그림의 자리를 적는 데도 씀)
+            if (img != null && mounted && key == _curlShotKey()) _setIdleShot(img.clone(), key, null);
+            return img;
+          });
     old?.then((i) => i?.dispose());
   }
 
@@ -3393,9 +3173,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             // 넘어가는 종이 뒷면·빈 곳 색: 지금 보는 배경색 (세피아면 세피아. 앱이 다크여도 검게 보이지 않게)
             paper: _getBgColor(),
             texture: _isPaperTheme ? BookCurlLayer.paperTexture(() => mounted ? setState(() {}) : null) : null,
-            // 한 쪽 보기 종이 뒷면: 한글·워드·TXT는 흰 종이(파일 테마가 다크면 검정), EPUB은 보는 색 그대로(세피아면 종이 질감)
-            // 파일 테마가 다크(검정)면 뒷면도 검정
-            backside: _isOfflineDocument ? (_epubBgTheme == 'dark' ? Colors.black : Colors.white) : null,
+            // 한 쪽 보기 종이 뒷면: 파일 안 테마를 따름 (라이트 = 흰 종이, 다크 = 검은 종이, 세피아 = 종이 질감)
+            backside: _epubBgTheme == 'dark' ? _getBgColor() : (_isPaperTheme ? null : Colors.white),
             textureKey: _epubBodyKey,
           ),
         ),
@@ -3841,10 +3620,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       items: [
         ('white', _tr('라이트', 'Light', '浅色', 'ライト'), Icons.light_mode_outlined, null),
         ('dark', _tr('다크', 'Dark', '深色', 'ダーク'), Icons.dark_mode_outlined, null),
-        // 세피아: 양피지 모양
+        // 세피아: 옛날 종이 모양 (선으로만)
         ('sepia', _tr('세피아', 'Sepia', '棕褐色', 'セピア'), Icons.description_outlined, null),
       ],
-      leadingFor: (v) => v == 'sepia' ? const ParchmentIcon(size: 19) : null,
+      leadingFor: (v) => v == 'sepia' ? ParchmentIcon(size: 17, color: Theme.of(context).colorScheme.onSurfaceVariant) : null,
     ));
     if (mounted) setState(() => _bgMenuOpen = false);
     if (picked != null && picked != _epubBgTheme && mounted) await _setEpubThemeMode(picked);
@@ -4840,6 +4619,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                         return;
                       }
                       _hasRestoredInitialPosition = true;
+                      if (value.startCfi != _currentCfi) _onPositionChanging();
                       _currentCfi = value.startCfi;
                       if (!_book.busy) _scheduleIdleShot();
                       _epubAtStart = value.atStart;
@@ -5121,6 +4901,15 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                                   _showControls = false;
                                 }),
                               ),
+                            // 공유: 이 파일을 형식 그대로 다른 앱으로 (파일 내 검색 오른쪽)
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: btnPadding,
+                              constraints: btnConstraints,
+                              icon: const Icon(Icons.share_outlined, color: Colors.white, size: 18),
+                              tooltip: _tr('공유', 'Share', '分享', '共有'),
+                              onPressed: () => shareFile(context, widget.filePath, title: widget.bookTitle),
+                            ),
                             // PPT에서만: 슬라이드 쇼
                             if (_isPresentation)
                               IconButton(
@@ -5131,15 +4920,6 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                                 tooltip: _tr('슬라이드 쇼', 'Slide Show', '幻灯片放映', 'スライドショー'),
                                 onPressed: _startSlideShow,
                               ),
-                            if (_canExport)
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const ExportFileIcon(size: 21),
-                              tooltip: _tr('파일 내보내기', 'Export File', '导出文件', 'ファイルを書き出す'),
-                              onPressed: _exportToPdf,
-                            ),
                             // 배경 색상 (라이트·다크, EPUB은 종이색도): 뷰어 설정 왼쪽 달 모양
                             if (!_isPresentation && !_isSpreadsheet)
                               Builder(
@@ -5151,7 +4931,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                                   // 메뉴가 열려 있는 동안 달 그림자(또는 양피지)가 미끄러지듯 바뀜
                                   icon: MorphIcon(
                                     child: _epubBgTheme == 'sepia'
-                                        ? ParchmentIcon(key: const ValueKey('bg-sepia'), size: 19, open: _bgMenuOpen)
+                                        ? ParchmentIcon(key: const ValueKey('bg-sepia'), size: 19, open: _bgMenuOpen, color: Colors.white)
                                         : MoonMorphIcon(
                                             key: const ValueKey('bg-moon'),
                                             size: 19,

@@ -128,6 +128,8 @@ class _IoEpubViewState extends State<_IoEpubView> {
   late final InAppWebViewSettings _settings = InAppWebViewSettings(
     isInspectable: kDebugMode,
     javaScriptEnabled: true,
+    // FReader: 책처럼 넘기기에서 넘긴 쪽이 비칠 때 아직 그려지지 않은 빈 곳이 보이지 않게 미리 그려 둠
+    offscreenPreRaster: true,
     mediaPlaybackRequiresUserGesture: false,
     transparentBackground: true,
     supportZoom: false,

@@ -37,3 +37,7 @@ FReader v116 selection patch
 - epubView.js: a touch that stays still for 350ms (long-press text selection)
   and then moves is left to the browser so the selection can be extended by
   dragging; it is no longer blocked as a swipe (blocking cleared the selection).
+
+FReader v119 page-turn patch
+- epub_web_view_io.dart: offscreenPreRaster enabled so a page revealed under the
+  page-curl overlay is already rasterized (no white flash).

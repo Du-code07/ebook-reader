@@ -20,7 +20,7 @@ import '../widgets/viewer_dialogs.dart';
 import '../widgets/app_colors.dart';
 import '../widgets/ui_scale.dart';
 import '../widgets/sheet_pull_to_close.dart';
-import '../services/pdf_export_service.dart';
+import '../services/file_share.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/vertical_page_swipe.dart';
 import '../widgets/direction_arrow_icon.dart';
@@ -1557,71 +1557,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   /// 5. 위 상황에서 진행바가 메모 도구모음 쪽에서 비켜 주는 폭 (메모 도구모음 폭 48 + 간격 8)
   static const double _memoBarSideInset = 54.0;
 
-  /// 파일 내보내기: 모든 페이지 + 직접 쓴 필기·텍스트 메모를 PDF 한 파일로 저장 (다운로드/FReader 폴더)
-  /// 파일 내보내기는 CBZ·이미지만 (PDF는 제외)
-  bool get _canExport => !(widget.isPdf || widget.files.first.path.toLowerCase().endsWith('.pdf'));
-
-  Future<void> _exportToPdf() async {
-    if (!_canExport) return;
-    if (_imagePages.isEmpty) return;
-    final Size view = MediaQuery.sizeOf(context);
-    final progress = showExportProgress(context, _tr);
-    progress.update(_tr('페이지 준비 중…', 'Preparing pages…', '正在准备页面…', 'ページを準備中…'), null);
-    try {
-      final pages = <Map<String, Object?>>[];
-      // PDF: 원래 파일의 글과 위치를 읽어 내보낸 PDF에도 보이지 않는 글자 층으로 넣음 (지원 기기만)
-      List<Object?> textPages = const [];
-      if (_isPdfFile) {
-        try {
-          textPages = await _pdfChannel.invokeMethod<List<Object?>>('pdfTextBoxes', {'path': widget.files.first.path}) ?? const [];
-        } catch (_) {}
-      }
-      for (int i = 0; i < _imagePages.length; i++) {
-        final strokes = _memoStrokesByPage[i] ?? const <MemoStroke>[];
-        // 필기 굵기는 화면에 그린 폭 기준이므로, 그때의 페이지 표시 폭을 함께 넘긴다
-        double refWidth = 0;
-        if (strokes.isNotEmpty) {
-          final Size img = _pageImageSizes[i] ?? await _getImageDimension(_imagePages[i]);
-          if (img.width > 0 && img.height > 0) {
-            refWidth = applyBoxFit(BoxFit.contain, img, view).destination.width;
-          }
-        }
-        pages.add({
-          'image': _imagePages[i].path,
-          'strokes': strokes.map(PdfExportService.strokeToMap).toList(),
-          'refWidth': refWidth,
-          'note': _memoNotesByPage[i] ?? '',
-          if (i < textPages.length && textPages[i] is List) 'texts': textPages[i],
-        });
-      }
-      final saved = await PdfExportService.buildPdf(
-        pages: pages,
-        // 목차(책갈피)도 그대로 넣음
-        outline: _isPdfFile ? _pdfToc : const [],
-        fileName: PdfExportService.exportFileName(widget.title, _tr),
-        onProgress: (cur, total) => progress.update('$cur / $total', total > 0 ? cur / total : null),
-      );
-      progress.close();
-      _showExportResult(saved, null);
-    } catch (e) {
-      progress.close();
-      _showExportResult(null, e);
-    }
-  }
-
-  void _showExportResult(String? savedPath, Object? error) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 5),
-        content: Text(
-          error == null
-              ? _tr('PDF로 내보냈어요: $savedPath', 'Exported to PDF: $savedPath', '已导出为 PDF：$savedPath', 'PDFに書き出しました: $savedPath')
-              : _tr('PDF 내보내기 실패: ', 'PDF export failed: ', 'PDF 导出失败：', 'PDF書き出し失敗: ') + exportErrorText(error, _tr),
-        ),
-      ),
-    );
+  /// 공유할 파일: PDF·CBZ는 그 파일, 그림 여러 장을 보는 중이면 지금 보는 그림
+  String get _shareFilePath {
+    final files = widget.files;
+    if (files.length <= 1) return files.first.path;
+    return files[_currentPage.clamp(0, files.length - 1)].path;
   }
 
   Future<void> _openPenSettings() {
@@ -2047,7 +1987,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         );
       }
     }
-    children.add(Positioned.fill(child: BookCurlLayer(drag: _book, paper: _backdrop(context), backside: Theme.of(context).brightness == Brightness.dark ? Colors.black : Colors.white /* 한 쪽 보기 종이 뒷면: 흰 종이 (다크 테마면 검정) */)));
+    children.add(Positioned.fill(child: BookCurlLayer(drag: _book, paper: _backdrop(context), backsideFromPaper: true /* 한 쪽 보기 종이 뒷면: 앱 테마와 상관없이 쪽의 종이 색(흰색·검은색·세피아) */)));
     // 길게 눌러 고른 글: 바탕·손잡이·[복사 | 모두 선택 | 공유] 막대
     children.add(Positioned.fill(child: SizedBox.expand(key: _textLayerKey, child: PageTextSelectLayer(sel: _textSel, tr: _tr))));
     return Stack(fit: StackFit.expand, clipBehavior: Clip.hardEdge, children: children);
@@ -2068,7 +2008,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     isRtl: () => _isMangaRtlMode,
     canTurn: _canStepPage,
     paperOf: (spread, fromRight, size) async => _curlPaper(spread, fromRight, size),
-  );
+  )..wantPaperTone = true; // 한 쪽 보기 종이 뒷면 = 쪽의 종이 색
 
   /// 넘어가는 쪽(종이)의 자리: 쪽 그림이 화면에 맞춰 놓인 네모 (빈 여백은 넘어가지 않음)
   /// 쪽 그림이 [box] 안에 맞춰 놓인 네모 ([side] -1: 두 쪽 보기 왼쪽, 1: 오른쪽, 0: 가운데)
@@ -3258,14 +3198,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               tooltip: _tr('파일 내 단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
                               onPressed: _openFind,
                             ),
-                          if (_canExport)
+                          // 공유: 이 파일을 형식 그대로 다른 앱으로 (파일 내 검색 오른쪽)
                           IconButton(
                             visualDensity: VisualDensity.compact,
                             padding: btnPadding,
                             constraints: btnConstraints,
-                            icon: const ExportFileIcon(size: 21),
-                            tooltip: _tr('파일 내보내기', 'Export File', '导出文件', 'ファイルを書き出す'),
-                            onPressed: _exportToPdf,
+                            icon: const Icon(Icons.share_outlined, color: Colors.white, size: 18),
+                            tooltip: _tr('공유', 'Share', '分享', '共有'),
+                            onPressed: () => shareFile(context, _shareFilePath, title: widget.title),
                           ),
                           IconButton(
                             visualDensity: VisualDensity.compact,

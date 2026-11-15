@@ -36,20 +36,152 @@ Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) 
   );
 }
 
-Widget _dialogFrame(BuildContext context, {required Widget child}) {
+/// 고르기 창 (페이지 표시·화면 회전): 제목 + 설명 + 아이콘 카드 목록 + 아래 [확인]
+Widget _choiceDialogBody<T>(
+  BuildContext context, {
+  required String title,
+  String? subtitle,
+  required List<(T, Widget, String, String)> options,
+  required T selected,
+  required ValueChanged<T> onTap,
+  required String okLabel,
+  required VoidCallback onOk,
+}) {
   final cs = Theme.of(context).colorScheme;
+  final bool dark = Theme.of(context).brightness == Brightness.dark;
+  final Color sig = AppColors.of(context);
+  // 고른 카드: 테마 대표 색을 옅게 / 아이콘 칸은 조금 더 진하게. 고르지 않은 카드는 밝은 바탕
+  final Color selFill = Color.alphaBlend(sig.withValues(alpha: dark ? 0.55 : 0.32), cs.surfaceContainerHigh);
+  final Color selTile = Color.alphaBlend(sig.withValues(alpha: dark ? 0.8 : 0.6), cs.surfaceContainerHigh);
+  final Color offFill = dark ? cs.surfaceContainer : Color.alphaBlend(Colors.white.withValues(alpha: 0.6), cs.surfaceContainerLow);
+  final Color offTile = Color.alphaBlend(sig.withValues(alpha: dark ? 0.25 : 0.14), cs.surfaceContainerHigh);
+  final Color ink = cs.primary; // 테두리·체크 (라이트는 진한 색, 다크는 밝은 색)
   return Material(
     color: cs.surfaceContainerHigh,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26), side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.5))),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
     clipBehavior: Clip.antiAlias,
+    elevation: 8,
     child: ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: math.min(440, MediaQuery.sizeOf(context).width - 40)),
-      child: child,
+      constraints: BoxConstraints(maxWidth: math.min(460, MediaQuery.sizeOf(context).width - 40)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 28, 22, 22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: Text(title, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: cs.onSurface)),
+            ),
+            if (subtitle != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 6, top: 8),
+                child: Text(subtitle, style: TextStyle(fontSize: 15, height: 1.4, color: cs.onSurfaceVariant)),
+              ),
+            const SizedBox(height: 18),
+            for (final (value, icon, label, desc) in options)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Material(
+                  color: value == selected ? selFill : offFill,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(22),
+                    side: value == selected
+                        ? BorderSide(color: ink, width: 2.2)
+                        : BorderSide(color: cs.outlineVariant.withValues(alpha: 0.7), width: 1),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: () => onTap(value),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 16, 14),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 54,
+                            height: 54,
+                            decoration: BoxDecoration(color: value == selected ? selTile : offTile, borderRadius: BorderRadius.circular(16)),
+                            alignment: Alignment.center,
+                            child: IconTheme(data: IconThemeData(size: 28, color: cs.onSurface), child: icon),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(label, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: cs.onSurface)),
+                                const SizedBox(height: 2),
+                                Text(desc, style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          // 고르면 진한 동그라미 안에 체크, 아니면 빈 동그라미
+                          AnimatedContainer(
+                            duration: Anim.ms(160),
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: value == selected ? ink : Colors.transparent,
+                              border: Border.all(color: ink, width: 2.2),
+                            ),
+                            child: value == selected ? Icon(Icons.check, size: 19, color: cs.onPrimary) : null,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 54,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: ink,
+                  foregroundColor: cs.onPrimary,
+                  shape: const StadiumBorder(),
+                ),
+                onPressed: onOk,
+                child: Text(okLabel, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              ),
+            ),
+          ],
+        ),
+      ),
     ),
   );
 }
 
-/// 페이지 표시: 한 페이지 / 두 페이지 / 자동. 누르면 바로 적용 ([onChanged]), '닫기'로 닫음
+/// 문서 + 톱니 (자동)
+class _AutoPageIcon extends StatelessWidget {
+  const _AutoPageIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    final it = IconTheme.of(context);
+    final double sz = it.size ?? 28;
+    return SizedBox.square(
+      dimension: sz,
+      child: Stack(
+        children: [
+          Icon(Icons.description_outlined, size: sz),
+          Positioned(
+            right: -sz * 0.06,
+            bottom: -sz * 0.06,
+            child: Container(
+              decoration: const BoxDecoration(shape: BoxShape.circle),
+              child: Icon(Icons.settings_outlined, size: sz * 0.48),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 페이지 표시: 한 페이지 / 두 페이지 / 자동. 누르면 바로 적용 ([onChanged]), [확인]으로 닫음
 Future<void> showPageDisplayDialog(
   BuildContext context, {
   required String current,
@@ -59,75 +191,23 @@ Future<void> showPageDisplayDialog(
 }) {
   String selected = current;
   return _centerDialog<void>(context, (ctx) {
-    final cs = Theme.of(ctx).colorScheme;
     return StatefulBuilder(
-      builder: (ctx, setState) => _dialogFrame(
+      builder: (ctx, setState) => _choiceDialogBody<String>(
         ctx,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(26, 26, 18, 14),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(tr('페이지 표시', 'Page Display', '页面显示', 'ページ表示'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Text(
-                  scrollMode
-                      ? tr('스크롤 모드에서는 바뀌지 않아요\n탭·슬라이드 모드에서 적용돼요', 'Not applied in scroll mode\nApplies in tap/slide mode', '滚动模式下不变，在点击/滑动模式下生效', 'スクロールモードでは変わりません\nタップ・スライドモードで適用されます')
-                      : tr('탭·슬라이드 모드에서 적용돼요\n스크롤 모드의 표시는 바뀌지 않아요', 'Applies in tap/slide mode\nScroll mode is not affected', '在点击/滑动模式下生效，滚动模式不受影响', 'タップ・スライドモードで適用されます\nスクロールモードは変わりません'),
-                  style: TextStyle(fontSize: 14, height: 1.4, color: cs.onSurfaceVariant),
-                ),
-              ),
-              const SizedBox(height: 8),
-              for (final (value, label, sub) in <(String, String, String?)>[
-                ('one', tr('한 페이지', 'One Page', '单页', '1ページ'), null),
-                ('two', tr('두 페이지', 'Two Pages', '双页', '2ページ'), null),
-                ('auto', tr('자동', 'Auto', '自动', '自動'),
-                    tr('화면이 넓으면 두 페이지, 좁으면 한 페이지로 표시해요', 'Two pages on wide screens, one on narrow screens', '屏幕宽时显示双页，窄时显示单页', '画面が広いと2ページ、狭いと1ページで表示します')),
-              ])
-                InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () {
-                    setState(() => selected = value);
-                    onChanged(value);
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Row(
-                      crossAxisAlignment: sub == null ? CrossAxisAlignment.center : CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          selected == value ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                          size: 23,
-                          color: selected == value ? AppColors.mark(context) : cs.outline,
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                              if (sub != null) Text(sub, style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  style: TextButton.styleFrom(foregroundColor: cs.onSurface),
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: Text(tr('닫기', 'Close', '关闭', '閉じる'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                ),
-              ),
-            ],
-          ),
-        ),
+        title: tr('페이지 표시', 'Page Display', '页面显示', 'ページ表示'),
+        subtitle: tr('탭·슬라이드 모드에서 적용돼요\n(스크롤 모드는 유지)', 'Applies in tap/slide mode\n(scroll mode stays the same)', '在点击/滑动模式下生效\n（滚动模式保持不变）', 'タップ・スライドモードで適用されます\n(スクロールモードはそのまま)'),
+        options: [
+          ('one', const Icon(Icons.insert_drive_file_outlined), tr('한 페이지', 'One Page', '单页', '1ページ'), tr('한 번에 한 쪽씩 보기', 'One page at a time', '一次看一页', '1ページずつ表示')),
+          ('two', const Icon(Icons.menu_book_outlined), tr('두 페이지', 'Two Pages', '双页', '2ページ'), tr('양쪽 두 페이지를 나란히 보기', 'Two pages side by side', '两页并排显示', '2ページを並べて表示')),
+          ('auto', const _AutoPageIcon(), tr('자동', 'Auto', '自动', '自動'), tr('화면이 넓으면 두 페이지, 좁으면 한 페이지', 'Two pages on wide screens, one on narrow', '屏幕宽时双页，窄时单页', '画面が広いと2ページ、狭いと1ページ')),
+        ],
+        selected: selected,
+        onTap: (v) {
+          setState(() => selected = v);
+          onChanged(v);
+        },
+        okLabel: tr('확인', 'OK', '确定', 'OK'),
+        onOk: () => Navigator.of(ctx).pop(),
       ),
     );
   });
@@ -137,72 +217,27 @@ Future<void> showPageDisplayDialog(
 Future<String?> showRotationDialog(BuildContext context, {required String current, required ViewerTr tr}) {
   String selected = current;
   return _centerDialog<String>(context, (ctx) {
-    final cs = Theme.of(ctx).colorScheme;
     return StatefulBuilder(
-      builder: (ctx, setState) => _dialogFrame(
+      builder: (ctx, setState) => _choiceDialogBody<String>(
         ctx,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 24, 22, 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 14),
-                child: Text(tr('화면 회전', 'Screen Rotation', '屏幕旋转', '画面回転'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
-              ),
-              for (final value in const ['auto', 'portrait', 'landscape'])
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Material(
-                    color: Colors.transparent,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(
-                        color: selected == value ? cs.onSurface.withValues(alpha: 0.7) : cs.outlineVariant.withValues(alpha: 0.6),
-                        width: selected == value ? 1.6 : 1,
-                      ),
-                    ),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(16),
-                      onTap: () => setState(() => selected = value),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        child: Column(
-                          children: [
-                            Icon(rotationIcon(value), size: 27, color: selected == value ? cs.onSurface : cs.onSurfaceVariant),
-                            const SizedBox(height: 6),
-                            Text(
-                              rotationLabel(value, tr),
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: selected == value ? FontWeight.w700 : FontWeight.w500,
-                                color: selected == value ? cs.onSurface : cs.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: cs.onSurface,
-                    foregroundColor: cs.surface,
-                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  onPressed: () => Navigator.of(ctx).pop(selected),
-                  child: Text(tr('확인', 'OK', '确定', 'OK'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                ),
-              ),
-            ],
-          ),
-        ),
+        title: tr('화면 회전', 'Screen Rotation', '屏幕旋转', '画面回転'),
+        options: [
+          for (final value in const ['auto', 'portrait', 'landscape'])
+            (
+              value,
+              Icon(rotationIcon(value)),
+              rotationLabel(value, tr),
+              switch (value) {
+                'portrait' => tr('세로 화면으로 유지', 'Stays in portrait', '保持竖屏', '縦画面のまま'),
+                'landscape' => tr('가로 화면으로 유지', 'Stays in landscape', '保持横屏', '横画面のまま'),
+                _ => tr('기기 방향에 맞춰 회전', 'Rotates with the device', '随设备方向旋转', '端末の向きに合わせて回転'),
+              },
+            ),
+        ],
+        selected: selected,
+        onTap: (v) => setState(() => selected = v),
+        okLabel: tr('확인', 'OK', '确定', 'OK'),
+        onOk: () => Navigator.of(ctx).pop(selected),
       ),
     );
   });

@@ -134,7 +134,143 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
   }
 }
 
-/// [anchorContext] 위치에서 커져 나오는 메뉴를 띄우고 고른 값을 돌려줌 (닫으면 null)
+/// 편집 버튼 모음: 메뉴 한 줄씩이 아니라 버튼 하나하나로, 메인 화면 [파일 추가] 버튼처럼
+/// 누른 자리에서 하나씩 차례로 빠져나오고(앞 버튼 뒤에 숨어 있다가) 닫을 때는 거꾸로 들어감.
+/// 빨간 색을 준 항목(삭제)은 빨간 바탕에 흰 아이콘·글씨
+class ActionButtonsRoute<T> extends PopupRoute<T> {
+  ActionButtonsRoute({required this.anchor, required this.items, this.barrierLabel, this.beside = false});
+
+  final Rect anchor;
+  final List<ScaleMenuItem<T>> items;
+  final bool beside;
+
+  @override
+  final String? barrierLabel;
+
+  @override
+  Color? get barrierColor => Colors.transparent;
+
+  @override
+  bool get barrierDismissible => true;
+
+  @override
+  Duration get transitionDuration => Anim.ms(460);
+
+  @override
+  Duration get reverseTransitionDuration => Anim.ms(340);
+
+  @override
+  Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) {
+    final Size screen = MediaQuery.sizeOf(context);
+    final EdgeInsets pad = MediaQuery.paddingOf(context);
+    const double rowH = 54; // 버튼 높이 46 + 사이 8
+    const double boxW = 260; // 버튼들이 놓이는 자리 너비 (가장 긴 버튼도 들어가게)
+    final double total = items.length * rowH;
+    final bool alignRight = !beside && anchor.center.dx > screen.width / 2;
+    final bool above = !beside && anchor.bottom + 6 + total > screen.height - pad.bottom - 8 && anchor.top - 6 - total > pad.top;
+    final double edgeX = beside
+        ? math.min(anchor.right + 16, screen.width - 8 - 150)
+        : alignRight ? math.min(screen.width - 8, anchor.right) : math.max(8.0, anchor.left);
+    final double edgeY = beside
+        ? math.max(pad.top + 8, math.min(anchor.top - 4, screen.height - pad.bottom - 8 - total))
+        : above
+            ? anchor.top - 6
+            : math.max(pad.top + 8, math.min(anchor.bottom + 6, screen.height - pad.bottom - 8 - total));
+    final cs = Theme.of(context).colorScheme;
+    final shadows = AppColors.sigShadows(context);
+
+    Widget button(ScaleMenuItem<T> it) {
+      final (value, label, icon, color) = it;
+      final bool danger = color != null;
+      final Color bg = danger ? Colors.redAccent : cs.surfaceContainerHighest;
+      final Color fg = danger ? Colors.white : cs.onSurface;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: rowH - 46),
+        child: Material(
+          color: bg,
+          elevation: 3,
+          shadowColor: Colors.black54,
+          shape: const StadiumBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => Navigator.of(context).pop(value),
+            child: SizedBox(
+              height: 46,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 20, color: fg, shadows: danger ? shadows : null),
+                    const SizedBox(width: 8),
+                    Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: fg, shadows: danger ? shadows : null)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Stack(
+      children: [
+        Positioned(
+          left: alignRight ? null : math.max(8.0, math.min(edgeX, screen.width - 8 - 170)), // 버튼이 화면 밖으로 나가지 않을 만큼만 당김
+          right: alignRight ? screen.width - edgeX : null,
+          top: above ? null : edgeY,
+          bottom: above ? screen.height - edgeY : null,
+          width: boxW,
+          height: total,
+          child: AnimatedBuilder(
+            animation: animation,
+            builder: (context, _) {
+              final double t = animation.value;
+              final bool opening = animation.status == AnimationStatus.forward || animation.status == AnimationStatus.completed;
+              final int n = items.length;
+              // 누른 자리에 가까운 버튼부터 차례로 (위로 펼치면 맨 아래 버튼이 먼저)
+              final order = above ? [for (int i = n - 1; i >= 0; i--) i] : [for (int i = 0; i < n; i++) i];
+              final offsets = List<double>.filled(n, 0);
+              final shown = List<double>.filled(n, 0);
+              double hidden = 0; // 앞 버튼이 아직 덜 나온 만큼 (그 뒤에 붙어 함께 움직임)
+              for (int k = 0; k < n; k++) {
+                final int i = order[k];
+                final double raw = ((t - k * 0.22) / 0.56).clamp(0.0, 1.0);
+                final double p = (opening ? Curves.easeOutBack : Curves.easeOutCubic).transform(raw);
+                hidden += rowH * (1 - p);
+                offsets[i] = above ? hidden : -hidden;
+                shown[i] = raw;
+              }
+              // 누른 자리에서 먼 버튼부터 그려, 가까운 버튼 뒤에 숨어 있다가 빠져나옴
+              final paintOrder = order.reversed.toList();
+              return SizedBox(
+                width: boxW,
+                height: total,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    for (final i in paintOrder)
+                      Positioned(
+                        top: i * rowH,
+                        left: alignRight ? null : 0,
+                        right: alignRight ? 0 : null,
+                        child: Transform.translate(
+                          offset: Offset(0, offsets[i]),
+                          child: Opacity(opacity: (shown[i] * 3).clamp(0.0, 1.0), child: button(items[i])),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// [anchorContext] 위치에서 편집 버튼들을 하나씩 빠져나오게 띄우고 고른 값을 돌려줌 (닫으면 null)
 Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> items, {bool beside = false, bool compact = false}) {
   final box = anchorContext.findRenderObject() as RenderBox?;
   if (box == null || !box.hasSize) return Future.value(null);
@@ -142,12 +278,11 @@ Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> i
   final RenderObject? overlayBox = Navigator.of(anchorContext).overlay?.context.findRenderObject();
   final Offset topLeft = box.localToGlobal(Offset.zero, ancestor: overlayBox);
   return Navigator.of(anchorContext).push<T>(
-    GroupJumpMenuRoute<T>(
+    ActionButtonsRoute<T>(
       anchor: topLeft & box.size,
       barrierLabel: MaterialLocalizations.of(anchorContext).modalBarrierDismissLabel,
       items: items,
       beside: beside,
-      compact: compact,
     ),
   );
 }

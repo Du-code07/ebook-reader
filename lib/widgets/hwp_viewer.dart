@@ -628,6 +628,8 @@ class _HwpViewerState extends State<HwpViewer> {
           initialUrlRequest: URLRequest(url: WebUri(_entry)),
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,
+            // 책처럼 넘기기: 넘긴 쪽이 비칠 때 아직 그려지지 않은 빈 곳이 보이지 않게 미리 그려 둠
+            offscreenPreRaster: true,
             transparentBackground: true,
             supportZoom: false,
             // Android consumes ACTION_MOVE when both flags are true. That
