@@ -139,7 +139,7 @@ class MemoToolButton extends StatelessWidget {
                   height: kMemoToolExtent - 8,
                   decoration: BoxDecoration(color: AppColors.signature, borderRadius: BorderRadius.circular(10)),
                 ),
-              iconBuilder != null ? iconBuilder!(color) : Icon(icon, color: color, size: 16),
+              iconBuilder != null ? iconBuilder!(color) : Icon(icon, color: color, size: 16, shadows: active ? AppColors.sigShadows(context) : null),
               // 펜 색: 펜 몸통 왼쪽에 살짝 띄워서
               if (dotColor != null)
                 Positioned(

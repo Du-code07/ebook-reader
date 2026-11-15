@@ -866,6 +866,32 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                 }
                 wake(window.decorView)
                 result.success(count)
+            } else if (call.method == "pixelCopyRaw") {
+                // 문서 화면(WebView) 자리에 보이는 그대로를 GPU로 복사 (WebView를 다시 그리지 않아 화면이 멈추지 않음)
+                val webView = findLargestWebView(window.decorView)
+                if (Build.VERSION.SDK_INT < 26 || webView == null || webView.width <= 0 || webView.height <= 0) {
+                    result.error("UNSUPPORTED", "PixelCopy unavailable", null)
+                    return@setMethodCallHandler
+                }
+                pixelCopyView(webView) { bmp ->
+                    if (bmp == null) {
+                        result.error("CAPTURE_ERR", "PixelCopy failed", null)
+                    } else {
+                        Thread {
+                            try {
+                                val buf = java.nio.ByteBuffer.allocate(bmp.byteCount)
+                                bmp.copyPixelsToBuffer(buf)
+                                val w = bmp.width
+                                val h = bmp.height
+                                bmp.recycle()
+                                val out = hashMapOf<String, Any>("w" to w, "h" to h, "px" to buf.array())
+                                runOnUiThread { result.success(out) }
+                            } catch (e: Throwable) {
+                                runOnUiThread { result.error("CAPTURE_ERR", e.message, null) }
+                            }
+                        }.start()
+                    }
+                }
             } else if (call.method == "snapshotWebViewRaw") {
                 // 책처럼 넘기기용: 압축하지 않은 화소(RGBA) 그대로 넘김 → PNG·JPEG 압축 시간이 없고 투명한 곳(종이 질감 위)도 살아 있음
                 val webView = findLargestWebView(window.decorView)
@@ -895,6 +921,26 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     }.start()
                 } catch (e: Throwable) {
                     result.error("CAPTURE_ERR", e.message, null)
+                }
+            } else if (call.method == "snapshotWebView" && call.argument<Boolean>("gpu") == true && Build.VERSION.SDK_INT >= 26 &&
+                (findLargestWebView(window.decorView)?.width ?: 0) > 0) {
+                // 쪽 저장 화면: 화면에 보이는 그대로를 GPU로 복사해 JPEG로 (WebView를 다시 그리지 않아 화면이 멈추지 않음)
+                pixelCopyView(findLargestWebView(window.decorView)!!) { bmp ->
+                    if (bmp == null) {
+                        result.error("CAPTURE_ERR", "PixelCopy failed", null)
+                    } else {
+                        Thread {
+                            try {
+                                val out = java.io.ByteArrayOutputStream()
+                                bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                                bmp.recycle()
+                                val bytes = out.toByteArray()
+                                runOnUiThread { result.success(bytes) }
+                            } catch (e: Throwable) {
+                                runOnUiThread { result.error("CAPTURE_ERR", e.message, null) }
+                            }
+                        }.start()
+                    }
                 }
             } else if (call.method == "snapshotWebView") {
                 // 위로 밀어 넘길 때 지금 페이지를 잠깐 붙잡아 두는 그림 (JPEG 바이트, 빈 곳은 배경색)
@@ -1551,6 +1597,28 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     // ── PDF 내보내기 ──────────────────────────────────────────────────────────
 
     /** 화면에 보이는 WebView 중 가장 큰 것 (EPUB 본문) */
+    /// 이 화면(View) 자리에 보이는 그대로 복사 (안드로이드 8 이상, 위에 겹친 앱 화면도 함께)
+    private fun pixelCopyView(view: View, done: (Bitmap?) -> Unit) {
+        if (Build.VERSION.SDK_INT < 26 || view.width <= 0 || view.height <= 0) { done(null); return }
+        try {
+            val loc = IntArray(2)
+            view.getLocationInWindow(loc)
+            val dw = window.decorView.width
+            val dh = window.decorView.height
+            val l = loc[0].coerceIn(0, maxOf(0, dw - 1))
+            val t = loc[1].coerceIn(0, maxOf(0, dh - 1))
+            val rw = minOf(view.width, dw - l)
+            val rh = minOf(view.height, dh - t)
+            if (rw <= 0 || rh <= 0) { done(null); return }
+            val bmp = Bitmap.createBitmap(rw, rh, Bitmap.Config.ARGB_8888)
+            android.view.PixelCopy.request(window, android.graphics.Rect(l, t, l + rw, t + rh), bmp, { res ->
+                if (res == android.view.PixelCopy.SUCCESS) done(bmp) else { bmp.recycle(); done(null) }
+            }, Handler(Looper.getMainLooper()))
+        } catch (e: Throwable) {
+            done(null)
+        }
+    }
+
     private fun findScrollWebView(root: View, tag: String? = null): WebView? {
         if (root is WebView) {
             val url = try { root.url } catch (_: Throwable) { null }

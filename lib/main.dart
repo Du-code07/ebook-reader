@@ -43,6 +43,9 @@ Future<void> _readStatusBarHeight() async {
   } catch (_) {}
 }
 
+
+/// 밝은·편안한 테마에서 흰 글씨 그림자 (AppColors.sigShadows와 같은 값)
+const List<Shadow> _whiteTextShadows = [Shadow(color: Color(0x66000000), blurRadius: 3, offset: Offset(0, 0.6))];
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 데이터 지우기 중 '모든 파일 접근'을 끄면 안드로이드가 앱을 다시 시작함 → 이어서 바로 지움
@@ -292,6 +295,16 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         checkColor: WidgetStatePropertyAll(b == Brightness.dark ? Colors.white : AppColors.onSignature),
       ),
       radioTheme: RadioThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null)),
+      // 밝은·편안한 테마: 흰 글씨(대표 색·진한 바탕 위)에 옅은 그림자를 넣어 잘 보이게 ('파일 추가' 단추와 같은 그림자)
+      floatingActionButtonTheme: b == Brightness.dark ? null : const FloatingActionButtonThemeData(extendedTextStyle: TextStyle(shadows: _whiteTextShadows)),
+      filledButtonTheme: b == Brightness.dark ? null : FilledButtonThemeData(style: ButtonStyle(textStyle: const WidgetStatePropertyAll(TextStyle(shadows: _whiteTextShadows)))),
+      chipTheme: b == Brightness.dark
+          ? null
+          : ChipThemeData(labelStyle: WidgetStateTextStyle.resolveWith((s) => s.contains(WidgetState.selected) ? const TextStyle(shadows: _whiteTextShadows) : const TextStyle())),
+      segmentedButtonTheme: b == Brightness.dark
+          ? null
+          : SegmentedButtonThemeData(style: ButtonStyle(textStyle: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? const TextStyle(shadows: _whiteTextShadows) : null))),
+      snackBarTheme: b == Brightness.dark ? null : const SnackBarThemeData(contentTextStyle: TextStyle(color: Colors.white, shadows: _whiteTextShadows)),
       // 아래에서 올라오는 모든 창: 위쪽 가운데 회색 막대
       bottomSheetTheme: BottomSheetThemeData(
         showDragHandle: true,
@@ -2443,11 +2456,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     messenger.showSnackBar(
       SnackBar(
         content: Text(message),
+        // [열기]가 있어도 5초 뒤에 사라짐 (단추가 있으면 기본으로는 계속 떠 있음)
+        duration: const Duration(seconds: 5),
+        persist: false,
         action: SnackBarAction(
           label: _tr('열기', 'Open', '打开', '開く'),
-          // 밝은 테마: 시그니처 색 단추 + 흰 글자 / 다크: 다크 테마 바탕색 단추 + 흰 글자
-          textColor: Colors.white,
-          backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2C2C30) : AppColors.of(context),
+          // 단추 바탕 없이 글자만: 알림창 바탕과 대비되는 글자색 (모든 테마)
+          textColor: Theme.of(context).colorScheme.onInverseSurface,
           onPressed: () {
             if (mounted && file.existsSync()) _openFile(file);
           },
@@ -4081,14 +4096,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                       heroTag: 'fab_batch_favorite',
                       // 즐겨찾기 책갈피와 같은 노란색
                       backgroundColor: const Color(0xFFFFCA28),
-                      foregroundColor: Colors.black87,
+                      foregroundColor: Colors.white,
                       extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
                       extendedIconLabelSpacing: 6,
                       onPressed: _selectedFilePaths.isNotEmpty ? _favoriteSelectedFilesBatch : null,
-                      icon: Icon(allFav ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined, size: 16),
+                      icon: Icon(allFav ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined, size: 16, shadows: const [Shadow(color: Color(0x80000000), blurRadius: 3, offset: Offset(0, 0.6))]),
                       label: Text(
                         '${allFav ? _tr("즐겨찾기 해제", "Unfavorite", "取消收藏", "お気に入り解除") : _tr("즐겨찾기", "Favorite", "收藏", "お気に入り")} (${_selectedFilePaths.length})',
-                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                        // 노란 바탕 위 흰 글씨: 모든 테마에서 그림자를 넣어 잘 보이게
+                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, shadows: [Shadow(color: Color(0x80000000), blurRadius: 3, offset: Offset(0, 0.6))]),
                       ),
                     ),
                   );
@@ -4103,7 +4119,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
                     extendedIconLabelSpacing: 6,
                     onPressed: _selectedFilePaths.isNotEmpty ? _moveSelectedFilesBatch : null,
-                    icon: const Icon(Icons.drive_file_move_outline, size: 16),
+                    icon: Icon(Icons.drive_file_move_outline, size: 16, shadows: AppColors.sigShadows(context)),
                     label: Text(
                       '${_tr("그룹", "Group", "分组", "グループ")} (${_selectedFilePaths.length})',
                       style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, shadows: AppColors.sigShadows(context)),
@@ -4120,10 +4136,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
                     extendedIconLabelSpacing: 6,
                     onPressed: _selectedFilePaths.isNotEmpty ? _deleteSelectedFilesBatch : null,
-                    icon: const Icon(Icons.delete_outline, size: 16),
+                    icon: Icon(Icons.delete_outline, size: 16, shadows: AppColors.sigShadows(context)),
                     label: Text(
                       '${_tr("삭제", "Delete", "删除", "削除")} (${_selectedFilePaths.length})',
-                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, shadows: AppColors.sigShadows(context)),
                     ),
                   ),
                 ),

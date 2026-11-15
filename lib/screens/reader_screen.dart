@@ -1382,7 +1382,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       try {
         final bytes = await _pdfChannel.invokeMethod<Uint8List>(
           'snapshotWebView',
-          {'background': _getBgColor().toARGB32(), 'scale': 1.0},
+          // 화면이 깨끗하면 보이는 그대로 GPU 복사 (화면이 멈추지 않음)
+          {'background': _getBgColor().toARGB32(), 'scale': 1.0, 'gpu': _screenCleanForShot},
         );
         if (bytes == null || bytes.length < 1024 || !mounted || page != _docPage) return;
         final again = _snapFile(page); // 저장하는 사이 화면 크기가 바뀌었을 수 있음
@@ -2992,7 +2993,44 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     beforeAfterCapture: _waitTurnedPageReady,
     // 새 쪽 그림을 찍어 붙이지 않고, 넘겨 둔 실제 화면이 다 그려지면 그대로 비쳐 보이게 (부드럽고 바로 보임)
     liveReady: _curlLiveReady,
+    // 이전 쪽으로 되돌아올 때: 앞으로 넘기며 떠나온 쪽 그림을 바로 씀 (글이 깜빡이지 않게)
+    reverseFront: _takeBackShot,
+    onCommitted: _onCurlCommitted,
   )..addListener(_onBookCurlChanged);
+
+  // 앞으로 넘기며 떠나온 쪽 그림들 (최근 2장). key = 그 다음 쪽(넘겨서 도착한 쪽)의 자리
+  final List<({ui.Image image, String? key})> _backShots = [];
+
+  void _onCurlCommitted(int dir, ui.Image left) {
+    if (dir > 0) {
+      _backShots.add((image: left, key: null)); // 도착한 쪽의 자리는 다 넘어간 뒤에 적음
+      while (_backShots.length > 2) {
+        _backShots.removeAt(0).image.dispose();
+      }
+    } else {
+      left.dispose();
+      // 되돌아왔음: 쓴 그림은 버림
+      if (_backShots.isNotEmpty && _backShotUsed) _backShots.removeLast().image.dispose();
+    }
+    _backShotUsed = false;
+  }
+
+  bool _backShotUsed = false;
+
+  ui.Image? _takeBackShot() {
+    if (_backShots.isEmpty) return null;
+    final last = _backShots.last;
+    if (last.key == null || last.key != _curlShotKey()) return null;
+    _backShotUsed = true;
+    return last.image.clone();
+  }
+
+  void _dropBackShots() {
+    for (final b in _backShots) {
+      b.image.dispose();
+    }
+    _backShots.clear();
+  }
 
   /// 넘겨 둔 실제 화면이 다 그려질 때까지 기다림
   Future<void> _curlLiveReady() async {
@@ -3037,7 +3075,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (!mounted || !_curlOn || _book.busy) return;
       if (_isOfflineDocument && _lastReadyPage != _docPage) return; // 다 그려지면 다시 불림
       final key = _curlShotKey();
-      final img = await _captureForCurl();
+      final img = await _captureForCurl(screen: true);
       List<Rect>? frames;
       if (_isOfflineDocument) {
         frames = await _hwpController.pageFrames().timeout(const Duration(milliseconds: 300), onTimeout: () => const <Rect>[]);
@@ -3055,7 +3093,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   void _onBookCurlChanged() {
     final bool busy = _book.busy;
-    if (_bookWasBusy && !busy) _scheduleIdleShot(); // 다 넘어간 뒤 새 쪽을 찍어 둠
+    if (_bookWasBusy && !busy) {
+      // 앞으로 넘긴 직후: 떠나온 쪽 그림에 도착한 쪽의 자리를 적어 둠
+      if (_backShots.isNotEmpty && _backShots.last.key == null) {
+        final b = _backShots.removeLast();
+        _backShots.add((image: b.image, key: _curlShotKey()));
+      }
+      _scheduleIdleShot(); // 다 넘어간 뒤 새 쪽을 찍어 둠
+    }
     _bookWasBusy = busy;
   }
 
@@ -3227,7 +3272,49 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _book.begin(start, e.position, pre, spread: _bookmarkSpreadNow);
   }
 
-  Future<ui.Image?> _captureForCurl() async {
+  /// 화면에 다른 것(메뉴·안내·고른 글 막대 등)이 덮여 있지 않아 보이는 그대로 찍어도 됨
+  bool get _screenCleanForShot =>
+      mounted &&
+      !_showControls &&
+      !(_tapGuide?.mounted ?? false) &&
+      !_bgMenuOpen &&
+      !_book.busy &&
+      !_docSel.active &&
+      !_hasTextSelection &&
+      _activeStrokePoints.isEmpty &&
+      !_findOpen &&
+      !_isExporting &&
+      _epubZoomScale <= 1.03;
+
+  /// 문서 화면 자리에 보이는 그대로를 GPU로 복사 (책 화면을 다시 그리지 않아 화면이 멈추지 않음)
+  Future<ui.Image?> _screenShot() async {
+    if (_isTxt || !_screenCleanForShot) return null;
+    try {
+      final r = await _pdfChannel.invokeMethod<Map>('pixelCopyRaw').timeout(const Duration(milliseconds: 800));
+      if (r == null || !mounted) return null;
+      final int w = (r['w'] as num).toInt(), h = (r['h'] as num).toInt();
+      final Uint8List px = r['px'] as Uint8List;
+      if (w <= 0 || h <= 0 || px.length < w * h * 4) return null;
+      final done = Completer<ui.Image>();
+      ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, done.complete);
+      final img = await done.future.timeout(const Duration(milliseconds: 1000));
+      // 이 기기에서 화면 복사가 안 되면 검은 그림이 나옴 → 예전 방법으로
+      if (await BookCurlDrag.looksBlank(img)) {
+        img.dispose();
+        return null;
+      }
+      return img;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// [screen]: 넘기기 막이 아직 덮이지 않았을 때(손가락을 대기 전·가만히 읽는 중) 보이는 그대로 복사해도 됨
+  Future<ui.Image?> _captureForCurl({bool screen = false}) async {
+    if (screen) {
+      final shot = await _screenShot();
+      if (shot != null) return shot;
+    }
     // 워드·한글·EPUB: 문서 화면의 화소를 압축 없이 그대로 받음 (빠르고, 종이 질감 위의 투명한 곳도 살아 있음)
     if (!_isTxt) {
       final raw = await _rawWebViewShot();
@@ -3272,7 +3359,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final old = _curlPre;
     final shot = _idleShot;
     // 미리 찍어 둔 지금 쪽이 있으면 바로 씀 (찍는 동안 기다리지 않음)
-    _curlPre = (shot != null && _idleShotKey == _curlShotKey()) ? Future<ui.Image?>.value(shot.clone()) : _captureForCurl();
+    _curlPre = (shot != null && _idleShotKey == _curlShotKey()) ? Future<ui.Image?>.value(shot.clone()) : _captureForCurl(screen: true);
     old?.then((i) => i?.dispose());
   }
 
@@ -3306,8 +3393,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             // 넘어가는 종이 뒷면·빈 곳 색: 지금 보는 배경색 (세피아면 세피아. 앱이 다크여도 검게 보이지 않게)
             paper: _getBgColor(),
             texture: _isPaperTheme ? BookCurlLayer.paperTexture(() => mounted ? setState(() {}) : null) : null,
-            // 한 쪽 보기 종이 뒷면: 한글·워드·TXT는 테마와 상관없이 흰 종이, EPUB은 보는 색 그대로(세피아면 종이 질감)
-            backside: _isOfflineDocument ? Colors.white : null,
+            // 한 쪽 보기 종이 뒷면: 한글·워드·TXT는 흰 종이(파일 테마가 다크면 검정), EPUB은 보는 색 그대로(세피아면 종이 질감)
+            // 파일 테마가 다크(검정)면 뒷면도 검정
+            backside: _isOfflineDocument ? (_epubBgTheme == 'dark' ? Colors.black : Colors.white) : null,
             textureKey: _epubBodyKey,
           ),
         ),
@@ -4086,6 +4174,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   void dispose() {
     _dropIdleShot();
+    _dropBackShots();
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     SystemBars.leaveViewer();
     _snapHideTimer?.cancel();

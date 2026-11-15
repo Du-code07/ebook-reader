@@ -1011,9 +1011,9 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
         // 메뉴·이전·다음 표시는 시그니쳐 색 바탕에 흰 글자
         decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(18)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (before != null) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(before, color: AppColors.onSig(context), size: 20)),
+          if (before != null) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(before, color: AppColors.onSig(context), size: 20, shadows: AppColors.sigShadows(context))),
           Text(text, style: TextStyle(color: AppColors.onSig(context), fontSize: 19, fontWeight: FontWeight.w800, shadows: AppColors.sigShadows(context))),
-          if (after != null) Padding(padding: const EdgeInsets.only(left: 4), child: Icon(after, color: AppColors.onSig(context), size: 20)),
+          if (after != null) Padding(padding: const EdgeInsets.only(left: 4), child: Icon(after, color: AppColors.onSig(context), size: 20, shadows: AppColors.sigShadows(context))),
         ]),
       );
 

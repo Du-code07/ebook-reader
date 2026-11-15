@@ -262,7 +262,7 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
                 child: SizedBox(
                   width: 40,
                   height: 46,
-                  child: Icon(Icons.drag_handle, size: 20, color: sel ? AppColors.onSig(context) : cs.onSurfaceVariant.withValues(alpha: 0.7)),
+                  child: Icon(Icons.drag_handle, size: 20, color: sel ? AppColors.onSig(context) : cs.onSurfaceVariant.withValues(alpha: 0.7), shadows: sel ? AppColors.sigShadows(context) : null),
                 ),
               ),
             ),

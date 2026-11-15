@@ -38,6 +38,8 @@ class BookCurlDrag extends ChangeNotifier {
     this.waitForPage,
     this.beforeAfterCapture,
     this.liveReady,
+    this.reverseFront,
+    this.onCommitted,
   }) {
     _anim = AnimationController(vsync: vsync)..addListener(_onTick);
   }
@@ -52,6 +54,12 @@ class BookCurlDrag extends ChangeNotifier {
   /// 그대로 비쳐 보이게 함 (찍는 동안 화면이 멈추지 않아 부드럽고 바로 보임).
   /// 이 기다림이 끝나면(새 쪽이 다 그려짐) 비치기 시작함. 그 전에는 종이색
   final Future<void> Function()? liveReady;
+
+  /// 되돌아오기(한 쪽 보기, 이전 쪽)를 시작할 때 이전 쪽 그림이 이미 있으면 줌 (바로 그려 글이 깜빡이지 않게)
+  final ui.Image? Function()? reverseFront;
+
+  /// 다 넘어감: (방향, 떠나온 쪽 그림 — 받은 쪽이 dispose)
+  final void Function(int dir, ui.Image left)? onCommitted;
 
   /// 넘겨 둔 실제 화면이 다 그려져 비쳐 보여도 됨
   final ValueNotifier<bool> live = ValueNotifier<bool>(false);
@@ -288,6 +296,15 @@ class BookCurlDrag extends ChangeNotifier {
       _released = null;
       return;
     }
+    // 되돌아오기: 들어올 이전 쪽 그림이 있으면 첫 장면부터 함께 (종이만 보였다가 글이 나타나는 깜빡임 없게)
+    if (reverse) {
+      final ui.Image? f = reverseFront?.call();
+      if (f != null) {
+        final old = after.value;
+        after.value = f;
+        old?.dispose();
+      }
+    }
     image = img;
     point = _released == null ? _fingerToPoint(_finger) : (reverse ? _target : corner);
     if (_released == null) _phase = _BookPhase.dragging;
@@ -443,6 +460,7 @@ class BookCurlDrag extends ChangeNotifier {
       if (gen != _gen) return;
       await SchedulerBinding.instance.endOfFrame;
     }
+    if (commit && turned && image != null) onCommitted?.call(_dir, image!.clone());
     _clear();
   }
 
@@ -689,7 +707,8 @@ class BookCurlPainter extends CustomPainter {
       _ground(canvas, full);
       canvas.drawImageRect(image, srcOf(image), full, paint);
       canvas.restore();
-      if (!live) {
+      // 이전 쪽 그림이 있으면 그것을 (실제 화면이 바뀌는 순간의 깜빡임 없이), 없으면 다 그려진 실제 화면이 비치게
+      if (!live || front != null) {
         canvas.clipRect(page);
         _ground(canvas, full);
         drawFront(canvas);
