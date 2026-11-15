@@ -404,6 +404,21 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
     } catch (_) {}
   }
 
+  /// 지금 보고 있는 쪽 지우기 (다 지우면 스캔 화면을 닫음)
+  void _deleteCurrentPage() {
+    if (_pages.isEmpty) return;
+    setState(() {
+      _pages.removeAt(_currentEditIndex.clamp(0, _pages.length - 1));
+      if (_pages.isEmpty) {
+        Navigator.pop(context);
+        return;
+      }
+      if (_currentEditIndex >= _pages.length) {
+        _currentEditIndex = _pages.length - 1;
+      }
+    });
+  }
+
   Future<void> _renameDocumentTitleDialog() async {
     final ctrl = TextEditingController(text: _docTitle);
     final res = await showDialog<String>(
@@ -836,12 +851,20 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
             ),
           ),
         ),
-        // 상단 우측 '추가' 버튼 삭제 완료
+        // 오른쪽 위 휴지통 (문서 이름 줄): 지금 보고 있는 쪽을 지움, 아이콘만
+        actions: [
+          IconButton(
+            tooltip: _tr('이 쪽 지우기', 'Delete This Page', '删除此页', 'このページを削除'),
+            icon: Icon(Icons.delete_outline, color: _fg),
+            onPressed: _deleteCurrentPage,
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       body: Column(
         children: [
           Divider(height: 1, color: _line),
-          // 1. 중앙 스캔 문서 미리보기 카드 (흰색 배경 + 좌상단 원형 휴지통 아이콘 포함)
+          // 1. 중앙 스캔 문서 미리보기 카드 (흰색 배경)
           Expanded(
             child: PageView.builder(
               controller: _pageController,
@@ -884,39 +907,6 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
                             key: ValueKey('$displayPath:${page.mode}:${page.contrast}'),
                             fit: BoxFit.contain,
                             filterQuality: FilterQuality.high,
-                          ),
-                        ),
-                      ),
-                      // 오른쪽 위 휴지통: 아이콘만 (바탕 동그라미 없음, 흰 종이·어두운 사진 위에서도 보이게 옅은 테두리 그림자)
-                      Positioned(
-                        top: 6,
-                        right: 6,
-                        child: Material(
-                          color: Colors.transparent,
-                          shape: const CircleBorder(),
-                          child: InkWell(
-                            customBorder: const CircleBorder(),
-                            onTap: () {
-                              setState(() {
-                                _pages.removeAt(idx);
-                                if (_pages.isEmpty) {
-                                  Navigator.pop(context);
-                                  return;
-                                }
-                                if (_currentEditIndex >= _pages.length) {
-                                  _currentEditIndex = _pages.length - 1;
-                                }
-                              });
-                            },
-                            child: const Padding(
-                              padding: EdgeInsets.all(9),
-                              child: Icon(
-                                Icons.delete_outline,
-                                color: Color(0xDD000000),
-                                size: 24,
-                                shadows: [Shadow(color: Color(0xCCFFFFFF), blurRadius: 4)],
-                              ),
-                            ),
                           ),
                         ),
                       ),
@@ -1154,14 +1144,16 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
               ),
             ),
 
-          // 3. 하단 필터 썸네일 스트립 (강화 / 음영 제거 / 밝게하기 / 흑백 / 반전 / 원본)
+          // 3. 하단 필터 썸네일 스트립 (강화 / 음영 제거 / 반전 / 원본): 가운데 정렬 (넘치면 옆으로 밀어 봄)
           Container(
             height: 92,
             decoration: BoxDecoration(
               color: _fillLo,
               border: Border(top: BorderSide(color: _line)),
             ),
+            alignment: Alignment.center,
             child: ListView.separated(
+              shrinkWrap: true,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               scrollDirection: Axis.horizontal,
               itemCount: _filterDefs.length,

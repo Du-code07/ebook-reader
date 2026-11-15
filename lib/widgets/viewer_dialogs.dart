@@ -2,23 +2,35 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart' show DeviceGestureSettings, EagerGestureRecognizer;
 import 'package:flutter/scheduler.dart';
 import 'app_colors.dart';
 import 'pop_dialog.dart';
+import '../services/storage_service.dart';
 
 typedef ViewerTr = String Function(String ko, String en, String zh, String ja);
 
 /// 탭 모드에서 누른 자리: 위쪽은 메뉴, 아래 왼쪽은 이전 쪽, 아래 오른쪽은 다음 쪽.
 /// 세로·가로 모두 위 2/3가 메뉴 자리, 아래 1/3이 이전/다음 쪽.
-enum TapZone { menu, left, right }
+enum TapZone { menu, left, right, none }
 
+/// 탭 영역 칸 하나의 뜻 (P = 이전, N = 다음, M = 메뉴, X = 없음)
+TapZone tapZoneOfCode(String code) => switch (code) {
+      'P' => TapZone.left,
+      'N' => TapZone.right,
+      'X' => TapZone.none,
+      _ => TapZone.menu,
+    };
+
+/// 누른 자리의 구역: 화면을 3×3 칸으로 나눠 앱 설정의 탭 영역대로 (기본: 위 6칸 메뉴, 아래 줄 왼쪽 칸 이전, 나머지 다음)
 TapZone tapZoneAt(Offset local, Size size) {
-  // 세로·가로 모두: 위 2/3는 메뉴, 아래 1/3은 왼쪽 반 = 이전 / 오른쪽 반 = 다음
-  final double menuBottom = size.height * 2 / 3;
-  if (local.dy < menuBottom) return TapZone.menu;
-  return local.dx < size.width / 2 ? TapZone.left : TapZone.right;
+  final String zones = StorageService.tapZones.value;
+  if (zones.length != 9 || size.width <= 0 || size.height <= 0) return TapZone.menu;
+  final int col = (local.dx / (size.width / 3)).floor().clamp(0, 2);
+  final int row = (local.dy / (size.height / 3)).floor().clamp(0, 2);
+  return tapZoneOfCode(zones[row * 3 + col]);
 }
 
 /// 가운데에 뜨는 둥근 창 (페이지 표시·화면 회전 등 짧은 고르기)
@@ -1124,7 +1136,7 @@ class FileLoadingView extends StatelessWidget {
 }
 
 /// 탭 존 가이드라인: 파일을 열 때 화면을 누르는 구역을 보여 줌 (화면을 누르면 닫힘)
-/// [tapTurn]: 탭으로 넘기는 보기면 위 2/3 = 메뉴, 아래 1/3 왼쪽 반·오른쪽 반 = 이전·다음 (아니면 화면 전체 = 메뉴)
+/// [tapTurn]: 탭으로 넘기는 보기면 앱 설정의 3×3 탭 영역대로 (아니면 화면 전체 = 메뉴)
 /// [rtl]: 우→좌 읽기면 왼쪽이 다음
 class TapZoneGuide extends StatefulWidget {
   const TapZoneGuide({super.key, required this.tapTurn, required this.rtl, required this.onClose, required this.tr});
@@ -1156,6 +1168,72 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
         ]),
       );
 
+  /// 3×3 칸을 같은 뜻끼리 이어진 덩어리로 묶어 그림: 덩어리가 네모면 한 칸처럼 크게, 아니면 칸마다 이름표
+  List<Widget> _zoneCells(BuildContext context, String zones, Size size,
+      {required String menu, required String leftLabel, required String rightLabel, required Color line}) {
+    final double cw = size.width / 3, ch = size.height / 3;
+    final List<int> group = List<int>.filled(9, -1);
+    int groups = 0;
+    for (int i = 0; i < 9; i++) {
+      if (group[i] >= 0) continue;
+      final stack = <int>[i];
+      group[i] = groups;
+      while (stack.isNotEmpty) {
+        final int k = stack.removeLast();
+        final int r = k ~/ 3, col = k % 3;
+        for (final int n in [if (r > 0) k - 3, if (r < 2) k + 3, if (col > 0) k - 1, if (col < 2) k + 1]) {
+          if (group[n] < 0 && zones[n] == zones[i]) {
+            group[n] = groups;
+            stack.add(n);
+          }
+        }
+      }
+      groups++;
+    }
+    Color fill(String z) => switch (z) {
+          'M' => const Color(0x8CE8EAF6),
+          'P' => const Color(0x8CF6F1E6),
+          'N' => const Color(0x8CE3ECF6),
+          _ => const Color(0x33000000),
+        };
+    Widget? label(String z) => switch (z) {
+          'M' => _label(context, menu),
+          'P' => _label(context, leftLabel, before: Icons.chevron_left_rounded),
+          'N' => _label(context, rightLabel, after: Icons.chevron_right_rounded),
+          _ => null,
+        };
+    // 바탕: 칸 경계에 옅은 줄이 생기지 않게 한 번에 (가장자리 흐림 없이) 칠함
+    final out = <Widget>[
+      Positioned.fill(child: CustomPaint(painter: _ZoneFillPainter([for (int i = 0; i < 9; i++) fill(zones[i])]))),
+    ];
+    // 이름표: 덩어리가 꽉 찬 네모면 가운데 하나, 아니면 칸마다
+    for (int g = 0; g < groups; g++) {
+      final cells = [for (int i = 0; i < 9; i++) if (group[i] == g) i];
+      final Widget? lb = label(zones[cells.first]);
+      if (lb == null) continue;
+      final int r0 = cells.map((i) => i ~/ 3).reduce(math.min), r1 = cells.map((i) => i ~/ 3).reduce(math.max);
+      final int c0 = cells.map((i) => i % 3).reduce(math.min), c1 = cells.map((i) => i % 3).reduce(math.max);
+      final bool rect = (r1 - r0 + 1) * (c1 - c0 + 1) == cells.length;
+      final rects = rect
+          ? [Rect.fromLTRB(c0 * cw, r0 * ch, (c1 + 1) * cw, (r1 + 1) * ch)]
+          : [for (final i in cells) Rect.fromLTWH((i % 3) * cw, (i ~/ 3) * ch, cw, ch)];
+      for (final rc in rects) {
+        out.add(Positioned.fromRect(rect: rc, child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: lb))));
+      }
+    }
+    // 뜻이 다른 칸 사이에만 선
+    for (int i = 0; i < 9; i++) {
+      final int r = i ~/ 3, col = i % 3;
+      if (col < 2 && group[i] != group[i + 1]) {
+        out.add(Positioned(left: (col + 1) * cw - 1, top: r * ch, width: 2, height: ch, child: ColoredBox(color: line)));
+      }
+      if (r < 2 && group[i] != group[i + 3]) {
+        out.add(Positioned(left: col * cw, top: (r + 1) * ch - 1, width: cw, height: 2, child: ColoredBox(color: line)));
+      }
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
     final tr = widget.tr;
@@ -1173,19 +1251,10 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
         behavior: HitTestBehavior.opaque,
         onTap: _close,
         child: LayoutBuilder(builder: (context, c) {
-          final double menuH = widget.tapTurn ? c.maxHeight * 2 / 3 : c.maxHeight;
+          // 탭으로 넘기면 앱 설정의 3×3 탭 영역대로, 아니면 화면 전체 = 메뉴
+          final String zones = widget.tapTurn ? StorageService.tapZones.value : 'MMMMMMMMM';
           return Stack(children: [
-            // 메뉴 구역
-            Positioned(left: 0, top: 0, right: 0, height: menuH, child: ColoredBox(color: const Color(0x8CE8EAF6), child: Center(child: _label(context, tr('메뉴', 'Menu', '菜单', 'メニュー'))))),
-            if (widget.tapTurn) ...[
-              Positioned(left: 0, top: menuH, width: c.maxWidth / 2, bottom: 0,
-                  child: ColoredBox(color: const Color(0x8CF6F1E6), child: Center(child: _label(context, leftLabel, before: Icons.chevron_left_rounded)))),
-              Positioned(left: c.maxWidth / 2, top: menuH, right: 0, bottom: 0,
-                  child: ColoredBox(color: const Color(0x8CE3ECF6), child: Center(child: _label(context, rightLabel, after: Icons.chevron_right_rounded)))),
-              // 구역 사이 선
-              Positioned(left: 0, right: 0, top: menuH - 1, height: 2, child: const ColoredBox(color: line)),
-              Positioned(left: c.maxWidth / 2 - 1, width: 2, top: menuH, bottom: 0, child: const ColoredBox(color: line)),
-            ],
+            ..._zoneCells(context, zones, c.biggest, menu: tr('메뉴', 'Menu', '菜单', 'メニュー'), leftLabel: leftLabel, rightLabel: rightLabel, line: line),
             // 위쪽 안내 문구
             Positioned(
               left: 16,
@@ -1212,6 +1281,25 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
       ),
     );
   }
+}
+
+class _ZoneFillPainter extends CustomPainter {
+  _ZoneFillPainter(this.colors);
+  final List<Color> colors;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double cw = size.width / 3, ch = size.height / 3;
+    for (int i = 0; i < 9; i++) {
+      final int r = i ~/ 3, c = i % 3;
+      // 끝 칸은 화면 끝까지 (나눗셈 오차로 틈이 생기지 않게)
+      final rect = Rect.fromLTRB(c * cw, r * ch, c == 2 ? size.width : (c + 1) * cw, r == 2 ? size.height : (r + 1) * ch);
+      canvas.drawRect(rect, Paint()..color = colors[i]..isAntiAlias = false);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ZoneFillPainter old) => !listEquals(old.colors, colors);
 }
 
 /// 파일 화면이 다 열린 뒤(열리는 움직임이 끝난 뒤) 탭 존 가이드라인을 화면 위에 띄움. 닫히거나 화면을 나가면 사라짐

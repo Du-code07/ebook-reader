@@ -77,6 +77,16 @@ class MorphIcon extends StatelessWidget {
 }
 
 /// 앱 설정 '애니메이션 멈추기': 켜면 앱의 움직임(버튼 튀어나옴·아이콘 움직임·창 열고 닫기·페이지 넘김 효과)을 모두 바로 바뀌게
+/// 편안한 모드: 앱 화면 전체에 덮는 옅은 호박색 (푸른빛을 줄임)
+/// 화면을 그대로 복사한 그림에는 이 색이 이미 들어 있어, 다시 화면에 놓을 때는 걷어낸 그림을 씀 (두 번 덮이면 더 진해짐)
+class ComfortTint {
+  static const Color color = Color(0x1FFF9100);
+  static bool on = false;
+
+  /// 화면 복사 때 걷어낼 색 (편안한 모드가 아니면 0)
+  static int get untint => on ? color.toARGB32() : 0;
+}
+
 class Anim {
   static final ValueNotifier<bool> off = ValueNotifier<bool>(false);
 

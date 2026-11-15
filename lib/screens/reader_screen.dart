@@ -1389,7 +1389,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         final bytes = await _pdfChannel.invokeMethod<Uint8List>(
           'snapshotWebView',
           // 화면이 깨끗하면 보이는 그대로 GPU 복사 (화면이 멈추지 않음)
-          {'background': _getBgColor().toARGB32(), 'scale': 1.0, 'gpu': _screenCleanForShot},
+          {'background': _getBgColor().toARGB32(), 'scale': 1.0, 'gpu': _screenCleanForShot, 'untint': ComfortTint.untint},
         );
         if (bytes == null || bytes.length < 1024 || !mounted || page != _docPage) return;
         final again = _snapFile(page); // 저장하는 사이 화면 크기가 바뀌었을 수 있음
@@ -3065,7 +3065,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   Future<ui.Image?> _screenShot() async {
     if (_isTxt || !_screenCleanForShot) return null;
     try {
-      final r = await _pdfChannel.invokeMethod<Map>('pixelCopyRaw').timeout(const Duration(milliseconds: 800));
+      // 편안한 모드의 덮개 색은 걷어내고 받음 (넘기는 그림 위에 덮개가 또 덮여 색이 진해지지 않게)
+      final r = await _pdfChannel.invokeMethod<Map>('pixelCopyRaw', {'untint': ComfortTint.untint}).timeout(const Duration(milliseconds: 800));
       if (r == null || !mounted) return null;
       final int w = (r['w'] as num).toInt(), h = (r['h'] as num).toInt();
       final Uint8List px = r['px'] as Uint8List;
@@ -3508,6 +3509,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         _tapTurn(-1);
       case TapZone.right:
         _tapTurn(1);
+      case TapZone.none:
+        break; // 탭 영역에서 '없음'으로 둔 칸
     }
   }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import '../widgets/favorite_ribbon.dart';
 import '../widgets/file_type_icon.dart';
 import 'user_fonts_screen.dart';
+import 'tap_zone_screen.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -490,6 +491,12 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               subtitle: _t('마지막으로 읽던 쪽으로 열어요', 'Opens at the page you last read', '打开到上次阅读的页面', '最後に読んだページで開きます'),
               onTap: () => _setRememberPage(!_rememberPage),
               trailing: Switch(value: _rememberPage, onChanged: _setRememberPage),
+            ),
+            _item(
+              icon: Icons.grid_view_outlined,
+              title: _t('탭 영역', 'Tap Zones', '点击区域', 'タップ領域'),
+              subtitle: _t('화면을 3×3 칸으로 나눠 누르면 할 일을 정해요', 'Set what a tap does in each of the 3×3 screen cells', '把屏幕分成 3×3 格，设置点击后的操作', '画面を3×3マスに分けてタップの動作を決めます'),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TapZoneScreen(t: _t))),
             ),
             _item(
               icon: Icons.touch_app_outlined,

@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'screens/document_scanner_screen.dart';
+import 'screens/splash_screen.dart';
 import 'screens/pdf_and_image_viewer.dart';
 import 'screens/reader_screen.dart';
 import 'screens/language_select_screen.dart';
@@ -111,6 +112,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
   bool get _isDarkMode => StorageService.isDarkFor(_themeMode);
   late String _appLang;
   late bool _needsLanguage;
+  bool _showSplash = true; // 시작 화면을 보여 주는 중
   bool _needsTheme = false; // 처음 시작: 언어를 고른 다음 앱 테마 고르기
   bool _needsPermGuide = false; // 처음 시작: 테마 다음 앱 접근 권한 안내
   late final AnimationController _rotationAnimController;
@@ -382,48 +384,56 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
             ),
           ),
         );
+        ComfortTint.on = _themeMode == 'comfort';
         if (_themeMode != 'comfort') return app;
         // 편안한 모드: 화면 전체(열어 본 파일 포함)에 옅은 호박색을 덮어 푸른빛을 줄임
         return Stack(fit: StackFit.expand, textDirection: TextDirection.ltr, children: [
           app,
-          const IgnorePointer(child: ColoredBox(color: Color(0x1FFF9100))),
+          const IgnorePointer(child: ColoredBox(color: ComfortTint.color)),
         ]);
       },
-      home: _needsLanguage
-          ? LanguageSelectScreen(
-              onConfirmed: (setting) {
-                _changeAppLanguage(setting);
-                setState(() {
-                  _needsLanguage = false;
-                  _needsTheme = true;
-                });
-              },
-            )
-          : _needsTheme
-          ? ThemeSelectScreen(
-              lang: _appLang,
-              initial: _themeMode,
-              onChanged: _changeThemeMode,
-              onConfirmed: (mode) {
-                _changeThemeMode(mode);
-                setState(() {
-                  _needsTheme = false;
-                  _needsPermGuide = true;
-                });
-              },
-            )
-          : _needsPermGuide
-          ? PermissionGuideScreen(
-              lang: _appLang,
-              onDone: () => setState(() => _needsPermGuide = false),
-            )
-          : BookshelfScreen(
-              isDarkMode: _isDarkMode,
-              appLang: _appLang,
-              themeMode: _themeMode,
-              onChangeThemeMode: _changeThemeMode,
-              onChangeLanguage: _changeAppLanguage,
-            ),
+      // 시작 화면: 앱을 켤 때마다 맨 위에 잠깐 (첫 실행이면 언어 선택보다 먼저). 그 아래 화면은 미리 준비됨
+      home: Stack(
+        fit: StackFit.expand,
+        children: [
+          _needsLanguage
+              ? LanguageSelectScreen(
+                  onConfirmed: (setting) {
+                    _changeAppLanguage(setting);
+                    setState(() {
+                      _needsLanguage = false;
+                      _needsTheme = true;
+                    });
+                  },
+                )
+              : _needsTheme
+              ? ThemeSelectScreen(
+                  lang: _appLang,
+                  initial: _themeMode,
+                  onChanged: _changeThemeMode,
+                  onConfirmed: (mode) {
+                    _changeThemeMode(mode);
+                    setState(() {
+                      _needsTheme = false;
+                      _needsPermGuide = true;
+                    });
+                  },
+                )
+              : _needsPermGuide
+              ? PermissionGuideScreen(
+                  lang: _appLang,
+                  onDone: () => setState(() => _needsPermGuide = false),
+                )
+              : BookshelfScreen(
+                  isDarkMode: _isDarkMode,
+                  appLang: _appLang,
+                  themeMode: _themeMode,
+                  onChangeThemeMode: _changeThemeMode,
+                  onChangeLanguage: _changeAppLanguage,
+                ),
+          if (_showSplash) SplashOverlay(onDone: () => setState(() => _showSplash = false)),
+        ],
+      ),
     );
   }
 }
@@ -499,10 +509,10 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.document_scanner_outlined),
                 title: _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'),
-                desc: _tr('[파일 추가]를 누르면 [닫기] 왼쪽에 나오는 [문서 스캔]으로 카메라로 문서를 여러 장 찍고, 스캔본처럼 선명하게 보정(필터·진하기·회전·자르기)해 PDF 한 개로 만들어요',
-                    'Use [Scan Document], shown left of [Close] after tapping [Add Files], to photograph pages, clean them up like a scan (filters, darkness, rotate, crop) and save them as one PDF',
-                    '点[添加文件]后，在[关闭]左边出现的[扫描文档]中用相机拍摄多页，像扫描件一样清晰校正（滤镜、浓度、旋转、裁剪）后合成一个 PDF',
-                    '[ファイル追加]を押すと[閉じる]の左に出る[文書スキャン]で書類を複数枚撮影し、スキャンのように補正(フィルター・濃さ・回転・切り抜き)して1つのPDFにします')),
+                desc: _tr('[파일 추가]를 누르면 [닫기] 왼쪽에 나오는 [문서 스캔]으로 카메라로 문서를 여러 장 찍고, 스캔본처럼 선명하게 보정(필터: 강화·음영 제거·반전·원본, 진하기·회전·자르기)해 PDF 한 개로 만들어요\n문서 이름 줄 오른쪽 휴지통으로 보고 있는 쪽을 지워요',
+                    'Use [Scan Document], shown left of [Close] after tapping [Add Files], to photograph pages, clean them up like a scan (filters: Enhance, No Shadow, Invert, Original; darkness, rotate, crop) and save them as one PDF\nThe trash icon at the right of the name bar deletes the page you are viewing',
+                    '点[添加文件]后，在[关闭]左边出现的[扫描文档]中用相机拍摄多页，像扫描件一样清晰校正（滤镜：增强·去阴影·反色·原图，浓度·旋转·裁剪）后合成一个 PDF\n用文档名称栏右侧的回收站删除当前页',
+                    '[ファイル追加]を押すと[閉じる]の左に出る[文書スキャン]で書類を複数枚撮影し、スキャンのように補正(フィルター：強調・影除去・反転・元の写真、濃さ・回転・切り抜き)して1つのPDFにします\n文書名の行の右にあるゴミ箱で、表示中のページを削除します')),
             _row(context,
                 icon: GroupStackIcon(size: 19, spread: false, color: cs.onSurface),
                 title: _tr('그룹', 'Groups', '分组', 'グループ'),
@@ -513,10 +523,10 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const SizedBox(width: 24, height: 24, child: FavoriteRibbon(active: true, width: 12, height: 18, isDark: true)),
                 title: _tr('즐겨찾기 (책갈피)', 'Favorites (Ribbon)', '收藏（书签）', 'お気に入り（しおり）'),
-                desc: _tr('파일 왼쪽 위 책갈피를 누르거나, 목록형에서 파일을 오른쪽으로 밀면 즐겨찾기가 되어 맨 위에 놓여요\n그룹 목록의 [즐겨찾기]에서 모아 볼 수 있어요',
-                    'Tap the ribbon at a file\'s top-left, or swipe the file right in list view, to favorite it and pin it to the top\nSee them all under [Favorites] in the group list',
-                    '点文件左上角的书签，或在列表视图中向右滑动文件，即可收藏并置顶\n可在分组列表的[收藏]中集中查看',
-                    'ファイル左上のしおりを押すか、リスト表示で右へスワイプするとお気に入りになり一番上に表示されます\nグループ一覧の[お気に入り]でまとめて見られます')),
+                desc: _tr('파일 왼쪽 위 책갈피를 아래로 당기거나, 목록형에서 파일을 오른쪽으로 밀면 즐겨찾기가 되어 맨 위에 놓여요\n앱 설정 → 파일 표시 방식에서 당기지 않고 눌러서 즐겨찾기로 바꿀 수 있어요\n그룹 목록의 [즐겨찾기]에서 모아 볼 수 있어요',
+                    'Pull down the ribbon at a file\'s top-left, or swipe the file right in list view, to favorite it and pin it to the top\nIn app settings → Bookshelf View Mode you can switch to tapping instead of pulling\nSee them all under [Favorites] in the group list',
+                    '向下拉文件左上角的书签，或在列表视图中向右滑动文件，即可收藏并置顶\n可在应用设置 → 文件显示样式中改为轻触收藏\n可在分组列表的[收藏]中集中查看',
+                    'ファイル左上のしおりを下に引っ張るか、リスト表示で右へスワイプするとお気に入りになり一番上に表示されます\nアプリ設定 → ファイル表示形式で、引っ張らずにタップでお気に入りにできます\nグループ一覧の[お気に入り]でまとめて見られます')),
             _row(context,
                 icon: const Icon(Icons.more_vert),
                 title: _tr('파일 메뉴 (점 3개)', 'File Menu (⋮)', '文件菜单 (⋮)', 'ファイルメニュー (⋮)'),
@@ -552,27 +562,27 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.settings_outlined),
                 title: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
-                desc: _tr('앱 테마(라이트·다크·편안한 모드), 언어, 파일 표시 방식(목록형·표지형, 형식·그룹 숨기기), 페이지 기억하기, 탭 가이드라인 끄기, 글꼴(한글·워드·EPUB·앱 글꼴, 글꼴 찾기), 사용 설명서가 있어요',
-                    'App theme (light, dark, comfort, library), language, file display (list/cover, hide extensions or groups), remember last page, turn off the tap guide, fonts (HWP·Word, EPUB and app fonts, Find Fonts), and this manual',
-                    '包含应用主题（浅色·深色·舒适·书房）、语言、文件显示方式（列表·封面，隐藏格式·分组）、记住页面、关闭点击指引、字体（韩文·Word、EPUB、应用字体，查找字体）和使用说明书',
-                    'アプリのテーマ(ライト・ダーク・快適・書斎)、言語、ファイル表示(リスト・表紙、形式・グループを隠す)、ページを記憶、タップガイドをオフ、フォント(ハングル・Word・EPUB・アプリ、フォント検索)、取扱説明書があります')),
+                desc: _tr('앱 테마(기본 시스템·라이트·다크·편안한 모드), 언어, 애니메이션 끄기, 파일 표시 방식(목록형·표지형, 형식 숨기기, 밀기 끄기, 파일 아이콘만, 터치로 즐겨찾기, 그룹 이름·페이지 수 표시), 페이지 기억하기, 탭 영역(3×3 칸), 탭 가이드라인 끄기, 글꼴(한글·워드·EPUB·앱 글꼴, 글꼴 찾기), 캐시·데이터 지우기, 사용 설명서가 있어요',
+                    'App theme (system, light, dark, comfort), language, turn off animations, file display (list/cover, hide file type, turn off swipes, icons only, tap to favorite, show group name and page count), remember last page, tap zones (3×3 cells), turn off the tap guide, fonts (HWP·Word, EPUB and app fonts, Find Fonts), clear cache and data, and this manual',
+                    '包含应用主题（跟随系统·浅色·深色·护眼）、语言、关闭动画、文件显示方式（列表·封面，隐藏格式、关闭滑动、只显示图标、轻触收藏、显示分组名·页数）、记住页面、点击区域（3×3 格）、关闭点击指引、字体（韩文·Word、EPUB、应用字体，查找字体）、清除缓存·数据和使用说明书',
+                    'アプリのテーマ(システム・ライト・ダーク・目に優しいモード)、言語、アニメーションをオフ、ファイル表示(リスト・表紙、形式を隠す、スワイプをオフ、アイコンのみ、タップでお気に入り、グループ名・ページ数の表示)、ページを記憶、タップ領域(3×3マス)、タップガイドをオフ、フォント(ハングル・Word・EPUB・アプリ、フォント検索)、キャッシュ・データの削除、取扱説明書があります')),
 
             // ── 2. 파일 보기 ──
             _section(context, _tr('2. 파일 보기', '2. Reading Files', '2. 查看文件', '2. ファイルを見る')),
             _row(context,
                 icon: const Icon(Icons.touch_app_outlined),
                 title: _tr('화면 누르기 (탭 존)', 'Tap Zones', '点击区域', 'タップゾーン'),
-                desc: _tr('탭 넘김일 때 화면 위 2/3를 누르면 메뉴, 아래 1/3의 왼쪽·오른쪽을 누르면 이전·다음 쪽이에요\n슬라이드·스크롤일 때는 어디를 눌러도 메뉴예요\n파일을 열 때마다 구역 안내가 나오고, 앱 설정에서 끌 수 있어요',
-                    'With tap turning, tap the top two-thirds for the menu and the bottom-left / bottom-right for the previous / next page\nIn slide or scroll mode, any tap opens the menu\nA zone guide appears each time a file opens; turn it off in app settings',
-                    '点击翻页时，点屏幕上方 2/3 打开菜单，点下方 1/3 的左·右翻到上一页·下一页\n滑动·滚动模式下点任意处都是菜单\n每次打开文件会显示区域指引，可在应用设置中关闭',
-                    'タップめくりでは画面上 2/3 でメニュー、下 1/3 の左・右で前・次のページです\nスライド・スクロールではどこを押してもメニューです\nファイルを開くたびに区域の案内が出て、アプリ設定でオフにできます')),
+                desc: _tr('탭 넘김일 때 화면을 3×3 칸으로 나눠, 기본은 위 6칸이 메뉴, 맨 아래 왼쪽 칸이 이전 쪽, 나머지 두 칸이 다음 쪽이에요\n칸마다 할 일은 앱 설정 → 탭 영역에서 바꿀 수 있어요\n슬라이드·스크롤일 때는 어디를 눌러도 메뉴예요\n파일을 열 때마다 구역 안내가 나오고, 앱 설정에서 끌 수 있어요',
+                    'With tap turning, the screen is split into 3×3 cells: by default the top six open the menu, the bottom-left cell goes to the previous page and the other two to the next page\nChange each cell in app settings → Tap Zones\nIn slide or scroll mode, any tap opens the menu\nA zone guide appears each time a file opens; turn it off in app settings',
+                    '点击翻页时，屏幕分成 3×3 格：默认上方 6 格是菜单，最下行左格是上一页，其余两格是下一页\n可在应用设置 → 点击区域中更改每一格\n滑动·滚动模式下点任意处都是菜单\n每次打开文件会显示区域指引，可在应用设置中关闭',
+                    'タップめくりでは画面を3×3マスに分け、初期設定は上6マスがメニュー、一番下の左マスが前のページ、残り2マスが次のページです\n各マスの動作はアプリ設定 → タップ領域で変えられます\nスライド・スクロールではどこを押してもメニューです\nファイルを開くたびに区域の案内が出て、アプリ設定でオフにできます')),
             _row(context,
                 icon: const Icon(Icons.list),
                 title: _tr('목차', 'Contents', '目录', '目次'),
-                desc: _tr('EPUB·PDF는 파일에 들어 있는 목차(책갈피)를, 워드·한글은 문서의 목차 쪽이나 번호 붙은 제목으로 목차를 만들어 보여 줘요\n목차가 없으면 \'표시할 목차가 없어요\'라고 나와요\n파일 내보내기를 하면 목차도 함께 들어가요',
-                    'EPUB and PDF show the contents (bookmarks) stored in the file; Word and Hangul build contents from the document\'s contents page or numbered headings\nIf there are none, it says "No contents to show"\nExported files keep the contents',
-                    'EPUB·PDF 显示文件内的目录（书签），Word·韩文根据目录页或编号标题生成目录\n没有目录时显示“没有可显示的目录”\n导出文件时目录也会一并保存',
-                    'EPUB・PDFはファイル内の目次(しおり)を、Word・ハングルは目次ページや番号付きの見出しから目次を作ります\nない場合は「表示できる目次がありません」と出ます\n書き出したファイルにも目次が入ります')),
+                desc: _tr('EPUB·PDF는 파일에 들어 있는 목차(책갈피)를, 워드·한글은 문서의 목차 쪽이나 번호 붙은 제목으로 목차를 만들어 보여 줘요\n목차가 없으면 \'표시할 목차가 없어요\'라고 나와요',
+                    'EPUB and PDF show the contents (bookmarks) stored in the file; Word and Hangul build contents from the document\'s contents page or numbered headings\nIf there are none, it says "No contents to show"',
+                    'EPUB·PDF 显示文件内的目录（书签），Word·韩文根据目录页或编号标题生成目录\n没有目录时显示“没有可显示的目录”',
+                    'EPUB・PDFはファイル内の目次(しおり)を、Word・ハングルは目次ページや番号付きの見出しから目次を作ります\nない場合は「表示できる目次がありません」と出ます')),
             _row(context,
                 icon: const Icon(Icons.search),
                 title: _tr('파일 내 단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
@@ -589,19 +599,26 @@ class UserManualScreen extends StatelessWidget {
                 title: _tr('공유', 'Share', '分享', '共有'),
                 desc: _tr('보고 있는 파일을 형식 그대로 다른 앱으로 보내요', 'Sends the open file to another app as it is', '将正在查看的文件按原格式发送到其他应用', '開いているファイルをそのままの形式で他のアプリに送ります')),
             _row(context,
+                icon: const Icon(Icons.slideshow_outlined),
+                title: _tr('슬라이드 쇼 (PPT)', 'Slide Show (PPT)', '幻灯片放映 (PPT)', 'スライドショー (PPT)'),
+                desc: _tr('PPT 파일 위쪽의 [슬라이드 쇼]를 누르면 첫 슬라이드부터 가로 전체 화면으로 보여 줘요\n화면을 누르거나 밀어서 넘기고, 위쪽을 누르면 끝내기 버튼이 나와요',
+                    'Tap [Slide Show] at the top of a PPT file to play it full screen in landscape from the first slide\nTap or swipe to advance; tap near the top for the end button',
+                    '在 PPT 文件上方点[幻灯片放映]，从第一张开始横屏全屏播放\n点击或滑动翻页，点上方会出现结束按钮',
+                    'PPTファイル上部の[スライドショー]を押すと、最初のスライドから横向きの全画面で表示します\n画面を押すかスワイプで進み、上の方を押すと終了ボタンが出ます')),
+            _row(context,
                 icon: const Icon(Icons.tune),
                 title: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
-                desc: _tr('글자 크기(EPUB), 페이지 모드(탭·슬라이드·스크롤 — 스크롤이면 스크롤바 끄기), 페이지 전환 버튼(음량·S펜), 화면 잠금 끄는 방법(흔들기·음량 버튼 동시에), 진행도 UI 위치, 메모 도구 모음 위치, 도구 모음 형태, 왼손잡이, 하단 정보 표시를 정해요',
-                    'Font size (EPUB), page mode (tap / slide / scroll — with an option to hide the scroll bar), page-turn buttons (volume, S Pen), how to unlock the screen (shake / both volume keys), progress bar position, memo toolbar position, toolbox style, left-handed mode and footer info',
-                    '设置字号（EPUB）、翻页模式（点击·滑动·滚动，滚动时可隐藏滚动条）、翻页按键（音量·S Pen）、解除锁屏方式（摇晃·同时按音量键）、进度条位置、笔记工具栏位置、工具箱样式、左手模式和底部信息',
-                    '文字サイズ(EPUB)、ページモード(タップ・スライド・スクロール — スクロール時はスクロールバーを隠す)、ページめくりボタン(音量・Sペン)、画面ロックの解除方法(振る・音量ボタン同時押し)、進行度バーの位置、メモツールバーの位置、ツールボックスの形、左利き、下部情報表示を設定します')),
+                desc: _tr('글자 크기(EPUB), 페이지 모드(탭·슬라이드는 함께, 스크롤은 따로 — 슬라이드면 책처럼 넘기기, 스크롤이면 스크롤바 끄기), 챕터 넘김 버튼·페이지 전환 버튼(음량·S펜), 화면 잠금 끄는 방법(흔들기·음량 버튼 동시에), 진행도 UI 위치, 메모 도구 모음 위치, 도구 모음 형태(반원·바), 왼손잡이, 하단 정보 표시를 정해요',
+                    'Font size (EPUB), page mode (tap and slide together, scroll on its own — page curl for slide, hide the scroll bar for scroll), chapter and page-turn buttons (volume, S Pen), how to unlock the screen (shake / both volume keys), progress bar position, memo toolbar position, toolbox style (arc / bar), left-handed mode and footer info',
+                    '设置字号（EPUB）、翻页模式（点击和滑动可同时使用，滚动单独使用——滑动时可选仿真翻页，滚动时可隐藏滚动条）、翻章·翻页按键（音量·S Pen）、解除锁屏方式（摇晃·同时按音量键）、进度条位置、笔记工具栏位置、工具箱样式（半圆·条）、左手模式和底部信息',
+                    '文字サイズ(EPUB)、ページモード(タップとスライドは併用、スクロールは単独 — スライドは本のようにめくる、スクロールはスクロールバーを隠す)、章・ページめくりボタン(音量・Sペン)、画面ロックの解除方法(振る・音量ボタン同時押し)、進行度バーの位置、メモツールバーの位置、ツールボックスの形(半円・バー)、左利き、下部情報表示を設定します')),
             _row(context,
                 icon: const Icon(Icons.grid_view_rounded),
                 title: _tr('도구 모음', 'Toolbox', '工具箱', 'ツールボックス'),
-                desc: _tr('이전·다음 파일(같은 그룹), 화면 잠금, 화면 회전(자동·세로·가로), 페이지 표시(한 쪽·두 쪽·자동), 읽기 방향(좌→우·우→좌, 파일마다 기억), 메모, 글자 복사, 북마크, 확대·축소가 있어요',
-                    'Previous / next file (same group), lock screen, rotate (auto / portrait / landscape), page display (one / two pages / auto), reading direction (L→R / R→L, remembered per file), memo, copy text, bookmarks, and zoom',
-                    '包括上一个·下一个文件（同一分组）、锁定屏幕、旋转屏幕（自动·竖屏·横屏）、页面显示（单页·双页·自动）、阅读方向（左→右·右→左，按文件记忆）、笔记、复制文字、书签、放大·缩小',
-                    '前・次のファイル(同じグループ)、画面ロック、画面回転(自動・縦・横)、ページ表示(1ページ・2ページ・自動)、読む方向(左→右・右→左、ファイルごとに記憶)、メモ、文字コピー、ブックマーク、拡大・縮小があります')),
+                desc: _tr('이전·다음 파일(같은 그룹), 화면 잠금, 화면 회전(자동·세로 고정·가로 고정), 페이지 표시(한 페이지·두 페이지·자동 — EPUB과 한 쪽뿐인 파일은 늘 한 페이지), 읽기 방향(좌→우·우→좌, 파일마다 기억), 메모, 글자 복사, 북마크, 확대·축소가 있어요\n화면 회전·페이지 표시는 창에서 고르고, 창이 닫힐 때 적용돼요',
+                    'Previous / next file (same group), lock screen, rotate (auto / portrait / landscape), page display (one / two pages / auto — EPUB and one-page files always show one page), reading direction (L→R / R→L, remembered per file), memo, copy text, bookmarks, and zoom\nRotation and page display apply when their window closes',
+                    '包括上一个·下一个文件（同一分组）、锁定屏幕、旋转屏幕（自动·固定竖屏·固定横屏）、页面显示（单页·双页·自动——EPUB 和只有一页的文件始终单页）、阅读方向（左→右·右→左，按文件记忆）、笔记、复制文字、书签、放大·缩小\n旋转屏幕和页面显示在窗口关闭时生效',
+                    '前・次のファイル(同じグループ)、画面ロック、画面回転(自動・縦固定・横固定)、ページ表示(1ページ・2ページ・自動 — EPUBと1ページだけのファイルは常に1ページ)、読む方向(左→右・右→左、ファイルごとに記憶)、メモ、文字コピー、ブックマーク、拡大・縮小があります\n画面回転・ページ表示はウィンドウを閉じたときに適用されます')),
             _row(context,
                 icon: const Icon(Icons.swap_vert_rounded),
                 title: _tr('스크롤 보기', 'Scroll View', '滚动视图', 'スクロール表示'),

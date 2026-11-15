@@ -281,9 +281,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _currentZoomScale <= 1.03 &&
       !(_isMemoMode && (_allowFingerDrawing || isStylusPointer(e)));
 
+  /// 한 번 넘기면 갈 쪽. 두 쪽 보기에서는 다음(이전) 두 쪽 묶음의 첫 쪽이고, 그런 묶음이 없으면 지금 쪽 그대로
+  /// (예전: 2쪽짜리 파일에서 0쪽 → 1쪽으로 '넘어가' 같은 두 쪽을 한 번 더 넘겨 보여 줌)
   int _stepTarget(int dir) {
-    final int step = _lastIsSpreadMode ? 2 : 1;
-    return (_currentPage + dir * step).clamp(0, _totalPages - 1).toInt();
+    if (_lastIsSpreadMode) {
+      final int first = (_currentPage ~/ 2) * 2;
+      final int t = first + dir * 2;
+      if (t < 0 || t > _totalPages - 1) return _currentPage;
+      return t;
+    }
+    return (_currentPage + dir).clamp(0, _totalPages - 1).toInt();
   }
 
   bool _canStepPage(int dir) => _totalPages > 1 && _stepTarget(dir) != _currentPage;
@@ -950,8 +957,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   void _stepPage(int direction, {bool fastResponse = false}) {
-    final int step = _lastIsSpreadMode ? 2 : 1;
-    final int target = (_currentPage + direction * step).clamp(0, _totalPages - 1).toInt();
+    if (!_canStepPage(direction)) return;
+    final int target = _stepTarget(direction);
     _goToPage(
       target,
       smoothAnimation: true,
@@ -1286,6 +1293,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         _tapTurn(-1);
       case TapZone.right:
         _tapTurn(1);
+      case TapZone.none:
+        break; // 탭 영역에서 '없음'으로 둔 칸
     }
   }
 

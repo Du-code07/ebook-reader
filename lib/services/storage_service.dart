@@ -106,6 +106,19 @@ class StorageService {
     tapGuideOff = prefs.getBool('tap_guide_off_v104') ?? false;
     Anim.off.value = prefs.getBool('anim_off_v109') ?? false;
     pageCurl = prefs.getBool('page_curl_v109') ?? true;
+    final zones = prefs.getString('tap_zones_v122');
+    tapZones.value = zones != null && RegExp(r'^[PNMX]{9}$').hasMatch(zones) ? zones : tapZonesDefault;
+  }
+
+  /// 탭 영역 (화면 3×3 칸, 왼쪽 위부터 줄마다): P = 이전, N = 다음, M = 메뉴, X = 없음
+  /// 기본: 위 6칸 메뉴, 맨 아래 줄 왼쪽 칸 이전, 나머지 다음
+  static const String tapZonesDefault = 'MMMMMMPNN';
+  static final ValueNotifier<String> tapZones = ValueNotifier<String>(tapZonesDefault);
+
+  static Future<void> setTapZones(String zones) async {
+    tapZones.value = zones;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('tap_zones_v122', zones);
   }
 
   /// 슬라이드로 넘길 때 책처럼 넘기기 (기본 켜짐)
