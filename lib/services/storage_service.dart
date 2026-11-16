@@ -19,6 +19,9 @@ class BookmarkItem {
   final bool? landscape;
   final String? display;
 
+  /// 스크롤 보기에서 한 북마크 (스크롤 보기에서만 책갈피가 보이고, 누르면 스크롤 보기로 돌아가 보여 줌)
+  final bool scroll;
+
   BookmarkItem({
     required this.id,
     required this.label,
@@ -28,6 +31,7 @@ class BookmarkItem {
     this.rotation,
     this.landscape,
     this.display,
+    this.scroll = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -39,6 +43,7 @@ class BookmarkItem {
         if (rotation != null) 'rotation': rotation,
         if (landscape != null) 'landscape': landscape,
         if (display != null) 'display': display,
+        if (scroll) 'scroll': true,
       };
 
   factory BookmarkItem.fromJson(Map<String, dynamic> json) => BookmarkItem(
@@ -50,6 +55,7 @@ class BookmarkItem {
         rotation: json['rotation'] is String ? json['rotation'] as String : null,
         landscape: json['landscape'] is bool ? json['landscape'] as bool : null,
         display: json['display'] is String ? json['display'] as String : null,
+        scroll: json['scroll'] == true,
       );
 }
 
@@ -170,17 +176,6 @@ class StorageService {
     rememberPage = on;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('remember_page_v116', on);
-  }
-
-  // 도구 모음 형태: 'arc'(반원, 기본) / 'bar'(아래 가로 바)
-  static Future<String> getToolbarStyle() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('toolbar_style_v89') == 'bar' ? 'bar' : 'arc';
-  }
-
-  static Future<void> setToolbarStyle(String style) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('toolbar_style_v89', style);
   }
 
   static Future<void> saveLastPosition(String bookPath, String pos) async {
@@ -680,7 +675,7 @@ class StorageService {
     return prefs.getString('memo_toolbar_pos') ?? 'bottom';
   }
 
-  // 도구 모음(활 모양 메뉴) 위치: 'right'(기본) / 'left'
+  // 왼손잡이: 'left'면 스크롤 막대를 왼쪽에 (기본 'right')
   static Future<void> setQuickMenuSide(String side) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('quick_menu_side', side);

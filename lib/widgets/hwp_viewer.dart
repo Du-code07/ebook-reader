@@ -33,6 +33,24 @@ class HwpReaderController {
   Future<void> zoomSheet(double factor) async => _invoke?.call('zoomBy', [factor]);
   Future<void> resetSheetZoom() async => _invoke?.call('resetZoom', []);
 
+  /// 한글·워드 스크롤 보기: 손가락으로 확대·축소해 둔 배율 (1이면 원래 크기)
+  double scrollZoom = 1;
+
+  /// 한글·워드 스크롤 보기: 북마크한 쪽들에 책갈피를 붙임
+  Future<void> setScrollMarks(List<int> pages) async => _invoke?.call('setScrollMarks', [pages]);
+
+  /// 한글·워드 스크롤 보기: 화면에 가장 많이 보이는 쪽 (모르면 null)
+  Future<int?> mostVisiblePage() async {
+    final r = await _query?.call('mostVisiblePage', []);
+    return r is num ? r.toInt() : null;
+  }
+
+  /// 한글·워드 스크롤 보기: 확대·축소를 원래 크기로 (화면 가운데 글 자리는 그대로)
+  Future<void> resetScrollZoom() async {
+    scrollZoom = 1;
+    await _invoke?.call('resetScrollZoom', []);
+  }
+
   /// 확대해 둔 화면을 선명하게: 쪽 상자를 [scale] 배율로 다시 그리고 (tx, ty)만큼 옮김 (1이면 원래대로)
   Future<void> setView(double scale, double tx, double ty) async => _invoke?.call('setView', [scale, tx, ty]);
 
@@ -437,6 +455,7 @@ class _HwpViewerState extends State<HwpViewer> {
         break;
       case 'scrollMetrics':
         double n(Object? v) => v is num ? v.toDouble() : 0;
+        if (event['zoom'] is num) widget.controller.scrollZoom = (event['zoom'] as num).toDouble();
         widget.onScrollMetrics?.call(n(event['top']), n(event['height']), n(event['client']));
         break;
       // 엑셀: 칸을 길게 눌러 고른 뒤 손을 떼면 [복사 | 모두 선택 | 공유] 막대

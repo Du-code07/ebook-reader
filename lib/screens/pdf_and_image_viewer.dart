@@ -15,7 +15,7 @@ import '../services/pdf_outline_service.dart';
 import '../widgets/outline_progress.dart';
 import '../widgets/text_copy_sheet.dart';
 import '../services/volume_key_service.dart';
-import '../widgets/quick_arc_menu.dart';
+import '../widgets/quick_tool_bar.dart';
 import '../widgets/viewer_dialogs.dart';
 import '../widgets/app_colors.dart';
 import '../widgets/ui_scale.dart';
@@ -254,8 +254,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _isMangaRtlMode = false;
   // 페이지 표시: 'one' / 'two' / 'auto'(화면이 넓으면 두 페이지)
   String _pageDisplay = 'one';
-  // 도구 모음 형태: 'arc'(반원) / 'bar'(아래 가로 바)
-  String _toolbarStyle = 'arc';
   // 페이지 모드: 탭(누른 자리로 넘김) / 스크롤(쪽을 이어 붙여 세로로) / 슬라이드(= _useSwipeTurn)
   bool _pageModeTap = true;
   OverlayEntry? _tapGuide;
@@ -332,20 +330,61 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   /// 실제 진행바 위치: 1쪽짜리 문서는 설정과 상관없이 숨김 (다른 버튼 배치도 숨김 기준으로)
   String get _progressBarPos => (_totalPages <= 1) ? 'hidden' : _progressBarPosSetting;
   String _memoToolbarPos = 'bottom'; // 메모 도구모음 위치
-  String _quickMenuSide = 'right'; // 도구 모음(활 메뉴) 위치
+  String _quickMenuSide = 'right'; // 왼손잡이('left'): 스크롤 막대를 왼쪽에
   int _rotateTapCount = 0; // 화면 회전 아이콘 흔들림 애니메이션용
   List<BookmarkItem> _bookmarks = [];
 
-  /// 지금 쪽이 북마크돼 있는지 (한 쪽 보기 북마크는 한 쪽 보기에서만, 두 쪽 보기 북마크는 두 쪽 보기에서만)
+  /// 지금 쪽이 북마크돼 있는지 (한 쪽·두 쪽·스크롤 보기마다 따로: 그 보기에서 한 북마크만)
   bool get _isCurrentPageBookmarked {
     if (_bookmarks.isEmpty) return false;
     final bool isSpreadNow = _isSpreadActive(context);
     final int firstPage = isSpreadNow ? ((_currentPage ~/ 2) * 2) : _currentPage;
-    return _isBookmarkedAt(firstPage, isSpreadNow);
+    return _isBookmarkedAt(firstPage, isSpreadNow, scroll: _pageModeScroll);
   }
 
-  bool _isBookmarkedAt(int firstPage, bool spread) =>
-      _bookmarks.any((bm) => bm.spread == spread && int.tryParse(bm.position) == firstPage);
+  bool _isBookmarkedAt(int firstPage, bool spread, {bool scroll = false}) =>
+      _bookmarks.any((bm) => bm.spread == spread && bm.scroll == scroll && int.tryParse(bm.position) == firstPage);
+
+  /// 스크롤 보기 북마크의 쪽들 (쪽 왼쪽 위에 책갈피)
+  Set<int> get _scrollMarkPages => {
+        for (final bm in _bookmarks)
+          if (bm.scroll)
+            if (int.tryParse(bm.position) case final p?) p,
+      };
+
+  /// 페이지 모드를 스크롤(true) / 탭·슬라이드(false)로 바꿈 (뷰어 설정의 '스크롤'과 같음)
+  void _mutateScrollMode(bool val) {
+    _pageModeScroll = val;
+    if (val) {
+      // 켜기 직전의 탭·슬라이드를 기억해 두었다가 스크롤을 다시 끄면 되돌림
+      if (_pageModeTap || _useSwipeTurn) {
+        PageModeMemory.tap = _pageModeTap;
+        PageModeMemory.slide = _useSwipeTurn;
+      }
+      _useSwipeTurn = false;
+      _pageModeTap = false;
+    } else {
+      _pageModeTap = PageModeMemory.tap;
+      _useSwipeTurn = PageModeMemory.slide;
+    }
+  }
+
+  Future<void> _setScrollModeTo(bool val) async {
+    if (val == _pageModeScroll) return;
+    setState(() {
+      _mutateScrollMode(val);
+      // 스크롤 보기에서는 메모를 쓰지 않음
+      if (_pageModeScroll && _isMemoMode) {
+        _isMemoMode = false;
+        _isEraserMode = false;
+        _allowFingerDrawing = false;
+      }
+    });
+    await StorageService.setPageModeTap(_pageModeTap);
+    await StorageService.setPageModeScroll(_pageModeScroll);
+    await StorageService.setUseSwipeTurn(_useSwipeTurn);
+    _onPageModeChanged();
+  }
 
   String _buildLockScreenMessage() {
     if (_useShakeLock && _useVolumeComboLock) {
@@ -479,21 +518,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           SettingToggle(
             label: Text(_tr('스크롤', 'Scroll', '滚动', 'スクロール')),
             selected: _pageModeScroll,
-            onSelected: (val) => apply(() {
-              _pageModeScroll = val;
-              if (val) {
-                // 켜기 직전의 탭·슬라이드를 기억해 두었다가 스크롤을 다시 끄면 되돌림
-                if (_pageModeTap || _useSwipeTurn) {
-                  PageModeMemory.tap = _pageModeTap;
-                  PageModeMemory.slide = _useSwipeTurn;
-                }
-                _useSwipeTurn = false;
-                _pageModeTap = false;
-              } else {
-                _pageModeTap = PageModeMemory.tap;
-                _useSwipeTurn = PageModeMemory.slide;
-              }
-            }),
+            onSelected: (val) => apply(() => _mutateScrollMode(val)),
           ),
           // 스크롤을 고르면 바로 밑에: 오른쪽(왼손잡이는 왼쪽) 회색 스크롤 막대 끄기
           if (_pageModeScroll)
@@ -541,7 +566,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   /// 페이지 모드가 바뀌었을 때: 스크롤로 바꾸면 쪽 크기를 미리 다 알아 둠 (한 번에 이어 붙여 끊김 없이)
-  /// 뷰어 설정 초기화: 음량 버튼 동시에 눌러 끄기 / 탭 + 슬라이드 / 음량 버튼 / 진행도 하단 / 메모 도구 모음 하단 / 반원 / 정보 표시 없음
+  /// 뷰어 설정 초기화: 음량 버튼 동시에 눌러 끄기 / 탭 + 슬라이드 / 음량 버튼 / 진행도 하단 / 메모 도구 모음 하단 / 정보 표시 없음
   Future<void> _resetViewerSettings(StateSetter setModalState) async {
     final bool scrollWas = _pageModeScroll;
     setState(() {
@@ -554,7 +579,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _useSpenTurn = false;
       _progressBarPosSetting = 'bottom';
       _memoToolbarPos = 'bottom';
-      _toolbarStyle = 'arc';
       _footerInfoMode = 'none';
       _quickMenuSide = 'right'; // 왼손잡이 끔
     });
@@ -570,7 +594,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     await StorageService.setUseSpenTurn(false);
     await StorageService.setProgressBarPosition('bottom');
     await StorageService.setMemoToolbarPosition('bottom');
-    await StorageService.setToolbarStyle('arc');
     await StorageService.setFooterInfoMode('none');
     await StorageService.setQuickMenuSide('right');
     await StorageService.setScrollBarOff(false);
@@ -775,7 +798,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   Future<void> _initMedia() async {
     try {
       _pageDisplay = await StorageService.getPageDisplay();
-      _toolbarStyle = await StorageService.getToolbarStyle();
       _pageModeTap = await StorageService.getPageModeTap();
       _pageModeScroll = await StorageService.getPageModeScroll();
       if (_pageModeScroll) _pageModeTap = false; // 스크롤은 탭과 함께 쓰지 않음
@@ -1308,6 +1330,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       initialPage: _currentPage,
       // 쪽 그대로 세로로 늘어놓고 쪽 사이는 살짝 띄움 (슬라이드 보기의 쪽을 세로로, 간격 줄은 예전 12의 절반)
       gap: 6,
+      markedPages: _scrollMarkPages,
       // 쪽 뒤 바탕은 앱 테마(또는 PDF 자체 배경색), 쪽 사이 간격 줄은 고정 색
       background: _backdrop(context),
       gapColor: kViewerGapColor,
@@ -1325,14 +1348,22 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           gaplessPlayback: true,
           filterQuality: FilterQuality.medium,
         );
+        // 라이트·편안한 모드: 한글·워드처럼 쪽마다 옅은 회색 테두리
+        final Widget page = Theme.of(ctx).brightness == Brightness.light
+            ? DecoratedBox(
+                position: DecorationPosition.foreground,
+                decoration: const BoxDecoration(border: Border.fromBorderSide(BorderSide(color: Color(0xFFC4C4CA), width: 1))),
+                child: img,
+              )
+            : img;
         // 스크롤 보기에서도 찾은 단어를 형광펜으로
         final all = <Rect>[], current = <Rect>[];
         for (int k = 0; k < _findHits.length; k++) {
           if (_findHits[k].page == i) (k == _findCurrent ? current : all).addAll(_findHits[k].rects);
         }
-        if (all.isEmpty && current.isEmpty) return img;
+        if (all.isEmpty && current.isEmpty) return page;
         return Stack(fit: StackFit.expand, children: [
-          img,
+          page,
           IgnorePointer(child: CustomPaint(painter: _FindMarkPainter(all, current))),
         ]);
       },
@@ -1531,16 +1562,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         final bool isLeft = _memoToolbarPos == 'left';
         // 같은 쪽에 세로 진행바가 있으면 그 안쪽으로 비켜서 배치
         final double edge = ((_showControls && _progressBarPos == _memoToolbarPos) ? 56.0 : 12.0) + (isLeft ? _safeSides.left : _safeSides.right);
-        // 아래쪽 진행바·도구 모음 버튼과 겹치지 않도록.
-        // 도구 모음과 같은 쪽이면 활 메뉴가 펼쳐지는 영역까지 비켜 간다 ('완료' 버튼이 가려지지 않게)
-        final bool sameSideAsQuickMenu = _showControls && (_quickMenuSide == 'left') == isLeft;
-        final double quickMenuBottom =
-            baseBottom + ((_progressBarPos == 'bottom' || (_useQuickNavTurn && _quickMenuSide != 'left')) ? 44.0 : 0.0);
+        // 아래쪽 진행바·도구 모음과 겹치지 않도록
         final double bottomLimit = _memoBarToFloorLandscape
             // 5. 가로 모드: 바닥까지 (오른쪽 아래 페이지 이동 버튼이 있으면 그 위까지)
             ? baseBottom + ((_useQuickNavTurn && _memoToolbarPos == 'right') ? 46.0 : 0.0)
-            : sameSideAsQuickMenu
-            ? math.max(baseBottom + bottomBarSpace, quickMenuBottom + QuickArcMenu.boxHeight + 4.0)
             : baseBottom + bottomBarSpace + (_showControls ? 52.0 : 8.0);
         return Positioned(
           key: ValueKey('memo_toolbar_$_memoToolbarPos'),
@@ -1577,9 +1602,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _showControls &&
       _isLandscapeNow &&
       (_memoToolbarPos == 'left' || _memoToolbarPos == 'right');
-
-  /// 위 상황에서 도구 모음과 같은 쪽이면 도구 모음 버튼이 메모 도구모음 안쪽 옆으로 비켜 선다
-  bool get _quickMenuBesideMemoBar => _memoBarToFloorLandscape && ((_quickMenuSide == 'left') == (_memoToolbarPos == 'left'));
 
   /// 5. 가로 모드 + 하단 진행바: 진행바를 메모 도구모음 쪽에서 줄인다
   /// (오른쪽 아래 페이지 이동 버튼이 있으면 그쪽은 이미 비어 있으므로 제외)
@@ -1903,33 +1925,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   ],
                 ),
                 const SizedBox(height: 26),
-                _settingsHeader(Icons.view_week_outlined, _tr('도구 모음 형태', 'Toolbox Style', '工具箱样式', 'ツールボックスの形')),
-                const SizedBox(height: 8),
-                SettingGroup(
-                  children: [
-                    for (final opt in <(String, String)>[
-                      ('arc', _tr('반원', 'Arc', '半圆', '半円')),
-                      ('bar', _tr('바', 'Bar', '横栏', 'バー')),
-                    ])
-                      SettingOption(
-                        label: Text(opt.$2),
-                        selected: _toolbarStyle == opt.$1,
-                        onSelected: (_) async {
-                          await StorageService.setToolbarStyle(opt.$1);
-                          setState(() => _toolbarStyle = opt.$1);
-                          setModalState(() {});
-                        },
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 26),
-                // 왼손잡이: 스크롤 막대·도구 모음을 왼쪽에 (끄면 오른쪽)
+                // 왼손잡이: 스크롤 막대를 왼쪽에 (끄면 오른쪽)
                 _settingsHeader(Icons.back_hand_outlined, _tr('왼손잡이', 'Left-handed', '左手模式', '左利き')),
                 const SizedBox(height: 8),
                 SettingGroup(
                   children: [
                     SettingToggle(
-                      label: Text(_tr('스크롤 막대·도구 모음을 왼쪽으로', 'Scroll bar & toolbox on the left', '滚动条和工具箱放在左侧', 'スクロールバー・ツールボックスを左に')),
+                      label: Text(_tr('스크롤 막대를 왼쪽으로', 'Scroll bar on the left', '滚动条放在左侧', 'スクロールバーを左に')),
                       selected: _quickMenuSide == 'left',
                       onSelected: (val) async {
                         final side = val ? 'left' : 'right';
@@ -2215,7 +2217,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     final strokes = _memoStrokesByPage[pageIndex] ?? [];
-    final imgSize = _pageImageSizes[pageIndex];
+    // 쪽 크기를 아직 모르면 그림 파일 머리만 읽어 바로 앎 (쪽 테두리·책갈피가 처음부터 쪽에 맞게)
+    Size? imgSize = _pageImageSizes[pageIndex];
+    if (imgSize == null && pageIndex >= 0 && pageIndex < _imagePages.length) {
+      final sz = readImageSizeSync(_imagePages[pageIndex].path);
+      if (sz != null && sz.width > 0 && sz.height > 0) imgSize = _pageImageSizes[pageIndex] = sz;
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -2392,6 +2399,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       setState(() => _bookmarks = bookmarks);
     }
     if (!mounted) return;
+    // 북마크할 쪽: 스크롤 보기는 화면에 절반 이상(가장 많이) 보이는 쪽, 두 쪽 보기는 두 쪽 중 앞쪽
+    final bool spreadNow = _isSpreadActive(context);
+    final int target = _pageModeScroll
+        ? (_scrollCtrl.mostVisiblePage ?? _currentPage).clamp(0, math.max(0, _totalPages - 1)).toInt()
+        : (spreadNow ? (_currentPage ~/ 2) * 2 : _currentPage);
+    final bool already = _isBookmarkedAt(target, spreadNow, scroll: _pageModeScroll);
     showModalBottomSheet(
       sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
       context: context,
@@ -2403,14 +2416,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               title: Text(_tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.w800)),
               // 같은 쪽(같은 보기 방식)은 한 번만 북마크
               trailing: ElevatedButton.icon(
-                icon: Icon(_isCurrentPageBookmarked ? Icons.bookmark_added : Icons.bookmark_add, size: 16),
-                label: Text(_isCurrentPageBookmarked
+                icon: Icon(already ? Icons.bookmark_added : Icons.bookmark_add, size: 16),
+                label: Text(already
                     ? _tr('북마크한 페이지예요', 'Already bookmarked', '已添加书签', 'ブックマーク済みです')
                     : _tr('현재 페이지 북마크 추가', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),
-                onPressed: _isCurrentPageBookmarked ? null : () async {
+                onPressed: already ? null : () async {
                   final now = DateTime.now();
-                  final bool spread = _isSpreadActive(context);
-                  final int first = spread ? (_currentPage ~/ 2) * 2 : _currentPage;
+                  final bool spread = spreadNow;
+                  final int first = target;
                   await StorageService.addBookmark(
                     _bookKey,
                     BookmarkItem(
@@ -2422,6 +2435,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       rotation: _rotationModeNow,
                       landscape: MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height,
                       display: _pageDisplay,
+                      scroll: _pageModeScroll,
                     ),
                   );
                   if (ctx.mounted) Navigator.pop(ctx);
@@ -2464,11 +2478,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               context: context,
                               display: _pageDisplay,
                               rotation: _rotationModeNow,
+                              scroll: _pageModeScroll,
                               setDisplay: (d) async {
                                 await StorageService.setPageDisplay(d);
                                 _setPageDisplay(d);
                               },
-                              setRotation: _applyRotation)) {
+                              setRotation: _applyRotation,
+                              setScroll: _setScrollModeTo)) {
                             await Future<void>.delayed(const Duration(milliseconds: 700));
                             if (!mounted) return;
                           }
@@ -2802,24 +2818,24 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     VolumeKeyService.setShakeListening(want);
   }
 
-  // 오른쪽 아래 빠른 메뉴(호 모양)에 들어가는 기능들 (예전 상단바 버튼과 동작 동일)
-  List<QuickArcMenuItem> _buildQuickMenuItems() {
+  // 도구 모음(화면 아래 가로 막대)에 들어가는 기능들
+  List<QuickToolItem> _buildQuickMenuItems() {
     return [
-      QuickArcMenuItem(
+      QuickToolItem(
         icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 19),
         tooltip: _tr('이전 파일로 이동', 'Previous File', '上一个文件', '前のファイル'),
         onTap: () => _openAdjacentFileInSameGroup(-1),
         enabled: _prevFilePath != null,
         closeAfterTap: true,
       ),
-      QuickArcMenuItem(
+      QuickToolItem(
         icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 19),
         tooltip: _tr('다음 파일로 이동', 'Next File', '下一个文件', '次のファイル'),
         onTap: () => _openAdjacentFileInSameGroup(1),
         enabled: _nextFilePath != null,
         closeAfterTap: true,
       ),
-      QuickArcMenuItem(
+      QuickToolItem(
         icon: const Icon(Icons.lock_outline, color: Colors.white, size: 17),
         tooltip: _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
         onTap: () {
@@ -2837,7 +2853,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         },
         closeAfterTap: true,
       ),
-      QuickArcMenuItem(
+      QuickToolItem(
         // 누르면 살짝 흔들리고, 가로로 돌려 둔 상태면 노란색
         // 누르면 회전 설정 창 (자동 / 세로 고정 / 가로 고정). 아이콘은 고른 설정 모양, 고정이면 노란색
         icon: WiggleOnChange(
@@ -2853,7 +2869,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         onTap: _pickRotation,
         closeAfterTap: true,
       ),
-      QuickArcMenuItem(
+      QuickToolItem(
         // 페이지 표시 (한 페이지 / 두 페이지 / 자동)
         // 설정 창에서 고른 것과 같은 아이콘
         icon: pageDisplayGlyph(
@@ -2865,7 +2881,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         onTap: _pickPageDisplay,
         closeAfterTap: true,
       ),
-      QuickArcMenuItem(
+      QuickToolItem(
         icon: _buildDualDirectionIcon(),
         tooltip: _isMangaRtlMode
             ? _tr('읽기 방향 전환 (우 → 좌)', 'Reading Direction (R → L)', '切换阅读方向 (右 → 左)', '読書方向切替 (右 → 左)')
@@ -2909,7 +2925,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ),
       // 메모는 쪽 넘김(탭·슬라이드) 보기에서만 (스크롤 보기에서는 끔)
       if (!_pageModeScroll)
-      QuickArcMenuItem(
+      QuickToolItem(
         icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
@@ -2922,13 +2938,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         closeAfterTap: true,
       ),
       if (_isPdfFile)
-        QuickArcMenuItem(
+        QuickToolItem(
           icon: const Icon(Icons.copy_all_outlined, color: Colors.white, size: 17),
           tooltip: _tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
           onTap: _openTextCopySheet,
           closeAfterTap: true,
         ),
-      QuickArcMenuItem(
+      QuickToolItem(
         icon: Icon(
           _isCurrentPageBookmarked ? Icons.bookmarks : Icons.bookmarks_outlined,
           color: _isCurrentPageBookmarked ? Colors.amber : Colors.white,
@@ -3284,10 +3300,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           if (_useQuickNavTurn && !_isTouchLocked && _totalPages > 1)
             _buildQuickNavButtons(bottomInset),
 
-          // 도구 모음 버튼 + 활 모양 메뉴 (상단바/진행바와 함께 보였다 사라짐)
-          // 평소엔 진행바 바로 위에 붙어 있고, 열리면 호가 진행바에 닿지 않을 만큼 올라간다
-          // 도구 모음 '바' 형태: 화면 아래 가로 막대 (뷰어 설정 → 도구 모음 형태)
-          if (_showControls && !_isTouchLocked && _toolbarStyle == 'bar')
+          // 도구 모음: 화면 아래 가로 막대 (상단바·진행바와 함께 보였다 사라짐)
+          if (_showControls && !_isTouchLocked)
             Positioned(
               left: 12.0 + _safeSides.left,
               right: 12.0 + _safeSides.right,
@@ -3295,22 +3309,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   ((_progressBarPos == 'bottom' || _useQuickNavTurn) ? 44.0 : 0.0) +
                   ((_isMemoMode && _memoToolbarPos == 'bottom') ? 56.0 : 0.0),
               child: Center(child: QuickToolBar(items: _buildQuickMenuItems())),
-            ),
-          if (_showControls && !_isTouchLocked && _toolbarStyle == 'arc')
-            Positioned(
-              right: _quickMenuSide == 'left' ? null : ((_progressBarPos == 'right' ? 56.0 : 12.0) + _safeSides.right + (_quickMenuBesideMemoBar ? 56.0 : 0.0)),
-              left: _quickMenuSide == 'left' ? ((_progressBarPos == 'left' ? 56.0 : 12.0) + _safeSides.left + (_quickMenuBesideMemoBar ? 56.0 : 0.0)) : null,
-              bottom: math.max<double>(bottomInset + 24.0, 28.0) +
-                  // 아래 진행바(또는 오른쪽 아래 페이지 이동 버튼)가 있을 때만 그 위에 붙는다
-              ((_progressBarPos == 'bottom' || (_useQuickNavTurn && _quickMenuSide != 'left')) ? 44.0 : 0.0) +
-                  ((_isMemoMode && _memoToolbarPos == 'bottom') ? 56.0 : 0.0),
-              child: QuickArcMenu(
-                key: ValueKey('quick_menu_$_quickMenuSide'),
-                leftSide: _quickMenuSide == 'left',
-                // 열면 '화면 회전'(4번째)부터 '북마크'까지 먼저 보이고, 호를 밀면 화면 잠금·다음/이전 파일
-                initialFirstIndex: 3,
-                items: _buildQuickMenuItems(),
-              ),
             ),
         ],
       ),

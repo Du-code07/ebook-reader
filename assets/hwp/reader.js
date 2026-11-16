@@ -394,7 +394,8 @@ function pageBox(index, width, height) {
     let top = Number(info.marginTop) || 0, bottom = info.height - (Number(info.marginBottom) || 0);
     if (info.headerArea) top = Math.min(top, Number(info.headerArea.y));
     if (info.footerArea) bottom = Math.max(bottom, Number(info.footerArea.y) + Number(info.footerArea.height));
-    if (right - left > 16 && bottom - top > 16) box = { x: left * k, y: Math.max(0, top - 6) * k, w: (right - left) * k, h: (Math.min(info.height, bottom + 6) - Math.max(0, top - 6)) * k };
+    // 위아래는 넉넉히 남김: 첫 줄 글자 윗부분(본문 위 여백에 걸친 큰 글씨·표 선 등)이 잘리지 않게
+    if (right - left > 16 && bottom - top > 16) box = { x: left * k, y: Math.max(0, top - 18) * k, w: (right - left) * k, h: (Math.min(info.height, bottom + 12) - Math.max(0, top - 18)) * k };
   } catch (_) {}
   pageBoxCache.set(index, box);
   return box;
@@ -536,6 +537,39 @@ function vPinchEnd(e) {
   vhost.scrollLeft = s2.offsetLeft + fx * s2.offsetWidth - (p.fx + p.dx);
   vUpdate(); vReportMetrics();
 }
+// FReader: 스크롤 보기 북마크 — 북마크한 쪽 왼쪽 위에 책갈피 (쪽과 함께 움직이고 확대·축소돼도 보임)
+let vMarks = new Set();
+function vApplyMarks() { vSlots.forEach((slot, i) => slot.classList.toggle('bm', vMarks.has(i))); }
+function setScrollMarks(pages) { vMarks = new Set((pages || []).map(Number)); vApplyMarks(); return true; }
+// 화면에 가장 많이(비율로) 보이는 쪽 (스크롤 보기에서 북마크할 쪽)
+function vMostVisible() {
+  if (!vertical || !vhost || !vSlots.length) return page;
+  const y0 = vhost.scrollTop, y1 = y0 + vhost.clientHeight;
+  let best = page, bestF = -1;
+  for (let i = Math.max(0, vIndexAt(y0) - 1); i < vSlots.length && vTops[i] < y1; i++) {
+    const h = Math.max(1, vTops[i + 1] - vTops[i] - V_GAP);
+    const f = (Math.min(vTops[i] + h, y1) - Math.max(vTops[i], y0)) / h;
+    if (f > bestF + 0.001) { bestF = f; best = i; }
+  }
+  return best;
+}
+// FReader: 스크롤 보기에서 확대·축소해 둔 것을 원래 크기로 (화면 가운데 있던 글 자리를 그대로 두고)
+function vResetZoom() {
+  if (!vertical || !vhost || vZoom === 1) return false;
+  const fyScreen = (vhost.clientHeight || innerHeight) / 2, fxScreen = (vhost.clientWidth || innerWidth) / 2;
+  const cy = vhost.scrollTop + fyScreen, i = vIndexAt(cy), slot = vSlots[i];
+  const sh = Math.max(1, slot ? slot.offsetHeight : 1), sw = Math.max(1, slot ? slot.offsetWidth : 1);
+  const fy = (cy - vTops[i]) / sh, fx = (vhost.scrollLeft + fxScreen - (slot ? slot.offsetLeft : 0)) / sw;
+  vZoom = 1;
+  vLayout(true);
+  const s2 = vSlots[i];
+  if (s2) {
+    vhost.scrollTop = vTops[i] + fy * s2.offsetHeight - fyScreen;
+    vhost.scrollLeft = s2.offsetLeft + fx * s2.offsetWidth - fxScreen;
+  }
+  vUpdate(); vReportMetrics();
+  return true;
+}
 function vZoomListen(el) {
   el.addEventListener('touchstart', vPinchStart, { passive: false });
   el.addEventListener('touchmove', vPinchMove, { passive: false });
@@ -568,6 +602,7 @@ function vLayout(keep) {
       vhost.appendChild(slot); vSlots.push(slot);
     }
   }
+  vApplyMarks();
   const sizes = pageSizes();
   vTops = []; let y = 0;
   for (let i = 0; i < count; i++) {
@@ -613,7 +648,7 @@ function vSchedule() {
 }
 function vReportMetrics() {
   if (!vhost) return;
-  emit('scrollMetrics', { top: vhost.scrollTop, height: vhost.scrollHeight, client: vhost.clientHeight });
+  emit('scrollMetrics', { top: vhost.scrollTop, height: vhost.scrollHeight, client: vhost.clientHeight, zoom: vZoom });
 }
 function vMount(index) {
   if (vMounted.has(index) || !doc) return;
@@ -834,7 +869,7 @@ function withoutZoom(fn) {
     try { return fn.apply(this, args); } finally { host.style.transform = t; }
   };
 }
-window.freaderHwp = { setView, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, pageSizes, setVertical, scrollToRatio: vScrollToRatio, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy,
+window.freaderHwp = { setView, resetScrollZoom: vResetZoom, setScrollMarks, mostVisiblePage: vMostVisible, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, pageSizes, setVertical, scrollToRatio: vScrollToRatio, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes: withoutZoom(visibleTextBoxes), pageRect: withoutZoom(pageRect),
   getState: () => ({ ready: readyReported, page, count, cachedPages: cache.size, cachedBytes, received, spread: options.spread, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });

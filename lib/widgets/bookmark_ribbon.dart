@@ -32,9 +32,5 @@ void paintBookmarkRibbon(Canvas canvas, Offset at, [Size size = const Size(16, 2
     ..close();
   canvas.drawShadow(path, Colors.black, 1.5, false);
   canvas.drawPath(path, Paint()..color = const Color(0xFFF2B01E));
-  // 끈 가운데 옅은 줄 (천 느낌)
-  canvas.drawLine(Offset(w / 2, 0), Offset(w / 2, h - w * 0.55), Paint()
-    ..color = const Color(0x33FFFFFF)
-    ..strokeWidth = 1.2);
   canvas.restore();
 }

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart' show DeviceGestureSettings, EagerGestureRecognizer;
 import 'package:flutter/scheduler.dart';
 import 'app_colors.dart';
+import 'bookmark_ribbon.dart';
 import 'pop_dialog.dart';
 import '../services/storage_service.dart';
 
@@ -35,19 +36,41 @@ TapZone tapZoneAt(Offset local, Size size) {
 
 /// 가운데에 뜨는 둥근 창 (페이지 표시·화면 회전 등 짧은 고르기)
 Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) async {
-  final Offset? popFrom = TapOrigin.last; // 연 자리 (닫을 때 그 자리로 돌아감)
+  final Offset? popFrom = TapOrigin.last; // 연 자리 (그쪽에서 살짝 다가오듯 열리고, 그쪽으로 살짝 물러나듯 닫힘)
   // 도구 모음이 닫히며 화면을 다시 그리는 프레임과 겹치지 않게, 그 프레임이 끝난 뒤 창을 띄움 (뜰 때 덜 버벅임)
   await WidgetsBinding.instance.endOfFrame;
   if (!context.mounted) return null;
-  return showGeneralDialog<T>(
+  final Duration dur = Anim.ms(260);
+  final T? result = await showGeneralDialog<T>(
     context: context,
     barrierDismissible: true,
     barrierLabel: 'close',
     barrierColor: Colors.black54,
-    transitionDuration: Anim.ms(300),
+    transitionDuration: dur,
     pageBuilder: (ctx, _, __) => SafeArea(child: Center(child: builder(ctx))),
-    // 꾹 눌러 뜨는 메뉴와 같은 움직임: 누른 자리에서 커져 나옴
-    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child, from: popFrom),
+    transitionBuilder: (ctx, anim, _, child) => _softDialogTransition(ctx, anim, child, popFrom),
+  );
+  // 닫히는 움직임이 다 끝난 뒤에 고른 것을 적용 (화면 회전·쪽 다시 배치가 닫히는 움직임과 겹쳐 끊기지 않게)
+  if (dur > Duration.zero) await Future<void>.delayed(dur);
+  return result;
+}
+
+/// 고르기 창이 열리고 닫히는 움직임: 크게 튀지 않고, 연 자리 쪽에서 살짝 다가오며 커지고 서서히 또렷해짐.
+/// 닫힐 때는 같은 길을 되돌아가며 뒤 배경 어두움과 같은 빠르기로 함께 사라짐 (창만 먼저 없어지지 않게)
+Widget _softDialogTransition(BuildContext context, Animation<double> animation, Widget child, Offset? from) {
+  final scale = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+  final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.7, curve: Curves.easeOut), reverseCurve: Curves.easeIn);
+  final Size screen = MediaQuery.sizeOf(context);
+  final Offset center = screen.center(Offset.zero);
+  // 연 자리 쪽으로 1/4만 치우쳐 (멀리서 날아오지 않게)
+  final Offset origin = ((from ?? center) - center) * 0.25;
+  return FadeTransition(
+    opacity: fade,
+    child: AnimatedBuilder(
+      animation: scale,
+      child: RepaintBoundary(child: child),
+      builder: (context, child) => Transform.scale(scale: 0.86 + 0.14 * scale.value, origin: origin, child: child),
+    ),
   );
 }
 
@@ -440,6 +463,9 @@ class ContinuousPageController {
 
   /// 확대를 처음(1배)으로 (보던 자리는 그대로)
   void resetZoom() => _state?._resetZoom();
+
+  /// 화면에 가장 많이(비율로) 보이는 쪽 (스크롤 보기 북마크)
+  int? get mostVisiblePage => _state?._mostVisible();
 }
 
 /// 뷰어 설정 페이지 모드: 스크롤을 켜기 직전의 탭·슬라이드 (스크롤을 다시 끄면 이대로 되돌림, 기억이 없으면 기본값 탭 + 슬라이드)
@@ -587,7 +613,11 @@ class ContinuousPageList extends StatefulWidget {
     this.zoomable = true,
     this.gap = 0,
     this.onLongPressPage,
+    this.markedPages = const {},
   });
+
+  /// 북마크한 쪽: 쪽 왼쪽 위(테두리 선에서 시작)에 책갈피를 붙여 둠 (쪽과 함께 움직이고 확대·축소돼도 보임)
+  final Set<int> markedPages;
 
   /// 쪽 사이 간격 줄 색 (없으면 바탕색 그대로). 바탕은 앱 테마 색, 간격 줄은 따로 고정된 색
   final Color? gapColor;
@@ -702,6 +732,24 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
   }
 
   /// 화면 위쪽 1/3 지점에 걸친 쪽 (oy: 확대된 좌표)
+  int _mostVisible() {
+    if (_tops.length < 2) return _current;
+    final double padY = _padYFor(_scale);
+    final double y0 = (_oy - padY) / _scale, y1 = (_oy - padY + _height) / _scale;
+    int best = _current;
+    double bestF = -1;
+    for (int i = math.max(0, _pageAt(_oy) - 2); i < widget.count && _tops[i] < y1; i++) {
+      final double top = _tops[i], bottom = _tops[i + 1];
+      final double seen = math.min(bottom, y1) - math.max(top, y0);
+      final double f = seen / math.max(1.0, bottom - top);
+      if (f > bestF + 0.001) {
+        bestF = f;
+        best = i;
+      }
+    }
+    return best;
+  }
+
   int _pageAt(double oy) {
     if (_tops.length < 2) return 0;
     final double y = (oy + _height / 3) / _scale;
@@ -874,6 +922,14 @@ class _ContinuousPageListState extends State<ContinuousPageList> with SingleTick
                 height: h,
                 child: RepaintBoundary(child: widget.pageBuilder(context, i)),
               ));
+              if (widget.markedPages.contains(i)) {
+                children.add(Positioned(
+                  key: ValueKey('bm$i'),
+                  left: -_ox + math.min(18.0, _width * s * 0.05),
+                  top: _tops[i] * s - _oy + padY,
+                  child: const IgnorePointer(child: BookmarkRibbon()),
+                ));
+              }
               // 쪽 사이 간격 줄 (화면 너비 전체)
               if (widget.gapColor != null && widget.gap > 0 && i < widget.count - 1) {
                 children.add(Positioned(
@@ -1391,17 +1447,23 @@ Future<OverlayEntry?> showTapZoneGuide(
   return entry;
 }
 
-/// 북마크할 때의 보기(페이지 표시·화면 회전)로 돌려놓음. 바뀐 게 있으면 true (다시 그려질 때까지 기다리게)
+/// 북마크할 때의 보기(페이지 모드·페이지 표시·화면 회전)로 돌려놓음. 바뀐 게 있으면 true (다시 그려질 때까지 기다리게)
 /// 회전이 '자동'이었으면 지금 방향이 그때와 다를 때만 그 방향으로 돌림
 Future<bool> restoreBookmarkView(
   BookmarkItem bm, {
   required BuildContext context,
   required String display,
   required String rotation,
+  required bool scroll,
   required Future<void> Function(String display) setDisplay,
   required Future<void> Function(String rotation) setRotation,
+  required Future<void> Function(bool scroll) setScroll,
 }) async {
   bool changed = false;
+  if (bm.scroll != scroll) {
+    await setScroll(bm.scroll);
+    changed = true;
+  }
   final String? d = bm.display;
   if (d != null && d != display) {
     await setDisplay(d);

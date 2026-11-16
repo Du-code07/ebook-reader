@@ -799,6 +799,39 @@ function vPinchEnd(e) {
   vhost.scrollLeft = s2.offsetLeft + fx * s2.offsetWidth - (p.fx + p.dx);
   vUpdate(); vReportMetrics();
 }
+// FReader: 스크롤 보기 북마크 — 북마크한 쪽 왼쪽 위에 책갈피 (쪽과 함께 움직이고 확대·축소돼도 보임)
+let vMarks = new Set();
+function vApplyMarks() { vSlots.forEach((slot, i) => slot.classList.toggle('bm', vMarks.has(i))); }
+function setScrollMarks(pages) { vMarks = new Set((pages || []).map(Number)); vApplyMarks(); return true; }
+// 화면에 가장 많이(비율로) 보이는 쪽 (스크롤 보기에서 북마크할 쪽)
+function vMostVisible() {
+  if (!vertical || !vhost || !vSlots.length) return page;
+  const y0 = vhost.scrollTop, y1 = y0 + vhost.clientHeight;
+  let best = page, bestF = -1;
+  for (let i = Math.max(0, vIndexAt(y0) - 1); i < vSlots.length && vTops[i] < y1; i++) {
+    const h = Math.max(1, vTops[i + 1] - vTops[i] - V_GAP);
+    const f = (Math.min(vTops[i] + h, y1) - Math.max(vTops[i], y0)) / h;
+    if (f > bestF + 0.001) { bestF = f; best = i; }
+  }
+  return best;
+}
+// FReader: 스크롤 보기에서 확대·축소해 둔 것을 원래 크기로 (화면 가운데 있던 글 자리를 그대로 두고)
+function vResetZoom() {
+  if (!vertical || !vhost || vZoom === 1) return false;
+  const fyScreen = (vhost.clientHeight || innerHeight) / 2, fxScreen = (vhost.clientWidth || innerWidth) / 2;
+  const cy = vhost.scrollTop + fyScreen, i = vIndexAt(cy), slot = vSlots[i];
+  const sh = Math.max(1, slot ? slot.offsetHeight : 1), sw = Math.max(1, slot ? slot.offsetWidth : 1);
+  const fy = (cy - vTops[i]) / sh, fx = (vhost.scrollLeft + fxScreen - (slot ? slot.offsetLeft : 0)) / sw;
+  vZoom = 1;
+  vLayout(true);
+  const s2 = vSlots[i];
+  if (s2) {
+    vhost.scrollTop = vTops[i] + fy * s2.offsetHeight - fyScreen;
+    vhost.scrollLeft = s2.offsetLeft + fx * s2.offsetWidth - fxScreen;
+  }
+  vUpdate(); vReportMetrics();
+  return true;
+}
 function vZoomListen(el) {
   el.addEventListener('touchstart', vPinchStart, { passive: false });
   el.addEventListener('touchmove', vPinchMove, { passive: false });
@@ -831,6 +864,7 @@ function vLayout(keep) {
       vhost.appendChild(slot); vSlots.push(slot);
     }
   }
+  vApplyMarks();
   vTops = []; let y = 0;
   pages.forEach((entry, i) => {
     const sh = entry.width > 0 ? W * entry.height / entry.width : W * 1.414;
@@ -869,7 +903,7 @@ function vSchedule() {
   if (!vMetricsTimer) vMetricsTimer = setTimeout(() => { vMetricsTimer = 0; vReportMetrics(); }, 30);
 }
 function vReportMetrics() {
-  if (vhost) emit('scrollMetrics', { top: vhost.scrollTop, height: vhost.scrollHeight, client: vhost.clientHeight });
+  if (vhost) emit('scrollMetrics', { top: vhost.scrollTop, height: vhost.scrollHeight, client: vhost.clientHeight, zoom: vZoom });
 }
 function vMount(index) {
   if (vMounted.has(index) || !pages[index]) return;
@@ -1142,7 +1176,7 @@ function withoutZoom(fn) {
     try { return fn.apply(this, args); } finally { host.style.transform = t; }
   };
 }
-window.freaderDocx = { setView, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy, setVertical, scrollToRatio: vScrollToRatio,
+window.freaderDocx = { setView, resetScrollZoom: vResetZoom, setScrollMarks, mostVisiblePage: vMostVisible, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy, setVertical, scrollToRatio: vScrollToRatio,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes: withoutZoom(visibleTextBoxes), pageRect: withoutZoom(pageRect), pageSizes,
   getState: () => ({ ready, page, count: pages.length, received, spread: options.spread, awaitingPassword, unavailableImages, imageCacheBytes, cachedImages: imageCache.size, visibleImages: activeImagePaths.size, maxBytes: MAX_BYTES, format: detectedFormat }) };
 window.addEventListener('pagehide', destroy, { once: true });
