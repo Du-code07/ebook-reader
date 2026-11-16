@@ -367,13 +367,20 @@ function realFrames() { return [...host.children].filter(f => f.classList.contai
 function pageRect() {
   const frames = realFrames(); if (!frames.length) return null;
   let l = 1e9, t = 1e9, r = -1e9, b = -1e9;
-  const W = window.innerWidth || 1, H = window.innerHeight || 1, list = [];
+  const W = window.innerWidth || 1, H = window.innerHeight || 1, list = [], layout = [];
   for (const f of frames) {
     const q = f.getBoundingClientRect(); l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom);
     list.push({ x: q.left / W, y: q.top / H, w: q.width / W, h: q.height / H });
   }
   if (!(r > l && b > t)) return null;
-  return { x: Math.max(0, l / W), y: Math.max(0, t / H), w: Math.min(1, (r - l) / W), h: Math.min(1, (b - t) / H), frames: list };
+  // 쪽 자리마다: 보이는 자리, 쪽 전체 자리(여백까지), 여백 줄이기 네모(쪽 대비), 빈 자리(두 쪽 보기의 홀수 마지막 쪽 옆)인지
+  for (const f of host.children) {
+    const q = f.getBoundingClientRect();
+    let fit = null; try { fit = f.dataset.fit ? JSON.parse(f.dataset.fit) : null; } catch (_) {}
+    const [tx, ty, pw, ph, bx, by, bw, bh] = fit || [0, 0, q.width, q.height, 0, 0, 1, 1];
+    layout.push({ x: q.left / W, y: q.top / H, w: q.width / W, h: q.height / H, px: (q.left + tx) / W, py: (q.top + ty) / H, pw: pw / W, ph: ph / H, bx, by, bw, bh, real: f.classList.contains('page') });
+  }
+  return { x: Math.max(0, l / W), y: Math.max(0, t / H), w: Math.min(1, (r - l) / W), h: Math.min(1, (b - t) / H), frames: list, layout };
 }
 // FReader: 앱에서 고른 글에 형광펜 (화면 크기 대비 0~1 네모들)
 function highlightBoxes(boxes) {
@@ -447,6 +454,8 @@ function fitPages() {
     const ty = clamp((slotH - b.h * scale) / 2 - b.y * scale, slotH - H * scale);
     frame.style.width = `${slotW}px`;
     frame.style.height = `${slotH}px`;
+    // 쪽 전체 자리·여백 줄이기 네모 (앱이 메모를 쪽에 붙이고, 화면을 돌릴 때 새 자리를 미리 계산하는 데 씀)
+    frame.dataset.fit = JSON.stringify([tx, ty, W * scale, H * scale, b.x / W, b.y / H, b.w / W, b.h / H]);
     const svg = frame.firstElementChild;
     if (svg && svg.localName === 'svg') Object.assign(svg.style, { position: 'absolute', left: `${tx}px`, top: `${ty}px`, width: `${W * scale}px`, height: `${H * scale}px` });
   });

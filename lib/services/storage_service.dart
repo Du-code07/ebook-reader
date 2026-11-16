@@ -686,20 +686,20 @@ class StorageService {
     return prefs.getString('quick_menu_side') ?? 'right';
   }
 
-  /// [spread]: 두 쪽 보기에서 쓴 메모 (두 쪽 보기에서만 보임. 한 쪽 보기 메모는 한 쪽 보기에서만)
+  /// PDF·CBZ 쪽 메모 (쪽마다 하나 — 한 쪽·두 쪽 보기 공통)
   static Future<void> savePageMemoStrokes(
-      String bookKey, int pageIndex, List<MemoStroke> strokes, {bool spread = false}) async {
+      String bookKey, int pageIndex, List<MemoStroke> strokes) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-      'memo_strokes_${bookKey}_$pageIndex${spread ? '_2p' : ''}',
+      'memo_strokes_${bookKey}_$pageIndex',
       jsonEncode(strokes.map((e) => e.toJson()).toList()),
     );
   }
 
   static Future<List<MemoStroke>> getPageMemoStrokes(
-      String bookKey, int pageIndex, {bool spread = false}) async {
+      String bookKey, int pageIndex) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('memo_strokes_${bookKey}_$pageIndex${spread ? '_2p' : ''}');
+    final raw = prefs.getString('memo_strokes_${bookKey}_$pageIndex');
     if (raw == null) return [];
     final List decoded = jsonDecode(raw);
     return decoded.map((e) => MemoStroke.fromJson(e)).toList();

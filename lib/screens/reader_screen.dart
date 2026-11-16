@@ -45,39 +45,105 @@ import '../widgets/group_jump_menu.dart';
 import '../widgets/page_curl.dart';
 import '../widgets/bookmark_ribbon.dart';
 
+/// 메모 좌표(0~1) ↔ 화면 자리.
+/// 문서는 보이는 쪽들을 여백까지 포함한 쪽 전체 크기로 왼쪽부터 이어 붙인 판이 0~1 —
+/// 쪽마다 따로 맞추므로 화면을 돌리거나 여백 줄이기로 잘린 폭이 달라져도 메모가 글자 위에 그대로 있음
+class _MemoMap {
+  _MemoMap(this.pages, this.hits, {this.transform, this.shift = Offset.zero})
+      : _sumW = pages.fold(0.0, (a, r) => a + r.width),
+        _maxH = pages.isEmpty ? 0 : pages.map((r) => r.height).reduce(math.max);
+  _MemoMap.rect(Rect r, {Matrix4? transform}) : this([r], [r], transform: transform);
+
+  /// 쪽 전체 자리 (화면 왼쪽부터, 확대 전 좌표)
+  final List<Rect> pages;
+
+  /// 보이는 쪽 자리 (그린 곳이 어느 쪽인지 고를 때)
+  final List<Rect> hits;
+  final Matrix4? transform;
+  final Offset shift;
+  final double _sumW, _maxH;
+
+  bool get valid => pages.isNotEmpty && _sumW > 0 && _maxH > 0;
+  double get _scale => transform?.getMaxScaleOnAxis() ?? 1;
+
+  /// 굵기 기준 너비 (화면 px, 확대 포함)
+  double get unit => _sumW * _scale;
+
+  _MemoMap shifted(Offset d) => _MemoMap(pages, hits, transform: transform, shift: shift + d);
+
+  Offset toLocal(double fx, double fy) {
+    final double vx = fx * _sumW;
+    double o = 0;
+    int i = 0;
+    for (; i < pages.length - 1; i++) {
+      if (vx < o + pages[i].width) break;
+      o += pages[i].width;
+    }
+    final Rect r = pages[i];
+    Offset p = Offset(r.left + vx - o, r.top + fy * _maxH);
+    if (transform != null) p = MatrixUtils.transformPoint(transform!, p);
+    return p + shift;
+  }
+
+  Offset toFrac(Offset local) {
+    Offset p = local - shift;
+    if (transform != null) {
+      final inv = Matrix4.tryInvert(transform!);
+      if (inv != null) p = MatrixUtils.transformPoint(inv, p);
+    }
+    int i = 0;
+    double best = double.infinity;
+    for (int j = 0; j < hits.length && j < pages.length; j++) {
+      final h = hits[j];
+      final double d = p.dx < h.left ? h.left - p.dx : (p.dx > h.right ? p.dx - h.right : 0.0);
+      if (d < best) {
+        best = d;
+        i = j;
+      }
+    }
+    double o = 0;
+    for (int j = 0; j < i; j++) {
+      o += pages[j].width;
+    }
+    return Offset((o + p.dx - pages[i].left) / _sumW, (p.dy - pages[i].top) / _maxH);
+  }
+}
+
 class _MemoPainter extends CustomPainter {
   final List<MemoStroke> strokes;
   final List<Offset> currentPoints;
   final Color currentColor;
   final double currentWidth;
 
-  /// 저장된 획의 0~1 좌표가 가리키는 네모 (문서는 쪽 네모, 그 밖은 화면). 없으면 그리는 곳 전체
-  final Rect? anchor;
+  /// 저장된 획의 0~1 좌표가 가리키는 자리 (문서는 쪽들, 그 밖은 화면). 없으면 그리는 곳 전체
+  final _MemoMap? map;
 
   _MemoPainter({
     required this.strokes,
     required this.currentPoints,
     required this.currentColor,
     required this.currentWidth,
-    this.anchor,
+    this.map,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final Rect a = anchor ?? (Offset.zero & size);
+    final _MemoMap m = (map != null && map!.valid) ? map! : _MemoMap.rect(Offset.zero & size);
     for (final s in strokes) {
       if (s.dxList.isEmpty) continue;
       final paint = Paint()
         ..color = Color(s.colorValue)
-        ..strokeWidth = s.widthOn(a.width)
+        ..strokeWidth = s.widthOn(m.unit)
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
 
       final path = Path();
-      path.moveTo(a.left + s.dxList.first * a.width, a.top + s.dyList.first * a.height);
+      final first = m.toLocal(s.dxList.first, s.dyList.first);
+      path.moveTo(first.dx, first.dy);
       for (int i = 1; i < s.dxList.length; i++) {
-        path.lineTo(a.left + s.dxList[i] * a.width, a.top + s.dyList[i] * a.height);
+        final p = m.toLocal(s.dxList[i], s.dyList[i]);
+        path.lineTo(p.dx, p.dy);
       }
       canvas.drawPath(path, paint);
     }
@@ -306,8 +372,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   int _memoLoadSeq = 0;
   bool _memoSyncQueued = false;
   // 문서(워드·한글·PPT) 지금 화면에 놓인 쪽 네모들 (보는 곳 대비 0~1). 메모·책갈피를 쪽에 붙임
-  List<Rect>? _pageFracs;
-  Size? _fracsStage; // [_pageFracs]를 잴 때의 책 화면 크기
+  List<DocPageSlot>? _pageSlots; // 문서가 잰 쪽 자리들 (보이는 자리·쪽 전체·여백 줄이기 네모)
+  Size? _fracsStage; // [_pageSlots]를 잴 때의 책 화면 크기
+  List<Size>? _docPageSizes; // 모든 쪽 크기 (메모를 쪽마다 나눠 저장할 때 씀)
   int _framesSeq = 0;
   Size? _framesForSize;
   Timer? _framesTimer;
@@ -814,7 +881,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final String initLocKey = (_isOfflineDocument && savedCfi != null && savedCfi.isNotEmpty)
         ? savedCfi
         : _computeLocationKey(savedCfi, savedProg);
-    final List<MemoStroke> strokes = await StorageService.getLocationStrokes(widget.filePath, initLocKey);
+    final List<MemoStroke> strokes = await _getMemo(initLocKey);
     // 북마크: 열자마자 책갈피를 보여 주려고 미리 읽어 둠
     final List<BookmarkItem> initBookmarks = _bookmarksOn ? await StorageService.getBookmarks(widget.filePath) : const [];
 
@@ -1174,6 +1241,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _chapters = const [];
     });
     if (_isTxt || _isSpreadsheet) return;
+    // 쪽 크기: 두 쪽 보기 메모를 쪽마다 나눌 때 씀 (받은 뒤 두 쪽 보기면 메모를 다시 읽음)
+    _hwpController.pageSizes().then((sizes) {
+      if (!mounted || sizes == null) return;
+      _docPageSizes = sizes;
+      if (_memoPageAnchored && _bookmarkSpreadNow) setState(() => _currentPageLocationKey = '');
+    });
     final cached = _cachedOutlines?[pageCount];
     if (cached != null && cached.isNotEmpty) {
       _applyDocumentOutline(cached, pageCount); // 같은 프레임에 바로 바뀜 (쪽 목록이 보였다 바뀌지 않음)
@@ -1232,7 +1305,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     await StorageService.savePageLabel(widget.filePath, _progressPageLabel());
     if (_isSpreadsheet) return; // No page-anchored drawing layer over the live grid.
     final int seq = ++_memoLoadSeq;
-    final Future<List<MemoStroke>> load = StorageService.getLocationStrokes(widget.filePath, memoKey);
+    final Future<List<MemoStroke>> load = _getMemo(memoKey);
     _memoLoading = load;
     final strokes = await load;
     if (mounted && relocation == _docRelocation && seq == _memoLoadSeq && memoKey == _currentPageLocationKey) setState(() => _memoStrokes = strokes);
@@ -1554,7 +1627,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (locKey == _currentPageLocationKey) {
       setState(() => _memoStrokes = List<MemoStroke>.of(strokes));
     }
-    await StorageService.saveLocationStrokes(widget.filePath, locKey, strokes);
+    await _saveMemo(locKey, strokes);
   }
 
   Future<void> _undoMemo() async {
@@ -1627,7 +1700,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           final locKey = _currentPageLocationKey;
           if (_memoStrokes.isNotEmpty) _memoHistory.record(locKey, _memoStrokes);
           setState(() => _memoStrokes = []);
-          await StorageService.saveLocationStrokes(widget.filePath, locKey, []);
+          await _saveMemo(locKey, []);
         },
       ),
       MemoDoneButton(
@@ -1748,8 +1821,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 2 & 5. 삼성 노트 스타일 초고속 캡슐 지우개 (드래그 중 디스크 I/O 제거)
-  void _eraseStrokeAt(Offset localPos, Rect anchor) {
-    if (_memoStrokes.isEmpty || anchor.width <= 0 || anchor.height <= 0) {
+  void _eraseStrokeAt(Offset localPos, _MemoMap map) {
+    if (_memoStrokes.isEmpty || !map.valid) {
       _lastEraserPos = localPos;
       return;
     }
@@ -1772,8 +1845,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       double sMinX = double.infinity, sMaxX = double.negativeInfinity;
       double sMinY = double.infinity, sMaxY = double.negativeInfinity;
       for (int i = 0; i < s.dxList.length; i++) {
-        final px = anchor.left + s.dxList[i] * anchor.width;
-        final py = anchor.top + s.dyList[i] * anchor.height;
+        final Offset q = map.toLocal(s.dxList[i], s.dyList[i]);
+        final px = q.dx, py = q.dy;
         if (px < sMinX) sMinX = px;
         if (px > sMaxX) sMaxX = px;
         if (py < sMinY) sMinY = py;
@@ -1786,10 +1859,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
       final densePts = <Offset>[];
       for (int i = 0; i < s.dxList.length; i++) {
-        final p0 = Offset(anchor.left + s.dxList[i] * anchor.width, anchor.top + s.dyList[i] * anchor.height);
+        final p0 = map.toLocal(s.dxList[i], s.dyList[i]);
         densePts.add(p0);
         if (i + 1 < s.dxList.length) {
-          final p1 = Offset(anchor.left + s.dxList[i + 1] * anchor.width, anchor.top + s.dyList[i + 1] * anchor.height);
+          final p1 = map.toLocal(s.dxList[i + 1], s.dyList[i + 1]);
           final dist = (p1 - p0).distance;
           if (dist > 4.0) {
             final steps = (dist / 4.0).ceil();
@@ -1830,10 +1903,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           }
         }
         compact.add(currentRun.last);
+        final fracs = [for (final p in compact) map.toFrac(p)];
         nextStrokes.add(
           MemoStroke(
-            dxList: compact.map((p) => (p.dx - anchor.left) / anchor.width).toList(),
-            dyList: compact.map((p) => (p.dy - anchor.top) / anchor.height).toList(),
+            dxList: [for (final f in fracs) f.dx],
+            dyList: [for (final f in fracs) f.dy],
             colorValue: s.colorValue,
             strokeWidth: s.strokeWidth,
           ),
@@ -2973,7 +3047,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     canvas.drawImage(img, Offset.zero, Paint());
     canvas.scale(img.width / stage.width, img.height / stage.height);
     if (strokes.isNotEmpty) {
-      _MemoPainter(strokes: strokes, currentPoints: const [], currentColor: _penColor, currentWidth: _penWidth, anchor: _memoAnchor(stage)).paint(canvas, stage);
+      _MemoPainter(strokes: strokes, currentPoints: const [], currentColor: _penColor, currentWidth: _penWidth, map: _memoMap(stage)).paint(canvas, stage);
     }
     if (ribbon) {
       final Rect page = _ribbonPage(stage);
@@ -3063,14 +3137,93 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 메모를 쪽에 붙이는 문서 (워드·한글·PPT 넘겨 보기)
   bool get _memoPageAnchored => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_pageModeScroll;
 
-  /// 메모 저장 이름: 쪽 위치 + 두 쪽 보기('|2p') + (EPUB·TXT는 글이 다시 흐르므로) 가로 화면('|L')
+  /// 메모 보기 이름. 문서(넘겨 보기)는 'view:쪽|2p|r' — 실제 저장은 쪽마다 ('pg:쪽')라 한 쪽·두 쪽 보기,
+  /// 가로·세로 어디서 보든 같은 메모가 글자 위 같은 자리에 보임 (삼성 노트처럼).
+  /// EPUB·TXT는 쪽 위치 + 두 쪽 보기('|2p') + (글이 다시 흐르므로) 가로 화면('|L')
   String _memoKeyFor(String base) {
     if (!mounted) return base;
     final size = MediaQuery.sizeOf(context);
+    if (_memoPageAnchored) {
+      final m = RegExp(r':(\d+)$').firstMatch(base);
+      if (m != null) {
+        final bool spread = _bookmarkSpreadNow;
+        return 'view:${m.group(1)}${spread ? '|2p' : ''}${spread && _isMangaRtlMode ? '|r' : ''}';
+      }
+    }
     String k = base;
     if (!_pageModeScroll && _bookmarkSpreadNow) k += '|2p';
     if ((_isEpub || _isTxt) && size.width > size.height) k += '|L';
     return k;
+  }
+
+  static final RegExp _viewKeyRe = RegExp(r'^view:(\d+)(\|2p)?(\|r)?$');
+
+  /// 'view:…' 보기에 보이는 쪽들 (화면 왼쪽부터)과 그 크기
+  (List<int>, List<Size>)? _viewPagesOf(String key) {
+    final m = _viewKeyRe.firstMatch(key);
+    if (m == null) return null;
+    final int p = int.parse(m.group(1)!);
+    final List<int> pages = [p, if (m.group(2) != null && (_docPageCount <= 0 || p + 1 < _docPageCount)) p + 1];
+    final List<int> order = m.group(3) != null ? pages.reversed.toList() : pages;
+    Size sizeOf(int i) {
+      final s = _docPageSizes;
+      final Size z = (s != null && i >= 0 && i < s.length) ? s[i] : Size.zero;
+      return (z.width > 0 && z.height > 0) ? z : const Size(1, 1.414);
+    }
+
+    return (order, [for (final i in order) sizeOf(i)]);
+  }
+
+  /// 메모 읽기: 문서 보기는 보이는 쪽들의 메모를 모아 보기 좌표로
+  Future<List<MemoStroke>> _getMemo(String key) async {
+    final v = _viewPagesOf(key);
+    if (v == null) return StorageService.getLocationStrokes(widget.filePath, key);
+    final (pages, sizes) = v;
+    final double sumW = sizes.fold(0.0, (a, z) => a + z.width), maxH = sizes.map((z) => z.height).reduce(math.max);
+    final out = <MemoStroke>[];
+    double o = 0;
+    for (int i = 0; i < pages.length; i++) {
+      final double w = sizes[i].width, h = sizes[i].height;
+      for (final s in await StorageService.getLocationStrokes(widget.filePath, 'pg:${pages[i]}')) {
+        out.add(MemoStroke(
+          dxList: [for (final x in s.dxList) (o + x * w) / sumW],
+          dyList: [for (final y in s.dyList) y * h / maxH],
+          colorValue: s.colorValue,
+          strokeWidth: s.strokeWidth < 0.5 ? s.strokeWidth * w / sumW : s.strokeWidth,
+        ));
+      }
+      o += w;
+    }
+    return out;
+  }
+
+  /// 메모 저장: 문서 보기는 획마다 시작한 쪽에 그 쪽 좌표로 나눠 저장
+  Future<void> _saveMemo(String key, List<MemoStroke> strokes) async {
+    final v = _viewPagesOf(key);
+    if (v == null) return StorageService.saveLocationStrokes(widget.filePath, key, strokes);
+    final (pages, sizes) = v;
+    final double sumW = sizes.fold(0.0, (a, z) => a + z.width), maxH = sizes.map((z) => z.height).reduce(math.max);
+    final List<List<MemoStroke>> per = [for (final _ in pages) <MemoStroke>[]];
+    for (final s in strokes) {
+      if (s.dxList.isEmpty) continue;
+      final double vx = s.dxList.first * sumW;
+      int i = 0;
+      double o = 0;
+      for (; i < pages.length - 1; i++) {
+        if (vx < o + sizes[i].width) break;
+        o += sizes[i].width;
+      }
+      final double w = sizes[i].width, h = sizes[i].height;
+      per[i].add(MemoStroke(
+        dxList: [for (final x in s.dxList) (x * sumW - o) / w],
+        dyList: [for (final y in s.dyList) y * maxH / h],
+        colorValue: s.colorValue,
+        strokeWidth: s.strokeWidth < 0.5 ? s.strokeWidth * sumW / w : s.strokeWidth,
+      ));
+    }
+    for (int i = 0; i < pages.length; i++) {
+      await StorageService.saveLocationStrokes(widget.filePath, 'pg:${pages[i]}', per[i]);
+    }
   }
 
   /// 보기 방식·화면 방향이 바뀌면 그 보기의 메모로 바꿔 보여 줌. 화면 크기가 바뀌면 쪽 네모도 다시 받음
@@ -3095,93 +3248,98 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         _memoStrokes = [];
         _activeStrokePoints.clear();
       });
-      StorageService.getLocationStrokes(widget.filePath, k).then((strokes) {
+      _getMemo(k).then((strokes) {
         if (mounted && seq == _memoLoadSeq && k == _currentPageLocationKey) setState(() => _memoStrokes = strokes);
       });
     });
   }
 
-  /// 문서 화면의 쪽 네모를 다시 받음 (쪽이 다 그려졌을 때·화면 크기가 바뀐 뒤)
+  /// 문서 화면의 쪽 자리를 다시 받음 (쪽이 다 그려졌을 때·화면 크기가 바뀐 뒤)
   Future<void> _refreshPageFrames() async {
     if (!_isOfflineDocument || _isTxt || _isSpreadsheet) return;
-    // 쪽 네모는 확대하지 않은 화면에서만 잼 (확대 중 값은 메모·책갈피 자리를 틀리게 함)
+    // 쪽 자리는 확대하지 않은 화면에서만 잼 (확대 중 값은 메모·책갈피 자리를 틀리게 함)
     if (_epubZoomScale > 1.03 || !_docViewNone) return;
     final int seq = ++_framesSeq;
-    final f = await _hwpController.pageFrames().timeout(const Duration(milliseconds: 500), onTimeout: () => const <Rect>[]);
+    final f = await _hwpController.pageSlots().timeout(const Duration(milliseconds: 500), onTimeout: () => const <DocPageSlot>[]);
     if (!mounted || seq != _framesSeq || f.isEmpty) return;
     final stageBox = _book.layerKey.currentContext?.findRenderObject() as RenderBox?;
     setState(() {
-      _pageFracs = f;
+      _pageSlots = f;
       _fracsStage = stageBox != null && stageBox.hasSize ? stageBox.size : null;
     });
   }
 
-  /// 책 화면 크기 [stage]에서의 쪽 네모들 (0~1). 화면을 돌려 크기가 바뀌었으면 문서가 다시 재 주기를 기다리지 않고
-  /// 문서와 같은 규칙(쪽 비율 그대로 화면에 꽉 차게, 가운데, 쪽 사이 8/3)으로 바로 계산 → 메모·책갈피가 늦게 따라오지 않음
-  List<Rect>? _fracsFor(Size stage) {
-    final f = _pageFracs, old = _fracsStage;
-    if (f == null || f.isEmpty) return null;
-    if (old == null || old.isEmpty || ((old.width - stage.width).abs() < 0.5 && (old.height - stage.height).abs() < 0.5)) return f;
-    final double gap = _isPresentation ? 8.0 : 8 / 3; // 문서 화면의 쪽 사이 (PPT는 8)
-    final int n = f.length;
-    final List<int> order = List<int>.generate(n, (i) => i)..sort((a, b) => f[a].left.compareTo(f[b].left));
-    final List<double> w = [for (final r in f) r.width * old.width], h = [for (final r in f) r.height * old.height];
-    final double sumW = w.fold(0.0, (a, b) => a + b), maxH = h.reduce(math.max);
-    if (sumW <= 0 || maxH <= 0) return null;
-    // 예전 화면에서 쪽이 차지하던 비율 (가장자리를 살짝 띄우는 문서는 1보다 조금 작음)
-    final double pad = math.min(1.0, math.max(sumW / math.max(1.0, old.width - (n - 1) * gap), maxH / old.height));
-    final double k = math.min(math.max(1.0, stage.width - (n - 1) * gap) * pad / sumW, stage.height * pad / maxH);
-    double x = (stage.width - (sumW * k + (n - 1) * gap)) / 2;
-    final List<Rect> out = List<Rect>.filled(n, Rect.zero);
-    for (final i in order) {
-      final double ww = w[i] * k, hh = h[i] * k;
-      out[i] = Rect.fromLTWH(x / stage.width, (stage.height - hh) / 2 / stage.height, ww / stage.width, hh / stage.height);
-      x += ww + gap;
+  /// 책 화면 크기 [stage]에서의 쪽 자리들 (px, 화면 왼쪽부터, 실제 쪽만): (보이는 자리, 쪽 전체 자리).
+  /// 화면을 돌려 크기가 바뀌었으면 문서가 다시 재 주기를 기다리지 않고 문서와 같은 규칙
+  /// (여백 줄이기 네모가 화면에 꽉 차게, 가운데, 쪽 사이 8/3)으로 바로 계산 → 메모·책갈피가 늦게 따라오지 않음
+  (List<Rect>, List<Rect>)? _layoutFor(Size stage) {
+    final f = _pageSlots, old = _fracsStage;
+    if (f == null || f.isEmpty || old == null || old.isEmpty) return null;
+    Rect px(Rect r, Size z) => Rect.fromLTWH(r.left * z.width, r.top * z.height, r.width * z.width, r.height * z.height);
+    final List<int> order = List<int>.generate(f.length, (i) => i)..sort((a, b) => f[a].frame.left.compareTo(f[b].frame.left));
+    final frames = <Rect>[], pages = <Rect>[];
+    if ((old.width - stage.width).abs() < 0.5 && (old.height - stage.height).abs() < 0.5) {
+      for (final i in order) {
+        if (!f[i].real) continue;
+        frames.add(px(f[i].frame, stage));
+        pages.add(px(f[i].page, stage));
+      }
+      return frames.isEmpty ? null : (frames, pages);
     }
-    return out;
+    const double gap = 8 / 3;
+    final int n = f.length;
+    final List<double> w = [for (final e in f) e.page.width * old.width], h = [for (final e in f) e.page.height * old.height];
+    final List<double> bw = [for (int i = 0; i < n; i++) f[i].box.width * w[i]], bh = [for (int i = 0; i < n; i++) f[i].box.height * h[i]];
+    final double sumBw = bw.fold(0.0, (a, b) => a + b), maxBh = bh.reduce(math.max);
+    if (sumBw <= 0 || maxBh <= 0) return null;
+    final bool trimming = f.any((e) => e.box.width < 0.999 || e.box.height < 0.999);
+    final double pad = trimming ? 0.96 : 1;
+    final double availW = stage.width - gap * (n - 1), availH = stage.height;
+    final double k = math.max(0.0001, math.min(availW * pad / sumBw, availH * pad / maxBh));
+    double clamp(double v, double lo) => math.min(0, math.max(lo, v));
+    final List<double> slotW = [for (int i = 0; i < n; i++) math.min(w[i] * k, availW * bw[i] / sumBw)];
+    double x = (stage.width - (slotW.fold(0.0, (a, b) => a + b) + gap * (n - 1))) / 2;
+    for (final i in order) {
+      final double sw = slotW[i], sh = math.min(h[i] * k, availH);
+      final double tx = clamp((sw - bw[i] * k) / 2 - f[i].box.left * w[i] * k, sw - w[i] * k);
+      final double ty = clamp((sh - bh[i] * k) / 2 - f[i].box.top * h[i] * k, sh - h[i] * k);
+      final double top = (stage.height - sh) / 2;
+      if (f[i].real) {
+        frames.add(Rect.fromLTWH(x, top, sw, sh));
+        pages.add(Rect.fromLTWH(x + tx, top + ty, w[i] * k, h[i] * k));
+      }
+      x += sw + gap;
+    }
+    return frames.isEmpty ? null : (frames, pages);
   }
 
-  /// 메모 좌표 기준 네모 (책 화면 안 좌표): 문서는 지금 쪽 (두 쪽 보기면 두 쪽을 합친 네모), 그 밖은 책 화면 전체.
+  /// 메모 좌표 자리 (책 화면 안 좌표): 문서는 보이는 쪽들 (쪽 전체 크기 기준), 그 밖은 책 화면 전체.
   /// 확대·이동한 만큼 함께 옮김 (삼성 노트처럼 메모가 쪽에 붙어 같이 커지고 움직임)
-  Rect _memoAnchor(Size stage) {
-    Rect a = Offset.zero & stage;
-    final f = _memoPageAnchored ? _fracsFor(stage) : null;
-    if (_memoPageAnchored && f != null && f.isNotEmpty) {
-      Rect u = f.first;
-      if (_bookmarkSpreadNow) {
-        for (final r in f.skip(1)) {
-          u = u.expandToInclude(r);
-        }
-      }
-      if (u.width > 0.01 && u.height > 0.01) {
-        a = Rect.fromLTWH(u.left * stage.width, u.top * stage.height, u.width * stage.width, u.height * stage.height);
-      }
-    }
+  _MemoMap _memoMap(Size stage) {
     // 한글·워드·PPT는 문서가 실제로 그려 보여 주는 확대를 따라 (글과 메모가 같은 순간에 움직이게)
     final Matrix4 m = _docLiveZoom ? _docShownView.value : _epubZoomController.value;
-    final double s = m.getMaxScaleOnAxis();
-    if ((s - 1).abs() < 0.001 && m.getTranslation().length2 < 0.01) return a;
-    return MatrixUtils.transformRect(m, a);
+    final bool moved = (m.getMaxScaleOnAxis() - 1).abs() >= 0.001 || m.getTranslation().length2 >= 0.01;
+    final l = _memoPageAnchored ? _layoutFor(stage) : null;
+    if (l != null && l.$2.every((r) => r.width > 4 && r.height > 4)) {
+      return _MemoMap(l.$2, l.$1, transform: moved ? m : null);
+    }
+    return _MemoMap.rect(Offset.zero & stage, transform: moved ? m : null);
   }
 
-  /// [_memoAnchor]를 메모 그리는 층(화면 전체) 좌표로
-  Rect _memoAnchorInLayer(Size layerSize) {
+  /// [_memoMap]을 메모 그리는 층(화면 전체) 좌표로
+  _MemoMap _memoMapInLayer(Size layerSize) {
     final stageBox = _book.layerKey.currentContext?.findRenderObject() as RenderBox?;
     final layerBox = _memoLayerKey.currentContext?.findRenderObject() as RenderBox?;
     if (stageBox == null || layerBox == null || !stageBox.attached || !layerBox.attached || !stageBox.hasSize || !layerBox.hasSize) {
-      return Offset.zero & layerSize;
+      return _MemoMap.rect(Offset.zero & layerSize);
     }
-    final Rect a = _memoAnchor(stageBox.size);
-    return layerBox.globalToLocal(stageBox.localToGlobal(a.topLeft)) & a.size;
+    return _memoMap(stageBox.size).shifted(layerBox.globalToLocal(stageBox.localToGlobal(Offset.zero)));
   }
 
-  /// 책갈피를 다는 쪽 (책 화면 안 좌표): 문서는 왼쪽 쪽, 그 밖은 책 화면
+  /// 책갈피를 다는 쪽 (책 화면 안 좌표): 문서는 왼쪽 쪽의 보이는 자리, 그 밖은 책 화면
   Rect _ribbonPage(Size stage) {
-    final f = (_isOfflineDocument && !_isTxt && !_pageModeScroll) ? _fracsFor(stage) : null;
-    if (f != null && f.isNotEmpty) {
-      final r = f.reduce((a, b) => a.left <= b.left ? a : b); // 화면 왼쪽 쪽 (우→좌 읽기여도)
-      return Rect.fromLTWH(r.left * stage.width, r.top * stage.height, r.width * stage.width, r.height * stage.height);
-    }
+    final l = (_isOfflineDocument && !_isTxt && !_pageModeScroll) ? _layoutFor(stage) : null;
+    if (l != null) return l.$1.first; // 화면 왼쪽 쪽 (우→좌 읽기여도)
     return Offset.zero & stage;
   }
 
@@ -3206,7 +3364,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       currentPoints: const [],
                       currentColor: _penColor,
                       currentWidth: _penWidth,
-                      anchor: _memoAnchor(box.biggest),
+                      map: _memoMap(box.biggest),
                     ),
                   ),
                 ),
@@ -4707,7 +4865,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       // 3. 페이지 이동 시 해당 페이지(CFI)에 저장된 필기만 불러와서 표시 (보기 방식·화면 방향별)
                       final String memoKey = _memoKeyFor(newLocKey);
                       final int memoSeq = ++_memoLoadSeq;
-                      final Future<List<MemoStroke>> load = StorageService.getLocationStrokes(widget.filePath, memoKey);
+                      final Future<List<MemoStroke>> load = _getMemo(memoKey);
                       _memoLoading = load;
                       final pageStrokes = await load;
                       if (mounted && memoSeq == _memoLoadSeq) {
@@ -4788,7 +4946,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                             _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
                         if (useEraser) {
                           _eraseStartStrokes = _memoStrokes;
-                          _eraseStrokeAt(event.localPosition, _memoAnchorInLayer(Size(drawWidth, drawHeight)));
+                          _eraseStrokeAt(event.localPosition, _memoMapInLayer(Size(drawWidth, drawHeight)));
                         } else {
                           setState(() {
                             _activeStrokePoints
@@ -4801,7 +4959,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                         final bool useEraser =
                             _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
                         if (useEraser) {
-                          _eraseStrokeAt(event.localPosition, _memoAnchorInLayer(Size(drawWidth, drawHeight)));
+                          _eraseStrokeAt(event.localPosition, _memoMapInLayer(Size(drawWidth, drawHeight)));
                         } else {
                           setState(() {
                             _activeStrokePoints.add(event.localPosition);
@@ -4818,25 +4976,22 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                         if (useEraser) {
                           _finishEraseHistory();
                           final locKey = _currentPageLocationKey;
-                          await StorageService.saveLocationStrokes(widget.filePath, locKey, _memoStrokes);
+                          await _saveMemo(locKey, _memoStrokes);
                         } else if (_activeStrokePoints.isNotEmpty &&
                             drawWidth > 0 &&
                             drawHeight > 0) {
                           final locKey = _currentPageLocationKey;
                           // 문서: 쪽 네모 기준으로 저장 (가로·세로로 돌려도 쪽 위 같은 자리에 같은 크기로)
-                          if (_memoPageAnchored && (_pageFracs?.isEmpty ?? true)) await _refreshPageFrames();
+                          if (_memoPageAnchored && (_pageSlots?.isEmpty ?? true)) await _refreshPageFrames();
                           if (!mounted) return;
-                          final Rect anchor = _memoAnchorInLayer(Size(drawWidth, drawHeight));
+                          final _MemoMap map = _memoMapInLayer(Size(drawWidth, drawHeight));
+                          final fracs = [for (final p in _activeStrokePoints) map.toFrac(p)];
                           final stroke = MemoStroke(
-                            dxList: _activeStrokePoints
-                                .map((p) => (p.dx - anchor.left) / anchor.width)
-                                .toList(),
-                            dyList: _activeStrokePoints
-                                .map((p) => (p.dy - anchor.top) / anchor.height)
-                                .toList(),
+                            dxList: [for (final f in fracs) f.dx],
+                            dyList: [for (final f in fracs) f.dy],
                             colorValue: _penColor.toARGB32(),
                             // 굵기는 쪽 너비에 대한 비율 (펜 굵기는 쪽 기준이라 확대하면 함께 굵어지고 화면을 돌려도 쪽과 같이)
-                            strokeWidth: _penWidth * _epubZoomController.value.getMaxScaleOnAxis() / anchor.width,
+                            strokeWidth: _penWidth * _epubZoomController.value.getMaxScaleOnAxis() / map.unit,
                           );
                           _memoHistory.record(locKey, _memoStrokes);
                           final list = List<MemoStroke>.from(_memoStrokes)..add(stroke);
@@ -4844,11 +4999,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                             _memoStrokes = list;
                             _activeStrokePoints.clear();
                           });
-                          await StorageService.saveLocationStrokes(
-                            widget.filePath,
-                            locKey,
-                            list,
-                          );
+                          await _saveMemo(locKey, list);
                         }
                       },
                       onStylusCancel: (_) {

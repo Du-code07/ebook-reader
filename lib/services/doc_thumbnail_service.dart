@@ -37,7 +37,7 @@ class DocThumbnailService {
       if (lowRes.existsSync()) lowRes.deleteSync();
       return true;
     }
-    if (allowRender && await _enqueueRender(path, outPath)) {
+    if (allowRender && await _enqueueRender(path, outPath) == true) {
       if (lowRes.existsSync()) lowRes.deleteSync();
       return true;
     }
@@ -128,8 +128,11 @@ class DocThumbnailService {
 
   static Future<void> _queue = Future<void>.value();
 
+  /// 문서 엔진이 연 파일의 전체 쪽 수 (표지를 그리며 함께 알게 된 것)
+  static final Map<String, int> _pageCounts = {};
+
   /// 무거운 문서 엔진은 한 번에 하나씩만 돌린다
-  static Future<bool> _enqueueRender(String path, String outPath) {
+  static Future<bool> _enqueueRender(String path, String? outPath) {
     final done = Completer<bool>();
     _queue = _queue.then((_) async {
       try {
@@ -141,18 +144,30 @@ class DocThumbnailService {
     return done.future;
   }
 
+  /// 한글·워드·PPT·엑셀의 전체 쪽(슬라이드·시트) 수 — 문서 뷰어와 같은 엔진을 화면 밖에서 열어 셈 (표지 그리기와 차례로)
+  static Future<int?> pageCount(String path) async {
+    final known = _pageCounts[path];
+    if (known != null) return known;
+    await _enqueueRender(path, null);
+    return _pageCounts.remove(path);
+  }
+
   static const _origin = 'https://appassets.androidplatform.net';
   static const _chunkBytes = 192 * 1024;
   static const _maxBytes = 64 * 1024 * 1024; // 표지용으로는 너무 큰 문서는 건너뜀
 
-  static Future<bool> _renderFirstPage(String path, String outPath) async {
+  /// [outPath]가 없으면 표지는 찍지 않고 전체 쪽 수만 셈
+  static Future<bool> _renderFirstPage(String path, String? outPath) async {
     final lower = path.toLowerCase();
     final bool isDocx = lower.endsWith('.docx');
     final bool isDoc = lower.endsWith('.doc');
     final bool isWord = isDocx || isDoc;
     final bool isSlides = lower.endsWith('.pptx') || lower.endsWith('.ppt');
-    final String entry = '$_origin/assets/flutter_assets/assets/${isSlides ? 'ppt' : isWord ? 'docx' : 'hwp'}/index.html';
-    final String jsObject = isSlides ? 'freaderPpt' : isWord ? 'freaderDocx' : 'freaderHwp';
+    final String ext = lower.split('.').last;
+    final bool isSheet = ext == 'xlsx' || ext == 'xlsm' || ext == 'xls';
+    if (isSheet && outPath != null) return false;
+    final String entry = '$_origin/assets/flutter_assets/assets/${isSheet ? 'xlsx' : isSlides ? 'ppt' : isWord ? 'docx' : 'hwp'}/index.html';
+    final String jsObject = isSheet ? 'freaderXlsx' : isSlides ? 'freaderPpt' : isWord ? 'freaderDocx' : 'freaderHwp';
 
     final source = File(path);
     final int length = await source.length();
@@ -172,6 +187,7 @@ class DocThumbnailService {
       'progress': 0.0,
       if (isWord) 'format': isDoc ? 'doc' : 'docx',
       if (isSlides) 'format': lower.endsWith('.pptx') ? 'pptx' : 'ppt',
+      if (isSheet) 'format': ext,
       if (isDocx) 'docxLayout': docxLayout,
     };
 
@@ -213,7 +229,7 @@ class DocThumbnailService {
     Timer? fallbackCapture;
     var capturing = false;
     Future<void> capture() async {
-      if (capturing) return;
+      if (capturing || outPath == null) return;
       capturing = true;
       fallbackCapture?.cancel();
       // 글꼴·그림이 다 그려질 시간을 조금 준다 (글꼴이 늦게 오면 글자가 깨져 찍히므로 글꼴 준비도 기다림)
@@ -281,6 +297,12 @@ class DocThumbnailService {
                 unawaited(transfer());
                 break;
               case 'loaded':
+                final pages = event['pageCount'];
+                if (pages is num && pages > 0) _pageCounts[path] = pages.toInt();
+                if (outPath == null) {
+                  if (!result.isCompleted) result.complete(true);
+                  break;
+                }
                 // 쪽(슬라이드) 안 그림까지 다 그려졌다는 알림(pageReady)을 기다린다 (늦으면 그냥 찍음)
                 fallbackCapture ??= Timer(Duration(seconds: isSlides ? 4 : 8), () => unawaited(capture()));
                 break;

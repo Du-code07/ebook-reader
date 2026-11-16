@@ -123,6 +123,37 @@ class HwpReaderController {
     return out;
   }
 
+  /// 화면에 놓인 쪽 자리들 (문서 순서대로, 두 쪽 보기의 빈 자리 포함). 모르면 빈 목록
+  Future<List<DocPageSlot>> pageSlots() async {
+    final r = await _query?.call('pageRect', []);
+    if (r is! Map || r['layout'] is! List) return const [];
+    double v(Object? x) => (x as num?)?.toDouble() ?? 0;
+    return [
+      for (final f in r['layout'] as List)
+        if (f is Map)
+          DocPageSlot(
+            frame: Rect.fromLTWH(v(f['x']), v(f['y']), v(f['w']), v(f['h'])),
+            page: Rect.fromLTWH(v(f['px']), v(f['py']), v(f['pw']), v(f['ph'])),
+            box: Rect.fromLTWH(v(f['bx']), v(f['by']), v(f['bw']), v(f['bh'])),
+            real: f['real'] != false,
+          ),
+    ];
+  }
+
+  /// 모든 쪽의 크기 [너비, 높이] (문서 단위). 모르면 null
+  Future<List<Size>?> pageSizes() async {
+    try {
+      final r = await _query?.call('pageSizes', []);
+      if (r is! List || r.isEmpty) return null;
+      return [
+        for (final e in r)
+          if (e is List && e.length >= 2) Size((e[0] as num?)?.toDouble() ?? 0, (e[1] as num?)?.toDouble() ?? 0) else Size.zero,
+      ];
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 앱에서 고른 글에 형광펜 (화면 크기 대비 0~1 네모들)
   Future<void> highlightBoxes(List<Rect> boxes) async {
     await _invoke?.call('highlightBoxes', [
@@ -762,4 +793,21 @@ class _ModeEagerRecognizer extends OneSequenceGestureRecognizer {
 
   @override
   void handleEvent(PointerEvent event) {}
+}
+
+/// 화면에 놓인 쪽 하나의 자리 (화면 크기 대비 0~1)
+class DocPageSlot {
+  const DocPageSlot({required this.frame, required this.page, required this.box, required this.real});
+
+  /// 보이는 자리 (여백을 줄이면 쪽보다 작음)
+  final Rect frame;
+
+  /// 쪽 전체 자리 (잘려 안 보이는 여백까지) — 메모를 쪽에 붙이는 기준
+  final Rect page;
+
+  /// 여백 줄이기 네모 (쪽 대비 0~1)
+  final Rect box;
+
+  /// 실제 쪽인지 (두 쪽 보기의 홀수 마지막 쪽 옆 빈 자리는 false)
+  final bool real;
 }

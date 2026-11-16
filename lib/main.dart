@@ -32,6 +32,7 @@ import 'services/system_bars.dart';
 import 'services/user_fonts.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart' show EpubBookServer;
 import 'services/doc_thumbnail_service.dart';
+import 'services/page_count_service.dart';
 import 'widgets/pop_dialog.dart';
 
 /// 상태표시줄 본래 높이(기기 픽셀). 태블릿에서 상단바를 이 높이에 맞춰 항상 내려 둔다
@@ -1445,6 +1446,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         if (!_globalThumbMemoryCache.containsKey(f.path) || _wantsSharpDocThumb(f.path)) {
           _ensureBookThumbnail(f, thumbDir.path);
         }
+      }
+      // 열어 보지 않은 파일도 전체 쪽 수를 세어 '(1/전체)'로 (한 번 세면 저장해 두고 다시 세지 않음)
+      for (final f in files) {
+        if (pageMap.containsKey(f.path)) continue;
+        PageCountService.ensureLabel(f.path).then((lbl) {
+          if (lbl != null && mounted) setState(() => _bookPageLabelMap[f.path] = lbl);
+        });
       }
     }
   }
@@ -3409,7 +3417,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Widget _favPop(String path, Widget child, {bool slide = false}) =>
       _FavoritePop(shrinking: _favShrinking.contains(path), growAt: _favGrowAt[path], slide: slide, child: child);
 
-  /// 파일 목록에 보여 줄 마지막으로 읽은 쪽 (예: (6/983)), 연 적 없으면 빈 문자열
+  /// 파일 목록에 보여 줄 쪽 (예: (6/983)) — 읽던 쪽, 연 적 없으면 (1/전체), 아직 못 셌으면 빈 문자열
   String _pageLabelText(String path) {
     final lbl = _bookPageLabelMap[path];
     return lbl == null ? '' : '($lbl)';

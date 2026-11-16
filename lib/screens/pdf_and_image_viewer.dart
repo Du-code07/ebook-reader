@@ -881,7 +881,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     // 필기 및 메모 데이터 비동기 로드
-    if (mounted) await _loadMemoStrokes(_isSpreadActive(context));
+    if (mounted) await _loadMemoStrokes();
     for (int i = 0; i < _imagePages.length; i++) {
       final note = await StorageService.getPageMemoNote(_bookKey, i);
       if (note.isNotEmpty) {
@@ -1369,17 +1369,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     return [firstPage, if (firstPage + 1 < _totalPages) firstPage + 1];
   }
 
-  // 지금 보여 주는 메모가 두 쪽 보기 것인지 (보기 방식이 바뀌면 그 보기의 메모로 바꿈)
-  bool? _memoSpreadLoaded;
+  // 메모는 쪽마다 하나 (한 쪽·두 쪽 보기, 가로·세로 어디서 보든 같은 메모)
   int _memoLoadSeq = 0;
-  bool get _memoSpread => _isSpreadActive(context);
 
-  Future<void> _loadMemoStrokes(bool spread) async {
+  Future<void> _loadMemoStrokes() async {
     final int seq = ++_memoLoadSeq;
-    _memoSpreadLoaded = spread;
     final Map<int, List<MemoStroke>> next = {};
     for (int i = 0; i < _imagePages.length; i++) {
-      final strokes = await StorageService.getPageMemoStrokes(_bookKey, i, spread: spread);
+      final strokes = await StorageService.getPageMemoStrokes(_bookKey, i);
       if (strokes.isNotEmpty) next[i] = strokes;
     }
     if (!mounted || seq != _memoLoadSeq) return;
@@ -1391,17 +1388,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     });
   }
 
-  void _syncMemoSpread() {
-    final loaded = _memoSpreadLoaded;
-    if (loaded == null || _imagePages.isEmpty) return;
-    final bool now = _memoSpread;
-    if (now == loaded) return;
-    _memoSpreadLoaded = now;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _loadMemoStrokes(now);
-    });
-  }
-
   Future<void> _applyMemoStrokes(int page, List<MemoStroke> strokes) async {
     setState(() {
       if (strokes.isEmpty) {
@@ -1410,7 +1396,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         _memoStrokesByPage[page] = List<MemoStroke>.of(strokes);
       }
     });
-    await StorageService.savePageMemoStrokes(_bookKey, page, strokes, spread: _memoSpread);
+    await StorageService.savePageMemoStrokes(_bookKey, page, strokes);
   }
 
   Future<void> _undoMemo() async {
@@ -1495,12 +1481,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               _memoStrokesByPage.remove(secondPage);
             }
           });
-          await StorageService.savePageMemoStrokes(_bookKey, _currentPage, [], spread: isSpreadNow);
+          await StorageService.savePageMemoStrokes(_bookKey, _currentPage, []);
           if (firstPage != _currentPage) {
-            await StorageService.savePageMemoStrokes(_bookKey, firstPage, [], spread: isSpreadNow);
+            await StorageService.savePageMemoStrokes(_bookKey, firstPage, []);
           }
           if (isSpreadNow && secondPage < _totalPages) {
-            await StorageService.savePageMemoStrokes(_bookKey, secondPage, [], spread: isSpreadNow);
+            await StorageService.savePageMemoStrokes(_bookKey, secondPage, []);
           }
         },
       ),
@@ -2351,7 +2337,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     if (useEraser) {
                       _finishEraseHistory(pageIndex);
                       final list = _memoStrokesByPage[pageIndex] ?? [];
-                      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list, spread: _memoSpread);
+                      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
                     } else if (_activeStrokePoints.isNotEmpty &&
                         drawWidth > 0 &&
                         drawHeight > 0) {
@@ -2372,7 +2358,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         _memoStrokesByPage[pageIndex] = list;
                         _activeStrokePoints.clear();
                       });
-                      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list, spread: _memoSpread);
+                      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
                     }
                   },
                   onStylusCancel: (_) async {
@@ -2380,7 +2366,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     _finishEraseHistory(pageIndex);
                     setState(() => _activeStrokePoints.clear());
                     final list = _memoStrokesByPage[pageIndex] ?? [];
-                    await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list, spread: _memoSpread);
+                    await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
                   },
                   child: RepaintBoundary(
                     child: CustomPaint(
@@ -3007,7 +2993,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   Widget build(BuildContext context) {
-    _syncMemoSpread(); // 보기 방식(한 쪽/두 쪽)이 바뀌면 그 보기의 메모로
     _syncShakeListening();
     // 메뉴를 띄운 동안에는 상태표시줄도 함께 보임
     SystemBars.viewerStatus(_showControls && !_isTouchLocked);

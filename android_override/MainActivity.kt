@@ -686,6 +686,22 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         runOnUiThread { result.success(emptyList<Any>()) }
                     }
                 }
+            } else if (call.method == "pdfPageCount") {
+                // 서재: 열지 않은 PDF의 전체 쪽 수
+                val filePath = call.argument<String>("filePath")
+                if (filePath == null) {
+                    result.success(null)
+                    return@setMethodCallHandler
+                }
+                Thread {
+                    var count: Int? = null
+                    try {
+                        ParcelFileDescriptor.open(File(filePath), ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                            PdfRenderer(pfd).use { count = it.pageCount }
+                        }
+                    } catch (_: Throwable) {}
+                    runOnUiThread { result.success(count) }
+                }.start()
             } else if (call.method == "renderPdfFirstPageThumbnail") {
                 val pdfPath = call.argument<String>("pdfPath") ?: call.argument<String>("filePath")
                 val thumbPath = call.argument<String>("thumbPath") ?: call.argument<String>("outPath")
