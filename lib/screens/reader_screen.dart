@@ -122,7 +122,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final EpubController _epubController = EpubController();
 
-  // ── TXT / 워드(DOC·DOCX) / 한글(HWP·HWPX): EPUB과 같은 화면·북마크를 쓰고 본문만 각자의 뷰어로 표시 (메모는 문서만) ──
+  // ── TXT / 워드(DOC·DOCX) / 한글(HWP·HWPX): EPUB과 같은 화면·메모·북마크를 쓰고 본문만 각자의 뷰어로 표시 ──
   final HwpReaderController _hwpController = HwpReaderController(); // DOC·DOCX·HWP·HWPX (WebView)
   final TxtPageController _txtController = TxtPageController(); // TXT (종이 쪽 단위)
   final GlobalKey _txtCaptureKey = GlobalKey(); // TXT 화면 그림 (책처럼 넘기기)용
@@ -309,10 +309,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _memoSyncQueued = false;
   // 문서(워드·한글·PPT) 지금 화면에 놓인 쪽 네모들 (보는 곳 대비 0~1). 메모·책갈피를 쪽에 붙임
   List<Rect>? _pageFracs;
+  Size? _fracsStage; // [_pageFracs]를 잴 때의 책 화면 크기
   int _framesSeq = 0;
   Size? _framesForSize;
   Timer? _framesTimer;
   final GlobalKey _memoLayerKey = GlobalKey();
+  // 지금 쪽 메모를 불러오는 중 (넘기는 종이 그림에 메모를 넣기 전에 기다림)
+  Future<List<MemoStroke>>? _memoLoading;
   List<MemoStroke> _memoStrokes = [];
   final List<Offset> _activeStrokePoints = [];
   Color _penColor = kMemoPenColors.first; // 기본: 빨강
@@ -778,9 +781,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final eraserType = await StorageService.getMemoEraserType();
     final spenTurn = await StorageService.getUseSpenTurn();
 
-    // 문서(TXT·워드·한글)는 저장된 위치(예: txt:12) 자체가 그 쪽의 메모 열쇠 (EPUB은 메모 없음)
-    final String? initLocKey = (_isOfflineDocument && savedCfi != null && savedCfi.isNotEmpty) ? savedCfi : null;
-    final List<MemoStroke> strokes = initLocKey == null ? <MemoStroke>[] : await StorageService.getLocationStrokes(widget.filePath, initLocKey);
+    // 문서(TXT·워드·한글)는 저장된 위치(예: txt:12) 자체가 그 쪽의 메모 열쇠, EPUB은 CFI(없으면 진행률)
+    final String initLocKey = (_isOfflineDocument && savedCfi != null && savedCfi.isNotEmpty)
+        ? savedCfi
+        : _computeLocationKey(savedCfi, savedProg);
+    final List<MemoStroke> strokes = await StorageService.getLocationStrokes(widget.filePath, initLocKey);
     final loadedBookmarks = await StorageService.getBookmarks(widget.filePath);
 
     _bindHardwareButtons();
@@ -792,10 +797,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _currentCfi = savedCfi;
       _progress = savedProg.clamp(0.0, 1.0).toDouble();
       _initialProgress = _progress;
-      if (initLocKey != null) {
-        _currentPageLocationKey = initLocKey;
-        _memoBase = initLocKey;
-      }
+      _currentPageLocationKey = initLocKey;
+      _memoBase = initLocKey;
       _pageDisplay = pageDisplay;
       _toolbarStyle = toolbarStyle;
       _epubFont = epubFont;
@@ -1199,7 +1202,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     await StorageService.savePageLabel(widget.filePath, _progressPageLabel());
     if (_isSpreadsheet) return; // No page-anchored drawing layer over the live grid.
     final int seq = ++_memoLoadSeq;
-    final strokes = await StorageService.getLocationStrokes(widget.filePath, memoKey);
+    final Future<List<MemoStroke>> load = StorageService.getLocationStrokes(widget.filePath, memoKey);
+    _memoLoading = load;
+    final strokes = await load;
     if (mounted && relocation == _docRelocation && seq == _memoLoadSeq && memoKey == _currentPageLocationKey) setState(() => _memoStrokes = strokes);
   }
 
@@ -2006,8 +2011,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ),
                   ],
                 ),
-                // EPUB은 메모가 없어 메모 도구 모음 위치도 보이지 않음
-                if (!_isEpub) ...[
                 const SizedBox(height: 26),
                 _settingsHeader(Icons.draw_outlined, _tr('메모 도구 모음 위치', 'Memo Toolbar Position', '笔记工具栏位置', 'メモツールバーの位置')),
                 const SizedBox(height: 8),
@@ -2030,7 +2033,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       ),
                   ],
                 ),
-                ],
                 const SizedBox(height: 26),
                 _settingsHeader(Icons.view_week_outlined, _tr('도구 모음 형태', 'Toolbox Style', '工具箱样式', 'ツールボックスの形')),
                 const SizedBox(height: 8),
@@ -2713,12 +2715,28 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       await SchedulerBinding.instance.endOfFrame;
     }
     final t = target.getTranslation();
+    if (cover) {
+      // 확대: 덮개 밑에서 먼저 되돌리는 변환을 걸어 문서 화면(WebView)을 화면 크기 그대로 둔 뒤에 문서를 확대해 그림.
+      // (거꾸로 하면 WebView가 확대된 채 화면에 보이는 한 귀퉁이만 보이는 곳으로 알고 그곳만 그려,
+      //  덮개를 걷었을 때 나머지 자리의 글자가 빠져 보임)
+      setState(() => _docBaked = target);
+      await SchedulerBinding.instance.endOfFrame;
+      if (!mounted || seq != _bakeSeq) return;
+      await _hwpController.setView(target.getMaxScaleOnAxis(), t.x, t.y);
+      try {
+        await _pdfChannel.invokeMethod('webVisualReady').timeout(const Duration(milliseconds: 700));
+      } catch (_) {}
+      await SchedulerBinding.instance.endOfFrame;
+      if (!mounted || seq != _bakeSeq) return;
+      _hideZoomCover();
+      return;
+    }
+    // 원래 크기로 돌아갈 때(덮개 없음): 문서를 먼저 원래대로 그린 뒤 되돌리는 변환을 풂
     await _hwpController.setView(target.getMaxScaleOnAxis(), t.x, t.y);
     try {
       await _pdfChannel.invokeMethod('webVisualReady').timeout(const Duration(milliseconds: 700));
     } catch (_) {}
     if (!mounted || seq != _bakeSeq) return;
-    // 문서 화면이 새 배율로 그려진 뒤, 되돌리는 변환을 걸면서 같은 순간에 덮개를 걷음
     final ui.Image? old = _zoomCoverImg;
     setState(() {
       _docBaked = target;
@@ -2975,6 +2993,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       final shot = await _screenShot();
       if (shot != null) return shot;
     }
+    // 아래 방법들은 문서 화면만 찍혀 그 위에 그린 메모·책갈피가 빠짐 → 같은 자리에 그려 넣음
+    final ui.Image? img = await _captureBookOnly();
+    return img == null ? null : _withPageMarks(img);
+  }
+
+  Future<ui.Image?> _captureBookOnly() async {
     // 워드·한글·EPUB: 문서 화면의 화소를 압축 없이 그대로 받음 (빠르고, 종이 질감 위의 투명한 곳도 살아 있음)
     if (!_isTxt) {
       final raw = await _rawWebViewShot();
@@ -2994,6 +3018,35 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       } catch (_) {}
     }
     return _snapshotScreenFallback();
+  }
+
+  /// 책 화면 그림에 지금 쪽의 메모와 책갈피를 화면과 같은 자리에 그려 넣음
+  /// (넘기는 종이에 메모가 찍혔다 안 찍혔다 하지 않게: 쪽을 막 넘겼으면 그 쪽 메모를 다 불러올 때까지 잠깐 기다림)
+  Future<ui.Image> _withPageMarks(ui.Image img) async {
+    try {
+      await _memoLoading?.timeout(const Duration(milliseconds: 350));
+    } catch (_) {}
+    if (!mounted) return img;
+    final stageBox = _book.layerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (stageBox == null || !stageBox.hasSize || stageBox.size.isEmpty) return img;
+    final Size stage = stageBox.size;
+    final List<MemoStroke> strokes = _memoStrokes;
+    final bool ribbon = _isCurrentPageBookmarked && _epubZoomScale <= 1.03;
+    if (strokes.isEmpty && !ribbon) return img;
+    final rec = ui.PictureRecorder();
+    final canvas = Canvas(rec);
+    canvas.drawImage(img, Offset.zero, Paint());
+    canvas.scale(img.width / stage.width, img.height / stage.height);
+    if (strokes.isNotEmpty) {
+      _MemoPainter(strokes: strokes, currentPoints: const [], currentColor: _penColor, currentWidth: _penWidth, anchor: _memoAnchor(stage)).paint(canvas, stage);
+    }
+    if (ribbon) {
+      final Rect page = _ribbonPage(stage);
+      paintBookmarkRibbon(canvas, Offset(page.left + math.min(18.0, page.width * 0.05), page.top));
+    }
+    final ui.Image out = await rec.endRecording().toImage(img.width, img.height);
+    img.dispose();
+    return out;
   }
 
   /// 마지막 방법: 지금 화면 그림 (TXT는 화면 그림, 그 밖은 책 화면을 직접 그림으로)
@@ -3064,22 +3117,30 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 본문 + 책처럼 넘기기 막 + (워드·한글) 글 고르기 막
+  // EPUB 메모 자리 이름: 쪽 첫 CFI (없으면 진행률)
+  String _computeLocationKey(String? cfi, double prog) {
+    if (cfi != null && cfi.trim().isNotEmpty) {
+      return cfi.trim();
+    }
+    return 'prog_${(prog * 1000).round()}';
+  }
+
   /// 메모를 쪽에 붙이는 문서 (워드·한글·PPT 넘겨 보기)
   bool get _memoPageAnchored => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_pageModeScroll;
 
-  /// 메모 저장 이름: 쪽 위치 + 두 쪽 보기('|2p') + (TXT는 글이 다시 흐르므로) 가로 화면('|L')
+  /// 메모 저장 이름: 쪽 위치 + 두 쪽 보기('|2p') + (EPUB·TXT는 글이 다시 흐르므로) 가로 화면('|L')
   String _memoKeyFor(String base) {
     if (!mounted) return base;
     final size = MediaQuery.sizeOf(context);
     String k = base;
     if (!_pageModeScroll && _bookmarkSpreadNow) k += '|2p';
-    if (_isTxt && size.width > size.height) k += '|L';
+    if ((_isEpub || _isTxt) && size.width > size.height) k += '|L';
     return k;
   }
 
   /// 보기 방식·화면 방향이 바뀌면 그 보기의 메모로 바꿔 보여 줌. 화면 크기가 바뀌면 쪽 네모도 다시 받음
   void _queueMemoSync() {
-    if (_memoSyncQueued || _isEpub) return; // EPUB은 메모 없음
+    if (_memoSyncQueued) return;
     _memoSyncQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _memoSyncQueued = false;
@@ -3088,7 +3149,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (_framesForSize != size && _memoPageAnchored) {
         _framesForSize = size;
         _framesTimer?.cancel();
-        _framesTimer = Timer(const Duration(milliseconds: 450), _refreshPageFrames);
+        _framesTimer = Timer(const Duration(milliseconds: 300), _refreshPageFrames);
       }
       final String k = _memoKeyFor(_memoBase);
       if (k == _currentPageLocationKey) return;
@@ -3112,14 +3173,43 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final int seq = ++_framesSeq;
     final f = await _hwpController.pageFrames().timeout(const Duration(milliseconds: 500), onTimeout: () => const <Rect>[]);
     if (!mounted || seq != _framesSeq || f.isEmpty) return;
-    setState(() => _pageFracs = f);
+    final stageBox = _book.layerKey.currentContext?.findRenderObject() as RenderBox?;
+    setState(() {
+      _pageFracs = f;
+      _fracsStage = stageBox != null && stageBox.hasSize ? stageBox.size : null;
+    });
+  }
+
+  /// 책 화면 크기 [stage]에서의 쪽 네모들 (0~1). 화면을 돌려 크기가 바뀌었으면 문서가 다시 재 주기를 기다리지 않고
+  /// 문서와 같은 규칙(쪽 비율 그대로 화면에 꽉 차게, 가운데, 쪽 사이 8/3)으로 바로 계산 → 메모·책갈피가 늦게 따라오지 않음
+  List<Rect>? _fracsFor(Size stage) {
+    final f = _pageFracs, old = _fracsStage;
+    if (f == null || f.isEmpty) return null;
+    if (old == null || old.isEmpty || ((old.width - stage.width).abs() < 0.5 && (old.height - stage.height).abs() < 0.5)) return f;
+    const double gap = 8 / 3;
+    final int n = f.length;
+    final List<int> order = List<int>.generate(n, (i) => i)..sort((a, b) => f[a].left.compareTo(f[b].left));
+    final List<double> w = [for (final r in f) r.width * old.width], h = [for (final r in f) r.height * old.height];
+    final double sumW = w.fold(0.0, (a, b) => a + b), maxH = h.reduce(math.max);
+    if (sumW <= 0 || maxH <= 0) return null;
+    // 예전 화면에서 쪽이 차지하던 비율 (가장자리를 살짝 띄우는 문서는 1보다 조금 작음)
+    final double pad = math.min(1.0, math.max(sumW / math.max(1.0, old.width - (n - 1) * gap), maxH / old.height));
+    final double k = math.min(math.max(1.0, stage.width - (n - 1) * gap) * pad / sumW, stage.height * pad / maxH);
+    double x = (stage.width - (sumW * k + (n - 1) * gap)) / 2;
+    final List<Rect> out = List<Rect>.filled(n, Rect.zero);
+    for (final i in order) {
+      final double ww = w[i] * k, hh = h[i] * k;
+      out[i] = Rect.fromLTWH(x / stage.width, (stage.height - hh) / 2 / stage.height, ww / stage.width, hh / stage.height);
+      x += ww + gap;
+    }
+    return out;
   }
 
   /// 메모 좌표 기준 네모 (책 화면 안 좌표): 문서는 지금 쪽 (두 쪽 보기면 두 쪽을 합친 네모), 그 밖은 책 화면 전체.
   /// 확대·이동한 만큼 함께 옮김 (삼성 노트처럼 메모가 쪽에 붙어 같이 커지고 움직임)
   Rect _memoAnchor(Size stage) {
     Rect a = Offset.zero & stage;
-    final f = _pageFracs;
+    final f = _memoPageAnchored ? _fracsFor(stage) : null;
     if (_memoPageAnchored && f != null && f.isNotEmpty) {
       Rect u = f.first;
       if (_bookmarkSpreadNow) {
@@ -3150,9 +3240,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// 책갈피를 다는 쪽 (책 화면 안 좌표): 문서는 왼쪽 쪽, 그 밖은 책 화면
   Rect _ribbonPage(Size stage) {
-    final f = _pageFracs;
-    if (_isOfflineDocument && !_isTxt && !_pageModeScroll && f != null && f.isNotEmpty) {
-      final r = f.first;
+    final f = (_isOfflineDocument && !_isTxt && !_pageModeScroll) ? _fracsFor(stage) : null;
+    if (f != null && f.isNotEmpty) {
+      final r = f.reduce((a, b) => a.left <= b.left ? a : b); // 화면 왼쪽 쪽 (우→좌 읽기여도)
       return Rect.fromLTWH(r.left * stage.width, r.top * stage.height, r.width * stage.width, r.height * stage.height);
     }
     return Offset.zero & stage;
@@ -3193,8 +3283,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               child: LayoutBuilder(builder: (context, box) {
                 final Rect page = _ribbonPage(box.biggest);
                 return Stack(clipBehavior: Clip.none, children: [
-                  // 쪽 테두리에 걸치게 (위로 살짝 나옴)
-                  Positioned(left: page.left + math.min(18.0, page.width * 0.05), top: page.top - 5, child: const BookmarkRibbon()),
+                  // 쪽 테두리 안쪽 (테두리 위로 넘어가지 않게)
+                  Positioned(left: page.left + math.min(18.0, page.width * 0.05), top: page.top, child: const BookmarkRibbon()),
                 ]);
               }),
             ),
@@ -3830,6 +3920,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     data: SliderTheme.of(context).copyWith(
                       // 라이트·편안한 모드: 게이지(지나온 부분)는 시그니처 색
                       activeTrackColor: Theme.of(context).brightness == Brightness.light ? AppColors.signature : null,
+                      thumbColor: Theme.of(context).brightness == Brightness.light ? AppColors.signatureDeep : null,
                       trackHeight: 2.8,
                       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
                       overlayShape: const RoundSliderOverlayShape(overlayRadius: 11.0),
@@ -3908,6 +3999,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     data: SliderTheme.of(context).copyWith(
                       // 라이트·편안한 모드: 게이지(지나온 부분)는 시그니처 색
                       activeTrackColor: Theme.of(context).brightness == Brightness.light ? AppColors.signature : null,
+                      thumbColor: Theme.of(context).brightness == Brightness.light ? AppColors.signatureDeep : null,
                       trackHeight: 2.8,
                       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
                       overlayShape: const RoundSliderOverlayShape(overlayRadius: 11.0),
@@ -4146,8 +4238,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           }
         },
       ),
-      // 메모는 문서의 쪽 넘김(탭·슬라이드) 보기에서만 (스크롤 보기·EPUB은 없음)
-      if (!_pageModeScroll && !_isEpub)
+      // 메모는 쪽 넘김(탭·슬라이드) 보기에서만 (스크롤 보기에서는 끔)
+      if (!_pageModeScroll)
       QuickArcMenuItem(
         icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
@@ -4457,7 +4549,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ? EdgeInsets.zero
                     : EdgeInsets.only(
                         // EPUB·TXT: 글이 상단바에 가리지 않도록 상단바 높이보다 살짝 아래에서 시작
-                        top: (_isEpub || _isTxt) ? _readerTextTop : 12.0,
+                        // 쪽이 있는 문서(워드·한글·PPT): 쪽 위아래 빈 곳이 같도록 위 여백을 아래와 같게
+                        top: (_isEpub || _isTxt)
+                            ? _readerTextTop
+                            : (_isSpreadsheet ? 12.0 : (bottomPadding > 0 ? bottomPadding : 8.0) + 20.0),
                         bottom: (bottomPadding > 0 ? bottomPadding : 8.0) + 20.0,
                       ),
                 child: IgnorePointer(
@@ -4656,16 +4751,27 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       _epubAtStart = value.atStart;
                       _epubAtEnd = value.atEnd;
                       final double clampedProg = value.progress.clamp(0.0, 1.0).toDouble();
+                      final String newLocKey = _computeLocationKey(value.startCfi, clampedProg);
 
                       StorageService.saveLastPosition(widget.filePath, value.startCfi);
                       StorageService.saveProgress(widget.filePath, clampedProg);
                       StorageService.savePageLabel(widget.filePath, _progressPageLabel(clampedProg));
 
-                      if (mounted) {
+                      // 3. 페이지 이동 시 해당 페이지(CFI)에 저장된 필기만 불러와서 표시 (보기 방식·화면 방향별)
+                      final String memoKey = _memoKeyFor(newLocKey);
+                      final int memoSeq = ++_memoLoadSeq;
+                      final Future<List<MemoStroke>> load = StorageService.getLocationStrokes(widget.filePath, memoKey);
+                      _memoLoading = load;
+                      final pageStrokes = await load;
+                      if (mounted && memoSeq == _memoLoadSeq) {
                         setState(() {
                           _epubSinglePage = _chapters.length <= 1 && value.chapterTotalPages == 1;
                           _epubLocated = true;
                           _progress = clampedProg;
+                          _memoBase = newLocKey;
+                          _currentPageLocationKey = memoKey;
+                          _memoStrokes = pageStrokes;
+                          _activeStrokePoints.clear();
                         });
                       }
                     },

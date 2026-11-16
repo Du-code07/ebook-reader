@@ -2247,7 +2247,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
         return Stack(
           fit: StackFit.expand,
-          clipBehavior: Clip.none, // 책갈피가 쪽 위로 살짝 나오게
           children: [
             RepaintBoundary(
               child: Padding(
@@ -2277,9 +2276,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             // 파일 내 단어 검색: 찾은 곳 형광펜
             ?_findMarks(pageIndex, drawLeft, drawTop, drawWidth, drawHeight),
             // 북마크한 쪽: 쪽 왼쪽 위에 책갈피 (두 쪽 보기는 화면 왼쪽 쪽에만)
-            // (쪽 테두리에 걸치게 위로 살짝 나오고, 확대하면 잠시 숨김)
+            // (쪽 테두리 안쪽에 두고, 확대하면 잠시 숨김)
             if (spreadSide != 1 && _currentZoomScale <= 1.03 && _isBookmarkedAt(spreadSide == 0 ? pageIndex : (pageIndex ~/ 2) * 2, spreadSide != 0))
-              Positioned(left: drawLeft + math.min(18.0, drawWidth * 0.05), top: drawTop - 5, child: const BookmarkRibbon()),
+              Positioned(left: drawLeft + math.min(18.0, drawWidth * 0.05), top: drawTop, child: const BookmarkRibbon()),
             // 1. S펜 필기 레이어: EagerStylusPanGestureRecognizer를 통해 S펜이 닿는 즉시 제스처 아레나를 독점하여
             // S펜으로 필기할 때 화면이 같이 움직이거나 페이지가 넘어가는 현상을 100% 차단! (손가락 스와이프로는 페이지 이동 가능)
             if (_isMemoMode)
@@ -2622,6 +2621,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     data: SliderTheme.of(context).copyWith(
                       // 라이트·편안한 모드: 게이지(지나온 부분)는 시그니처 색
                       activeTrackColor: Theme.of(context).brightness == Brightness.light ? AppColors.signature : null,
+                      thumbColor: Theme.of(context).brightness == Brightness.light ? AppColors.signatureDeep : null,
                       trackHeight: 2.8,
                       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
                       overlayShape: const RoundSliderOverlayShape(overlayRadius: 11.0),
@@ -2697,6 +2697,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     data: SliderTheme.of(context).copyWith(
                       // 라이트·편안한 모드: 게이지(지나온 부분)는 시그니처 색
                       activeTrackColor: Theme.of(context).brightness == Brightness.light ? AppColors.signature : null,
+                      thumbColor: Theme.of(context).brightness == Brightness.light ? AppColors.signatureDeep : null,
                       trackHeight: 2.8,
                       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
                       overlayShape: const RoundSliderOverlayShape(overlayRadius: 11.0),

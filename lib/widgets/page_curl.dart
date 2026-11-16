@@ -732,7 +732,13 @@ class BookCurlPainter extends CustomPainter {
     final Rect full = Offset.zero & size;
     // 화면 그림의 맨 아래 한두 줄이 어둡게 찍히는 기기가 있어(아래 검은 줄) 살짝 잘라 씀
     Rect srcOf(ui.Image im) => Rect.fromLTWH(0, 0, im.width.toDouble(), math.max(1.0, im.height - 2.0));
+    // 잘라 낸 만큼 그리는 자리도 줄여 늘리지 않음 (조금이라도 늘이면 글씨가 흐려 보임)
+    Rect dstOf(ui.Image im) => Rect.fromLTWH(0, 0, size.width, size.height * math.max(1.0, im.height - 2.0) / im.height);
     final paint = Paint()..filterQuality = FilterQuality.medium;
+    // 반듯하게 놓이는 그림(아직 안 넘어간 부분·드러나는 쪽)은 화면 화소와 1:1이면 보간 없이 그려 글씨가 흐려지지 않게
+    final double dpr = ui.PlatformDispatcher.instance.views.isEmpty ? 1.0 : ui.PlatformDispatcher.instance.views.first.devicePixelRatio;
+    final Paint crisp = Paint()..filterQuality = FilterQuality.none;
+    Paint flat(ui.Image im) => (im.width - size.width * dpr).abs() < 2.5 ? crisp : paint;
     final Rect page = pp.page;
     // 넘어가는 종이(앞면)와 그 밑에서 드러나는 쪽
     final ui.Image? front = reverse ? after : image;
@@ -740,7 +746,7 @@ class BookCurlPainter extends CustomPainter {
     void drawFront(Canvas cv) {
       final f = front;
       if (f != null) {
-        cv.drawImageRect(f, srcOf(f), full, paint);
+        cv.drawImageRect(f, srcOf(f), dstOf(f), flat(f));
       } else {
         // 이전 쪽 그림이 아직 없음: 종이만
         cv.save();
@@ -755,7 +761,7 @@ class BookCurlPainter extends CustomPainter {
     final double len = v.distance;
     if (len < 0.5) {
       _ground(canvas, full);
-      if (reverse) canvas.drawImageRect(image, srcOf(image), full, paint);
+      if (reverse) canvas.drawImageRect(image, srcOf(image), dstOf(image), flat(image));
       drawFront(canvas);
       return;
     }
@@ -790,14 +796,14 @@ class BookCurlPainter extends CustomPainter {
     canvas.clipPath(rest);
     if (!reverse) {
       _ground(canvas, full);
-      canvas.drawImageRect(image, srcOf(image), full, paint);
+      canvas.drawImageRect(image, srcOf(image), dstOf(image), flat(image));
     } else {
       // 되돌아오기: 종이 밖 여백은 지금 화면 그대로, 종이 자리는 들어오는 이전 쪽
       // (실제 화면이 이미 이전 쪽으로 넘어가 다 그려졌으면 그대로 비쳐 보이게 비워 둠)
       canvas.save();
       canvas.clipPath(Path.combine(PathOperation.difference, Path()..addRect(full), Path()..addRect(page)));
       _ground(canvas, full);
-      canvas.drawImageRect(image, srcOf(image), full, paint);
+      canvas.drawImageRect(image, srcOf(image), dstOf(image), flat(image));
       canvas.restore();
       // 이전 쪽 그림이 있으면 그것을 (실제 화면이 바뀌는 순간의 깜빡임 없이), 없으면 다 그려진 실제 화면이 비치게
       if (!live || front != null) {
@@ -820,7 +826,7 @@ class BookCurlPainter extends CustomPainter {
         final na = revealed;
         if (na != null) {
           _ground(canvas, full); // 종이 질감(세피아): 새 쪽 그림의 투명한 곳 밑에도 깔림
-          canvas.drawImageRect(na, srcOf(na), full, paint);
+          canvas.drawImageRect(na, srcOf(na), dstOf(na), flat(na));
         } else {
           // 새 쪽이 아직 그려지는 중: 빈 종이 (문서는 흰 종이, EPUB은 보는 바탕색·종이 질감)
           _backBase(canvas, full);
@@ -853,13 +859,13 @@ class BookCurlPainter extends CustomPainter {
         ..[15] = 1;
       canvas.transform(mirror);
       _ground(canvas, full);
-      canvas.drawImageRect(a, srcOf(a), full, paint);
+      canvas.drawImageRect(a, srcOf(a), dstOf(a), paint);
     } else {
       // 한 쪽 보기 종이 뒷면: 흰 종이(또는 세피아 종이 질감) 위로 앞면 글자가 흐리게 비침
       _backBase(canvas, full);
       final f = front;
       if (f != null) {
-        canvas.drawImageRect(f, srcOf(f), full, Paint()
+        canvas.drawImageRect(f, srcOf(f), dstOf(f), Paint()
           ..filterQuality = FilterQuality.medium
           ..color = const Color(0x1F000000));
       }

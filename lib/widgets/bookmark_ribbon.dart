@@ -12,23 +12,29 @@ class BookmarkRibbon extends StatelessWidget {
 
 class _RibbonPainter extends CustomPainter {
   @override
-  void paint(Canvas canvas, Size size) {
-    final double w = size.width, h = size.height;
-    final path = Path()
-      ..moveTo(0, 0)
-      ..lineTo(w, 0)
-      ..lineTo(w, h)
-      ..lineTo(w / 2, h - w * 0.45)
-      ..lineTo(0, h)
-      ..close();
-    canvas.drawShadow(path, Colors.black, 1.5, false);
-    canvas.drawPath(path, Paint()..color = const Color(0xFFF2B01E));
-    // 끈 가운데 옅은 줄 (천 느낌)
-    canvas.drawLine(Offset(w / 2, 0), Offset(w / 2, h - w * 0.55), Paint()
-      ..color = const Color(0x33FFFFFF)
-      ..strokeWidth = 1.2);
-  }
+  void paint(Canvas canvas, Size size) => paintBookmarkRibbon(canvas, Offset.zero, size);
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// 책갈피를 [at](왼쪽 위)에 그림 (넘기는 종이 그림에도 같은 모양으로 넣을 때)
+void paintBookmarkRibbon(Canvas canvas, Offset at, [Size size = const Size(16, 28)]) {
+  final double w = size.width, h = size.height;
+  canvas.save();
+  canvas.translate(at.dx, at.dy);
+  final path = Path()
+    ..moveTo(0, 0)
+    ..lineTo(w, 0)
+    ..lineTo(w, h)
+    ..lineTo(w / 2, h - w * 0.45)
+    ..lineTo(0, h)
+    ..close();
+  canvas.drawShadow(path, Colors.black, 1.5, false);
+  canvas.drawPath(path, Paint()..color = const Color(0xFFF2B01E));
+  // 끈 가운데 옅은 줄 (천 느낌)
+  canvas.drawLine(Offset(w / 2, 0), Offset(w / 2, h - w * 0.55), Paint()
+    ..color = const Color(0x33FFFFFF)
+    ..strokeWidth = 1.2);
+  canvas.restore();
 }
