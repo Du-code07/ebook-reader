@@ -26,10 +26,10 @@ class _SplashOverlayState extends State<SplashOverlay> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    // 애니메이션 끄기를 켰으면 움직이지 않고 다 나온 모습으로 약 2초 보여 준 뒤 사라짐
+    // 애니메이션 끄기를 켰으면 움직이지 않고 다 나온 모습으로 약 1초 보여 준 뒤 사라짐
     if (Anim.off.value) {
       _c.value = 0.84;
-      Future<void>.delayed(const Duration(milliseconds: 2000), () {
+      Future<void>.delayed(const Duration(milliseconds: 1000), () {
         if (mounted) widget.onDone();
       });
       return;

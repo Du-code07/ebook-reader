@@ -485,6 +485,17 @@ class StorageService {
     return prefs.getString('epub_bg_theme') ?? 'white';
   }
 
+  /// 파일 안 테마 '편안한 모드' (EPUB 말고 워드·한글·TXT 등): 라이트 화면 위에 따뜻한 색을 덮음
+  static Future<void> setDocComfort(bool on) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('doc_comfort_theme', on);
+  }
+
+  static Future<bool> getDocComfort() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('doc_comfort_theme') ?? false;
+  }
+
   // 2. 가로 모드 2페이지 보기는 꺼짐(false)을 기본값으로 설정
   static Future<void> setTwoPageLandscape(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
@@ -594,17 +605,6 @@ class StorageService {
   static Future<void> setPageDisplay(String mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('page_display_v88', mode);
-  }
-
-  // 위로 밀어서 다음 페이지 / 아래로 밀어서 이전 페이지 (기본값: 켜짐)
-  static Future<void> setUseSwipeUpTurn(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('use_swipe_up_turn', enabled);
-  }
-
-  static Future<bool> getUseSwipeUpTurn() async {
-    // '위로 밀기'는 v88의 스크롤 모드로 바뀜 (더 쓰지 않음)
-    return false;
   }
 
   // 메모 지우개 종류: 'area'(닿은 부분만) / 'stroke'(닿은 획 전체)

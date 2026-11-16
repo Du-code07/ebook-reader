@@ -22,7 +22,6 @@ import '../widgets/ui_scale.dart';
 import '../widgets/sheet_pull_to_close.dart';
 import '../services/file_share.dart';
 import '../widgets/memo_tools.dart';
-import '../widgets/vertical_page_swipe.dart';
 import '../widgets/direction_arrow_icon.dart';
 import '../widgets/find_in_file_bar.dart';
 import 'reader_screen.dart';
@@ -269,17 +268,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _useVolumeComboLock = true;
 
   bool _useSwipeTurn = true;
-  bool _useSwipeUpTurn = false; // 기본값: 꺼짐
-
-  // 위/아래로 밀기: 손가락을 따라 페이지가 위·아래로 움직이며 넘어감
-  late final VerticalPageSwipe _vPageSwipe = VerticalPageSwipe(vsync: this);
-
-  bool _vSwipeEnabled(PointerEvent e) =>
-      _useSwipeUpTurn &&
-      !_isTouchLocked &&
-      !_textSel.active &&
-      _currentZoomScale <= 1.03 &&
-      !(_isMemoMode && (_allowFingerDrawing || isStylusPointer(e)));
 
   /// 한 번 넘기면 갈 쪽. 두 쪽 보기에서는 다음(이전) 두 쪽 묶음의 첫 쪽이고, 그런 묶음이 없으면 지금 쪽 그대로
   /// (예전: 2쪽짜리 파일에서 0쪽 → 1쪽으로 '넘어가' 같은 두 쪽을 한 번 더 넘겨 보여 줌)
@@ -792,7 +780,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _useVolumeTurn = await StorageService.getUseVolumeTurn();
       _useQuickNavTurn = await StorageService.getUseQuickNavTurn();
       _useSwipeTurn = await StorageService.getUseSwipeTurn() && !_pageModeScroll;
-      _useSwipeUpTurn = await StorageService.getUseSwipeUpTurn();
       _eraserType = await StorageService.getMemoEraserType();
       _useSpenTurn = await StorageService.getUseSpenTurn();
       _footerInfoMode = await StorageService.getFooterInfoMode();
@@ -1974,29 +1961,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  /// 위/아래로 미는 동안 지금 화면이 움직이는 만큼, 비는 자리에 다음(이전) 화면을 미리 보여준다
-  int? _vPreviewBaseView;
-
-  Widget _buildVerticalSwipeStage(BuildContext context, Widget pages, bool isSpread, int viewItemCount) {
-    final double off = _vPageSwipe.offset;
-    if (off == 0.0) _vPreviewBaseView = null;
-    final List<Widget> children = [Transform.translate(offset: Offset(0, off), child: RepaintBoundary(key: _curlKey, child: pages))];
-    if (off != 0.0) {
-      final int base = _vPreviewBaseView ??= isSpread ? _currentPage ~/ 2 : _currentPage;
-      final int dir = off < 0 ? 1 : -1;
-      final int target = base + dir;
-      if (target >= 0 && target < viewItemCount) {
-        final double h = MediaQuery.sizeOf(context).height;
-        children.add(
-          Transform.translate(
-            offset: Offset(0, off + (dir > 0 ? h : -h)),
-            child: IgnorePointer(
-              child: ColoredBox(color: _backdrop(context), child: _buildViewPageContent(target, isSpread)),
-            ),
-          ),
-        );
-      }
-    }
+  /// 쪽 화면 + 책처럼 넘기기 막 + 글 고르기 막
+  Widget _buildPageStage(BuildContext context, Widget pages) {
+    final List<Widget> children = [RepaintBoundary(key: _curlKey, child: pages)];
     children.add(Positioned.fill(child: BookCurlLayer(drag: _book, paper: _backdrop(context), backsideFromPaper: true /* 한 쪽 보기 종이 뒷면: 앱 테마와 상관없이 쪽의 종이 색(흰색·검은색·세피아) */)));
     // 길게 눌러 고른 글: 바탕·손잡이·[복사 | 모두 선택 | 공유] 막대
     children.add(Positioned.fill(child: SizedBox.expand(key: _textLayerKey, child: PageTextSelectLayer(sel: _textSel, tr: _tr))));
@@ -2128,7 +2095,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final start = _curlDownPos, t0 = _curlDownTime;
     if (start == null || t0 == null || _curlMulti || _book.busy) return;
     if (!_curlOn || _textSel.active) return;
-    if (_isTouchLocked || _currentZoomScale > 1.03 || _vPageSwipe.offset != 0) return;
+    if (_isTouchLocked || _currentZoomScale > 1.03) return;
     if (_isMemoMode && (e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus || _allowFingerDrawing)) return;
     final Offset d = e.position - start;
     // 옆으로 움직이기 시작하면 그때 지금 쪽을 찍어 둠 (그냥 누르기만 할 때는 찍지 않음)
@@ -2184,7 +2151,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       return;
     }
     if (start == null || t0 == null || _curlMulti || !_curlOn) return;
-    if (_isTouchLocked || _currentZoomScale > 1.03 || _vPageSwipe.offset != 0) return;
+    if (_isTouchLocked || _currentZoomScale > 1.03) return;
     if (_isMemoMode && (e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus || _allowFingerDrawing)) return;
     // 길게 누르기(글 고르기, 0.5초)와 겹치지 않게
     if (DateTime.now().difference(t0).inMilliseconds > 450) return;
@@ -2741,7 +2708,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     ComfortTint.viewerClosed();
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     SystemBars.leaveViewer();
-    _vPageSwipe.dispose();
     _book.dispose();
     _textSel.dispose();
     if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
@@ -2979,7 +2945,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               child: Listener(
                 behavior: HitTestBehavior.translucent,
                 onPointerDown: (event) {
-                  _vPageSwipe.down(event);
                   _curlTrackDown(event); // (손가락 목록에 넣기 전에 확인)
                   if (event.kind == PointerDeviceKind.touch) {
                     if (_activeTouchPointerIds.isEmpty) _pinchSeen = false;
@@ -2999,24 +2964,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 },
                 onPointerMove: (event) {
                   _curlTrackMove(event);
-                  _vPageSwipe.move(
-                    event,
-                    enabled: _vSwipeEnabled(event),
-                    canTurn: _canStepPage,
-                  );
                 },
                 onPointerUp: (event) {
                   _curlTrackUp(event);
                   if (_activeTouchPointerIds.remove(event.pointer)) {
                     setState(() {});
                   }
-                  _vPageSwipe.up(
-                    event,
-                    height: MediaQuery.sizeOf(context).height,
-                    canTurn: _canStepPage,
-                    turnPage: _stepPageInstant,
-                    seamless: true,
-                  );
                   if (_isStylusDown &&
                       (event.kind == PointerDeviceKind.stylus ||
                           event.kind == PointerDeviceKind.invertedStylus)) {
@@ -3026,14 +2979,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 onPointerCancel: (event) {
                   if (_book.tracking) _book.end(cancel: true);
                   _curlDownPos = null;
-                  _vPageSwipe.up(
-                    event,
-                    height: MediaQuery.sizeOf(context).height,
-                    canTurn: _canStepPage,
-                    turnPage: _stepPageInstant,
-                    seamless: true,
-                    cancelled: true,
-                  );
                   if (_activeTouchPointerIds.remove(event.pointer)) {
                     setState(() {});
                   }
@@ -3060,12 +3005,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     final local = _textLocal(d.globalPosition);
                     if (local != null && _textSel.active) _textSel.extendTo(local);
                   } : null,
-                  // 위/아래로 밀 때 페이지 영역이 손가락을 따라 움직임
                   // 사진·PDF 쪽은 원래 크기·선명도 그대로 (앱 화면을 크게 보여 줄 때도)
-                  child: UiUnscale(child: _pageModeScroll ? _buildScrollPages() : AnimatedBuilder(
-                    animation: _vPageSwipe,
-                    builder: (context, child) => _buildVerticalSwipeStage(context, child!, isSpread, viewItemCount),
-                    child: PageView.builder(
+                  child: UiUnscale(child: _pageModeScroll ? _buildScrollPages() : _buildPageStage(context,
+                    PageView.builder(
                     key: ValueKey('pageview_spread_$isSpread'),
                     controller: _pageController,
                     reverse: _isMangaRtlMode,

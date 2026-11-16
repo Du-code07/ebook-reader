@@ -85,6 +85,9 @@ class ComfortTint {
   static const Color color = Color(0x1FFF9100);
   static bool on = false;
 
+  /// 파일 안 테마 '편안한 모드'로 파일을 보는 중 (파일 화면 위에 같은 색을 덮음)
+  static bool fileOn = false;
+
   /// 열려 있는 파일 보기 화면 수: 파일을 볼 때는 덮지 않음 (파일 색은 파일 테마대로)
   static final ValueNotifier<int> viewers = ValueNotifier<int>(0);
 
@@ -93,7 +96,7 @@ class ComfortTint {
   static void viewerClosed() => Future.microtask(() => viewers.value = math.max(0, viewers.value - 1));
 
   /// 화면 복사 때 걷어낼 색 (덮개가 보이지 않으면 0)
-  static int get untint => on && viewers.value == 0 ? color.toARGB32() : 0;
+  static int get untint => (on && viewers.value == 0) || fileOn ? color.toARGB32() : 0;
 }
 
 class Anim {

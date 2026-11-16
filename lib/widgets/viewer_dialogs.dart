@@ -100,8 +100,12 @@ Widget _choiceDialogBody<T>(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
             child: Stack(
               children: [
-                Column(
+                // 가로 배치: 아이콘·이름·설명을 카드 가운데에
+                SizedBox(
+                  width: double.infinity,
+                  child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     tile,
                     const SizedBox(height: 8),
@@ -109,6 +113,7 @@ Widget _choiceDialogBody<T>(
                     const SizedBox(height: 2),
                     Text(desc, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, height: 1.3, color: cs.onSurfaceVariant)),
                   ],
+                ),
                 ),
                 Positioned(top: 0, right: 0, child: check(on)),
               ],
@@ -1248,7 +1253,7 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
     final out = <Widget>[
       Positioned.fill(child: CustomPaint(painter: _ZoneFillPainter([for (int i = 0; i < 9; i++) fill(zones[i])]))),
     ];
-    // 이름표: 덩어리가 꽉 찬 네모면 가운데 하나, 아니면 칸마다
+    // 이름표는 덩어리마다 하나: 꽉 찬 네모면 그 가운데, 아니면 덩어리 한가운데에 가장 가까운 칸에
     for (int g = 0; g < groups; g++) {
       final cells = [for (int i = 0; i < 9; i++) if (group[i] == g) i];
       final Widget? lb = label(zones[cells.first]);
@@ -1256,12 +1261,20 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
       final int r0 = cells.map((i) => i ~/ 3).reduce(math.min), r1 = cells.map((i) => i ~/ 3).reduce(math.max);
       final int c0 = cells.map((i) => i % 3).reduce(math.min), c1 = cells.map((i) => i % 3).reduce(math.max);
       final bool rect = (r1 - r0 + 1) * (c1 - c0 + 1) == cells.length;
-      final rects = rect
-          ? [Rect.fromLTRB(c0 * cw, r0 * ch, (c1 + 1) * cw, (r1 + 1) * ch)]
-          : [for (final i in cells) Rect.fromLTWH((i % 3) * cw, (i ~/ 3) * ch, cw, ch)];
-      for (final rc in rects) {
-        out.add(Positioned.fromRect(rect: rc, child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: lb))));
+      Rect rc;
+      if (rect) {
+        rc = Rect.fromLTRB(c0 * cw, r0 * ch, (c1 + 1) * cw, (r1 + 1) * ch);
+      } else {
+        final double mr = cells.map((i) => (i ~/ 3).toDouble()).reduce((a, b) => a + b) / cells.length;
+        final double mc = cells.map((i) => (i % 3).toDouble()).reduce((a, b) => a + b) / cells.length;
+        double d2(int i) => math.pow(i ~/ 3 - mr, 2) + math.pow(i % 3 - mc, 2).toDouble();
+        int best = cells.first;
+        for (final i in cells) {
+          if (d2(i) < d2(best) - 1e-9) best = i;
+        }
+        rc = Rect.fromLTWH((best % 3) * cw, (best ~/ 3) * ch, cw, ch);
       }
+      out.add(Positioned.fromRect(rect: rc, child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: lb))));
     }
     // 뜻이 다른 칸 사이에만 선
     for (int i = 0; i < 9; i++) {

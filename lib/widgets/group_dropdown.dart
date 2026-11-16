@@ -184,19 +184,19 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
     final nameCtx = _nameKeys[g]?.currentContext ?? rowContext;
     // 편집 버튼은 그룹 목록 위가 아니라 목록 오른쪽 바깥에 놓음
     double? besideLeft;
+    final bool phone = MediaQuery.sizeOf(context).shortestSide < 600;
     final panelBox = _panelKey.currentContext?.findRenderObject() as RenderBox?;
     final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
     if (panelBox != null && panelBox.hasSize) {
       final Offset panelTL = panelBox.localToGlobal(Offset.zero, ancestor: overlayBox);
       // 휴대폰: 목록 안쪽으로 살짝 들어오게 (목록 너비의 56% 자리부터). 태블릿: 목록 오른쪽 바깥
-      final bool phone = MediaQuery.sizeOf(context).shortestSide < 600;
       besideLeft = phone ? panelTL.dx + panelBox.size.width * 0.56 : panelTL.dx + panelBox.size.width + 10;
     }
     if (!mounted) return;
     final action = await showScaleMenu<String>(nameCtx, [
       ('rename', r.renameLabel, Icons.edit_outlined, null),
       ('delete', r.deleteLabel, Icons.delete_outline, Colors.redAccent),
-    ], beside: true, besideLeft: besideLeft);
+    ], beside: true, besideLeft: besideLeft, overList: phone);
     if (!mounted || action == null) return;
     if (action == 'rename') {
       final name = await r.onRename(g);

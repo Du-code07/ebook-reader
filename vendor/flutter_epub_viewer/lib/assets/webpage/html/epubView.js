@@ -1001,6 +1001,8 @@ function renderBook(data, opts, loadToken) {
 
   //book location changes callback
   rendition.on("relocated", function (location) {
+    // FReader: 쪽 넘기기(탭·슬라이드) 보기에서도 첫/마지막 장인지 앱에 알림 ('이전 챕터 / 다음 챕터' 단추)
+    if (!rendition.settings || rendition.settings.flow !== 'scrolled-doc') freaderReportChapterEnds(location);
     // BLOCK navigation if there's an active selection
     // This is a final safeguard - if something bypassed our other blocks, prevent the navigation
     // BUT: Don't block if the user is actively dragging selection handles (isSelecting is true)
@@ -2167,6 +2169,18 @@ function freaderGoChapter(dir) {
   });
 }
 window.freaderGoChapter = freaderGoChapter;
+var freaderLastEnds = '';
+function freaderReportChapterEnds(location) {
+  try {
+    var idx = location && location.start ? location.start.index : null;
+    var sec = (idx === null || idx === undefined) ? freaderCurrentSection() : book.spine.get(idx);
+    var first = !sec || !sec.prev(), last = !sec || !sec.next();
+    var key = first + ',' + last;
+    if (key === freaderLastEnds) return;
+    freaderLastEnds = key;
+    window.flutter_inappwebview.callHandler('chapterEdge', { atStart: false, atEnd: false, first: first, last: last });
+  } catch (e) {}
+}
 // FReader: 오른쪽 스크롤 막대를 끌 때 (0 = 장의 처음, 1 = 끝)
 function freaderScrollToRatio(t) {
   var c = rendition && rendition.manager && rendition.manager.container;

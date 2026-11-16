@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../services/storage_service.dart';
@@ -93,9 +95,16 @@ class _TapZoneScreenState extends State<TapZoneScreen> {
     final bool isDefault = _zones == StorageService.tapZonesDefault;
     return Scaffold(
       appBar: AppBar(title: Text(_t('탭 영역', 'Tap Zones', '点击区域', 'タップ領域'))),
+      // 설정이 화면 가운데에 오게 (화면이 낮으면 밀어서 보기)
       body: SafeArea(
-        child: ListView(
+        child: LayoutBuilder(
+          builder: (context, box) => SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+          child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: math.max(0, box.maxHeight - 40)),
+          child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const SizedBox(height: 8),
             // 휴대폰 모양 미리보기 + 3×3 칸
@@ -155,6 +164,9 @@ class _TapZoneScreenState extends State<TapZoneScreen> {
               ),
             ),
           ],
+        ),
+        ),
+        ),
         ),
       ),
     );

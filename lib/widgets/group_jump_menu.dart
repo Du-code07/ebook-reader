@@ -138,7 +138,7 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
 /// 누른 자리에서 하나씩 차례로 빠져나오고(앞 버튼 뒤에 숨어 있다가) 닫을 때는 거꾸로 들어감.
 /// 빨간 색을 준 항목(삭제)은 빨간 바탕에 흰 아이콘·글씨
 class ActionButtonsRoute<T> extends PopupRoute<T> {
-  ActionButtonsRoute({required this.anchor, required this.items, this.barrierLabel, this.beside = false, this.besideLeft});
+  ActionButtonsRoute({required this.anchor, required this.items, this.barrierLabel, this.beside = false, this.besideLeft, this.overList = false});
 
   final Rect anchor;
   final List<ScaleMenuItem<T>> items;
@@ -146,6 +146,9 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
 
   /// 옆에 띄울 때 버튼 왼쪽 끝 자리 (그룹 목록 오른쪽 바깥). 없으면 누른 이름 바로 오른쪽
   final double? besideLeft;
+
+  /// 버튼이 목록 위에 겹쳐 놓이는지 (휴대폰 그룹 편집): 목록과 구별되게 바탕을 살짝 어둡게
+  final bool overList;
 
   @override
   final String? barrierLabel;
@@ -186,7 +189,11 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
     Widget button(ScaleMenuItem<T> it) {
       final (value, label, icon, color) = it;
       final bool danger = color != null;
-      final Color bg = danger ? Colors.redAccent : cs.surfaceContainerHighest;
+      final Color bg = danger
+          ? Colors.redAccent
+          : overList
+              ? Color.alphaBlend(Colors.black.withValues(alpha: 0.07), cs.surfaceContainerHighest)
+              : cs.surfaceContainerHighest;
       final Color fg = danger ? Colors.white : cs.onSurface;
       return Padding(
         padding: const EdgeInsets.only(bottom: rowH - 46),
@@ -305,7 +312,7 @@ class _LeftEdgeClipper extends CustomClipper<Rect> {
 }
 
 /// [anchorContext] 위치에서 편집 버튼들을 하나씩 빠져나오게 띄우고 고른 값을 돌려줌 (닫으면 null)
-Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> items, {bool beside = false, bool compact = false, double? besideLeft}) {
+Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> items, {bool beside = false, bool compact = false, double? besideLeft, bool overList = false}) {
   final box = anchorContext.findRenderObject() as RenderBox?;
   if (box == null || !box.hasSize) return Future.value(null);
   // 메뉴가 놓이는 화면 기준 좌표 (태블릿처럼 앱을 크게 보여 줄 때도 누른 자리에 맞게)
@@ -318,6 +325,7 @@ Future<T?> showScaleMenu<T>(BuildContext anchorContext, List<ScaleMenuItem<T>> i
       items: items,
       beside: beside,
       besideLeft: besideLeft,
+      overList: overList,
     ),
   );
 }

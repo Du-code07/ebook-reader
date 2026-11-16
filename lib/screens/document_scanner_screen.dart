@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../services/storage_service.dart';
 import '../widgets/app_colors.dart';
+import '../widgets/pop_dialog.dart';
 
 class _ScanPageItem {
   _ScanPageItem({
@@ -15,8 +16,6 @@ class _ScanPageItem {
     required this.rawPath,
     required this.quad,
     this.mode = 'magic',
-    this.contrast = 0.50,
-    this.rotation = 0,
   });
 
   final String id;
@@ -24,8 +23,8 @@ class _ScanPageItem {
   // 4개 꼭짓점 [tlX, tlY, trX, trY, brX, brY, blX, blY] (0.0 ~ 1.0)
   List<double> quad;
   String mode; // 'magic'|'noshadow'|'invert'|'original'
-  double contrast; // 0.0 ~ 1.0
-  int rotation; // 0, 90, 180, 270
+  double contrast = 0.50; // 0.0 ~ 1.0
+  int rotation = 0; // 0, 90, 180, 270
   String? processedPath;
   bool isProcessing = false;
   final Map<String, String> filterThumbPaths = {};
@@ -134,6 +133,12 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
     if (_isLaunchingCamera) return;
     setState(() => _isLaunchingCamera = true);
     try {
+      // 카메라 권한: 없으면 허용 창을 띄우고, '다시 묻지 않음'으로 막혀 있으면 설정으로 안내
+      if (!await _ensureCameraPermission()) {
+        if (mounted && initialLaunch && _pages.isEmpty) Navigator.pop(context);
+        return;
+      }
+      if (!mounted) return;
       final Map<Object?, Object?>? res =
           await _pdfChannel.invokeMethod<Map<Object?, Object?>>(
         'openInAppDocumentCamera',
@@ -251,6 +256,49 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
         setState(() => _isLaunchingCamera = false);
       }
     }
+  }
+
+  Future<bool> _ensureCameraPermission() async {
+    final String state = await _pdfChannel.invokeMethod<String>('ensureCameraPermission').catchError((_) => 'granted') ?? 'granted';
+    if (state == 'granted') return true;
+    if (!mounted) return false;
+    if (state != 'blocked') {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr(
+          '문서를 스캔하려면 카메라 권한이 필요해요', 'Camera permission is needed to scan documents', '扫描文档需要相机权限', '書類をスキャンするにはカメラの権限が必要です'))));
+      return false;
+    }
+    final go = await showPopDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_tr('카메라 권한 허용', 'Allow camera access', '允许相机权限', 'カメラの権限を許可')),
+        content: Text(_tr(
+          '카메라 권한이 꺼져 있어요\n설정 > 권한에서 카메라를 허용해 주세요',
+          'Camera access is turned off\nPlease allow Camera in Settings > Permissions',
+          '相机权限已关闭\n请在 设置 > 权限 中允许相机',
+          'カメラの権限がオフになっています\n設定 > 権限 でカメラを許可してください',
+        )),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_tr('설정 열기', 'Open Settings', '打开设置', '設定を開く'))),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return false;
+    // 설정에서 돌아올 때까지 기다린 뒤 다시 확인
+    final back = Completer<void>();
+    final listener = AppLifecycleListener(onResume: () {
+      if (!back.isCompleted) back.complete();
+    });
+    await _pdfChannel.invokeMethod('openAppSettings').catchError((_) => null);
+    await back.future.timeout(const Duration(minutes: 3), onTimeout: () {});
+    listener.dispose();
+    final String again = await _pdfChannel.invokeMethod<String>('ensureCameraPermission', {'ask': false}).catchError((_) => 'denied') ?? 'denied';
+    if (again == 'granted') return true;
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr(
+          '카메라 권한이 허용되지 않았어요', 'Camera permission was not allowed', '未允许相机权限', 'カメラの権限が許可されていません'))));
+    }
+    return false;
   }
 
   Future<void> _pickPhotosFromGallery({bool initialLaunch = false}) async {

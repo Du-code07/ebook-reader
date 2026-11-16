@@ -70,7 +70,13 @@ class _SpreadsheetTabBarState extends State<SpreadsheetTabBar> {
                 padding: EdgeInsets.only(right: i == widget.names.length - 1 ? 0 : 8),
                 child: ChoiceChip(
                   showCheckmark: false,
-                  label: Text(widget.names[i], maxLines: 1, style: TextStyle(shadows: i == widget.selectedIndex ? AppColors.sigShadows(context) : null)),
+                  // 고른 시트: 시그니처 바탕 + 흰 글씨 / 안 고른 시트: 라이트 모드는 검은 글씨, 다크 모드는 밝은 글씨
+                  label: Text(widget.names[i], maxLines: 1, style: TextStyle(
+                    color: i == widget.selectedIndex
+                        ? (Theme.of(context).brightness == Brightness.dark ? AppColors.onSig(context) : AppColors.onSignature)
+                        : (Theme.of(context).brightness == Brightness.dark ? Theme.of(context).colorScheme.onSurface : Colors.black87),
+                    shadows: i == widget.selectedIndex ? AppColors.sigShadows(context) : null,
+                  )),
                   selected: i == widget.selectedIndex,
                   onSelected: (_) => widget.onSelected(i),
                 ),
