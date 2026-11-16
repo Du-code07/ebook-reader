@@ -625,10 +625,10 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.grid_view_rounded),
                 title: _tr('도구 모음', 'Toolbox', '工具箱', 'ツールボックス'),
-                desc: _tr('이전·다음 파일(같은 그룹), 화면 잠금, 화면 회전(자동·세로 고정·가로 고정), 페이지 표시(한 페이지·두 페이지·자동 — EPUB과 한 쪽뿐인 파일은 늘 한 페이지), 읽기 방향(좌→우·우→좌, 파일마다 기억), 메모, 글자 복사, 북마크, 확대·축소가 있어요\n화면 회전·페이지 표시는 창에서 고르고, 창이 닫힐 때 적용돼요',
-                    'Previous / next file (same group), lock screen, rotate (auto / portrait / landscape), page display (one / two pages / auto — EPUB and one-page files always show one page), reading direction (L→R / R→L, remembered per file), memo, copy text, bookmarks, and zoom\nRotation and page display apply when their window closes',
-                    '包括上一个·下一个文件（同一分组）、锁定屏幕、旋转屏幕（自动·固定竖屏·固定横屏）、页面显示（单页·双页·自动——EPUB 和只有一页的文件始终单页）、阅读方向（左→右·右→左，按文件记忆）、笔记、复制文字、书签、放大·缩小\n旋转屏幕和页面显示在窗口关闭时生效',
-                    '前・次のファイル(同じグループ)、画面ロック、画面回転(自動・縦固定・横固定)、ページ表示(1ページ・2ページ・自動 — EPUBと1ページだけのファイルは常に1ページ)、読む方向(左→右・右→左、ファイルごとに記憶)、メモ、文字コピー、ブックマーク、拡大・縮小があります\n画面回転・ページ表示はウィンドウを閉じたときに適用されます')),
+                desc: _tr('이전·다음 파일(같은 그룹), 화면 잠금, 화면 회전(자동·세로 고정·가로 고정), 페이지 표시(한 페이지·두 페이지·자동 — EPUB과 한 쪽뿐인 파일은 늘 한 페이지), 읽기 방향(좌→우·우→좌, 파일마다 기억), 메모(EPUB 제외), 글자 복사, 북마크(북마크할 때의 화면 회전·페이지 표시까지 기억), 확대·축소가 있어요\n화면 회전·페이지 표시는 창에서 고르고, 창이 닫힐 때 적용돼요',
+                    'Previous / next file (same group), lock screen, rotate (auto / portrait / landscape), page display (one / two pages / auto — EPUB and one-page files always show one page), reading direction (L→R / R→L, remembered per file), memo (not in EPUB), copy text, bookmarks (also remember the rotation and page display at that time), and zoom\nRotation and page display apply when their window closes',
+                    '包括上一个·下一个文件（同一分组）、锁定屏幕、旋转屏幕（自动·固定竖屏·固定横屏）、页面显示（单页·双页·自动——EPUB 和只有一页的文件始终单页）、阅读方向（左→右·右→左，按文件记忆）、笔记（EPUB 除外）、复制文字、书签（同时记住当时的屏幕旋转·页面显示）、放大·缩小\n旋转屏幕和页面显示在窗口关闭时生效',
+                    '前・次のファイル(同じグループ)、画面ロック、画面回転(自動・縦固定・横固定)、ページ表示(1ページ・2ページ・自動 — EPUBと1ページだけのファイルは常に1ページ)、読む方向(左→右・右→左、ファイルごとに記憶)、メモ(EPUB以外)、文字コピー、ブックマーク(そのときの画面回転・ページ表示も記憶)、拡大・縮小があります\n画面回転・ページ表示はウィンドウを閉じたときに適用されます')),
             _row(context,
                 icon: const Icon(Icons.swap_vert_rounded),
                 title: _tr('스크롤 보기', 'Scroll View', '滚动视图', 'スクロール表示'),
@@ -642,10 +642,10 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: QuillInkIcon(color: cs.onSurface, size: 22),
                 title: _tr('메모 도구 모음', 'Memo Toolbar', '笔记工具栏', 'メモツールバー'),
-                desc: _tr('펜(한 번 더 누르면 굵기·색상), 획 지우개(한 번 더 누르면 종류), 손으로 그리기, 되돌리기·다시 실행, 전체 지우기, 완료가 있어요\n고른 도구는 연두색으로 표시돼요\nS펜으로 쓰는 동안에는 쪽이 넘어가지 않아요',
-                    'Pen (tap again for width and color), stroke eraser (tap again for type), finger writing, undo / redo, clear all and done\nThe selected tool is highlighted in green\nWriting with the S Pen never turns the page',
-                    '有笔（再点一次调粗细·颜色）、笔画橡皮擦（再点一次选类型）、手指书写、撤销·重做、清除全部手写、完成\n所选工具以绿色显示\n用 S Pen 书写时不会翻页',
-                    'ペン(もう一度でペンの太さ・色)、消しゴム(もう一度で種類)、指で手書き、元に戻す・やり直し、手書きを全消去、完了があります\n選んだツールは黄緑で表示されます\nSペンで書いている間はページがめくれません')),
+                desc: _tr('펜(한 번 더 누르면 굵기·색상), 획 지우개(한 번 더 누르면 종류), 손으로 그리기, 되돌리기·다시 실행, 전체 지우기, 완료가 있어요\n고른 도구는 연두색으로 표시돼요\nS펜으로 쓰는 동안에는 쪽이 넘어가지 않아요\n두 손가락으로 확대·이동해도 메모는 쪽에 붙어 함께 커지고 움직여요',
+                    'Pen (tap again for width and color), stroke eraser (tap again for type), finger writing, undo / redo, clear all and done\nThe selected tool is highlighted in green\nWriting with the S Pen never turns the page\nZoom and move with two fingers; memos stay on the page and scale with it',
+                    '有笔（再点一次调粗细·颜色）、笔画橡皮擦（再点一次选类型）、手指书写、撤销·重做、清除全部手写、完成\n所选工具以绿色显示\n用 S Pen 书写时不会翻页\n用两根手指放大·移动时，笔记会贴在页面上一起放大和移动',
+                    'ペン(もう一度でペンの太さ・色)、消しゴム(もう一度で種類)、指で手書き、元に戻す・やり直し、手書きを全消去、完了があります\n選んだツールは黄緑で表示されます\nSペンで書いている間はページがめくれません\n2本指で拡大・移動しても、メモはページに付いたまま一緒に拡大・移動します')),
           ],
         ),
       ),
@@ -2617,6 +2617,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         content: TextField(
           controller: controller,
           autofocus: true,
+          maxLength: 16, // 그룹 이름은 16글자까지
           decoration: InputDecoration(
             hintText: _tr('그룹 이름 입력', 'Enter group name', '输入分组名称', 'グループ名を入力'),
             border: const OutlineInputBorder(),
@@ -2817,9 +2818,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         ? const FavoritesIcon(size: 18)
         : _selectedGroup == '전체'
             ? const FolderDocsIcon(size: 20)
+            // 그룹 목록에 보이는 아이콘 그대로 (같은 크기·같은 선 색)
             : ext == null
-                ? GroupFolderIcon(size: 18, color: cs.onSecondaryContainer)
-                : FileTypeIcon(ext: ext, size: 20); // 그룹 목록의 형식 아이콘과 같은 크기
+                ? GroupFolderIcon(size: 20, color: cs.onSurfaceVariant)
+                : FileTypeIcon(ext: ext, size: 20);
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
@@ -2828,9 +2830,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           ChoiceChip(
             key: _allGroupChipKey,
             // 시그니쳐 색 칸 안에서도 아이콘 안쪽은 바탕(흰색)으로
-            // 형식 그룹 아이콘은 그룹 목록과 똑같이 (같은 크기, 안쪽은 목록 바탕색)
-            avatar: IconInnerFill(color: ext != null ? cs.surfaceContainerHigh : cs.surface, child: groupIcon),
-            avatarBoxConstraints: ext != null ? const BoxConstraints.tightFor(width: 20, height: 20) : null,
+            // 그룹 아이콘은 그룹 목록과 똑같이 (같은 크기, 안쪽은 목록 바탕색)
+            avatar: IconInnerFill(color: _favoritesOnly || _selectedGroup == '전체' ? cs.surface : cs.surfaceContainerHigh, child: groupIcon),
+            avatarBoxConstraints: _favoritesOnly || _selectedGroup == '전체' ? null : const BoxConstraints.tightFor(width: 20, height: 20),
             showCheckmark: false,
             // 아이콘과 글자 사이는 좁게, 글자 오른쪽 여백은 아이콘 왼쪽 여백과 같게 (칸 가운데에 오도록)
             labelPadding: const EdgeInsets.only(left: 4, right: 2),
@@ -2990,6 +2992,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         content: TextField(
           controller: controller,
           autofocus: true,
+          maxLength: 16, // 그룹 이름은 16글자까지
           decoration: InputDecoration(
             hintText: _tr('그룹 이름 입력', 'Enter group name', '输入分组名称', 'グループ名を入力'),
             border: const OutlineInputBorder(),

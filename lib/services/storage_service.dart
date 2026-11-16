@@ -10,8 +10,14 @@ class BookmarkItem {
   final String position;
   final String createdAt;
 
-  /// 가로 모드 2페이지 보기에서 저장한 북마크 (누르면 그 보기로 돌아가서 보여 줌)
+  /// 2페이지 보기에서 저장한 북마크 (두 쪽을 함께 북마크)
   final bool spread;
+
+  /// 북마크할 때의 화면 회전 설정('auto'·'portrait'·'landscape')과 실제 방향(가로면 true), 페이지 표시('one'·'two'·'auto')
+  /// → 북마크를 누르면 그때 보기 그대로 돌아가서 보여 줌
+  final String? rotation;
+  final bool? landscape;
+  final String? display;
 
   BookmarkItem({
     required this.id,
@@ -19,6 +25,9 @@ class BookmarkItem {
     required this.position,
     required this.createdAt,
     this.spread = false,
+    this.rotation,
+    this.landscape,
+    this.display,
   });
 
   Map<String, dynamic> toJson() => {
@@ -27,6 +36,9 @@ class BookmarkItem {
         'position': position,
         'createdAt': createdAt,
         if (spread) 'spread': true,
+        if (rotation != null) 'rotation': rotation,
+        if (landscape != null) 'landscape': landscape,
+        if (display != null) 'display': display,
       };
 
   factory BookmarkItem.fromJson(Map<String, dynamic> json) => BookmarkItem(
@@ -35,6 +47,9 @@ class BookmarkItem {
         position: json['position'] ?? '',
         createdAt: json['createdAt'] ?? '',
         spread: json['spread'] == true,
+        rotation: json['rotation'] is String ? json['rotation'] as String : null,
+        landscape: json['landscape'] is bool ? json['landscape'] as bool : null,
+        display: json['display'] is String ? json['display'] as String : null,
       );
 }
 
@@ -42,7 +57,12 @@ class MemoStroke {
   final List<double> dxList;
   final List<double> dyList;
   final int colorValue;
+
+  /// 굵기: 쪽 너비에 대한 비율 (쪽이 커지거나 확대하면 같이 굵어짐). 0.5 이상이면 예전 방식(화면 점 크기)
   final double strokeWidth;
+
+  /// 너비가 [pageWidth]인 쪽 위에 그릴 때의 굵기
+  double widthOn(double pageWidth) => strokeWidth < 0.5 ? strokeWidth * pageWidth : strokeWidth;
 
   MemoStroke({
     required this.dxList,
@@ -700,19 +720,19 @@ class StorageService {
     return prefs.getString('memo_note_${bookKey}_$pageIndex') ?? '';
   }
 
-  static Future<void> saveEpubLocationStrokes(
+  static Future<void> saveLocationStrokes(
       String bookKey, String locationKey, List<MemoStroke> strokes) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-      'epub_strokes_${bookKey}_$locationKey',
+      'page_strokes_${bookKey}_$locationKey',
       jsonEncode(strokes.map((e) => e.toJson()).toList()),
     );
   }
 
-  static Future<List<MemoStroke>> getEpubLocationStrokes(
+  static Future<List<MemoStroke>> getLocationStrokes(
       String bookKey, String locationKey) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('epub_strokes_${bookKey}_$locationKey');
+    final raw = prefs.getString('page_strokes_${bookKey}_$locationKey');
     if (raw == null) return [];
     final List decoded = jsonDecode(raw);
     return decoded.map((e) => MemoStroke.fromJson(e)).toList();
@@ -848,7 +868,7 @@ class StorageService {
         'bubbles_v5_',
         'memo_strokes_',
         'memo_note_',
-        'epub_strokes_',
+        'page_strokes_',
       ]) {
         final matchPrefix = '$prefix${oldPath}_';
         if (key.startsWith(matchPrefix)) {
@@ -884,7 +904,7 @@ class StorageService {
           key.startsWith('bubbles_${bookPath}_') ||
           key.startsWith('memo_strokes_${bookPath}_') ||
           key.startsWith('memo_note_${bookPath}_') ||
-          key.startsWith('epub_strokes_${bookPath}_')) {
+          key.startsWith('page_strokes_${bookPath}_')) {
         await prefs.remove(key);
       }
     }

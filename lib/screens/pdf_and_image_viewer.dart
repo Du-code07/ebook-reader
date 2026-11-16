@@ -150,7 +150,7 @@ class _MemoCanvasPainter extends CustomPainter {
       if (s.dxList.isEmpty) continue;
       final paint = Paint()
         ..color = Color(s.colorValue)
-        ..strokeWidth = s.strokeWidth
+        ..strokeWidth = s.widthOn(size.width)
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
@@ -556,7 +556,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _memoToolbarPos = 'bottom';
       _toolbarStyle = 'arc';
       _footerInfoMode = 'none';
+      _quickMenuSide = 'right'; // 왼손잡이 끔
     });
+    ScrollThumbBar.leftHanded.value = false;
+    ScrollThumbBar.off.value = false;
     setModalState(() {});
     await StorageService.setUseVolumeComboLock(true);
     await StorageService.setUseShakeLock(false);
@@ -569,6 +572,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     await StorageService.setMemoToolbarPosition('bottom');
     await StorageService.setToolbarStyle('arc');
     await StorageService.setFooterInfoMode('none');
+    await StorageService.setQuickMenuSide('right');
+    await StorageService.setScrollBarOff(false);
+    await StorageService.setPageCurl(true);
+    _syncCurlSwipe();
     if (scrollWas) _onPageModeChanged();
   }
 
@@ -1624,7 +1631,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final Offset prevPos = _lastEraserPos ?? localPos;
     _lastEraserPos = localPos;
 
-    final double hitRadius = math.max<double>(15.0, _penWidth * 3.2);
+    // 지우개 크기는 화면 기준 (확대해도 화면에서 같은 크기)
+    final double hitRadius = math.max<double>(15.0, _penWidth * 3.2) / math.max(1.0, _currentZoomScale);
     final double minEraserX = math.min(prevPos.dx, localPos.dx) - hitRadius;
     final double maxEraserX = math.max(prevPos.dx, localPos.dx) + hitRadius;
     final double minEraserY = math.min(prevPos.dy, localPos.dy) - hitRadius;
@@ -2239,6 +2247,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
         return Stack(
           fit: StackFit.expand,
+          clipBehavior: Clip.none, // 책갈피가 쪽 위로 살짝 나오게
           children: [
             RepaintBoundary(
               child: Padding(
@@ -2257,11 +2266,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
               ),
             ),
+            // 라이트·편안한 모드: 흰 쪽이 흰 바탕에 묻히지 않게 쪽마다 옅은 회색 테두리
+            if (imgSize != null && Theme.of(context).brightness == Brightness.light)
+              Positioned(
+                left: drawLeft,
+                top: drawTop,
+                width: drawWidth,
+                height: drawHeight,
+                child: const IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(border: Border.fromBorderSide(BorderSide(color: Color(0xFFC4C4CA), width: 1)))))),
             // 파일 내 단어 검색: 찾은 곳 형광펜
             ?_findMarks(pageIndex, drawLeft, drawTop, drawWidth, drawHeight),
             // 북마크한 쪽: 쪽 왼쪽 위에 책갈피 (두 쪽 보기는 화면 왼쪽 쪽에만)
-            if (spreadSide != 1 && _isBookmarkedAt(spreadSide == 0 ? pageIndex : (pageIndex ~/ 2) * 2, spreadSide != 0))
-              Positioned(left: drawLeft + math.min(18.0, drawWidth * 0.05), top: drawTop, child: const BookmarkRibbon()),
+            // (쪽 테두리에 걸치게 위로 살짝 나오고, 확대하면 잠시 숨김)
+            if (spreadSide != 1 && _currentZoomScale <= 1.03 && _isBookmarkedAt(spreadSide == 0 ? pageIndex : (pageIndex ~/ 2) * 2, spreadSide != 0))
+              Positioned(left: drawLeft + math.min(18.0, drawWidth * 0.05), top: drawTop - 5, child: const BookmarkRibbon()),
             // 1. S펜 필기 레이어: EagerStylusPanGestureRecognizer를 통해 S펜이 닿는 즉시 제스처 아레나를 독점하여
             // S펜으로 필기할 때 화면이 같이 움직이거나 페이지가 넘어가는 현상을 100% 차단! (손가락 스와이프로는 페이지 이동 가능)
             if (_isMemoMode)
@@ -2331,7 +2349,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             .map((p) => (p.dy / drawHeight).clamp(0.0, 1.0).toDouble())
                             .toList(),
                         colorValue: _penColor.toARGB32(),
-                        strokeWidth: _penWidth,
+                        strokeWidth: _penWidth / drawWidth, // 쪽 너비에 대한 비율 (확대·화면 회전에도 쪽과 같이)
                       );
                       final before = _memoStrokesByPage[pageIndex] ?? const <MemoStroke>[];
                       final list = List<MemoStroke>.from(before)..add(stroke);
@@ -2402,6 +2420,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       position: first.toString(),
                       createdAt: '${now.month}/${now.day} ${now.hour}:${now.minute.toString().padLeft(2, '0')}',
                       spread: spread,
+                      rotation: _rotationModeNow,
+                      landscape: MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height,
+                      display: _pageDisplay,
                     ),
                   );
                   if (ctx.mounted) Navigator.pop(ctx);
@@ -2438,8 +2459,22 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       onTap: () async {
                         Navigator.pop(ctx);
                         final target = int.tryParse(bm.position) ?? 0;
-                        // 2페이지 보기에서 저장한 북마크: 가로 모드 2페이지 보기로 바꾼 뒤 그 쪽으로
-                        if (bm.spread && !_pageModeScroll && !_isSpreadActive(context)) {
+                        // 북마크할 때의 화면 회전·페이지 표시로 돌려놓은 뒤 그 쪽으로
+                        if (bm.display != null || bm.rotation != null) {
+                          if (await restoreBookmarkView(bm,
+                              context: context,
+                              display: _pageDisplay,
+                              rotation: _rotationModeNow,
+                              setDisplay: (d) async {
+                                await StorageService.setPageDisplay(d);
+                                _setPageDisplay(d);
+                              },
+                              setRotation: _applyRotation)) {
+                            await Future<void>.delayed(const Duration(milliseconds: 700));
+                            if (!mounted) return;
+                          }
+                        // 예전 북마크: 2페이지 보기에서 저장했으면 가로 모드 2페이지 보기로
+                        } else if (bm.spread && !_pageModeScroll && !_isSpreadActive(context)) {
                           if (_pageDisplay == 'one') {
                             await StorageService.setPageDisplay('auto');
                             if (!mounted) return;
@@ -2585,6 +2620,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 Expanded(
                   child: SliderTheme(
                     data: SliderTheme.of(context).copyWith(
+                      // 라이트·편안한 모드: 게이지(지나온 부분)는 시그니처 색
+                      activeTrackColor: Theme.of(context).brightness == Brightness.light ? AppColors.signature : null,
                       trackHeight: 2.8,
                       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
                       overlayShape: const RoundSliderOverlayShape(overlayRadius: 11.0),
@@ -2658,6 +2695,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   quarterTurns: 1,
                   child: SliderTheme(
                     data: SliderTheme.of(context).copyWith(
+                      // 라이트·편안한 모드: 게이지(지나온 부분)는 시그니처 색
+                      activeTrackColor: Theme.of(context).brightness == Brightness.light ? AppColors.signature : null,
                       trackHeight: 2.8,
                       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
                       overlayShape: const RoundSliderOverlayShape(overlayRadius: 11.0),
@@ -3078,7 +3117,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
                     return InteractiveViewer(
                       transformationController: _zoomController,
-                      panEnabled: !_isMemoMode && (_currentZoomScale > 1.03 || _activeTouchPointerIds.length >= 2),
+                      // 메모 중에도 (손으로 그리기가 아니면) 손가락으로 확대한 쪽을 옮김 (삼성 노트처럼: 펜은 쓰고 손가락은 움직임)
+                      panEnabled: (!_isMemoMode || !_allowFingerDrawing) && (_currentZoomScale > 1.03 || _activeTouchPointerIds.length >= 2),
                       scaleEnabled: !_isTouchLocked && (!_isMemoMode || !_allowFingerDrawing),
                       minScale: 1.0,
                       maxScale: 5.0,

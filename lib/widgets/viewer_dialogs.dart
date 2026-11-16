@@ -1390,3 +1390,33 @@ Future<OverlayEntry?> showTapZoneGuide(
   overlay.insert(entry);
   return entry;
 }
+
+/// 북마크할 때의 보기(페이지 표시·화면 회전)로 돌려놓음. 바뀐 게 있으면 true (다시 그려질 때까지 기다리게)
+/// 회전이 '자동'이었으면 지금 방향이 그때와 다를 때만 그 방향으로 돌림
+Future<bool> restoreBookmarkView(
+  BookmarkItem bm, {
+  required BuildContext context,
+  required String display,
+  required String rotation,
+  required Future<void> Function(String display) setDisplay,
+  required Future<void> Function(String rotation) setRotation,
+}) async {
+  bool changed = false;
+  final String? d = bm.display;
+  if (d != null && d != display) {
+    await setDisplay(d);
+    changed = true;
+  }
+  final String? r = bm.rotation;
+  if (r != null && context.mounted) {
+    final size = MediaQuery.sizeOf(context);
+    final bool landNow = size.width > size.height;
+    String target = r;
+    if (r == 'auto') target = bm.landscape == null || bm.landscape == landNow ? rotation : (bm.landscape! ? 'landscape' : 'portrait');
+    if (target != rotation) {
+      await setRotation(target);
+      changed = true;
+    }
+  }
+  return changed;
+}
