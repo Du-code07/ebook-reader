@@ -75,6 +75,7 @@ class _SpreadsheetTabBarState extends State<SpreadsheetTabBar> {
                     color: i == widget.selectedIndex
                         ? (Theme.of(context).brightness == Brightness.dark ? AppColors.onSig(context) : AppColors.onSignature)
                         : (Theme.of(context).brightness == Brightness.dark ? Theme.of(context).colorScheme.onSurface : Colors.black87),
+                    fontWeight: FontWeight.w700,
                     shadows: i == widget.selectedIndex ? AppColors.sigShadows(context) : null,
                   )),
                   selected: i == widget.selectedIndex,

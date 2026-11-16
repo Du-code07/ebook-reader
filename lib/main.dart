@@ -2819,7 +2819,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             ? const FolderDocsIcon(size: 20)
             : ext == null
                 ? GroupFolderIcon(size: 18, color: cs.onSecondaryContainer)
-                : FileTypeIcon(ext: ext, size: 18);
+                : FileTypeIcon(ext: ext, size: 20); // 그룹 목록의 형식 아이콘과 같은 크기
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
@@ -2828,7 +2828,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           ChoiceChip(
             key: _allGroupChipKey,
             // 시그니쳐 색 칸 안에서도 아이콘 안쪽은 바탕(흰색)으로
-            avatar: IconInnerFill(color: cs.surface, child: groupIcon),
+            // 형식 그룹 아이콘은 그룹 목록과 똑같이 (같은 크기, 안쪽은 목록 바탕색)
+            avatar: IconInnerFill(color: ext != null ? cs.surfaceContainerHigh : cs.surface, child: groupIcon),
+            avatarBoxConstraints: ext != null ? const BoxConstraints.tightFor(width: 20, height: 20) : null,
             showCheckmark: false,
             // 아이콘과 글자 사이는 좁게, 글자 오른쪽 여백은 아이콘 왼쪽 여백과 같게 (칸 가운데에 오도록)
             labelPadding: const EdgeInsets.only(left: 4, right: 2),

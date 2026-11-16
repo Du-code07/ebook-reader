@@ -1184,10 +1184,9 @@ class FileLoadingView extends StatelessWidget {
 
 /// 탭 존 가이드라인: 파일을 열 때 화면을 누르는 구역을 보여 줌 (화면을 누르면 닫힘)
 /// [tapTurn]: 탭으로 넘기는 보기면 앱 설정의 3×3 탭 영역대로 (아니면 화면 전체 = 메뉴)
-/// [rtl]: 우→좌 읽기면 왼쪽이 다음
 class TapZoneGuide extends StatefulWidget {
-  const TapZoneGuide({super.key, required this.tapTurn, required this.rtl, required this.onClose, required this.tr});
-  final bool tapTurn, rtl;
+  const TapZoneGuide({super.key, required this.tapTurn, required this.onClose, required this.tr});
+  final bool tapTurn;
   final VoidCallback onClose;
   final String Function(String ko, String en, String zh, String ja) tr;
 
@@ -1217,7 +1216,7 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
 
   /// 3×3 칸을 같은 뜻끼리 이어진 덩어리로 묶어 그림: 덩어리가 네모면 한 칸처럼 크게, 아니면 칸마다 이름표
   List<Widget> _zoneCells(BuildContext context, String zones, Size size,
-      {required String menu, required String leftLabel, required String rightLabel, required Color line}) {
+      {required String menu, required String prevLabel, required String nextLabel, required Color line}) {
     final double cw = size.width / 3, ch = size.height / 3;
     final List<int> group = List<int>.filled(9, -1);
     int groups = 0;
@@ -1245,8 +1244,8 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
         };
     Widget? label(String z) => switch (z) {
           'M' => _label(context, menu),
-          'P' => _label(context, leftLabel, before: Icons.chevron_left_rounded),
-          'N' => _label(context, rightLabel, after: Icons.chevron_right_rounded),
+          'P' => _label(context, prevLabel, before: Icons.chevron_left_rounded),
+          'N' => _label(context, nextLabel, after: Icons.chevron_right_rounded),
           _ => null,
         };
     // 바탕: 칸 경계에 옅은 줄이 생기지 않게 한 번에 (가장자리 흐림 없이) 칠함
@@ -1294,7 +1293,7 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
     final tr = widget.tr;
     const line = Color(0xFF9E9E9E);
     final String prev = tr('이전', 'Previous', '上一页', '前へ'), next = tr('다음', 'Next', '下一页', '次へ');
-    final String leftLabel = widget.rtl ? next : prev, rightLabel = widget.rtl ? prev : next;
+    // 읽기 방향(우→좌)과 상관없이 '이전' 칸은 이전, '다음' 칸은 다음
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: _closing ? 0 : 1),
       duration: Anim.ms(180),
@@ -1309,7 +1308,7 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
           // 탭으로 넘기면 앱 설정의 3×3 탭 영역대로, 아니면 화면 전체 = 메뉴
           final String zones = widget.tapTurn ? StorageService.tapZones.value : 'MMMMMMMMM';
           return Stack(children: [
-            ..._zoneCells(context, zones, c.biggest, menu: tr('메뉴', 'Menu', '菜单', 'メニュー'), leftLabel: leftLabel, rightLabel: rightLabel, line: line),
+            ..._zoneCells(context, zones, c.biggest, menu: tr('메뉴', 'Menu', '菜单', 'メニュー'), prevLabel: prev, nextLabel: next, line: line),
             // 위쪽 안내 문구
             Positioned(
               left: 16,
@@ -1362,7 +1361,6 @@ class _ZoneFillPainter extends CustomPainter {
 Future<OverlayEntry?> showTapZoneGuide(
   BuildContext context, {
   required bool Function() tapTurn,
-  required bool Function() rtl,
   required String Function(String ko, String en, String zh, String ja) tr,
 }) async {
   final anim = ModalRoute.of(context)?.animation;
@@ -1383,7 +1381,6 @@ Future<OverlayEntry?> showTapZoneGuide(
   entry = OverlayEntry(
     builder: (ctx) => TapZoneGuide(
       tapTurn: tapTurn(),
-      rtl: rtl(),
       tr: tr,
       onClose: () {
         if (entry.mounted) entry.remove();

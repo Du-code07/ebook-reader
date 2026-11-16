@@ -585,7 +585,12 @@ class BookCurlDrag extends ChangeNotifier {
 
 /// 화면 위에 깔리는 책처럼 넘기기 층 (넘기지 않을 때는 아무것도 그리지 않음)
 class BookCurlLayer extends StatelessWidget {
-  BookCurlLayer({required this.drag, this.paper, this.texture, this.backside, this.textureKey, this.backsideFromPaper = false}) : super(key: drag.layerKey);
+  BookCurlLayer({required this.drag, this.paper, this.texture, this.backside, this.textureKey, this.backsideFromPaper = false, this.keepOverlay = false}) : super(key: drag.layerKey);
+
+  /// 문서 화면(WebView) 위: 넘기지 않을 때도 눈에 보이지 않는 막을 한 겹 깔아 둠.
+  /// 넘김이 끝나 이 층이 통째로 사라지는 순간 안드로이드가 WebView를 한두 장면 숨겨
+  /// 화면이 하얗게 번쩍이는 것을 막음 (덮개 층이 생겼다 없어졌다 하지 않게)
+  final bool keepOverlay;
 
   /// 한 쪽 보기 종이 뒷면을 쪽의 종이 색(흰색·검은색·누런색 등)으로 (앱 테마와 상관없이)
   final bool backsideFromPaper;
@@ -628,7 +633,9 @@ class BookCurlLayer extends StatelessWidget {
         listenable: Listenable.merge([drag, drag.after, drag.live]),
         builder: (context, _) {
           final img = drag.image;
-          if (img == null) return const SizedBox.expand();
+          if (img == null) {
+            return keepOverlay ? const ColoredBox(color: Color(0x01000000), child: SizedBox.expand()) : const SizedBox.expand();
+          }
           Rect? groundRect;
           if (texture != null && textureKey != null) {
             final lb = drag.layerKey.currentContext?.findRenderObject() as RenderBox?;

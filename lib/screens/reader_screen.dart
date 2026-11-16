@@ -43,6 +43,7 @@ import 'pdf_and_image_viewer.dart';
 import '../widgets/pop_dialog.dart';
 import '../widgets/group_jump_menu.dart';
 import '../widgets/page_curl.dart';
+import '../widgets/bookmark_ribbon.dart';
 
 class _EpubMemoPainter extends CustomPainter {
   final List<MemoStroke> strokes;
@@ -50,15 +51,20 @@ class _EpubMemoPainter extends CustomPainter {
   final Color currentColor;
   final double currentWidth;
 
+  /// 저장된 획의 0~1 좌표가 가리키는 네모 (문서는 쪽 네모, 그 밖은 화면). 없으면 그리는 곳 전체
+  final Rect? anchor;
+
   _EpubMemoPainter({
     required this.strokes,
     required this.currentPoints,
     required this.currentColor,
     required this.currentWidth,
+    this.anchor,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    final Rect a = anchor ?? (Offset.zero & size);
     for (final s in strokes) {
       if (s.dxList.isEmpty) continue;
       final paint = Paint()
@@ -69,9 +75,9 @@ class _EpubMemoPainter extends CustomPainter {
         ..style = PaintingStyle.stroke;
 
       final path = Path();
-      path.moveTo(s.dxList.first * size.width, s.dyList.first * size.height);
+      path.moveTo(a.left + s.dxList.first * a.width, a.top + s.dyList.first * a.height);
       for (int i = 1; i < s.dxList.length; i++) {
-        path.lineTo(s.dxList[i] * size.width, s.dyList[i] * size.height);
+        path.lineTo(a.left + s.dxList[i] * a.width, a.top + s.dyList[i] * a.height);
       }
       canvas.drawPath(path, paint);
     }
@@ -297,6 +303,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _allowFingerDrawing = false;
   bool _isStylusDown = false;
   String _currentPageLocationKey = 'page_0';
+  // 메모 자리 이름(쪽 위치). 실제 저장 이름은 보기 방식(한 쪽/두 쪽)·화면 방향을 붙인 [_currentPageLocationKey]
+  String _memoBase = 'page_0';
+  int _memoLoadSeq = 0;
+  bool _memoSyncQueued = false;
+  // 문서(워드·한글·PPT) 지금 화면에 놓인 쪽 네모들 (보는 곳 대비 0~1). 메모·책갈피를 쪽에 붙임
+  List<Rect>? _pageFracs;
+  int _framesSeq = 0;
+  Size? _framesForSize;
+  Timer? _framesTimer;
+  final GlobalKey _memoLayerKey = GlobalKey();
   List<MemoStroke> _epubStrokes = [];
   final List<Offset> _activeStrokePoints = [];
   Color _penColor = kMemoPenColors.first; // 기본: 빨강
@@ -324,12 +340,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   int _rotateTapCount = 0; // 화면 회전 아이콘 흔들림 애니메이션용
   List<BookmarkItem> _bookmarks = [];
 
+  /// 지금 쪽이 북마크돼 있는지 (한 쪽 보기에서 한 북마크는 한 쪽 보기에서만, 두 쪽 보기 북마크는 두 쪽 보기에서만)
   bool get _isCurrentPageBookmarked {
-    if (_bookmarks.isEmpty) return false;
-    if (_currentCfi != null && _currentCfi!.isNotEmpty) {
-      if (_bookmarks.any((bm) => bm.position == _currentCfi)) return true;
-    }
-    return false;
+    if (_bookmarks.isEmpty || !mounted) return false;
+    final String? pos = _currentCfi;
+    if (pos == null || pos.isEmpty) return false;
+    final bool spread = !_pageModeScroll && _bookmarkSpreadNow;
+    return _bookmarks.any((bm) => bm.position == pos && bm.spread == spread);
   }
 
   String _buildLockScreenMessage() {
@@ -778,6 +795,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _progress = savedProg.clamp(0.0, 1.0).toDouble();
       _initialProgress = _progress;
       _currentPageLocationKey = initLocKey;
+      _memoBase = initLocKey;
       _pageDisplay = pageDisplay;
       _toolbarStyle = toolbarStyle;
       _epubFont = epubFont;
@@ -1160,6 +1178,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
     if (_snapShownPage != null && _snapShownPage != page) _snapShow(page);
     if (page != _docPage) _docSel.clear();
+    final String memoKey = _memoKeyFor(position);
     setState(() {
       _docPage = page;
       _docPageCount = pageCount;
@@ -1168,7 +1187,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         _sheetZoom = parts.length == 5 ? double.tryParse(parts.last) ?? 1 : 1;
       }
       _currentCfi = position;
-      _currentPageLocationKey = position;
+      _memoBase = position;
+      _currentPageLocationKey = memoKey;
       _progress = progress.clamp(0.0, 1.0).toDouble();
       _hasRestoredInitialPosition = true;
       _activeStrokePoints.clear();
@@ -1178,8 +1198,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     await StorageService.saveProgress(widget.filePath, progress);
     await StorageService.savePageLabel(widget.filePath, _progressPageLabel());
     if (_isSpreadsheet) return; // No page-anchored drawing layer over the live grid.
-    final strokes = await StorageService.getEpubLocationStrokes(widget.filePath, position);
-    if (mounted && relocation == _docRelocation) setState(() => _epubStrokes = strokes);
+    final int seq = ++_memoLoadSeq;
+    final strokes = await StorageService.getEpubLocationStrokes(widget.filePath, memoKey);
+    if (mounted && relocation == _docRelocation && seq == _memoLoadSeq && memoKey == _currentPageLocationKey) setState(() => _epubStrokes = strokes);
   }
 
   Widget _buildDocumentViewer(bool isLandscape) {
@@ -1375,6 +1396,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   void _onDocumentPageReady(int page) {
     _lastReadyPage = page;
+    _refreshPageFrames();
     if (!_book.busy) _scheduleIdleShot();
     final readyWaiter = _pageReadyWaiter;
     if (readyWaiter != null && !readyWaiter.isCompleted) {
@@ -1419,22 +1441,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     });
   }
 
+  // 탭 칸·음량 버튼·S펜: 읽기 방향(우→좌)과 상관없이 늘 읽는 순서로 다음/이전
   void _turnNext() {
     setState(() => _activeStrokePoints.clear());
-    if (_isMangaRtlMode) {
-      _readerPrevious();
-    } else {
-      _readerNext();
-    }
+    _readerNext();
   }
 
   void _turnPrev() {
     setState(() => _activeStrokePoints.clear());
-    if (_isMangaRtlMode) {
-      _readerNext();
-    } else {
-      _readerPrevious();
-    }
+    _readerPrevious();
   }
 
   void _jumpToFirstPage() {
@@ -1705,8 +1720,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 2 & 5. 삼성 노트 스타일 초고속 캡슐 지우개 (드래그 중 디스크 I/O 제거)
-  void _eraseEpubStrokeAt(Offset localPos, double drawWidth, double drawHeight) {
-    if (_epubStrokes.isEmpty || drawWidth <= 0 || drawHeight <= 0) {
+  void _eraseEpubStrokeAt(Offset localPos, Rect anchor) {
+    if (_epubStrokes.isEmpty || anchor.width <= 0 || anchor.height <= 0) {
       _lastEraserPos = localPos;
       return;
     }
@@ -1729,8 +1744,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       double sMinX = double.infinity, sMaxX = double.negativeInfinity;
       double sMinY = double.infinity, sMaxY = double.negativeInfinity;
       for (int i = 0; i < s.dxList.length; i++) {
-        final px = s.dxList[i] * drawWidth;
-        final py = s.dyList[i] * drawHeight;
+        final px = anchor.left + s.dxList[i] * anchor.width;
+        final py = anchor.top + s.dyList[i] * anchor.height;
         if (px < sMinX) sMinX = px;
         if (px > sMaxX) sMaxX = px;
         if (py < sMinY) sMinY = py;
@@ -1743,10 +1758,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
       final densePts = <Offset>[];
       for (int i = 0; i < s.dxList.length; i++) {
-        final p0 = Offset(s.dxList[i] * drawWidth, s.dyList[i] * drawHeight);
+        final p0 = Offset(anchor.left + s.dxList[i] * anchor.width, anchor.top + s.dyList[i] * anchor.height);
         densePts.add(p0);
         if (i + 1 < s.dxList.length) {
-          final p1 = Offset(s.dxList[i + 1] * drawWidth, s.dyList[i + 1] * drawHeight);
+          final p1 = Offset(anchor.left + s.dxList[i + 1] * anchor.width, anchor.top + s.dyList[i + 1] * anchor.height);
           final dist = (p1 - p0).distance;
           if (dist > 4.0) {
             final steps = (dist / 4.0).ceil();
@@ -1789,8 +1804,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         compact.add(currentRun.last);
         nextStrokes.add(
           MemoStroke(
-            dxList: compact.map((p) => (p.dx / drawWidth).clamp(0.0, 1.0).toDouble()).toList(),
-            dyList: compact.map((p) => (p.dy / drawHeight).clamp(0.0, 1.0).toDouble()).toList(),
+            dxList: compact.map((p) => (p.dx - anchor.left) / anchor.width).toList(),
+            dyList: compact.map((p) => (p.dy - anchor.top) / anchor.height).toList(),
             colorValue: s.colorValue,
             strokeWidth: s.strokeWidth,
           ),
@@ -1837,7 +1852,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void _showTapGuide() {
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     _tapGuide = null;
-    unawaited(showTapZoneGuide(context, tapTurn: () => _pageModeTap && !_slideShow && !_isSpreadsheet, rtl: () => _isMangaRtlMode, tr: _tr).then((e) {
+    unawaited(showTapZoneGuide(context, tapTurn: () => _pageModeTap && !_slideShow && !_isSpreadsheet, tr: _tr).then((e) {
       if (!mounted) {
         if (e?.mounted ?? false) e!.remove();
       } else {
@@ -2226,13 +2241,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           children: [
             ListTile(
               title: Text(_tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.w800)),
+              // 같은 쪽(같은 보기 방식)은 한 번만 북마크
               trailing: ElevatedButton.icon(
-                icon: const Icon(Icons.bookmark_add, size: 16),
-                label: Text(_tr('현재 페이지 북마크', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),
-                onPressed: () async {
+                icon: Icon(_isCurrentPageBookmarked ? Icons.bookmark_added : Icons.bookmark_add, size: 16),
+                label: Text(_isCurrentPageBookmarked
+                    ? _tr('북마크한 페이지예요', 'Already bookmarked', '已添加书签', 'ブックマーク済みです')
+                    : _tr('현재 페이지 북마크', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),
+                onPressed: _isCurrentPageBookmarked ? null : () async {
                   if (_currentCfi == null) return;
                   final now = DateTime.now();
-                  final bool spread = _bookmarkSpreadNow;
+                  final bool spread = !_pageModeScroll && _bookmarkSpreadNow;
                   await StorageService.addBookmark(
                     widget.filePath,
                     BookmarkItem(
@@ -2603,7 +2621,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   String _curlShotKey() {
     if (!mounted) return '';
     final size = MediaQuery.sizeOf(context);
-    return '${_currentCfi ?? ''}|$_docPage|${size.width.round()}x${size.height.round()}|${_getBgColor().toARGB32()}|$_bookmarkSpreadNow|$_lastReadyPage';
+    return '${_currentCfi ?? ''}|$_docPage|${size.width.round()}x${size.height.round()}|${_getBgColor().toARGB32()}|$_bookmarkSpreadNow|$_lastReadyPage|$_isCurrentPageBookmarked|${_epubStrokes.length}|$_currentPageLocationKey';
   }
 
   void _dropIdleShot() {
@@ -3022,12 +3040,130 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 본문 + 책처럼 넘기기 막 + (워드·한글) 글 고르기 막
+  /// 메모를 쪽에 붙이는 문서 (워드·한글·PPT 넘겨 보기)
+  bool get _memoPageAnchored => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_pageModeScroll;
+
+  /// 메모 저장 이름: 쪽 위치 + 두 쪽 보기('|2p') + (EPUB·TXT는 글이 다시 흐르므로) 가로 화면('|L')
+  String _memoKeyFor(String base) {
+    if (!mounted) return base;
+    final size = MediaQuery.sizeOf(context);
+    String k = base;
+    if (!_pageModeScroll && _bookmarkSpreadNow) k += '|2p';
+    if ((_isEpub || _isTxt) && size.width > size.height) k += '|L';
+    return k;
+  }
+
+  /// 보기 방식·화면 방향이 바뀌면 그 보기의 메모로 바꿔 보여 줌. 화면 크기가 바뀌면 쪽 네모도 다시 받음
+  void _queueMemoSync() {
+    if (_memoSyncQueued) return;
+    _memoSyncQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _memoSyncQueued = false;
+      if (!mounted) return;
+      final Size size = MediaQuery.sizeOf(context);
+      if (_framesForSize != size && _memoPageAnchored) {
+        _framesForSize = size;
+        _framesTimer?.cancel();
+        _framesTimer = Timer(const Duration(milliseconds: 450), _refreshPageFrames);
+      }
+      final String k = _memoKeyFor(_memoBase);
+      if (k == _currentPageLocationKey) return;
+      _currentPageLocationKey = k;
+      final int seq = ++_memoLoadSeq;
+      setState(() {
+        _epubStrokes = [];
+        _activeStrokePoints.clear();
+      });
+      StorageService.getEpubLocationStrokes(widget.filePath, k).then((strokes) {
+        if (mounted && seq == _memoLoadSeq && k == _currentPageLocationKey) setState(() => _epubStrokes = strokes);
+      });
+    });
+  }
+
+  /// 문서 화면의 쪽 네모를 다시 받음 (쪽이 다 그려졌을 때·화면 크기가 바뀐 뒤)
+  Future<void> _refreshPageFrames() async {
+    if (!_isOfflineDocument || _isTxt || _isSpreadsheet) return;
+    final int seq = ++_framesSeq;
+    final f = await _hwpController.pageFrames().timeout(const Duration(milliseconds: 500), onTimeout: () => const <Rect>[]);
+    if (!mounted || seq != _framesSeq || f.isEmpty) return;
+    setState(() => _pageFracs = f);
+  }
+
+  /// 메모 좌표 기준 네모 (책 화면 안 좌표): 문서는 지금 쪽 (두 쪽 보기면 두 쪽을 합친 네모), 그 밖은 책 화면 전체
+  Rect _memoAnchor(Size stage) {
+    final f = _pageFracs;
+    if (_memoPageAnchored && f != null && f.isNotEmpty) {
+      Rect u = f.first;
+      if (_bookmarkSpreadNow) {
+        for (final r in f.skip(1)) {
+          u = u.expandToInclude(r);
+        }
+      }
+      if (u.width > 0.01 && u.height > 0.01) {
+        return Rect.fromLTWH(u.left * stage.width, u.top * stage.height, u.width * stage.width, u.height * stage.height);
+      }
+    }
+    return Offset.zero & stage;
+  }
+
+  /// [_memoAnchor]를 메모 그리는 층(화면 전체) 좌표로
+  Rect _memoAnchorInLayer(Size layerSize) {
+    final stageBox = _book.layerKey.currentContext?.findRenderObject() as RenderBox?;
+    final layerBox = _memoLayerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (stageBox == null || layerBox == null || !stageBox.attached || !layerBox.attached || !stageBox.hasSize || !layerBox.hasSize) {
+      return Offset.zero & layerSize;
+    }
+    final Rect a = _memoAnchor(stageBox.size);
+    return layerBox.globalToLocal(stageBox.localToGlobal(a.topLeft)) & a.size;
+  }
+
+  /// 책갈피를 다는 쪽 (책 화면 안 좌표): 문서는 왼쪽 쪽, 그 밖은 책 화면
+  Rect _ribbonPage(Size stage) {
+    final f = _pageFracs;
+    if (_isOfflineDocument && !_isTxt && !_pageModeScroll && f != null && f.isNotEmpty) {
+      final r = f.first;
+      return Rect.fromLTWH(r.left * stage.width, r.top * stage.height, r.width * stage.width, r.height * stage.height);
+    }
+    return Offset.zero & stage;
+  }
+
   Widget _curlStage(Widget content) {
+    _queueMemoSync();
     return Stack(
       fit: StackFit.expand,
       clipBehavior: Clip.none,
       children: [
         content,
+        // 저장된 메모: 넘기는 종이 밑 (넘길 때 함께 넘어가고, 새 쪽 메모는 드러나는 만큼만 보임)
+        if (_epubStrokes.isNotEmpty)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: LayoutBuilder(
+                builder: (context, box) => CustomPaint(
+                  size: Size.infinite,
+                  painter: _EpubMemoPainter(
+                    strokes: _epubStrokes,
+                    currentPoints: const [],
+                    currentColor: _penColor,
+                    currentWidth: _penWidth,
+                    anchor: _memoAnchor(box.biggest),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        // 북마크한 쪽: 쪽 왼쪽 위에 책갈피 (두 쪽 보기는 왼쪽 쪽에만)
+        if (_isCurrentPageBookmarked)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: LayoutBuilder(builder: (context, box) {
+                final Rect page = _ribbonPage(box.biggest);
+                return Stack(clipBehavior: Clip.none, children: [
+                  Positioned(left: page.left + math.min(18.0, page.width * 0.05), top: page.top, child: const BookmarkRibbon()),
+                ]);
+              }),
+            ),
+          ),
         Positioned.fill(
           child: BookCurlLayer(
             drag: _book,
@@ -3037,6 +3173,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             // 한 쪽 보기 종이 뒷면: 파일 안 테마를 따름 (라이트 = 흰 종이, 다크 = 검은 종이, 세피아 = 종이 질감)
             backside: _epubBgTheme == 'dark' ? _getBgColor() : (_isPaperTheme ? null : Colors.white),
             textureKey: _epubBodyKey,
+            keepOverlay: _curlOn && !_isTxt,
           ),
         ),
         // 워드·한글: 길게 눌러 고른 글 — 바탕·손잡이·[복사 | 모두 선택 | 공유 | 형광펜] 막대
@@ -3338,7 +3475,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 화면을 한 번 눌렀을 때: 탭 모드면 위쪽은 메뉴, 아래 왼쪽·오른쪽은 이전·다음 쪽
-  /// (메뉴가 떠 있거나 필기 중이면 메뉴만 닫음. 읽기 방향 우→좌면 왼쪽이 다음, 스크롤 모드는 원래 순서)
+  /// (메뉴가 떠 있거나 필기 중이면 메뉴만 닫음. '이전'·'다음' 칸은 읽기 방향과 상관없이 그대로)
   void _onReaderTap(Offset global) {
     if (!_pageModeTap || _showControls || _isMemoMode || _slideShow) {
       _toggleControls();
@@ -3820,6 +3957,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    _framesTimer?.cancel();
     ComfortTint.viewerClosed();
     ComfortTint.fileOn = false;
     _bakeTimer?.cancel();
@@ -4484,17 +4622,20 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       StorageService.saveProgress(widget.filePath, clampedProg);
                       StorageService.savePageLabel(widget.filePath, _progressPageLabel(clampedProg));
 
-                      // 3. 페이지 이동 시 해당 페이지(CFI)에 저장된 필기만 불러와서 표시!
+                      // 3. 페이지 이동 시 해당 페이지(CFI)에 저장된 필기만 불러와서 표시! (보기 방식·화면 방향별)
+                      final String memoKey = _memoKeyFor(newLocKey);
+                      final int memoSeq = ++_memoLoadSeq;
                       final pageStrokes = await StorageService.getEpubLocationStrokes(
                         widget.filePath,
-                        newLocKey,
+                        memoKey,
                       );
-                      if (mounted) {
+                      if (mounted && memoSeq == _memoLoadSeq) {
                         setState(() {
                           _epubSinglePage = _chapters.length <= 1 && value.chapterTotalPages == 1;
                           _epubLocated = true;
                           _progress = clampedProg;
-                          _currentPageLocationKey = newLocKey;
+                          _memoBase = newLocKey;
+                          _currentPageLocationKey = memoKey;
                           _epubStrokes = pageStrokes;
                           _activeStrokePoints.clear();
                         });
@@ -4545,9 +4686,11 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
             ),
 
             // 2. S펜 전용 페이지별 필기/지우개 오버레이 (EagerStylusPanGestureRecognizer로 S펜 이동 시 화면 움직임 100% 차단 + 손가락은 페이지 스와이프)
-            if (_epubStrokes.isNotEmpty || _isMemoMode)
+            // (저장된 메모는 책 화면 안(넘기는 종이 밑)에 그림: 쪽을 넘길 때 새 쪽 메모가 미리 보이지 않게)
+            if (_isMemoMode)
               Positioned.fill(
                 child: KeyedSubtree(
+                  key: _memoLayerKey,
                   child: LayoutBuilder(
                   builder: (context, constraints) {
                     final double drawWidth = constraints.maxWidth;
@@ -4564,7 +4707,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                             _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
                         if (useEraser) {
                           _eraseStartStrokes = _epubStrokes;
-                          _eraseEpubStrokeAt(event.localPosition, drawWidth, drawHeight);
+                          _eraseEpubStrokeAt(event.localPosition, _memoAnchorInLayer(Size(drawWidth, drawHeight)));
                         } else {
                           setState(() {
                             _activeStrokePoints
@@ -4577,7 +4720,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                         final bool useEraser =
                             _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
                         if (useEraser) {
-                          _eraseEpubStrokeAt(event.localPosition, drawWidth, drawHeight);
+                          _eraseEpubStrokeAt(event.localPosition, _memoAnchorInLayer(Size(drawWidth, drawHeight)));
                         } else {
                           setState(() {
                             _activeStrokePoints.add(event.localPosition);
@@ -4599,12 +4742,16 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                             drawWidth > 0 &&
                             drawHeight > 0) {
                           final locKey = _currentPageLocationKey;
+                          // 문서: 쪽 네모 기준으로 저장 (가로·세로로 돌려도 쪽 위 같은 자리에 같은 크기로)
+                          if (_memoPageAnchored && (_pageFracs?.isEmpty ?? true)) await _refreshPageFrames();
+                          if (!mounted) return;
+                          final Rect anchor = _memoAnchorInLayer(Size(drawWidth, drawHeight));
                           final stroke = MemoStroke(
                             dxList: _activeStrokePoints
-                                .map((p) => (p.dx / drawWidth).clamp(0.0, 1.0).toDouble())
+                                .map((p) => (p.dx - anchor.left) / anchor.width)
                                 .toList(),
                             dyList: _activeStrokePoints
-                                .map((p) => (p.dy / drawHeight).clamp(0.0, 1.0).toDouble())
+                                .map((p) => (p.dy - anchor.top) / anchor.height)
                                 .toList(),
                             colorValue: _penColor.toARGB32(),
                             strokeWidth: _penWidth,
@@ -4632,7 +4779,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       },
                       child: CustomPaint(
                         painter: _EpubMemoPainter(
-                          strokes: _epubStrokes,
+                          strokes: const [],
                           currentPoints: _activeStrokePoints,
                           currentColor: _penColor,
                           currentWidth: _penWidth,

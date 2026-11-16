@@ -22,6 +22,7 @@ class I18nExtra {
     'Allow camera access': ['Autoriser l\'appareil photo', 'Разрешить доступ к камере', 'Permitir acceso a la cámara'],
     'Camera access is turned off\nPlease allow Camera in Settings > Permissions': ['L\'accès à l\'appareil photo est désactivé\nAutorisez l\'appareil photo dans Paramètres > Autorisations', 'Доступ к камере отключён\nРазрешите камеру в Настройки > Разрешения', 'El acceso a la cámara está desactivado\nPermite la cámara en Ajustes > Permisos'],
     'Open Settings': ['Ouvrir les paramètres', 'Открыть настройки', 'Abrir ajustes'],
+    'Already bookmarked': ['Déjà dans les signets', 'Уже в закладках', 'Ya está en marcadores'],
     'Camera permission was not allowed': ['L\'autorisation de l\'appareil photo n\'a pas été accordée', 'Доступ к камере не разрешён', 'No se permitió el acceso a la cámara'],
     'Set what tapping each area does': ['Choisissez l\'action d\'un appui sur chaque zone', 'Задайте действие при нажатии на каждую зону', 'Elige lo que hace tocar cada zona'],
     'Delete This Page': ['Supprimer cette page', 'Удалить эту страницу', 'Eliminar esta página'],

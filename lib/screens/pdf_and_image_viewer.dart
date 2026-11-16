@@ -27,6 +27,7 @@ import '../widgets/find_in_file_bar.dart';
 import 'reader_screen.dart';
 import '../widgets/pop_dialog.dart';
 import '../widgets/page_curl.dart';
+import '../widgets/bookmark_ribbon.dart';
 import '../widgets/text_select.dart';
 
 /// 1. S펜 전용 즉시 승리 제스처 인식기 (Eager Stylus Gesture Recognizer):
@@ -335,19 +336,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   int _rotateTapCount = 0; // 화면 회전 아이콘 흔들림 애니메이션용
   List<BookmarkItem> _bookmarks = [];
 
+  /// 지금 쪽이 북마크돼 있는지 (한 쪽 보기 북마크는 한 쪽 보기에서만, 두 쪽 보기 북마크는 두 쪽 보기에서만)
   bool get _isCurrentPageBookmarked {
     if (_bookmarks.isEmpty) return false;
     final bool isSpreadNow = _isSpreadActive(context);
     final int firstPage = isSpreadNow ? ((_currentPage ~/ 2) * 2) : _currentPage;
-    final int secondPage = firstPage + 1;
-    return _bookmarks.any((bm) {
-      final p = int.tryParse(bm.position);
-      if (p == null) return false;
-      if (p == _currentPage || p == firstPage) return true;
-      if (isSpreadNow && secondPage < _totalPages && p == secondPage) return true;
-      return false;
-    });
+    return _isBookmarkedAt(firstPage, isSpreadNow);
   }
+
+  bool _isBookmarkedAt(int firstPage, bool spread) =>
+      _bookmarks.any((bm) => bm.spread == spread && int.tryParse(bm.position) == firstPage);
 
   String _buildLockScreenMessage() {
     if (_useShakeLock && _useVolumeComboLock) {
@@ -880,11 +878,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     // 필기 및 메모 데이터 비동기 로드
+    if (mounted) await _loadMemoStrokes(_isSpreadActive(context));
     for (int i = 0; i < _imagePages.length; i++) {
-      final strokes = await StorageService.getPageMemoStrokes(_bookKey, i);
-      if (strokes.isNotEmpty) {
-        _memoStrokesByPage[i] = strokes;
-      }
       final note = await StorageService.getPageMemoNote(_bookKey, i);
       if (note.isNotEmpty) {
         _memoNotesByPage[i] = note;
@@ -1226,7 +1221,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   /// 화면을 한 번 눌렀을 때: 탭 모드면 위쪽은 메뉴, 아래 왼쪽·오른쪽은 이전·다음 쪽
-  /// (메뉴가 떠 있거나 필기 중이면 메뉴만 닫음. 읽기 방향 우→좌면 왼쪽이 다음, 스크롤 모드는 원래 순서)
+  /// (메뉴가 떠 있거나 필기 중이면 메뉴만 닫음. '이전'·'다음' 칸은 읽기 방향과 상관없이 그대로)
   // 두 손가락(확대·축소) 동작 중이었는지: 그 끝에 손가락을 떼는 것은 탭이 아님
   bool _pinchSeen = false;
 
@@ -1291,7 +1286,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _scrollCtrl.scrollByScreen(dir);
       return;
     }
-    _stepPage(_isMangaRtlMode ? -dir : dir);
+    _stepPage(dir); // 읽기 방향(우→좌)과 상관없이 '이전'·'다음' 칸 그대로
   }
 
   /// 스크롤 모드: 모든 쪽을 세로로 늘어놓고 쪽 사이를 살짝 띄워 보여 줌 (쪽 그림은 이미 다 만들어 둔 것)
@@ -1362,6 +1357,39 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     return [firstPage, if (firstPage + 1 < _totalPages) firstPage + 1];
   }
 
+  // 지금 보여 주는 메모가 두 쪽 보기 것인지 (보기 방식이 바뀌면 그 보기의 메모로 바꿈)
+  bool? _memoSpreadLoaded;
+  int _memoLoadSeq = 0;
+  bool get _memoSpread => _isSpreadActive(context);
+
+  Future<void> _loadMemoStrokes(bool spread) async {
+    final int seq = ++_memoLoadSeq;
+    _memoSpreadLoaded = spread;
+    final Map<int, List<MemoStroke>> next = {};
+    for (int i = 0; i < _imagePages.length; i++) {
+      final strokes = await StorageService.getPageMemoStrokes(_bookKey, i, spread: spread);
+      if (strokes.isNotEmpty) next[i] = strokes;
+    }
+    if (!mounted || seq != _memoLoadSeq) return;
+    setState(() {
+      _memoStrokesByPage
+        ..clear()
+        ..addAll(next);
+      _activeStrokePoints.clear();
+    });
+  }
+
+  void _syncMemoSpread() {
+    final loaded = _memoSpreadLoaded;
+    if (loaded == null || _imagePages.isEmpty) return;
+    final bool now = _memoSpread;
+    if (now == loaded) return;
+    _memoSpreadLoaded = now;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadMemoStrokes(now);
+    });
+  }
+
   Future<void> _applyMemoStrokes(int page, List<MemoStroke> strokes) async {
     setState(() {
       if (strokes.isEmpty) {
@@ -1370,7 +1398,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         _memoStrokesByPage[page] = List<MemoStroke>.of(strokes);
       }
     });
-    await StorageService.savePageMemoStrokes(_bookKey, page, strokes);
+    await StorageService.savePageMemoStrokes(_bookKey, page, strokes, spread: _memoSpread);
   }
 
   Future<void> _undoMemo() async {
@@ -1455,12 +1483,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               _memoStrokesByPage.remove(secondPage);
             }
           });
-          await StorageService.savePageMemoStrokes(_bookKey, _currentPage, []);
+          await StorageService.savePageMemoStrokes(_bookKey, _currentPage, [], spread: isSpreadNow);
           if (firstPage != _currentPage) {
-            await StorageService.savePageMemoStrokes(_bookKey, firstPage, []);
+            await StorageService.savePageMemoStrokes(_bookKey, firstPage, [], spread: isSpreadNow);
           }
           if (isSpreadNow && secondPage < _totalPages) {
-            await StorageService.savePageMemoStrokes(_bookKey, secondPage, []);
+            await StorageService.savePageMemoStrokes(_bookKey, secondPage, [], spread: isSpreadNow);
           }
         },
       ),
@@ -1721,7 +1749,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   void _showTapGuide() {
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     _tapGuide = null;
-    unawaited(showTapZoneGuide(context, tapTurn: () => _pageModeTap, rtl: () => _isMangaRtlMode, tr: _tr).then((e) {
+    unawaited(showTapZoneGuide(context, tapTurn: () => _pageModeTap, tr: _tr).then((e) {
       if (!mounted) {
         if (e?.mounted ?? false) e!.remove();
       } else {
@@ -2231,6 +2259,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ),
             // 파일 내 단어 검색: 찾은 곳 형광펜
             ?_findMarks(pageIndex, drawLeft, drawTop, drawWidth, drawHeight),
+            // 북마크한 쪽: 쪽 왼쪽 위에 책갈피 (두 쪽 보기는 화면 왼쪽 쪽에만)
+            if (spreadSide != 1 && _isBookmarkedAt(spreadSide == 0 ? pageIndex : (pageIndex ~/ 2) * 2, spreadSide != 0))
+              Positioned(left: drawLeft + math.min(18.0, drawWidth * 0.05), top: drawTop, child: const BookmarkRibbon()),
             // 1. S펜 필기 레이어: EagerStylusPanGestureRecognizer를 통해 S펜이 닿는 즉시 제스처 아레나를 독점하여
             // S펜으로 필기할 때 화면이 같이 움직이거나 페이지가 넘어가는 현상을 100% 차단! (손가락 스와이프로는 페이지 이동 가능)
             if (_isMemoMode)
@@ -2288,7 +2319,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     if (useEraser) {
                       _finishEraseHistory(pageIndex);
                       final list = _memoStrokesByPage[pageIndex] ?? [];
-                      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
+                      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list, spread: _memoSpread);
                     } else if (_activeStrokePoints.isNotEmpty &&
                         drawWidth > 0 &&
                         drawHeight > 0) {
@@ -2309,7 +2340,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         _memoStrokesByPage[pageIndex] = list;
                         _activeStrokePoints.clear();
                       });
-                      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
+                      await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list, spread: _memoSpread);
                     }
                   },
                   onStylusCancel: (_) async {
@@ -2317,7 +2348,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     _finishEraseHistory(pageIndex);
                     setState(() => _activeStrokePoints.clear());
                     final list = _memoStrokesByPage[pageIndex] ?? [];
-                    await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list);
+                    await StorageService.savePageMemoStrokes(_bookKey, pageIndex, list, spread: _memoSpread);
                   },
                   child: RepaintBoundary(
                     child: CustomPaint(
@@ -2353,10 +2384,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           children: [
             ListTile(
               title: Text(_tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.w800)),
+              // 같은 쪽(같은 보기 방식)은 한 번만 북마크
               trailing: ElevatedButton.icon(
-                icon: const Icon(Icons.bookmark_add, size: 16),
-                label: Text(_tr('현재 페이지 북마크 추가', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),
-                onPressed: () async {
+                icon: Icon(_isCurrentPageBookmarked ? Icons.bookmark_added : Icons.bookmark_add, size: 16),
+                label: Text(_isCurrentPageBookmarked
+                    ? _tr('북마크한 페이지예요', 'Already bookmarked', '已添加书签', 'ブックマーク済みです')
+                    : _tr('현재 페이지 북마크 추가', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),
+                onPressed: _isCurrentPageBookmarked ? null : () async {
                   final now = DateTime.now();
                   final bool spread = _isSpreadActive(context);
                   final int first = spread ? (_currentPage ~/ 2) * 2 : _currentPage;
@@ -2894,6 +2928,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   Widget build(BuildContext context) {
+    _syncMemoSpread(); // 보기 방식(한 쪽/두 쪽)이 바뀌면 그 보기의 메모로
     _syncShakeListening();
     // 메뉴를 띄운 동안에는 상태표시줄도 함께 보임
     SystemBars.viewerStatus(_showControls && !_isTouchLocked);
