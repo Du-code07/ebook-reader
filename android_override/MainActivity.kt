@@ -893,12 +893,14 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     result.error("UNSUPPORTED", "PixelCopy unavailable", null)
                     return@setMethodCallHandler
                 }
-                pixelCopyView(webView) { bmp ->
-                    if (bmp == null) {
+                val untint = (call.argument<Number>("untint") ?: 0).toLong().toInt()
+                pixelCopyView(webView) { copied ->
+                    if (copied == null) {
                         result.error("CAPTURE_ERR", "PixelCopy failed", null)
                     } else {
                         Thread {
                             try {
+                                val bmp = if (untint != 0) removeScreenTint(copied, untint) else copied
                                 val buf = java.nio.ByteBuffer.allocate(bmp.byteCount)
                                 bmp.copyPixelsToBuffer(buf)
                                 val w = bmp.width
@@ -945,12 +947,14 @@ class MainActivity : FlutterActivity(), SensorEventListener {
             } else if (call.method == "snapshotWebView" && call.argument<Boolean>("gpu") == true && Build.VERSION.SDK_INT >= 26 &&
                 (findLargestWebView(window.decorView)?.width ?: 0) > 0) {
                 // 쪽 저장 화면: 화면에 보이는 그대로를 GPU로 복사해 JPEG로 (WebView를 다시 그리지 않아 화면이 멈추지 않음)
-                pixelCopyView(findLargestWebView(window.decorView)!!) { bmp ->
-                    if (bmp == null) {
+                val untint = (call.argument<Number>("untint") ?: 0).toLong().toInt()
+                pixelCopyView(findLargestWebView(window.decorView)!!) { copied ->
+                    if (copied == null) {
                         result.error("CAPTURE_ERR", "PixelCopy failed", null)
                     } else {
                         Thread {
                             try {
+                                val bmp = if (untint != 0) removeScreenTint(copied, untint) else copied
                                 val out = java.io.ByteArrayOutputStream()
                                 bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
                                 bmp.recycle()
@@ -1692,6 +1696,27 @@ class MainActivity : FlutterActivity(), SensorEventListener {
 
     /** 화면에 보이는 WebView 중 가장 큰 것 (EPUB 본문) */
     /// 이 화면(View) 자리에 보이는 그대로 복사 (안드로이드 8 이상, 위에 겹친 앱 화면도 함께)
+    /// 화면 복사본에서 앱이 화면 전체에 덮은 색(편안한 모드의 옅은 호박색, [tint] = ARGB)을 걷어냄
+    /// 화면 복사본은 그 색이 이미 칠해진 채라, 다시 화면에 놓으면 색이 두 번 덮여 더 진해짐
+    private fun removeScreenTint(src: Bitmap, tint: Int): Bitmap {
+        val a = ((tint ushr 24) and 0xFF) / 255f
+        if (a <= 0f || a >= 1f) return src
+        val k = 1f / (1f - a)
+        val r = ((tint shr 16) and 0xFF) * a * k
+        val g = ((tint shr 8) and 0xFF) * a * k
+        val b = (tint and 0xFF) * a * k
+        val cm = android.graphics.ColorMatrix(floatArrayOf(
+            k, 0f, 0f, 0f, -r,
+            0f, k, 0f, 0f, -g,
+            0f, 0f, k, 0f, -b,
+            0f, 0f, 0f, 1f, 0f
+        ))
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        Canvas(out).drawBitmap(src, 0f, 0f, android.graphics.Paint().apply { colorFilter = android.graphics.ColorMatrixColorFilter(cm) })
+        src.recycle()
+        return out
+    }
+
     private fun pixelCopyView(view: View, done: (Bitmap?) -> Unit) {
         if (Build.VERSION.SDK_INT < 26 || view.width <= 0 || view.height <= 0) { done(null); return }
         try {
@@ -5530,13 +5555,8 @@ class DocumentCameraActivity : android.app.Activity(), android.view.TextureView.
             if (latestBmp != null) {
                 thumbImageView.setImageBitmap(latestBmp)
             }
-            confirmBatchBtn.visibility = View.VISIBLE
-            confirmBatchBtn.text = "확인 (${capturedPaths.size}장) ✓"
-            confirmBatchBtn.onAccentText()
-            confirmBatchBtn.background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(uiAccent)
-                cornerRadius = dp(18f).toFloat()
-            }
+            // [확인] 단추는 쓰지 않음: 찍은 장 수가 보이는 왼쪽 미리보기를 누르면 편집으로 넘어감
+            confirmBatchBtn.visibility = View.GONE
         }
     }
 

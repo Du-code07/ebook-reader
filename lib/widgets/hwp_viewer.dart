@@ -33,6 +33,9 @@ class HwpReaderController {
   Future<void> zoomSheet(double factor) async => _invoke?.call('zoomBy', [factor]);
   Future<void> resetSheetZoom() async => _invoke?.call('resetZoom', []);
 
+  /// 확대해 둔 화면을 선명하게: 쪽 상자를 [scale] 배율로 다시 그리고 (tx, ty)만큼 옮김 (1이면 원래대로)
+  Future<void> setView(double scale, double tx, double ty) async => _invoke?.call('setView', [scale, tx, ty]);
+
   /// 한글·워드 스크롤 보기: 전체 중 비율 위치(0~1)로 바로 이동 (오른쪽 회색 막대)
   Future<void> scrollToRatio(double ratio) async => _invoke?.call('scrollToRatio', [ratio]);
 

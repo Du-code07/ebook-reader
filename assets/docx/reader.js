@@ -727,7 +727,7 @@ const resizeObserver = new ResizeObserver(fitPages); resizeObserver.observe(host
 let vertical = false, vhost = null, vSlots = [], vTops = [], vRaf = 0, vMetricsTimer = 0, vSerial = 0;
 const vMounted = new Map(); // 쪽 번호 → { frame, source, original, entry }
 const vOwner = new Map(); // 원래 글 덩어리 → 그것을 쓰고 있는 쪽 번호 (다른 쪽은 복사본)
-const V_GAP = 12;
+const V_GAP = 6; // 스크롤 보기 쪽 사이 간격 (예전 12의 절반)
 function pageFrames() { return vertical ? [...vMounted.values()].map(m => m.frame) : realFrames(); }
 const vResize = new ResizeObserver(() => { if (vertical) vLayout(true); });
 function setVertical(on) {
@@ -1122,7 +1122,27 @@ function headingCandidates() {
   return outlineBlockCache.filter(b => !b.cell && (b.head || b.text).length <= 100 && (NUMBERED_START.test(b.head || b.text) || b.boldRatio >= 0.5))
     .slice(0, 3000).map(b => ({ title: b.head || b.text, page: b.page, bold: b.bold, boldRatio: b.boldRatio, centered: b.centered, fs: b.fs, body }));
 }
-window.freaderDocx = { highlightBoxes, beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy, setVertical, scrollToRatio: vScrollToRatio,
-  search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes, pageRect, pageSizes,
+
+// ── 확대해 둔 화면을 선명하게: 앱이 화면 그림을 키우는 대신, 쪽 상자 자체를 그 배율로 다시 그림 ──
+// (앱은 그 배율만큼 화면 그림을 되돌려 겹치게 하므로 보이는 자리는 그대로, 글씨만 선명해짐)
+let zoomView = null; // [배율, 가로 이동, 세로 이동] (CSS px)
+function setView(s, tx, ty) {
+  if (!(s > 1.001)) { zoomView = null; host.style.transform = ''; host.style.transformOrigin = ''; return true; }
+  zoomView = [s, tx, ty];
+  host.style.transformOrigin = '0 0';
+  host.style.transform = `matrix(${s},0,0,${s},${tx},${ty})`;
+  return true;
+}
+// 자리를 재는 일(쪽 위치·글자 상자·표시)은 확대하지 않은 자리로 (앱 쪽 좌표와 맞게)
+function withoutZoom(fn) {
+  return function (...args) {
+    if (!zoomView) return fn.apply(this, args);
+    const t = host.style.transform;
+    host.style.transform = '';
+    try { return fn.apply(this, args); } finally { host.style.transform = t; }
+  };
+}
+window.freaderDocx = { setView, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy, setVertical, scrollToRatio: vScrollToRatio,
+  search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes: withoutZoom(visibleTextBoxes), pageRect: withoutZoom(pageRect), pageSizes,
   getState: () => ({ ready, page, count: pages.length, received, spread: options.spread, awaitingPassword, unavailableImages, imageCacheBytes, cachedImages: imageCache.size, visibleImages: activeImagePaths.size, maxBytes: MAX_BYTES, format: detectedFormat }) };
 window.addEventListener('pagehide', destroy, { once: true });

@@ -279,6 +279,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _useSpenTurn = false;
   Offset? _lastEraserPos;
   final TransformationController _epubZoomController = TransformationController();
+
+  // ── 한글·워드 확대를 선명하게 ──
+  // 화면 그림을 키우기만 하면 글씨가 뭉개져서, 확대가 멈추면 문서 화면이 그 배율로 쪽을 다시 그리게 하고(JS)
+  // 문서 화면에는 그만큼 되돌리는 변환을 걸어 보이는 자리는 그대로 둠. 바꾸는 순간은 가만히 읽던 때의 화면 그림으로 가림
+  Matrix4 _docBaked = Matrix4.identity(); // 문서 화면이 지금 그려 둔 확대 (JS 쪽)
+  ui.Image? _zoomCoverImg; // 바꾸는 동안 덮는 그림 (가만히 읽던 때 화면의 사본)
+  Timer? _bakeTimer;
+  int _bakeSeq = 0;
+  bool _zoomGestureActive = false; // 손가락으로 확대·이동하는 중 (그동안은 다시 그리지 않음)
   double _epubZoomScale = 1.0;
 
   // 1 & 3. S펜 전용 페이지별 필기 및 지우개 상태 (필기 모드에서 S펜이 닿으면 화면 이동 100% 차단 + 해당 페이지에서만 필기 표시)
@@ -368,6 +377,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   void initState() {
     super.initState();
+    ComfortTint.viewerOpened(); // 파일을 보는 동안 편안한 모드 덮개를 걷음
+    _epubZoomController.addListener(_onZoomMatrixChanged);
     SystemBars.enterViewer(); // 파일 열람 중에는 상태표시줄·내비게이션 바를 모두 숨김
     _activeFilePath = widget.filePath;
     _loadNeighborFiles();
@@ -1199,6 +1210,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         // 스크롤 보기 그림이 다 덮고 있거나 목차를 여닫는 동안: 문서 화면(WebView)을 잠시 숨겨 움직임이 끊기지 않게
         Offstage(
           offstage: _tocFreeze != null,
+          // 확대를 선명하게 다시 그려 둔 만큼 되돌림 (화면 확대와 겹쳐 보이는 자리는 그대로)
+          child: Transform(
+          transform: _docBakedNone ? Matrix4.identity() : Matrix4.inverted(_docBaked),
           child: HwpViewer(
           key: ValueKey('document:${widget.filePath}'),
           filePath: widget.filePath,
@@ -1223,6 +1237,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           },
         ),
         ),
+        ),
+        // 확대를 선명하게 바꾸는 동안 덮는 그림 (가만히 읽던 때 화면, 화면 확대와 함께 움직임)
+        if (_zoomCoverImg != null)
+          Positioned.fill(child: IgnorePointer(child: RawImage(image: _zoomCoverImg, fit: BoxFit.fill))),
         if (_tocFreeze != null && !_pageModeScroll)
           Positioned.fill(child: IgnorePointer(child: Image.memory(_tocFreeze!, fit: BoxFit.fill, gaplessPlayback: true))),
         // 한 번 본 쪽: 실제 쪽(특히 사진)이 다 준비될 때까지 저장해 둔 화면을 먼저 보여 줌
@@ -2852,11 +2870,90 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 쪽이 바뀌었거나 다시 그려짐: 예전 그림은 버리고 잠시 뒤 다시 찍음
+  bool get _canBakeZoom => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_pageModeScroll && !_docVertical;
+
+  static bool _sameMatrix(Matrix4 a, Matrix4 b) {
+    for (int i = 0; i < 16; i++) {
+      if ((a.storage[i] - b.storage[i]).abs() > 0.01) return false;
+    }
+    return true;
+  }
+
+  bool get _docBakedNone => _sameMatrix(_docBaked, Matrix4.identity());
+
+  /// 가만히 읽던 때의 화면 그림이 지금 쪽 그대로인가 (확대를 바꾸는 동안 덮개로 씀)
+  bool get _zoomCoverReady => _idleShot != null && _idleShotKey == _curlShotKey();
+
+  void _onZoomMatrixChanged() {
+    if (!_canBakeZoom) return;
+    _bakeTimer?.cancel();
+    final bool toNone = _epubZoomController.value.getMaxScaleOnAxis() < 1.03;
+    // 원래 크기로 돌아가면 바로, 확대·이동 중이면 멈춘 뒤에
+    _bakeTimer = Timer(Duration(milliseconds: toNone ? 0 : 220), _bakeDocZoom);
+  }
+
+  /// 확대·이동을 시작할 때: 선명하게 다시 그려 둔 화면이면, 덮개를 깔고 문서 화면을 원래대로 (움직이는 동안은 덮개 그림이 따라 움직임)
+  void _onZoomGestureStart() {
+    _zoomGestureActive = true;
+    _bakeTimer?.cancel();
+    if (!_canBakeZoom || _docBakedNone) return;
+    _bakeSeq++;
+    if (_zoomCoverReady && _zoomCoverImg == null) {
+      setState(() => _zoomCoverImg = _idleShot!.clone());
+    }
+    unawaited(() async {
+      await SchedulerBinding.instance.endOfFrame;
+      await _hwpController.setView(1, 0, 0);
+      if (mounted) setState(() => _docBaked = Matrix4.identity());
+    }());
+  }
+
+  Future<void> _bakeDocZoom() async {
+    if (!mounted || !_canBakeZoom || _zoomGestureActive) return;
+    final Matrix4 m = _epubZoomController.value.clone();
+    final double s = m.getMaxScaleOnAxis();
+    final Matrix4 target = s < 1.03 ? Matrix4.identity() : m;
+    if (_sameMatrix(target, _docBaked)) {
+      _hideZoomCover();
+      return;
+    }
+    final int seq = ++_bakeSeq;
+    // 덮개 그림이 없으면 바꾸는 순간이 보일 수 있어 원래 크기로 돌아갈 때만 그대로 바꿈 (확대는 예전처럼 그림만 키움)
+    final bool cover = _zoomCoverReady;
+    if (!cover && !_sameMatrix(target, Matrix4.identity())) return;
+    if (cover && _zoomCoverImg == null) {
+      setState(() => _zoomCoverImg = _idleShot!.clone());
+      await SchedulerBinding.instance.endOfFrame;
+    }
+    final t = target.getTranslation();
+    await _hwpController.setView(target.getMaxScaleOnAxis(), t.x, t.y);
+    try {
+      await _pdfChannel.invokeMethod('webVisualReady').timeout(const Duration(milliseconds: 700));
+    } catch (_) {}
+    if (!mounted || seq != _bakeSeq) return;
+    // 문서 화면이 새 배율로 그려진 뒤, 되돌리는 변환을 걸면서 같은 순간에 덮개를 걷음
+    final ui.Image? old = _zoomCoverImg;
+    setState(() {
+      _docBaked = target;
+      _zoomCoverImg = null;
+    });
+    if (old != null) SchedulerBinding.instance.addPostFrameCallback((_) => old.dispose());
+  }
+
+  void _hideZoomCover() {
+    final ui.Image? old = _zoomCoverImg;
+    if (old == null || !mounted) return;
+    setState(() => _zoomCoverImg = null);
+    SchedulerBinding.instance.addPostFrameCallback((_) => old.dispose());
+  }
+
   void _scheduleIdleShot() {
     _dropIdleShot();
-    if (!_curlOn || _isTxt) return;
+    // 책처럼 넘기기 + 한글·워드 확대를 선명하게 바꿀 때 덮개로도 씀
+    if ((!_curlOn && !_canBakeZoom) || _isTxt) return;
     _idleShotTimer = Timer(const Duration(milliseconds: 380), () async {
-      if (!mounted || !_curlOn || _book.busy) return;
+      if (!mounted || (!_curlOn && !_canBakeZoom) || _book.busy) return;
+      if (_epubZoomScale > 1.03 || !_docBakedNone) return; // 확대해 둔 동안은 찍지 않음
       if (_isOfflineDocument && _lastReadyPage != _docPage) return; // 다 그려지면 다시 불림
       final key = _curlShotKey();
       final img = await _captureForCurl(screen: true);
@@ -3957,6 +4054,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    ComfortTint.viewerClosed();
+    _bakeTimer?.cancel();
+    _epubZoomController.removeListener(_onZoomMatrixChanged);
     _dropIdleShot();
     _dropBackShots();
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
@@ -4476,6 +4576,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       minScale: 1.0,
                       maxScale: 4.5,
                       onInteractionStart: (_) {
+                        _onZoomGestureStart();
                         // 확대/이동 제스처가 터치를 가져가면 WebView는 스와이프를 받지 못함
                         _swipeScaleStarted = true;
                       },
@@ -4486,6 +4587,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         }
                       },
                       onInteractionEnd: (_) {
+                        _zoomGestureActive = false;
+                        _onZoomMatrixChanged(); // 멈추면 선명하게 다시 그림
                         final s = _epubZoomController.value.getMaxScaleOnAxis();
                         if (s < 1.03) {
                           _epubZoomController.value = Matrix4.identity();
@@ -4996,8 +5099,8 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
             if (_useQuickNavTurn && !_isTouchLocked && !_slideShow)
               _buildQuickNavButtons(bottomPadding),
 
-            // EPUB 스크롤 보기: 장의 끝(또는 처음)에 닿으면 '이전 챕터 / 다음 챕터'
-            if (_isEpub && _pageModeScroll && !_slideShow && !_isTouchLocked && (_chAtEnd || (_chAtStart && !_chFirst)))
+            // EPUB 스크롤 보기: 메뉴(도구 모음)를 연 동안만 '이전 챕터 / 다음 챕터' (읽는 동안 글자를 가리지 않게)
+            if (_isEpub && _pageModeScroll && _showControls && !_slideShow && !_isTouchLocked)
               Positioned(
                 left: 16.0 + _safeSides.left,
                 right: 16.0 + _safeSides.right,

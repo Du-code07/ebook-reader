@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 /// 앱 대표 색 RGB(163, 204, 163): 고른 것·켜짐·버튼 바탕과 체크 표시에만 쓰고, 글씨·아이콘에는 쓰지 않음.
@@ -45,9 +46,10 @@ class SigColors extends ThemeExtension<SigColors> {
 }
 
 /// 아이콘이 바뀌는 움직임의 기본값 ([전체] 그룹 아이콘과 같은 빠르기·느낌)
-/// 파일 뒤 바탕: 앱 테마가 밝으면 흰색(편안한 모드는 미색), 어두우면 검은색
-Color viewerBackdrop(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark ? Colors.black : Theme.of(context).colorScheme.surface;
+/// 파일 뒤 바탕: 앱 테마가 밝으면 흰색, 어두우면 검은색 (편안한 모드여도 파일을 볼 때는 흰색)
+Color viewerBackdrop(BuildContext context) => Theme.of(context).brightness == Brightness.dark
+    ? Colors.black
+    : (ComfortTint.on ? Colors.white : Theme.of(context).colorScheme.surface);
 
 /// 쪽 사이 간격 줄 (스크롤 보기·두 쪽 보기): 테마와 상관없이 밝은 회색
 const Color kViewerGapColor = Color(0xFFE2E2E6);
@@ -83,8 +85,15 @@ class ComfortTint {
   static const Color color = Color(0x1FFF9100);
   static bool on = false;
 
-  /// 화면 복사 때 걷어낼 색 (편안한 모드가 아니면 0)
-  static int get untint => on ? color.toARGB32() : 0;
+  /// 열려 있는 파일 보기 화면 수: 파일을 볼 때는 덮지 않음 (파일 색은 파일 테마대로)
+  static final ValueNotifier<int> viewers = ValueNotifier<int>(0);
+
+  /// 파일 보기 화면이 열리고 닫힐 때 (화면을 그리는 중에 바꾸지 않게 한 박자 뒤에)
+  static void viewerOpened() => Future.microtask(() => viewers.value++);
+  static void viewerClosed() => Future.microtask(() => viewers.value = math.max(0, viewers.value - 1));
+
+  /// 화면 복사 때 걷어낼 색 (덮개가 보이지 않으면 0)
+  static int get untint => on && viewers.value == 0 ? color.toARGB32() : 0;
 }
 
 class Anim {

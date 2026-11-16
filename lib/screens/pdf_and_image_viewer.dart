@@ -396,6 +396,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   @override
   void initState() {
     super.initState();
+    ComfortTint.viewerOpened(); // 파일을 보는 동안 편안한 모드 덮개를 걷음
     SystemBars.enterViewer(); // 파일 열람 중에는 상태표시줄·내비게이션 바를 모두 숨김
     WidgetsBinding.instance.addObserver(this);
     _loadNeighborFiles();
@@ -1316,8 +1317,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       count: _imagePages.length,
       aspectOf: _scrollAspect,
       initialPage: _currentPage,
-      // 쪽 그대로 세로로 늘어놓고 쪽 사이는 살짝 띄움 (슬라이드 보기의 쪽을 세로로)
-      gap: 12,
+      // 쪽 그대로 세로로 늘어놓고 쪽 사이는 살짝 띄움 (슬라이드 보기의 쪽을 세로로, 간격 줄은 예전 12의 절반)
+      gap: 6,
       // 쪽 뒤 바탕은 앱 테마(또는 PDF 자체 배경색), 쪽 사이 간격 줄은 고정 색
       background: _backdrop(context),
       gapColor: kViewerGapColor,
@@ -2737,6 +2738,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   void dispose() {
+    ComfortTint.viewerClosed();
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     SystemBars.leaveViewer();
     _vPageSwipe.dispose();

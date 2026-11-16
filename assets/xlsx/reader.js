@@ -248,10 +248,49 @@ function clearSearch() {
 function rebaseGesture() {
   if (!viewer || !pointers.size) { gesture = null; return; }
   const points = [...pointers.values()], a = points[0], b = points[1];
+  const dv = pinchPreview?.desired || desiredView;
   gesture = { count: points.length, x: b ? (a.x + b.x) / 2 : a.x, y: b ? (a.y + b.y) / 2 : a.y,
     distance: b ? Math.hypot(a.x - b.x, a.y - b.y) : 0,
-    offset: desiredView ? { x: Math.max(0, desiredView.x), y: Math.max(0, desiredView.y) } : viewer.getViewportOffset(),
-    scale: desiredView?.scale ?? viewer.getScale() };
+    offset: dv ? { x: Math.max(0, dv.x), y: Math.max(0, dv.y) } : viewer.getViewportOffset(),
+    scale: dv?.scale ?? viewer.getScale() };
+}
+// FReader: 두 손가락으로 확대·축소하는 동안에는 표를 매번 다시 그리지 않고 지금 그림을 키우거나 줄여서만 보여 줌
+// (매번 다시 그리면 무겁고, 배율과 위치가 따로 그려져 화면이 튀었음). 손을 떼면 한 번만 제대로 그림
+let pinchPreview = null; // { base: 지금 그려진 배율·위치, desired: 손가락이 원하는 배율·위치 }
+function previewPinch(desired) {
+  const canvas = viewer?.canvasElement;
+  if (!canvas) { desiredView = desired; return false; }
+  if (!pinchPreview) {
+    const o = viewer.getViewportOffset();
+    pinchPreview = { base: { scale: viewer.getScale(), x: o.x, y: o.y }, desired };
+  }
+  pinchPreview.desired = desired;
+  const b = pinchPreview.base, r = desired.scale / b.scale;
+  canvas.style.transformOrigin = '0 0';
+  canvas.style.transform = `matrix(${r},0,0,${r},${b.x * r - desired.x},${b.y * r - desired.y})`;
+  return true;
+}
+function finishPinch() {
+  const p = pinchPreview; pinchPreview = null;
+  const canvas = viewer?.canvasElement;
+  if (!p || !canvas) return;
+  // 제대로 다시 그리는 동안은 지금 보이는 그림을 그대로 덮어 둠 (중간 모습이 비치지 않게)
+  let cover = null;
+  const shown = canvas.style.transform;
+  canvas.style.transform = '';
+  try {
+    const rect = canvas.getBoundingClientRect();
+    cover = document.createElement('canvas');
+    cover.width = canvas.width; cover.height = canvas.height;
+    cover.getContext('2d').drawImage(canvas, 0, 0);
+    cover.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;` +
+      `transform-origin:0 0;transform:${shown};pointer-events:none;z-index:50`;
+    document.body.appendChild(cover);
+  } catch { cover?.remove(); cover = null; }
+  desiredView = p.desired;
+  void applyDesiredView().finally(() => {
+    requestAnimationFrame(() => requestAnimationFrame(() => cover?.remove()));
+  });
 }
 function applyDesiredView() {
   if (applyingView) return viewTask;
@@ -343,8 +382,10 @@ host.addEventListener('pointermove', event => {
   const [a, b] = [...pointers.values()], x = b ? (a.x + b.x) / 2 : a.x, y = b ? (a.y + b.y) / 2 : a.y;
   const scale = b && gesture.distance > 0 ? Math.max(.25, Math.min(4, gesture.scale * Math.hypot(a.x - b.x, a.y - b.y) / gesture.distance)) : gesture.scale;
   const ratio = scale / gesture.scale, bounds = host.getBoundingClientRect();
-  desiredView = { scale, x: (gesture.offset.x + gesture.x - bounds.left) * ratio - (x - bounds.left),
+  const want = { scale, x: (gesture.offset.x + gesture.x - bounds.left) * ratio - (x - bounds.left),
     y: (gesture.offset.y + gesture.y - bounds.top) * ratio - (y - bounds.top) };
+  if (b && !applyingView && previewPinch(want)) return;
+  desiredView = want;
   cancelAnimationFrame(frameRequest); frameRequest = requestAnimationFrame(() => { void applyDesiredView(); });
 }, true);
 function endPointer(event) {
@@ -370,6 +411,7 @@ function endPointer(event) {
   if (!pointers.has(event.pointerId)) return;
   event.preventDefault(); event.stopPropagation(); pointers.delete(event.pointerId);
   if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId);
+  if (pinchPreview && pointers.size < 2) finishPinch();
   rebaseGesture(); scheduleLocation();
 }
 host.addEventListener('pointerup', endPointer, true);

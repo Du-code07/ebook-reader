@@ -69,89 +69,131 @@ Widget _choiceDialogBody<T>(
   final Color offFill = dark ? cs.surfaceContainer : Color.alphaBlend(Colors.white.withValues(alpha: 0.6), cs.surfaceContainerLow);
   final Color offTile = Color.alphaBlend(sig.withValues(alpha: dark ? 0.25 : 0.14), cs.surfaceContainerHigh);
   final Color ink = cs.primary; // 테두리·체크 (라이트는 진한 색, 다크는 밝은 색)
-  return Material(
+  final Size screen = MediaQuery.sizeOf(context);
+  // 휴대폰 가로처럼 높이가 낮으면: 카드를 옆으로 나란히 놓아 창 높이를 줄임
+  final bool wide = screen.height < 560 && screen.width > screen.height;
+
+  Widget check(bool on) => AnimatedContainer(
+        // 고르면 진한 동그라미 안에 체크, 아니면 빈 동그라미
+        duration: Anim.ms(160),
+        width: wide ? 26 : 30,
+        height: wide ? 26 : 30,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: on ? ink : Colors.transparent,
+          border: Border.all(color: ink, width: 2.2),
+        ),
+        child: on ? Icon(Icons.check, size: wide ? 17 : 19, color: cs.onPrimary) : null,
+      );
+
+  Widget card(T value, Widget icon, String label, String desc) {
+    final bool on = value == selected;
+    final Widget tile = Container(
+      width: wide ? 48 : 54,
+      height: wide ? 48 : 54,
+      decoration: BoxDecoration(color: on ? selTile : offTile, borderRadius: BorderRadius.circular(wide ? 14 : 16)),
+      alignment: Alignment.center,
+      child: IconTheme(data: IconThemeData(size: wide ? 26 : 28, color: cs.onSurface), child: icon),
+    );
+    final Widget body = wide
+        ? Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            child: Stack(
+              children: [
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    tile,
+                    const SizedBox(height: 8),
+                    Text(label, textAlign: TextAlign.center, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: cs.onSurface)),
+                    const SizedBox(height: 2),
+                    Text(desc, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, height: 1.3, color: cs.onSurfaceVariant)),
+                  ],
+                ),
+                Positioned(top: 0, right: 0, child: check(on)),
+              ],
+            ),
+          )
+        : Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 16, 14),
+            child: Row(
+              children: [
+                tile,
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: cs.onSurface)),
+                      const SizedBox(height: 2),
+                      Text(desc, style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                check(on),
+              ],
+            ),
+          );
+    return Material(
+      color: on ? selFill : offFill,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: on ? BorderSide(color: ink, width: 2.2) : BorderSide(color: cs.outlineVariant.withValues(alpha: 0.7), width: 1),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(onTap: () => onTap(value), child: SizedBox(width: double.infinity, child: body)),
+    );
+  }
+
+  final Widget dialog = Material(
     color: cs.surfaceContainerHigh,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(wide ? 28 : 32)),
     clipBehavior: Clip.antiAlias,
     elevation: 8,
     child: ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: math.min(460, MediaQuery.sizeOf(context).width - 40)),
+      constraints: BoxConstraints(maxWidth: math.min(wide ? 680 : 460, screen.width - 40)),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 28, 22, 10),
+        padding: wide ? const EdgeInsets.fromLTRB(20, 20, 20, 18) : const EdgeInsets.fromLTRB(22, 28, 22, 10),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
               padding: const EdgeInsets.only(left: 6),
-              child: Text(title, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: cs.onSurface)),
+              child: Text(title, style: TextStyle(fontSize: wide ? 21 : 24, fontWeight: FontWeight.w800, color: cs.onSurface)),
             ),
             if (subtitle != null)
               Padding(
-                padding: const EdgeInsets.only(left: 6, top: 8),
-                child: Text(subtitle, style: TextStyle(fontSize: 15, height: 1.4, color: cs.onSurfaceVariant)),
-              ),
-            const SizedBox(height: 18),
-            for (final (value, icon, label, desc) in options)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Material(
-                  color: value == selected ? selFill : offFill,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(22),
-                    side: value == selected
-                        ? BorderSide(color: ink, width: 2.2)
-                        : BorderSide(color: cs.outlineVariant.withValues(alpha: 0.7), width: 1),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: () => onTap(value),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 14, 16, 14),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 54,
-                            height: 54,
-                            decoration: BoxDecoration(color: value == selected ? selTile : offTile, borderRadius: BorderRadius.circular(16)),
-                            alignment: Alignment.center,
-                            child: IconTheme(data: IconThemeData(size: 28, color: cs.onSurface), child: icon),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(label, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: cs.onSurface)),
-                                const SizedBox(height: 2),
-                                Text(desc, style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          // 고르면 진한 동그라미 안에 체크, 아니면 빈 동그라미
-                          AnimatedContainer(
-                            duration: Anim.ms(160),
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: value == selected ? ink : Colors.transparent,
-                              border: Border.all(color: ink, width: 2.2),
-                            ),
-                            child: value == selected ? Icon(Icons.check, size: 19, color: cs.onPrimary) : null,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                padding: EdgeInsets.only(left: 6, top: wide ? 4 : 8),
+                child: Text(
+                  wide ? subtitle.replaceAll('\n', ' ') : subtitle,
+                  style: TextStyle(fontSize: wide ? 13.5 : 15, height: 1.4, color: cs.onSurfaceVariant),
                 ),
               ),
+            SizedBox(height: wide ? 14 : 18),
+            if (wide)
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (int i = 0; i < options.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 10),
+                      Expanded(child: card(options[i].$1, options[i].$2, options[i].$3, options[i].$4)),
+                    ],
+                  ],
+                ),
+              )
+            else
+              for (final (value, icon, label, desc) in options)
+                Padding(padding: const EdgeInsets.only(bottom: 12), child: card(value, icon, label, desc)),
           ],
         ),
       ),
     ),
   );
+  // 그래도 화면보다 크면 창 전체를 줄여서 다 보이게
+  return FittedBox(fit: BoxFit.scaleDown, child: dialog);
 }
 
 /// 자동 (페이지 표시): 귀퉁이가 접힌 문서 + 줄 + 오른쪽 아래 톱니

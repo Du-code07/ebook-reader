@@ -187,7 +187,10 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
     final panelBox = _panelKey.currentContext?.findRenderObject() as RenderBox?;
     final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
     if (panelBox != null && panelBox.hasSize) {
-      besideLeft = panelBox.localToGlobal(Offset(panelBox.size.width, 0), ancestor: overlayBox).dx + 10;
+      final Offset panelTL = panelBox.localToGlobal(Offset.zero, ancestor: overlayBox);
+      // 휴대폰: 목록 안쪽으로 살짝 들어오게 (목록 너비의 56% 자리부터). 태블릿: 목록 오른쪽 바깥
+      final bool phone = MediaQuery.sizeOf(context).shortestSide < 600;
+      besideLeft = phone ? panelTL.dx + panelBox.size.width * 0.56 : panelTL.dx + panelBox.size.width + 10;
     }
     if (!mounted) return;
     final action = await showScaleMenu<String>(nameCtx, [

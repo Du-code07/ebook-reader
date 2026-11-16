@@ -302,7 +302,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       filledButtonTheme: b == Brightness.dark ? null : FilledButtonThemeData(style: ButtonStyle(textStyle: const WidgetStatePropertyAll(TextStyle(shadows: _whiteTextShadows)))),
       chipTheme: b == Brightness.dark
           ? null
-          : ChipThemeData(labelStyle: WidgetStateTextStyle.resolveWith((s) => s.contains(WidgetState.selected) ? const TextStyle(shadows: _whiteTextShadows) : const TextStyle())),
+          // 고른 칩: 대표 색 바탕 위 흰 글씨 + 옅은 그림자. 고르지 않은 칩: 바탕이 밝으니 진한 글씨 (예전엔 색이 비어 흰 바탕에 안 보였음)
+          : ChipThemeData(labelStyle: WidgetStateTextStyle.resolveWith((s) => s.contains(WidgetState.selected) ? const TextStyle(color: Colors.white, shadows: _whiteTextShadows) : TextStyle(color: scheme.onSurface))),
       segmentedButtonTheme: b == Brightness.dark
           ? null
           : SegmentedButtonThemeData(style: ButtonStyle(textStyle: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? const TextStyle(shadows: _whiteTextShadows) : null))),
@@ -386,10 +387,19 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         );
         ComfortTint.on = _themeMode == 'comfort';
         if (_themeMode != 'comfort') return app;
-        // 편안한 모드: 화면 전체(열어 본 파일 포함)에 옅은 호박색을 덮어 푸른빛을 줄임
+        // 편안한 모드: 앱 화면에 옅은 호박색을 덮어 푸른빛을 줄임. 파일을 볼 때는 덮지 않음 (파일 색은 파일 테마대로)
         return Stack(fit: StackFit.expand, textDirection: TextDirection.ltr, children: [
           app,
-          const IgnorePointer(child: ColoredBox(color: ComfortTint.color)),
+          IgnorePointer(
+            child: ValueListenableBuilder<int>(
+              valueListenable: ComfortTint.viewers,
+              builder: (context, n, _) => AnimatedOpacity(
+                opacity: n > 0 ? 0 : 1,
+                duration: const Duration(milliseconds: 220),
+                child: const ColoredBox(color: ComfortTint.color),
+              ),
+            ),
+          ),
         ]);
       },
       // 시작 화면: 앱을 켤 때마다 맨 위에 잠깐 (첫 실행이면 언어 선택보다 먼저). 그 아래 화면은 미리 준비됨
@@ -1752,23 +1762,42 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
     final appDir = await getApplicationDocumentsDirectory();
     final importedFiles = <File>[];
+    int alreadyIn = 0; // 이름·크기가 같은 파일이 이미 서재에 있어 넣지 않은 수
 
     for (final pf in validPicked) {
       if (pf.path == null) continue;
       final targetGrp = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
+      final existing = File('${appDir.path}/${pf.name}');
+      try {
+        if (await existing.exists() && await existing.length() == await File(pf.path!).length()) {
+          alreadyIn++;
+          continue;
+        }
+      } catch (_) {}
       final saved = await File(pf.path!).copy('${appDir.path}/${pf.name}');
       await StorageService.setBookGroup(saved.path, targetGrp);
       importedFiles.add(saved);
     }
 
     await _loadLibrary();
+    if (mounted && importedFiles.isEmpty && alreadyIn > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(alreadyIn == 1
+            ? _tr('해당 파일은 이미 서재에 있어요', 'This file is already in your library', '该文件已在书架中', 'このファイルはすでにライブラリにあります')
+            : _tr('고른 파일 $alreadyIn개는 이미 서재에 있어요', 'The $alreadyIn selected files are already in your library', '所选的 $alreadyIn 个文件已在书架中', '選んだ$alreadyIn個のファイルはすでにライブラリにあります')),
+      ));
+      return;
+    }
     if (mounted) {
-      final msg = _tr(
+      String msg = _tr(
         '${importedFiles.length}개의 파일이 서재에 추가됐어요',
         'Added ${importedFiles.length} file(s) to bookshelf',
         '已添加 ${importedFiles.length} 个文件到书架',
         '${importedFiles.length}個のファイルが追加されました',
       );
+      if (alreadyIn > 0) {
+        msg += _tr('\n(이미 서재에 있는 $alreadyIn개는 빼고 넣었어요)', '\n($alreadyIn already in your library were skipped)', '\n（已在书架中的 $alreadyIn 个未重复添加）', '\n(すでにあった$alreadyIn個は除きました)');
+      }
       if (importedFiles.length == 1) {
         // 파일 하나만 넣었으면 바로 열 수 있게
         _showCreatedSnack(msg, importedFiles.first);
@@ -3181,7 +3210,27 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                   trailing: _trashedBooks.isNotEmpty
-                      ? TextButton.icon(
+                      ? Row(mainAxisSize: MainAxisSize.min, children: [
+                        // 모두 복원: 휴지통의 파일을 모두 서재로 되돌림 (휴지통 비우기 왼쪽)
+                        TextButton.icon(
+                          style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
+                          icon: const Icon(Icons.restore_from_trash, size: 16),
+                          label: Text(_tr('모두 복원', 'Restore All', '全部恢复', 'すべて復元')),
+                          onPressed: () async {
+                            final appDir = await getApplicationDocumentsDirectory();
+                            for (final tf in List<File>.of(_trashedBooks)) {
+                              final fileName = tf.path.split(Platform.pathSeparator).last;
+                              if (await tf.exists()) {
+                                await tf.copy('${appDir.path}/$fileName');
+                                await tf.delete();
+                              }
+                            }
+                            await _loadLibrary();
+                            setModalState(() {});
+                          },
+                        ),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
                           icon: const Icon(Icons.delete_forever, color: Colors.redAccent, size: 16),
                           label: Text(_tr('휴지통 비우기', 'Empty Trash', '清空回收站', 'ゴミ箱を空にする'), style: const TextStyle(color: Colors.redAccent)),
                           onPressed: () async {
@@ -3214,7 +3263,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                               setModalState(() {});
                             }
                           },
-                        )
+                        ),
+                      ])
                       : null,
                 ),
                 const Divider(height: 1),
@@ -3546,8 +3596,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             clipBehavior: Clip.antiAlias,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
+              // 고른 파일 테두리: 대표 색 (다크 테마는 잘 보이게 테마의 밝은 강조색)
               side: isSelected
-                  ? const BorderSide(color: Colors.amber, width: 2.2)
+                  ? BorderSide(color: widget.isDarkMode ? Theme.of(context).colorScheme.primary : AppColors.of(context), width: 2.4)
                   : BorderSide(
                       color: widget.isDarkMode ? Colors.white12 : Colors.black12,
                       width: 1.0,

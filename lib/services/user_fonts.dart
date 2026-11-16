@@ -131,27 +131,8 @@ class UserFonts {
     }
   }
 
-  /// EPUB 글꼴 중 앱에 들어 있는 만년필 글씨 (영어 글자만, Petit Formal Script · SIL OFL)
-  static const String builtinPen = 'builtin:pen';
-  static const String _penFile = 'builtin_pen_petit_formal_script.ttf';
-
-  static Future<UserFontEntry?> _penEntry() async {
-    try {
-      final d = await dir();
-      final f = File('${d.path}/$_penFile');
-      if (!await f.exists()) {
-        final data = await rootBundle.load('assets/fonts/pen/PetitFormalScript-Regular.ttf');
-        await f.writeAsBytes(data.buffer.asUint8List(), flush: true);
-      }
-      return UserFontEntry(file: _penFile, names: const ['Petit Formal Script'], weight: 400, italic: false, label: 'Petit Formal Script', category: 'epub');
-    } catch (_) {
-      return null;
-    }
-  }
-
   /// EPUB 본문 글꼴 (없으면 null = 책에 들어 있는 원래 글꼴)
   static Future<UserFontEntry?> epubFont() async {
-    if (await activeLabel('epub') == builtinPen) return _penEntry();
     final faces = await activeFaces('epub');
     return faces.isEmpty ? null : faces.first;
   }

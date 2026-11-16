@@ -157,7 +157,7 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
   bool get barrierDismissible => true;
 
   @override
-  Duration get transitionDuration => Anim.ms(460);
+  Duration get transitionDuration => Anim.ms(380);
 
   @override
   Duration get reverseTransitionDuration => Anim.ms(340);
@@ -239,11 +239,25 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
               double hidden = 0; // 앞 버튼이 아직 덜 나온 만큼 (그 뒤에 붙어 함께 움직임)
               for (int k = 0; k < n; k++) {
                 final int i = order[k];
-                final double raw = ((t - k * 0.22) / 0.56).clamp(0.0, 1.0);
+                // 버튼이 많아도(표지형 5개) 마지막 버튼까지 다 나오도록 간격을 버튼 수에 맞춤 (예전엔 5번째가 덜 나와 위 버튼과 겹쳤음)
+                final double gap = n > 1 ? math.min(0.22, 0.48 / (n - 1)) : 0.0;
+                final double raw = ((t - k * gap) / 0.52).clamp(0.0, 1.0);
                 final double p = (opening ? Curves.easeOutBack : Curves.easeOutCubic).transform(raw);
                 if (beside) {
-                  // 옆에 띄울 때: 목록 오른쪽 가장자리 뒤에서 오른쪽으로 하나씩 미끄러져 나옴
-                  offsets[i] = Offset(-sideSlide * (1 - p), 0);
+                  // 옆에 띄울 때: 첫 버튼(이름 수정)은 옆에서 미끄러져 나오고, 그다음 버튼(그룹 삭제)은 앞 버튼 밑에서 아래로 빠져나옴
+                  // (닫을 때는 시간이 거꾸로 흘러 그룹 삭제가 먼저 올라가 숨고, 이름 수정이 옆으로 들어감)
+                  if (k == 0) {
+                    final double r0 = (t / 0.55).clamp(0.0, 1.0);
+                    final double p0 = (opening ? Curves.easeOutBack : Curves.easeOutCubic).transform(r0);
+                    offsets[i] = Offset(-sideSlide * (1 - p0), 0);
+                    shown[i] = r0;
+                  } else {
+                    final double rk = ((t - 0.45 - (k - 1) * 0.15) / 0.55).clamp(0.0, 1.0);
+                    final double pk = (opening ? Curves.easeOutBack : Curves.easeOutCubic).transform(rk);
+                    offsets[i] = Offset(0, -rowH * (1 - pk));
+                    shown[i] = rk;
+                  }
+                  continue;
                 } else {
                   hidden += rowH * (1 - p);
                   offsets[i] = Offset(0, above ? hidden : -hidden);

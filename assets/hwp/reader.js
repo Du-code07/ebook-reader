@@ -467,7 +467,7 @@ const resizeObserver = new ResizeObserver(fitPages); resizeObserver.observe(host
 // ── FReader: 스크롤 보기 — 쪽을 그대로 세로로 늘어놓고 쪽 사이를 살짝 띄움 (보이는 쪽 근처만 그림) ──
 let vertical = false, vhost = null, vSlots = [], vTops = [], vRaf = 0, vMetricsTimer = 0;
 const vMounted = new Map(); // 쪽 번호 → { frame, entry }
-const V_GAP = 12;
+const V_GAP = 6; // 스크롤 보기 쪽 사이 간격 (예전 12의 절반)
 function pageFrames() { return vertical ? [...vMounted.values()].map(m => m.frame) : realFrames(); }
 const vResize = new ResizeObserver(() => { if (vertical) vLayout(true); });
 function setVertical(on) {
@@ -814,8 +814,28 @@ function pageSizes() {
   }
   return out;
 }
-window.freaderHwp = { highlightBoxes, beginDocument, pageSizes, setVertical, scrollToRatio: vScrollToRatio, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection, destroy,
-  search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes, pageRect,
+
+// ── 확대해 둔 화면을 선명하게: 앱이 화면 그림을 키우는 대신, 쪽 상자 자체를 그 배율로 다시 그림 ──
+// (앱은 그 배율만큼 화면 그림을 되돌려 겹치게 하므로 보이는 자리는 그대로, 글씨만 선명해짐)
+let zoomView = null; // [배율, 가로 이동, 세로 이동] (CSS px)
+function setView(s, tx, ty) {
+  if (!(s > 1.001)) { zoomView = null; host.style.transform = ''; host.style.transformOrigin = ''; return true; }
+  zoomView = [s, tx, ty];
+  host.style.transformOrigin = '0 0';
+  host.style.transform = `matrix(${s},0,0,${s},${tx},${ty})`;
+  return true;
+}
+// 자리를 재는 일(쪽 위치·글자 상자·표시)은 확대하지 않은 자리로 (앱 쪽 좌표와 맞게)
+function withoutZoom(fn) {
+  return function (...args) {
+    if (!zoomView) return fn.apply(this, args);
+    const t = host.style.transform;
+    host.style.transform = '';
+    try { return fn.apply(this, args); } finally { host.style.transform = t; }
+  };
+}
+window.freaderHwp = { setView, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, pageSizes, setVertical, scrollToRatio: vScrollToRatio, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy,
+  search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes: withoutZoom(visibleTextBoxes), pageRect: withoutZoom(pageRect),
   getState: () => ({ ready: readyReported, page, count, cachedPages: cache.size, cachedBytes, received, spread: options.spread, maxBytes: MAX_BYTES }) };
 window.addEventListener('pagehide', destroy, { once: true });
 

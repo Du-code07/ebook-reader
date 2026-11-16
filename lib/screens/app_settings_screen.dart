@@ -495,7 +495,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             _item(
               icon: Icons.grid_view_outlined,
               title: _t('탭 영역', 'Tap Zones', '点击区域', 'タップ領域'),
-              subtitle: _t('화면을 3×3 칸으로 나눠 누르면 할 일을 정해요', 'Set what a tap does in each of the 3×3 screen cells', '把屏幕分成 3×3 格，设置点击后的操作', '画面を3×3マスに分けてタップの動作を決めます'),
+              subtitle: _t('영역별로 눌렀을 때의 동작을 정해요', 'Set what tapping each area does', '设置点击各区域时的操作', 'エリアごとのタップ時の動作を決めます'),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TapZoneScreen(t: _t))),
             ),
             _item(

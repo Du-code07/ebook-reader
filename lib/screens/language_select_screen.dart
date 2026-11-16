@@ -114,14 +114,16 @@ class _LanguageSelectScreenState extends State<LanguageSelectScreen> {
               ),
             ),
             const Divider(height: 1),
+            // 고른 줄의 바탕색: 줄마다 따로 칠해 끌어도 그 줄을 따라가고, 목록 밖(위 안내 부분)으로 겹치지 않음
             Expanded(
-              child: ListView(
+              child: ClipRect(
+                  child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 children: [
                   for (final code in LanguageSelectScreen.options)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: ListTile(
+                      child: Material(type: MaterialType.transparency, child: ListTile(
                         selected: code == _selected,
                         selectedTileColor: cs.secondaryContainer,
                         selectedColor: cs.onSecondaryContainer,
@@ -143,9 +145,10 @@ class _LanguageSelectScreenState extends State<LanguageSelectScreen> {
                           shadows: code == _selected ? AppColors.sigShadows(context) : null,
                         ),
                         onTap: () => setState(() => _selected = code),
-                      ),
+                      )),
                     ),
                 ],
+                  ),
               ),
             ),
             Padding(
@@ -243,14 +246,16 @@ class _ThemeSelectScreenState extends State<ThemeSelectScreen> {
               ),
             ),
             const Divider(height: 1),
+            // 고른 줄의 바탕색: 줄마다 따로 칠해 끌어도 그 줄을 따라가고, 목록 밖(위 안내 부분)으로 겹치지 않음
             Expanded(
-              child: ListView(
+              child: ClipRect(
+                  child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 children: [
                   for (final mode in ThemeSelectScreen.options)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: ListTile(
+                      child: Material(type: MaterialType.transparency, child: ListTile(
                         selected: mode == _selected,
                         selectedTileColor: cs.secondaryContainer,
                         selectedColor: cs.onSecondaryContainer,
@@ -271,9 +276,10 @@ class _ThemeSelectScreenState extends State<ThemeSelectScreen> {
                           setState(() => _selected = mode);
                           widget.onChanged(mode);
                         },
-                      ),
+                      )),
                     ),
                 ],
+                  ),
               ),
             ),
             Padding(

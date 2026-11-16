@@ -97,15 +97,7 @@ class _TapZoneScreenState extends State<TapZoneScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
           children: [
-            Text(
-              _t('파일을 탭 넘김으로 볼 때 화면을 누른 자리에 따라 할 일이에요',
-                  'What a tap does in each part of the screen when turning pages by tap',
-                  '以点击翻页阅读时，点击屏幕各位置的操作',
-                  'タップでページをめくるとき、画面の場所ごとの動作です'),
-              textAlign: TextAlign.center,
-              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14, height: 1.4),
-            ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 8),
             // 휴대폰 모양 미리보기 + 3×3 칸
             Center(
               child: Container(
