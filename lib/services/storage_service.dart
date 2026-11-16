@@ -759,12 +759,21 @@ class StorageService {
     );
   }
 
-  static const List<String> defaultGroups = ['전체', 'pdf', 'ppt', 'cbz', 'png', 'xlsx', 'hwpx', 'docx', 'epub', 'txt'];
+  static const List<String> defaultGroups = ['전체', 'pdf', 'ppt', 'cbz', 'xlsx', 'hwpx', 'docx', 'epub', 'txt'];
 
   static Future<List<String>> getGroups() async {
     final prefs = await SharedPreferences.getInstance();
     // 처음 켤 때: 파일 형식별 그룹을 미리 만들어 둠
-    return prefs.getStringList('book_groups_v2') ?? List<String>.of(defaultGroups);
+    final saved = prefs.getStringList('book_groups_v2');
+    if (saved == null) return List<String>.of(defaultGroups);
+    // 사진(jpg·png) 파일은 더 이상 열지 않으므로 그 그룹도 없앰 (그 그룹에 있던 파일은 미분류로)
+    if (saved.remove('png')) {
+      await prefs.setStringList('book_groups_v2', saved);
+      for (final key in prefs.getKeys().toList()) {
+        if (key.startsWith('grp_') && prefs.getString(key) == 'png') await prefs.setString(key, '미분류');
+      }
+    }
+    return saved;
   }
 
   static Future<void> addGroup(String groupName) async {

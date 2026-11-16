@@ -341,6 +341,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   int _rotateTapCount = 0; // 화면 회전 아이콘 흔들림 애니메이션용
   List<BookmarkItem> _bookmarks = [];
 
+  /// 북마크는 한글·워드·PPT 문서에서만 (EPUB·TXT는 쓰지 않음)
+  bool get _bookmarksOn => _isOfflineDocument && !_isTxt;
+
   /// 지금 쪽이 북마크돼 있는지 (한 쪽·두 쪽·스크롤 보기마다 따로: 그 보기에서 한 북마크만)
   bool get _isCurrentPageBookmarked {
     if (_bookmarks.isEmpty || !mounted) return false;
@@ -359,9 +362,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (_pageModeScroll && _docVertical) {
       final int? p = await _hwpController.mostVisiblePage();
       if (p != null && p >= 0) return '$_documentPositionPrefix:$p';
-    } else if (_pageModeScroll && _isTxt) {
-      final int? p = _scrollCtrl.mostVisiblePage;
-      if (p != null && p >= 0) return 'txt:$p';
     }
     return _currentCfi;
   }
@@ -722,7 +722,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<void> _openAdjacentFileInSameGroup(int step) async {
-    const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
     final String? target = step < 0 ? _prevFilePath : _nextFilePath;
     if (target == null || !File(target).existsSync()) return;
     final nextFile = File(target);
@@ -755,17 +754,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             files: [nextFile],
             title: nextName,
             isPdf: true,
-          ),
-        ),
-      );
-    } else if (imageExts.contains(nextExt)) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => UniversalMediaReaderScreen(
-            files: [nextFile],
-            title: nextName,
-            isPdf: false,
           ),
         ),
       );
@@ -828,8 +816,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         : _computeLocationKey(savedCfi, savedProg);
     final List<MemoStroke> strokes = await StorageService.getLocationStrokes(widget.filePath, initLocKey);
     // 북마크: 열자마자 책갈피를 보여 주려고 미리 읽어 둠
-    final List<BookmarkItem> initBookmarks = await StorageService.getBookmarks(widget.filePath);
-    final loadedBookmarks = await StorageService.getBookmarks(widget.filePath);
+    final List<BookmarkItem> initBookmarks = _bookmarksOn ? await StorageService.getBookmarks(widget.filePath) : const [];
 
     _bindHardwareButtons();
     ScrollThumbBar.off.value = await StorageService.getScrollBarOff();
@@ -869,7 +856,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _eraserType = eraserType;
       _useSpenTurn = spenTurn;
       _memoStrokes = strokes;
-      _bookmarks = loadedBookmarks;
       _isLoading = false;
     });
     unawaited(_snapInit());
@@ -1267,7 +1253,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           rtl: _isMangaRtlMode,
           scroll: _pageModeScroll,
           scrollController: _scrollCtrl,
-          scrollMarks: _pageModeScroll ? _scrollMarkPages : const {},
           onLoaded: _onDocumentLoaded,
           onLocation: _onDocumentLocation,
           onError: _handleEpubLoadError,
@@ -1871,7 +1856,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
   }
 
-  /// 뷰어 표시 설정 (JPG 뷰어와 100% 동일한 UI + EPUB 글자 크기 및 다크 모드 설정 포함)
+  /// 뷰어 표시 설정 (PDF 뷰어와 같은 UI + EPUB 글자 크기·다크 모드 설정 포함)
   /// 뷰어 표시 설정 항목 제목: 관련 아이콘 + 문구 (줄바꿈돼도 아이콘이 문구 앞에 붙어 있음)
   Widget _settingsHeader(IconData icon, String text, {bool isTitle = false}) {
     if (isTitle) return Text(text, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800));
@@ -2214,13 +2199,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   /// 북마크 이름: 쪽 번호 ('12페이지', 2페이지 보기면 '12, 13페이지')
   String _bookmarkPageLabel(bool spread) {
-    final int total = _isOfflineDocument ? math.max(1, _docPageCount) : (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
-    final int page = _isOfflineDocument ? (_docPage + 1).clamp(1, total).toInt() : ((_progress * total).round()).clamp(1, total).toInt();
+    final int total = math.max(1, _docPageCount);
+    final int page = (_docPage + 1).clamp(1, total).toInt();
     if (spread && page + 1 <= total) return '$page, ${page + 1}페이지';
     return '$page페이지';
   }
 
-  /// 예전 북마크('진행률 …% 지점')도 문서는 쪽 번호로 보여 줌
+  /// 북마크 이름: 저장된 쪽 번호로 보여 줌
   String _bookmarkTitle(BookmarkItem bm) {
     final m = RegExp(r'^[a-z]+:(\d+)$').firstMatch(bm.position);
     if (m != null) {
@@ -2230,39 +2215,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     return bm.label;
   }
 
-  /// 북마크로 이동: 북마크할 때의 화면 회전·페이지 표시로 돌려놓은 뒤 그 자리를 보여 줌
+  /// 북마크로 이동: 북마크할 때의 화면 회전·페이지 표시·페이지 모드로 돌려놓은 뒤 그 자리를 보여 줌
   Future<void> _openBookmark(BookmarkItem bm) async {
-    if (bm.display != null || bm.rotation != null) {
-      setState(() => _initialCfi = bm.position);
-      if (await restoreBookmarkView(bm,
-          context: context,
-          display: _pageDisplay,
-          rotation: _rotationModeNow,
-          scroll: _pageModeScroll,
-          setDisplay: (d) async {
-            await StorageService.setPageDisplay(d);
-            _setPageDisplay(d);
-          },
-          setRotation: _applyRotation,
-          setScroll: _setScrollModeTo)) {
-        if (mounted) setState(() => _initialCfi = bm.position);
-        await Future<void>.delayed(const Duration(milliseconds: 900));
-        if (!mounted) return;
-      }
-      _readerDisplay(bm.position);
-      return;
-    }
-    // 예전 북마크: 2페이지 보기에서 저장했으면 가로 모드 2페이지 보기로
-    if (bm.spread && !_pageModeScroll && !_bookmarkSpreadNow) {
-      if (_pageDisplay == 'one') {
-        await StorageService.setPageDisplay('auto');
-        if (!mounted) return;
-        setState(() => _pageDisplay = 'auto');
-      }
-      final size = MediaQuery.sizeOf(context);
-      setState(() => _initialCfi = bm.position);
-      if (size.height >= size.width && _pageDisplay == 'auto') await _applyRotation('landscape');
-      // 화면이 돌고 다시 그려진 뒤 그 자리로
+    setState(() => _initialCfi = bm.position);
+    if (await restoreBookmarkView(bm,
+        context: context,
+        display: _pageDisplay,
+        rotation: _rotationModeNow,
+        scroll: _pageModeScroll,
+        setDisplay: (d) async {
+          await StorageService.setPageDisplay(d);
+          _setPageDisplay(d);
+        },
+        setRotation: _applyRotation,
+        setScroll: _setScrollModeTo)) {
+      if (mounted) setState(() => _initialCfi = bm.position);
       await Future<void>.delayed(const Duration(milliseconds: 900));
       if (!mounted) return;
     }
@@ -4161,7 +4128,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         onTap: _pickPageDisplay,
         closeAfterTap: true,
       ),
-      // TXT는 읽기 방향 전환·북마크를 쓰지 않음
+      // TXT는 읽기 방향 전환을 쓰지 않음
       if (!_isTxt)
       QuickToolItem(
         icon: _buildDualDirectionIcon(),
@@ -4210,12 +4177,23 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           }
         },
       ),
-      // 메모는 쪽 넘김(탭·슬라이드) 보기에서만 (스크롤 보기에서는 끔)
-      if (!_pageModeScroll)
       QuickToolItem(
         icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
+          // 스크롤 모드는 쪽이 이어져 있어 메모를 쓰지 않음 (읽기 방향 전환과 같은 안내)
+          if (_pageModeScroll) {
+            ScaffoldMessenger.of(context)
+              ..clearSnackBars()
+              ..showSnackBar(SnackBar(
+                content: Text(_tr('스크롤 모드에서는 메모를 쓸 수 없어요\n탭·슬라이드 모드에서 쓸 수 있어요',
+                    'Memos are not available in scroll mode\nUse them in tap/slide mode',
+                    '滚动模式下不能写笔记，请在点击/滑动模式下使用',
+                    'スクロールモードではメモを使えません\nタップ・スライドモードで使えます')),
+                duration: const Duration(seconds: 2),
+              ));
+            return;
+          }
           setState(() {
             _isMemoMode = !_isMemoMode;
             _isEraserMode = false;
@@ -4231,7 +4209,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         onTap: _openTextCopySheet,
         closeAfterTap: true,
       ),
-      if (!_isTxt)
+      if (_bookmarksOn)
       QuickToolItem(
         icon: Icon(
           _isCurrentPageBookmarked ? Icons.bookmarks : Icons.bookmarks_outlined,

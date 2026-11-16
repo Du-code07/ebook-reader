@@ -712,21 +712,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   String? _prevFilePath, _nextFilePath;
 
   Future<void> _loadNeighborFiles() async {
-    final paths = widget.files.map((f) => f.path).toList();
-    final set = paths.toSet();
-    Future<String?> walk(String from, int step) async {
-      final list = await LibraryNav.listFor(from);
-      int i = list.indexOf(from);
-      if (i < 0) return null;
-      // 지금 함께 보고 있는 파일(여러 장 이미지)은 건너뜀
-      for (i += step; i >= 0 && i < list.length; i += step) {
-        if (!set.contains(list[i]) && File(list[i]).existsSync()) return list[i];
-      }
-      return null;
-    }
-
-    final prev = await walk(paths.first, -1);
-    final next = await walk(paths.last, 1);
+    final String path = widget.files.first.path;
+    final prev = await LibraryNav.neighbor(path, -1);
+    final next = await LibraryNav.neighbor(path, 1);
     if (!mounted) return;
     setState(() {
       _prevFilePath = prev;
@@ -735,7 +723,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Future<void> _openAdjacentFileInSameGroup(int step) async {
-    const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
     final String? target = step < 0 ? _prevFilePath : _nextFilePath;
     final File? targetFile = target == null ? null : File(target);
     if (targetFile == null || !mounted) return;
@@ -767,17 +754,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             files: [targetFile],
             title: nextName,
             isPdf: true,
-          ),
-        ),
-      );
-    } else if (imageExts.contains(nextExt)) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => UniversalMediaReaderScreen(
-            files: [targetFile],
-            title: nextName,
-            isPdf: false,
           ),
         ),
       );
@@ -867,8 +843,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               b.path.split(Platform.pathSeparator).last,
             ));
         _imagePages = extracted;
-      } else {
-        _imagePages = widget.files;
       }
 
       _totalPages = _imagePages.isNotEmpty ? _imagePages.length : 1;
@@ -1611,11 +1585,45 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   /// 5. 위 상황에서 진행바가 메모 도구모음 쪽에서 비켜 주는 폭 (메모 도구모음 폭 48 + 간격 8)
   static const double _memoBarSideInset = 54.0;
 
-  /// 공유할 파일: PDF·CBZ는 그 파일, 그림 여러 장을 보는 중이면 지금 보는 그림
-  String get _shareFilePath {
-    final files = widget.files;
-    if (files.length <= 1) return files.first.path;
-    return files[_currentPage.clamp(0, files.length - 1)].path;
+  /// 공유: PDF에 메모가 있으면 쪽마다 메모를 얹은 PDF를 새로 만들어 공유 (메모가 없거나 CBZ면 파일 그대로)
+  Future<void> _shareWithMemos() async {
+    final String path = widget.files.first.path;
+    final Map<int, List<Map<String, Object?>>> memos = {
+      for (final e in _memoStrokesByPage.entries)
+        if (e.value.isNotEmpty) e.key: [for (final s in e.value) s.toJson()],
+    };
+    if (!_isPdfFile || memos.isEmpty) {
+      await shareFile(context, path, title: widget.title);
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(_tr('메모를 넣은 PDF를 만들고 있어요', 'Preparing the PDF with memos', '正在生成含笔记的 PDF', 'メモ入りのPDFを作成しています')),
+        duration: const Duration(minutes: 1),
+      ));
+    String? made;
+    try {
+      // 공유용 파일은 한 개만 남김 (예전에 만든 것은 지움)
+      final dir = Directory('${(await getTemporaryDirectory()).path}/share');
+      if (await dir.exists()) await dir.delete(recursive: true);
+      await dir.create(recursive: true);
+      String name = widget.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+      if (name.isEmpty) name = 'memo';
+      if (!name.toLowerCase().endsWith('.pdf')) name = '$name.pdf';
+      final String out = '${dir.path}/$name';
+      if (await PdfOutlineService.writeWithMemos(path, out, memos)) made = out;
+    } catch (_) {}
+    messenger.hideCurrentSnackBar();
+    if (!mounted) return;
+    if (made == null) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(_tr('메모를 넣지 못해 원래 파일을 공유해요', 'Could not add memos, sharing the original file', '无法加入笔记，将分享原文件', 'メモを入れられなかったため元のファイルを共有します')),
+      ));
+      made = path;
+    }
+    await shareFile(context, made, title: widget.title);
   }
 
   Future<void> _openPenSettings() {
@@ -2806,6 +2814,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     WidgetsBinding.instance.removeObserver(this);
     _volumeKeyService.stopListening();
     _pageController?.dispose();
+    // 닫으면 이 파일의 쪽 그림을 메모리에서 내림 (서재·다른 파일이 쓸 메모리를 비움)
+    for (final f in _imagePages) {
+      FileImage(f).evict().catchError((_) => false);
+    }
     super.dispose();
   }
 
@@ -2923,12 +2935,23 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           }
         },
       ),
-      // 메모는 쪽 넘김(탭·슬라이드) 보기에서만 (스크롤 보기에서는 끔)
-      if (!_pageModeScroll)
       QuickToolItem(
         icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
+          // 스크롤 모드는 쪽이 이어져 있어 메모를 쓰지 않음 (읽기 방향 전환과 같은 안내)
+          if (_pageModeScroll) {
+            ScaffoldMessenger.of(context)
+              ..clearSnackBars()
+              ..showSnackBar(SnackBar(
+                content: Text(_tr('스크롤 모드에서는 메모를 쓸 수 없어요\n탭·슬라이드 모드에서 쓸 수 있어요',
+                    'Memos are not available in scroll mode\nUse them in tap/slide mode',
+                    '滚动模式下不能写笔记，请在点击/滑动模式下使用',
+                    'スクロールモードではメモを使えません\nタップ・スライドモードで使えます')),
+                duration: const Duration(seconds: 2),
+              ));
+            return;
+          }
           setState(() {
             _isMemoMode = !_isMemoMode;
             _isEraserMode = false;
@@ -3096,7 +3119,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     final local = _textLocal(d.globalPosition);
                     if (local != null && _textSel.active) _textSel.extendTo(local);
                   } : null,
-                  // 사진·PDF 쪽은 원래 크기·선명도 그대로 (앱 화면을 크게 보여 줄 때도)
+                  // PDF·CBZ 쪽은 원래 크기·선명도 그대로 (앱 화면을 크게 보여 줄 때도)
                   child: UiUnscale(child: _pageModeScroll ? _buildScrollPages() : _buildPageStage(context,
                     PageView.builder(
                     key: ValueKey('pageview_spread_$isSpread'),
@@ -3252,7 +3275,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                             constraints: btnConstraints,
                             icon: const Icon(Icons.share_outlined, color: Colors.white, size: 18),
                             tooltip: _tr('공유', 'Share', '分享', '共有'),
-                            onPressed: () => shareFile(context, _shareFilePath, title: widget.title),
+                            onPressed: _shareWithMemos,
                           ),
                           IconButton(
                             visualDensity: VisualDensity.compact,

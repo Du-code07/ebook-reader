@@ -58,7 +58,8 @@ void main() async {
   // 상태표시줄 본래 높이 (태블릿에서 상단바를 이만큼 항상 내려 둠)
   await _readStatusBarHeight();
   PaintingBinding.instance.imageCache.maximumSize = 3000;
-  PaintingBinding.instance.imageCache.maximumSizeBytes = 300 << 20;
+  // 그림 캐시: 표지·지금 보는 쪽 정도면 충분 (예전 300MB는 오래된 쪽 그림까지 붙잡아 둠)
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 200 << 20;
   try {
     await UserFonts.dir(); // 사용자가 넣은 글꼴 폴더 (문서 화면이 바로 읽을 수 있게 미리 준비)
     EpubBookServer.userFontDir = UserFonts.cachedDirPath; // EPUB 글꼴도 같은 폴더에서
@@ -500,10 +501,10 @@ class UserManualScreen extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
           children: [
             Text(
-              _tr('PDF·EPUB·워드(docx·doc)·한글(hwp·hwpx)·엑셀(xlsx)·PPT(pptx)·TXT·사진(jpg·png)·만화(cbz) 파일을 볼 수 있어요',
-                  'Opens PDF, EPUB, Word (docx, doc), Hangul (hwp, hwpx), Excel (xlsx), PowerPoint (pptx), TXT, images (jpg, png) and comics (cbz)',
-                  '可查看 PDF、EPUB、Word(docx·doc)、韩文(hwp·hwpx)、Excel(xlsx)、PPT(pptx)、TXT、图片(jpg·png)、漫画(cbz)文件',
-                  'PDF・EPUB・Word(docx・doc)・ハングル(hwp・hwpx)・Excel(xlsx)・PPT(pptx)・TXT・画像(jpg・png)・漫画(cbz)を閲覧できます'),
+              _tr('PDF·EPUB·워드(docx·doc)·한글(hwp·hwpx)·엑셀(xlsx)·PPT(pptx)·TXT·만화(cbz) 파일을 볼 수 있어요',
+                  'Opens PDF, EPUB, Word (docx, doc), Hangul (hwp, hwpx), Excel (xlsx), PowerPoint (pptx), TXT and comics (cbz)',
+                  '可查看 PDF、EPUB、Word(docx·doc)、韩文(hwp·hwpx)、Excel(xlsx)、PPT(pptx)、TXT、漫画(cbz)文件',
+                  'PDF・EPUB・Word(docx・doc)・ハングル(hwp・hwpx)・Excel(xlsx)・PPT(pptx)・TXT・漫画(cbz)を閲覧できます'),
               style: TextStyle(fontSize: 13.5, height: 1.45, color: cs.onSurfaceVariant),
             ),
 
@@ -625,10 +626,10 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.grid_view_rounded),
                 title: _tr('도구 모음', 'Toolbox', '工具箱', 'ツールボックス'),
-                desc: _tr('이전·다음 파일(같은 그룹), 화면 잠금, 화면 회전(자동·세로 고정·가로 고정), 페이지 표시(한 페이지·두 페이지·자동 — EPUB과 한 쪽뿐인 파일은 늘 한 페이지), 읽기 방향(좌→우·우→좌, 파일마다 기억), 메모, 글자 복사, 북마크(북마크할 때의 페이지 모드·화면 회전·페이지 표시까지 기억), 확대·축소가 있어요\n화면 회전·페이지 표시는 창에서 고르고, 창이 닫힐 때 적용돼요',
-                    'Previous / next file (same group), lock screen, rotate (auto / portrait / landscape), page display (one / two pages / auto — EPUB and one-page files always show one page), reading direction (L→R / R→L, remembered per file), memo, copy text, bookmarks (also remember the page mode, rotation and page display at that time), and zoom\nRotation and page display apply when their window closes',
-                    '包括上一个·下一个文件（同一分组）、锁定屏幕、旋转屏幕（自动·固定竖屏·固定横屏）、页面显示（单页·双页·自动——EPUB 和只有一页的文件始终单页）、阅读方向（左→右·右→左，按文件记忆）、笔记、复制文字、书签（同时记住当时的翻页模式·屏幕旋转·页面显示）、放大·缩小\n旋转屏幕和页面显示在窗口关闭时生效',
-                    '前・次のファイル(同じグループ)、画面ロック、画面回転(自動・縦固定・横固定)、ページ表示(1ページ・2ページ・自動 — EPUBと1ページだけのファイルは常に1ページ)、読む方向(左→右・右→左、ファイルごとに記憶)、メモ、文字コピー、ブックマーク(そのときのページモード・画面回転・ページ表示も記憶)、拡大・縮小があります\n画面回転・ページ表示はウィンドウを閉じたときに適用されます')),
+                desc: _tr('이전·다음 파일(같은 그룹), 화면 잠금, 화면 회전(자동·세로 고정·가로 고정), 페이지 표시(한 페이지·두 페이지·자동 — EPUB과 한 쪽뿐인 파일은 늘 한 페이지), 읽기 방향(좌→우·우→좌, 파일마다 기억), 메모, 글자 복사, 북마크(EPUB·TXT 제외, 북마크할 때의 페이지 모드·화면 회전·페이지 표시까지 기억), 확대·축소가 있어요\n화면 회전·페이지 표시는 창에서 고르고, 창이 닫힐 때 적용돼요',
+                    'Previous / next file (same group), lock screen, rotate (auto / portrait / landscape), page display (one / two pages / auto — EPUB and one-page files always show one page), reading direction (L→R / R→L, remembered per file), memo, copy text, bookmarks (not for EPUB / TXT; also remember the page mode, rotation and page display at that time), and zoom\nRotation and page display apply when their window closes',
+                    '包括上一个·下一个文件（同一分组）、锁定屏幕、旋转屏幕（自动·固定竖屏·固定横屏）、页面显示（单页·双页·自动——EPUB 和只有一页的文件始终单页）、阅读方向（左→右·右→左，按文件记忆）、笔记、复制文字、书签（EPUB·TXT 除外，同时记住当时的翻页模式·屏幕旋转·页面显示）、放大·缩小\n旋转屏幕和页面显示在窗口关闭时生效',
+                    '前・次のファイル(同じグループ)、画面ロック、画面回転(自動・縦固定・横固定)、ページ表示(1ページ・2ページ・自動 — EPUBと1ページだけのファイルは常に1ページ)、読む方向(左→右・右→左、ファイルごとに記憶)、メモ、文字コピー、ブックマーク(EPUB・TXTを除く、そのときのページモード・画面回転・ページ表示も記憶)、拡大・縮小があります\n画面回転・ページ表示はウィンドウを閉じたときに適用されます')),
             _row(context,
                 icon: const Icon(Icons.swap_vert_rounded),
                 title: _tr('스크롤 보기', 'Scroll View', '滚动视图', 'スクロール表示'),
@@ -1010,10 +1011,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   // 메모장(.txt), 워드(.docx, .doc), 한글(.hwpx, .hwp), 파워포인트(.pptx, .ppt)도 열람 (모두 기기 안에서 처리)
   static const _supportedExts = [
-    'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+    'epub', 'txt', 'pdf', 'cbz',
     'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt', 'xlsx', 'xlsm', 'xls',
   ];
-  static const _imageExts = ['jpg', 'jpeg', 'png', 'webp'];
 
   /// 글 문서(리더 화면에서 여는 형식)
   static const _readerExts = ['epub', 'txt', 'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt', 'xlsx', 'xlsm', 'xls'];
@@ -1121,8 +1121,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       final head = await raf.read(8);
       await raf.close();
       if (head.length >= 4 && head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46) return 'pdf';
-      if (head.length >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF) return 'jpg';
-      if (head.length >= 4 && head[0] == 0x89 && head[1] == 0x50 && head[2] == 0x4E && head[3] == 0x47) return 'png';
       if (head.length >= 2 && head[0] == 0x50 && head[1] == 0x4B) {
         // ZIP으로 묶인 형식: 안에 든 파일 이름으로 구별
         final input = InputFileStream(f.path);
@@ -1400,10 +1398,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         continue;
       }
       final ext = path.split('.').last.toLowerCase();
-      if (_imageExts.contains(ext)) {
-        _cacheThumbnailFromFileSync(path, path, isRawOriginalImage: true);
-        continue;
-      }
       // 사용자가 고른 표지가 있으면 그것
       final custom = covers[path];
       if (custom != null && File(custom).existsSync()) {
@@ -1486,10 +1480,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         return;
       }
       final ext = path.split('.').last.toLowerCase();
-      if (_imageExts.contains(ext)) {
-        _cacheThumbnailFromFileSync(path, path, isRawOriginalImage: true);
-        return;
-      }
 
       final String thumbDirPath = cachedThumbDirPath ??
           '${(await getApplicationDocumentsDirectory()).path}/.thumbnails';
@@ -1670,10 +1660,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           SnackBar(
             content: Text(
               _tr(
-                '지원되는 파일 형식(EPUB, PDF, JPG, PNG, CBZ)을 선택해 주세요',
-                'Please select supported files (EPUB, PDF, JPG, PNG, CBZ)',
-                '请选择受支持的文件格式 (EPUB, PDF, JPG, PNG, CBZ)',
-                '対応ファイル形式(EPUB, PDF, JPG, PNG, CBZ)を選択してください',
+                '지원되는 파일 형식(PDF, EPUB, TXT, CBZ, 워드, 한글, PPT, 엑셀)을 선택해 주세요',
+                'Please select supported files (PDF, EPUB, TXT, CBZ, Word, HWP, PPT, Excel)',
+                '请选择受支持的文件格式 (PDF, EPUB, TXT, CBZ, Word, HWP, PPT, Excel)',
+                '対応ファイル形式(PDF, EPUB, TXT, CBZ, Word, HWP, PPT, Excel)を選択してください',
               ),
             ),
           ),
@@ -1717,45 +1707,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       if (action == 'merge_pdf') {
         final paths = pdfPicked.map((e) => File(e.path!)).toList();
         await _createMergedPdfFromFiles(paths, deleteSourceAfter: false);
-        return;
-      }
-    }
-
-    final imagePicked = validPicked.where((pf) {
-      final ext = pf.name.split('.').last.toLowerCase();
-      return _imageExts.contains(ext);
-    }).toList();
-
-    if (imagePicked.length >= 2 && imagePicked.length == validPicked.length && mounted) {
-      final action = await showPopDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(_tr('이미지 추가 방식 선택', 'Image Import Option', '选择图片导入方式', '画像の追加方法を選択')),
-          content: Text(
-            _tr(
-              '선택한 이미지들을 하나로 묶어 통합 파일(.cbz)로 추가할까요?',
-              'Would you like to bundle the selected images into a single .cbz book?',
-              '是否将所选图片打包为单个 .cbz 文件添加？',
-              '選択した画像を1つのファイル(.cbz)にまとめて追加しますか？',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, 'separate'),
-              child: Text(_tr('개별 파일로 추가', 'Add Separately', '单独添加', '個別に追加')),
-            ),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.auto_stories, size: 16),
-              onPressed: () => Navigator.pop(ctx, 'merge'),
-              label: Text(_tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合')),
-            ),
-          ],
-        ),
-      );
-
-      if (action == 'merge') {
-        final paths = imagePicked.map((e) => File(e.path!)).toList();
-        await _createMangaBookFromImages(paths, deleteSourceAfter: false);
         return;
       }
     }
@@ -1820,7 +1771,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       'pptx': ['pptx', 'ppt'],
       'xlsx': ['xlsx', 'xlsm', 'xls'],
       'cbz': ['cbz'],
-      'jpg': ['jpg', 'jpeg', 'png', 'webp'],
     };
     final exts = extsOf[ext] ?? [ext];
     bool allowed = await _pdfChannel.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
@@ -1968,14 +1918,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }
   }
 
-  Future<void> _createMangaBookFromImages(List<File> sourceImages, {bool deleteSourceAfter = false}) async {
+  Future<void> _createMangaBookFromImages(List<File> sourceImages) async {
     final now = DateTime.now();
     final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
     final rand4 = (1000 + math.Random().nextInt(9000)).toString();
     final defaultFileName = '파일_${dateStr}_$rand4';
 
     final titleController = TextEditingController(text: defaultFileName);
-    bool deleteOriginals = deleteSourceAfter;
     bool sortByName = true;
 
     final confirmed = await showPopDialog<bool>(
@@ -2017,18 +1966,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   groupValue: sortByName,
                   onChanged: (v) => setModalState(() => sortByName = v ?? false),
                 ),
-                if (deleteSourceAfter) ...[
-                  const Divider(height: 12),
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: deleteOriginals,
-                    title: Text(
-                      _tr('통합 후 기존 낱장 이미지 휴지통으로 이동', 'Move original images to Trash after merge', '合并后将原图移至回收站', '結合後に元の画像をゴミ箱へ移動'),
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    onChanged: (v) => setModalState(() => deleteOriginals = v ?? false),
-                  ),
-                ],
               ],
             ),
           ),
@@ -2114,14 +2051,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final targetGroup = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
     await StorageService.setBookGroup(outFile.path, targetGroup);
 
-    if (deleteOriginals) {
-      for (final img in orderedImages) {
-        if (await img.exists()) {
-          await _moveFileToTrash(img, reloadAfter: false);
-        }
-      }
-    }
-
     if (mounted) {
       Navigator.pop(context);
     }
@@ -2141,59 +2070,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }
   }
 
+  /// 이미지 합치기: 기기에서 그림을 2장 이상 골라 하나의 만화책 파일(.cbz)로 만듦
   Future<void> _showMergeExistingImagesDialog() async {
-    final existingImages = _allBooks.where((f) {
-      final ext = f.path.split('.').last.toLowerCase();
-      return _imageExts.contains(ext);
-    }).toList();
-
-    if (existingImages.isEmpty) {
-      final result = await _pickFilesWithNotice(
-        type: FileType.image,
-        allowMultiple: true,
+    final result = await _pickFilesWithNotice(type: FileType.image, allowMultiple: true);
+    if (result == null) return;
+    final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
+    if (files.length >= 2) {
+      await _createMangaBookFromImages(files);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_tr('이미지를 2개 이상 선택해 주세요', 'Please select at least 2 images', '请选择至少 2 张图片', '画像を2つ以上選択してください'))),
       );
-      if (result != null && result.files.length >= 2) {
-        final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
-        await _createMangaBookFromImages(files, deleteSourceAfter: false);
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_tr('JPG/PNG 파일을 2개 이상 선택해 주세요', 'Please select at least 2 JPG/PNG files', '请选择至少 2 个 JPG/PNG 文件', 'JPG/PNGファイルを2つ以上選択してください'))),
-        );
-      }
-      return;
-    }
-
-    final result = await showPopDialog<Object?>(
-      context: context,
-      builder: (ctx) => _FileMergeSelectDialog(
-        files: existingImages,
-        tr: _tr,
-        displayName: (f) => _formatDisplayFileName(f.path.split(Platform.pathSeparator).last),
-        title: _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'),
-        mergeLabel: _tr('선택한 이미지 합치기', 'Merge Selected', '合并所选图片', '選択した画像を結合'),
-      ),
-    );
-
-    if (result == 'browse') {
-      final picked = await _pickFilesWithNotice(
-        type: FileType.image,
-        allowMultiple: true,
-      );
-      if (picked != null && picked.files.length >= 2) {
-        final files = picked.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
-        await _createMangaBookFromImages(files, deleteSourceAfter: false);
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_tr('JPG/PNG 파일을 2개 이상 선택해 주세요', 'Please select at least 2 JPG/PNG files', '请选择至少 2 个 JPG/PNG 文件', 'JPG/PNGファイルを2つ以上選択してください'))),
-        );
-      }
-      return;
-    }
-
-    if (result is List<String> && result.length >= 2) {
-      final fileByPath = {for (final f in existingImages) f.path: f};
-      final chosen = result.map((p) => fileByPath[p]!).toList();
-      await _createMangaBookFromImages(chosen, deleteSourceAfter: true);
     }
   }
 
@@ -2551,17 +2438,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           ),
         ),
       );
-    } else if (_imageExts.contains(ext)) {
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => UniversalMediaReaderScreen(
-            files: [file],
-            title: displayName,
-            isPdf: false,
-          ),
-        ),
-      );
     } else {
       await Navigator.push(
         context,
@@ -2657,7 +2533,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   bool _fabOpen = false; // 파일 추가 버튼을 눌러 세 가지 메뉴가 펼쳐진 상태
 
-  /// 파일 추가 버튼: 누르면 위로 [파일 추가 / PDF 병합 / 이미지 병합] 세 버튼이 펼쳐짐
+  /// 파일 추가 버튼: 누르면 위로 [파일 추가 / PDF 합치기 / 이미지 합치기] 세 버튼이 펼쳐짐
   /// 문서 스캔: 카메라로 찍어 보정한 뒤 PDF 한 개로 만들어 지금 그룹에 넣음
   Future<void> _openDocumentScanner() async {
     final targetGroup = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
@@ -2803,7 +2679,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       'ppt': 'pptx', 'pptx': 'pptx', 'powerpoint': 'pptx', '파워포인트': 'pptx', 'ppt 문서': 'pptx',
       'xls': 'xlsx', 'xlsx': 'xlsx', 'xlsm': 'xlsx', 'excel': 'xlsx', '엑셀': 'xlsx',
       'cbz': 'cbz', '만화': 'cbz', 'comic': 'cbz', 'comics': 'cbz',
-      'jpg': 'jpg', 'jpeg': 'jpg', 'png': 'jpg', 'webp': 'jpg', '이미지': 'jpg', '사진': 'jpg', 'image': 'jpg', 'images': 'jpg',
     };
     return map[n];
   }
@@ -4304,7 +4179,7 @@ double _edgeAutoScrollStep(double localDy, double viewportHeight, double zone) {
   return 0.0;
 }
 
-/// 합치기용 파일 선택 창 (이미지·PDF 공용)
+/// 합치기용 파일 선택 창 (PDF)
 /// - 그냥 드래그: 목록 스크롤
 /// - 파일을 꾹 누른 채 드래그: 지나가는 파일 연속 선택(가장자리에서 자동 스크롤)
 /// 반환값: 선택한 경로 목록(List<String>) 또는 'browse'(기기에서 선택)

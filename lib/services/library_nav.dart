@@ -15,7 +15,7 @@ class LibraryNav {
   static List<String> order = const [];
 
   static const supportedExts = [
-    'epub', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'cbz',
+    'epub', 'txt', 'pdf', 'cbz',
     'docx', 'doc', 'hwpx', 'hwp', 'pptx', 'ppt', 'xlsx', 'xlsm', 'xls',
   ];
 

@@ -34,7 +34,7 @@ class TxtPageController {
   void clearSearch() => _clear?.call();
 }
 
-/// Keeps the existing ReaderScreen toolbar, gestures, bookmarks and memos.
+/// Keeps the existing ReaderScreen toolbar, gestures and memos.
 /// TXT is still the document's identity; only its display uses fixed paper pages.
 class TxtPagedViewer extends StatefulWidget {
   final String filePath;
@@ -49,8 +49,6 @@ class TxtPagedViewer extends StatefulWidget {
   final bool scroll;
   final ContinuousPageController? scrollController;
 
-  /// 스크롤 보기에서 북마크한 쪽 (쪽 왼쪽 위에 책갈피)
-  final Set<int> scrollMarks;
   final ValueChanged<int> onLoaded;
   final void Function(int, int, String, double) onLocation;
   final ValueChanged<String> onError;
@@ -66,7 +64,6 @@ class TxtPagedViewer extends StatefulWidget {
     required this.rtl,
     this.scroll = false,
     this.scrollController,
-    this.scrollMarks = const {},
     required this.onLoaded,
     required this.onLocation,
     required this.onError,
@@ -340,7 +337,6 @@ extension on _TxtPagedViewerState {
       gapColor: kViewerGapColor,
       // 두 손가락으로 벌려 확대
       zoomable: true,
-      markedPages: widget.scrollMarks,
       onPageChanged: (p) {
         _page = p;
         widget.onLocation(p, doc.pageCount, 'txt:$p', doc.pageCount <= 1 ? 0 : p / (doc.pageCount - 1));

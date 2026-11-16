@@ -41,11 +41,6 @@ String shareMimeOf(String path) {
     'xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
     'cbz': 'application/vnd.comicbook+zip',
     'zip': 'application/zip',
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'png': 'image/png',
-    'webp': 'image/webp',
-    'gif': 'image/gif',
   };
   return map[ext] ?? 'application/octet-stream';
 }

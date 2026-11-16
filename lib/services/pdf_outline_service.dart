@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 /// PDF 파일 안의 목차(책갈피, Outlines)를 읽는다. 각 항목 {title, level, page(0부터)}.
 /// 암호가 걸렸거나 목차가 없거나 읽지 못하면 빈 목록.
+/// 공유할 때 메모(펜 자국)를 PDF 주석으로 덧붙이는 일도 함 ([writeWithMemos])
 class PdfOutlineService {
   static Future<List<Map<String, Object>>> read(String path) async {
     try {
@@ -17,20 +19,19 @@ class PdfOutlineService {
     }
   }
 
-  /// [path] PDF 끝에 목차(책갈피)를 덧붙인다 (기존 내용은 그대로 두는 '덧붙여 고치기' 방식).
-  /// [items]: {title, level(1~), page(0부터)}. 실패하면 false (파일은 그대로)
-  static Future<bool> appendOutline(String path, List<Map<String, Object>> items) async {
-    if (items.isEmpty) return false;
+  /// 메모를 넣은 PDF: [src]를 [dst]로 복사하고 끝에 쪽마다 펜 자국(잉크 주석)을 덧붙인다.
+  /// 원래 내용(글자·그림)은 그대로라 글자 고르기·확대도 원래처럼 됨.
+  /// [memos]: 쪽 번호(0부터) → 펜 자국들 {x, y: 쪽 안 비율(왼쪽 위 0), c: ARGB, w: 쪽 너비에 대한 굵기}.
+  /// 읽지 못하는 PDF(암호 등)면 false (만들지 않음)
+  static Future<bool> writeWithMemos(String src, String dst, Map<int, List<Map<String, Object?>>> memos) async {
     try {
-      final bytes = await File(path).readAsBytes();
-      final tail = await Isolate.run(() => _PdfOutlineReader(bytes).buildOutlineUpdate(items));
+      final bytes = await File(src).readAsBytes();
+      final tail = await Isolate.run(() => _PdfOutlineReader(bytes).buildInkUpdate(memos));
       if (tail == null) return false;
-      final raf = await File(path).open(mode: FileMode.append);
-      try {
-        await raf.writeFrom(tail);
-      } finally {
-        await raf.close();
-      }
+      final out = BytesBuilder(copy: false)
+        ..add(bytes)
+        ..add(tail);
+      await File(dst).writeAsBytes(out.takeBytes(), flush: true);
       return true;
     } catch (_) {
       return false;
@@ -273,8 +274,8 @@ class _PdfOutlineReader {
     return out;
   }
 
-  // ── 목차 덧붙이기 ──
-  Uint8List? buildOutlineUpdate(List<Map<String, Object>> items) {
+  // ── 메모(잉크 주석) 덧붙이기 ──
+  Uint8List? buildInkUpdate(Map<int, List<Map<String, Object?>>> memos) {
     _readXref();
     if (_trailer['Encrypt'] != null || _startXref < 0) return null;
     final rootRef = _trailer['Root'];
@@ -284,69 +285,119 @@ class _PdfOutlineReader {
     final pages = <int>[];
     _collectPages(catalog['Pages'], pages, <int>{}, 0);
     if (pages.isEmpty) return null;
-    final pageGen = <int, int>{};
-    // 쪽 개체의 세대 번호 (보통 0)
     int nextNum = _size;
     for (final n in [..._offsets.keys, ..._inStream.keys]) {
       if (n + 1 > nextNum) nextNum = n + 1;
     }
 
-    // 단계로 나무 모양 만들기
-    final root = _OutlineNode('', 0, 0);
-    final stack = <_OutlineNode>[];
-    for (final it in items) {
-      final title = (it['title'] ?? '').toString().trim();
-      final level = (it['level'] as int?) ?? 1;
-      final page = ((it['page'] as int?) ?? 0).clamp(0, pages.length - 1);
-      if (title.isEmpty) continue;
-      final node = _OutlineNode(title, level, page);
-      while (stack.isNotEmpty && stack.last.level >= level) {
-        stack.removeLast();
-      }
-      (stack.isEmpty ? root : stack.last).children.add(node);
-      stack.add(node);
-    }
-    if (root.children.isEmpty) return null;
-    root.num = nextNum++;
-    void number(_OutlineNode n) {
-      for (final c in n.children) {
-        c.num = nextNum++;
-        number(c);
-      }
-    }
-    number(root);
-    int total(_OutlineNode n) => n.children.fold(0, (sum, c) => sum + 1 + total(c));
-
     final base = b.length;
     final out = BytesBuilder();
     final offsets = <int, int>{};
     void write(String text) => out.add(latin1.encode(text));
-    void obj(int num, Map<String, Object?> dict) {
+    void obj(int num, String body) {
       offsets[num] = base + out.length;
-      write('$num 0 obj\n${_ser(dict)}\nendobj\n');
+      write('$num 0 obj\n$body\nendobj\n');
     }
 
+    String f(double v) => v.toStringAsFixed(2);
     write('\n');
-    obj(root.num, {'Type': const _Name('Outlines'), 'First': _Ref(root.children.first.num, 0), 'Last': _Ref(root.children.last.num, 0), 'Count': total(root)});
-    void emit(_OutlineNode parent) {
-      for (int i = 0; i < parent.children.length; i++) {
-        final c = parent.children[i];
-        obj(c.num, {
-          'Title': _Str(_utf16be(c.title)),
-          'Parent': _Ref(parent.num, 0),
-          if (i > 0) 'Prev': _Ref(parent.children[i - 1].num, 0),
-          if (i + 1 < parent.children.length) 'Next': _Ref(parent.children[i + 1].num, 0),
-          if (c.children.isNotEmpty) 'First': _Ref(c.children.first.num, 0),
-          if (c.children.isNotEmpty) 'Last': _Ref(c.children.last.num, 0),
-          if (c.children.isNotEmpty) 'Count': total(c),
-          'Dest': [_Ref(pages[c.page], pageGen[pages[c.page]] ?? 0), const _Name('XYZ'), null, null, null],
-        });
-        emit(c);
+    for (final entry in memos.entries) {
+      final int index = entry.key;
+      if (index < 0 || index >= pages.length || entry.value.isEmpty) continue;
+      final int pageNum = pages[index];
+      final page = _dict(_Ref(pageNum, 0));
+      if (page == null) continue;
+      // 쪽 크기·회전은 위(쪽 묶음)에서 물려받을 수 있음
+      Object? inherited(String key) {
+        Map<String, Object?>? d = page;
+        for (int guard = 0; d != null && guard < 32; guard++) {
+          if (d[key] != null) return _resolve(d[key]);
+          d = _dict(d['Parent']);
+        }
+        return null;
       }
+
+      List<double>? boxOf(Object? v) {
+        if (v is! List || v.length < 4) return null;
+        final n = [for (final e in v.take(4)) (_resolve(e) is num) ? (_resolve(e) as num).toDouble() : 0.0];
+        return [math.min(n[0], n[2]), math.min(n[1], n[3]), math.max(n[0], n[2]), math.max(n[1], n[3])];
+      }
+
+      final box = boxOf(inherited('CropBox')) ?? boxOf(inherited('MediaBox')) ?? const [0.0, 0.0, 612.0, 792.0];
+      final double x0 = box[0], y0 = box[1], x1 = box[2], y1 = box[3], w = x1 - x0, h = y1 - y0;
+      if (w <= 0 || h <= 0) continue;
+      final Object? rotObj = inherited('Rotate');
+      final int rot = (((rotObj is num ? rotObj.toInt() : 0) % 360) + 360) % 360 ~/ 90 * 90;
+      // 화면에 보이는 쪽(왼쪽 위가 0)의 비율 자리 → PDF 쪽 좌표
+      (double, double) toPdf(double fx, double fy) => switch (rot) {
+            90 => (x0 + fy * w, y0 + fx * h),
+            180 => (x1 - fx * w, y0 + fy * h),
+            270 => (x1 - fy * w, y1 - fx * h),
+            _ => (x0 + fx * w, y1 - fy * h),
+          };
+      final double shownWidth = (rot == 90 || rot == 270) ? h : w;
+
+      final annots = <Object?>[];
+      for (final stroke in entry.value) {
+        final xs = stroke['x'], ys = stroke['y'];
+        if (xs is! List || ys is! List || xs.isEmpty || xs.length != ys.length) continue;
+        final pts = <(double, double)>[
+          for (int i = 0; i < xs.length; i++) toPdf((xs[i] as num).toDouble(), (ys[i] as num).toDouble()),
+        ];
+        if (pts.length == 1) pts.add((pts[0].$1 + 0.01, pts[0].$2));
+        final double wf = (stroke['w'] as num?)?.toDouble() ?? 0.005;
+        final double lw = math.max(0.3, wf < 0.5 ? wf * shownWidth : wf * shownWidth / 400);
+        final int c = (stroke['c'] as num?)?.toInt() ?? 0xFFFFC107;
+        final double a = ((c >> 24) & 0xFF) / 255, r = ((c >> 16) & 0xFF) / 255, g = ((c >> 8) & 0xFF) / 255, bl = (c & 0xFF) / 255;
+        double minX = pts.first.$1, maxX = minX, minY = pts.first.$2, maxY = minY;
+        for (final p in pts) {
+          minX = math.min(minX, p.$1);
+          maxX = math.max(maxX, p.$1);
+          minY = math.min(minY, p.$2);
+          maxY = math.max(maxY, p.$2);
+        }
+        final rect = [minX - lw, minY - lw, maxX + lw, maxY + lw];
+        final path = StringBuffer('${f(pts.first.$1)} ${f(pts.first.$2)} m');
+        for (final p in pts.skip(1)) {
+          path.write(' ${f(p.$1)} ${f(p.$2)} l');
+        }
+        final content = 'q /G0 gs ${f(r)} ${f(g)} ${f(bl)} RG ${f(lw)} w 1 J 1 j $path S Q';
+        final int apNum = nextNum++, annotNum = nextNum++;
+        // 그려 둔 모양(어느 PDF 앱에서나 같은 모양으로 보이게)
+        obj(apNum, '${_ser({
+              'Type': const _Name('XObject'),
+              'Subtype': const _Name('Form'),
+              'BBox': rect,
+              'Resources': {
+                'ExtGState': {
+                  'G0': {'CA': a, 'ca': a},
+                },
+              },
+              'Length': content.length,
+            })}\nstream\n$content\nendstream');
+        obj(annotNum, _ser({
+          'Type': const _Name('Annot'),
+          'Subtype': const _Name('Ink'),
+          'Rect': rect,
+          'InkList': [
+            [for (final p in pts) ...[p.$1, p.$2]],
+          ],
+          'C': [r, g, bl],
+          'CA': a,
+          'BS': {'W': lw},
+          'F': 4,
+          'P': _Ref(pageNum, 0),
+          'AP': {'N': _Ref(apNum, 0)},
+        }));
+        annots.add(_Ref(annotNum, 0));
+      }
+      if (annots.isEmpty) continue;
+      final old = _resolve(page['Annots']);
+      // 쪽을 같은 번호로 다시 써서 원래 주석 뒤에 메모를 이어 붙임
+      obj(pageNum, _ser({...page, 'Annots': [if (old is List) ...old, ...annots]}));
     }
-    emit(root);
-    // 문서 목록(Catalog)을 새로 써서 목차를 연결 (같은 번호로 덮어씀)
-    obj(rootRef.num, {...catalog, 'Outlines': _Ref(root.num, 0)});
+    if (offsets.isEmpty) return null;
+
     final xrefAt = base + out.length;
     final nums = offsets.keys.toList()..sort();
     final sb = StringBuffer('xref\n');
@@ -358,22 +409,20 @@ class _PdfOutlineReader {
       }
       sb.write('${nums[i]} ${j - i + 1}\n');
       for (int k = i; k <= j; k++) {
-        sb.write('${offsets[nums[k]]!.toString().padLeft(10, '0')} ${(nums[k] == rootRef.num ? rootRef.gen : 0).toString().padLeft(5, '0')} n \n');
+        sb.write('${offsets[nums[k]]!.toString().padLeft(10, '0')} 00000 n \n');
       }
       i = j + 1;
     }
     write(sb.toString());
-    final trailer = <String, Object?>{'Size': nextNum, 'Root': rootRef, if (_trailer['Info'] != null) 'Info': _trailer['Info'], 'Prev': _startXref};
+    final trailer = <String, Object?>{
+      'Size': nextNum,
+      'Root': rootRef,
+      if (_trailer['Info'] != null) 'Info': _trailer['Info'],
+      if (_trailer['ID'] != null) 'ID': _trailer['ID'],
+      'Prev': _startXref,
+    };
     write('trailer\n${_ser(trailer)}\nstartxref\n$xrefAt\n%%EOF\n');
     return out.toBytes();
-  }
-
-  static List<int> _utf16be(String s) {
-    final out = <int>[0xFE, 0xFF];
-    for (final u in s.codeUnits) {
-      out..add(u >> 8)..add(u & 0xFF);
-    }
-    return out;
   }
 
   static String _ser(Object? v) {
@@ -765,13 +814,4 @@ class _PdfOutlineReader {
     }
     return null;
   }
-}
-
-class _OutlineNode {
-  _OutlineNode(this.title, this.level, this.page);
-  final String title;
-  final int level;
-  final int page;
-  int num = 0;
-  final List<_OutlineNode> children = [];
 }

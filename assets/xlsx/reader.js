@@ -20,16 +20,25 @@ const pointers = new Map();
 
 function emit(type, data = {}) { events.push({ type, ...data }); void flush(); }
 async function flush() {
-  if (disposed || flushing || !window.flutter_inappwebview?.callHandler) return;
+  if (disposed || flushing) return;
+  if (!window.flutter_inappwebview?.callHandler) { retryBridge(); return; }
   flushing = true;
   try {
     while (events.length && !disposed) {
       await window.flutter_inappwebview.callHandler('freaderXlsx', events[0]); events.shift();
     }
-  } catch (_) { /* Retry when the Android bridge finishes attaching. */ }
+  } catch (_) { retryBridge(); /* Retry when the Android bridge finishes attaching. */ }
   finally { flushing = false; }
 }
-const bridgeTimer = setInterval(flush, 150);
+// FReader(배터리): 보낼 알림이 남아 있을 때만 0.15초마다 다시 시도 (예전에는 시트를 펴 둔 내내 깨어 있었음)
+let bridgeTimer = 0;
+function retryBridge() {
+  if (bridgeTimer || disposed) return;
+  bridgeTimer = setInterval(() => {
+    if (disposed || !events.length) { clearInterval(bridgeTimer); bridgeTimer = 0; return; }
+    void flush();
+  }, 150);
+}
 window.addEventListener('flutterInAppWebViewPlatformReady', flush);
 function errorMessage(error) {
   switch (error?.code) {

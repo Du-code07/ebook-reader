@@ -61,7 +61,7 @@ function clearPages() {
   renderSerial++;
   if (vertical) {
     vertical = false; vResize.disconnect(); vMounted.clear(); vOwner.clear();
-    vhost?.remove(); vhost = null; vSlots = []; vTops = []; host.style.display = '';
+    vhost?.remove(); vhost = null; vSlots = []; vTops = []; vRatios = []; host.style.display = '';
   }
   for (const item of imageCache.values()) URL.revokeObjectURL(item.url);
   imageCache.clear(); imageJobs.clear(); brokenImages.clear();
@@ -753,7 +753,7 @@ function setVertical(on) {
     vertical = false;
     vResize.disconnect();
     for (const index of [...vMounted.keys()]) vUnmount(index);
-    vhost?.remove(); vhost = null; vSlots = []; vTops = []; vZoom = 1; vPinch = null;
+    vhost?.remove(); vhost = null; vSlots = []; vTops = []; vRatios = []; vZoom = 1; vPinch = null;
     host.style.display = '';
     void render().then(reportLocation);
   }
@@ -765,10 +765,12 @@ function vTouchInfo(t) {
   return { d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 };
 }
 function vPinchStart(e) {
-  if (!vertical || !vhost || e.touches.length !== 2) return;
+  if (!vertical || !vhost || e.touches.length !== 2 || !vTops.length) return;
   const t = vTouchInfo(e.touches);
-  vPinch = { d0: Math.max(1, t.d), z0: vZoom, fx: t.x, fy: t.y, dx: 0, dy: 0, z: vZoom };
-  vhost.style.transformOrigin = `${t.x}px ${t.y}px`;
+  // 손가락 가운데에 있던 글 자리 (몇째 쪽의 어느 비율 자리인지) — 크기를 바꿔도 그 글이 손가락 아래 남게
+  const cy = vhost.scrollTop + t.y, i = vIndexAt(cy), slot = vSlots[i];
+  const sh = Math.max(1, vTops[i + 1] - vTops[i] - V_GAP), sw = Math.max(1, vPageWidth());
+  vPinch = { d0: Math.max(1, t.d), z0: vZoom, z: vZoom, i, fy: (cy - vTops[i]) / sh, fx: (vhost.scrollLeft + t.x - vLeft()) / sw, x: t.x, y: t.y, raf: 0 };
   e.preventDefault();
 }
 function vPinchMove(e) {
@@ -777,27 +779,32 @@ function vPinchMove(e) {
   if (e.touches.length !== 2) return;
   const t = vTouchInfo(e.touches);
   vPinch.z = Math.max(V_ZOOM_MIN, Math.min(V_ZOOM_MAX, vPinch.z0 * t.d / vPinch.d0));
-  vPinch.dx = t.x - vPinch.fx; vPinch.dy = t.y - vPinch.fy;
-  vhost.style.transform = `translate(${vPinch.dx}px, ${vPinch.dy}px) scale(${vPinch.z / vPinch.z0})`;
+  vPinch.x = t.x; vPinch.y = t.y;
+  // 손가락이 움직이는 동안 바로 새 크기로 다시 놓음 (그림을 늘리지 않아 흐려지지 않고, 줄여도 빈 곳 없이 쪽을 채움)
+  if (!vPinch.raf) vPinch.raf = requestAnimationFrame(vPinchApply);
+}
+function vPinchApply() {
+  const p = vPinch; if (!p || !vhost) return;
+  p.raf = 0;
+  if (p.z === vZoom && p.applied && p.ax === p.x && p.ay === p.y) return;
+  p.applied = true; p.ax = p.x; p.ay = p.y;
+  vZoom = p.z;
+  vSize();
+  const sh = Math.max(1, vTops[p.i + 1] - vTops[p.i] - V_GAP);
+  vhost.scrollTop = vTops[p.i] + p.fy * sh - p.y;
+  vhost.scrollLeft = vLeft() + p.fx * vPageWidth() - p.x;
+  vUpdate();
 }
 function vPinchEnd(e) {
   if (!vPinch || !vhost) return;
   if (e.touches.length >= 2) return;
-  const p = vPinch; vPinch = null;
-  // 손가락 가운데 있던 글 자리를 기억해 두었다가, 새 크기로 다시 놓은 뒤 같은 자리에 오게
-  const cy = vhost.scrollTop + p.fy, i = vIndexAt(cy), slot = vSlots[i];
-  const sh = Math.max(1, slot ? slot.offsetHeight : 1), sw = Math.max(1, slot ? slot.offsetWidth : 1);
-  const fy = (cy - vTops[i]) / sh, fx = (vhost.scrollLeft + p.fx - (slot ? slot.offsetLeft : 0)) / sw;
-  vhost.style.transform = ''; vhost.style.transformOrigin = '';
-  let z = p.z; if (Math.abs(z - 1) < 0.05) z = 1;
-  if (z === vZoom) return;
-  vZoom = z;
-  vLayout(true);
-  const s2 = vSlots[i];
-  if (!s2) return;
-  vhost.scrollTop = vTops[i] + fy * s2.offsetHeight - (p.fy + p.dy);
-  vhost.scrollLeft = s2.offsetLeft + fx * s2.offsetWidth - (p.fx + p.dx);
-  vUpdate(); vReportMetrics();
+  const p = vPinch;
+  if (p.raf) { cancelAnimationFrame(p.raf); p.raf = 0; }
+  // 거의 원래 크기면 딱 원래 크기로
+  if (Math.abs(p.z - 1) < 0.05) p.z = 1;
+  vPinchApply();
+  vPinch = null;
+  vReportMetrics();
 }
 // FReader: 스크롤 보기 북마크 — 북마크한 쪽 왼쪽 위에 책갈피 (쪽과 함께 움직이고 확대·축소돼도 보임)
 let vMarks = new Set();
@@ -840,37 +847,26 @@ function vZoomListen(el) {
 }
 /** 확대 배율에 맞춘 쪽 너비 */
 function vPageWidth() { return (innerWidth || vhost.clientWidth) * vZoom; }
-/** 화면보다 좁게 줄였으면 쪽을 가로 가운데에 */
-function vPlaceSlot(slot, W) {
-  const VW = innerWidth || vhost.clientWidth;
-  slot.style.marginLeft = W < VW - 0.5 ? `${Math.floor((VW - W) / 2)}px` : '';
+/** 화면보다 좁게 줄였으면 쪽을 가로 가운데에 (쪽 왼쪽 끝 자리) */
+function vLeft() {
+  const VW = innerWidth || vhost.clientWidth, W = vPageWidth();
+  return W < VW - 0.5 ? Math.floor((VW - W) / 2) : 0;
 }
-function vLayout(keep) {
-  if (!vhost || !pages.length) return;
+// 쪽 크기는 쪽마다 정해 둔 비율 × 쪽 너비(--vw) — 확대·축소할 때는 너비 하나만 바꾸면 모든 쪽이 따라 바뀜
+let vRatios = [];
+function vSetRatio(i, r) {
+  if (vRatios[i] === r) return;
+  vRatios[i] = r;
+  vSlots[i].style.height = `calc(var(--vw) * ${r})`;
+}
+/** 지금 배율로 쪽 너비·자리를 다시 셈 (쪽을 다시 그리지 않음) */
+function vSize() {
   const W = vPageWidth();
+  vhost.style.setProperty('--vw', `${W}px`);
+  vhost.style.setProperty('--vml', `${vLeft()}px`);
   vhost.style.overflowX = vZoom > 1.001 ? 'auto' : 'hidden';
-  let anchor = page, frac = 0;
-  if (keep && vTops.length) {
-    const st = vhost.scrollTop;
-    anchor = vIndexAt(st);
-    frac = (st - vTops[anchor]) / Math.max(1, vTops[anchor + 1] - vTops[anchor]);
-  }
-  for (const index of [...vMounted.keys()]) vUnmount(index);
-  if (vSlots.length !== pages.length) {
-    vhost.replaceChildren();
-    vSlots = [];
-    for (let i = 0; i < pages.length; i++) {
-      const slot = document.createElement('div'); slot.className = 'vslot'; slot.dataset.page = String(i);
-      vhost.appendChild(slot); vSlots.push(slot);
-    }
-  }
-  vApplyMarks();
   vTops = []; let y = 0;
-  pages.forEach((entry, i) => {
-    const sh = entry.width > 0 ? W * entry.height / entry.width : W * 1.414;
-    vSlots[i].style.width = `${W}px`; vSlots[i].style.height = `${sh}px`; vPlaceSlot(vSlots[i], W);
-    vTops.push(y); y += sh + V_GAP;
-  });
+  for (let i = 0; i < vRatios.length; i++) { vTops.push(y); y += W * vRatios[i] + V_GAP; }
   vTops.push(y);
   // 쪽이 화면보다 짧으면(1쪽뿐인 문서 등) 위에 붙이지 않고 화면 가운데에
   const total = y - V_GAP, viewH = innerHeight || vhost.clientHeight;
@@ -880,6 +876,29 @@ function vLayout(keep) {
     vSlots[vSlots.length - 1].style.marginBottom = pad ? '0px' : '';
   }
   if (pad) for (let i = 0; i < vTops.length; i++) vTops[i] += pad;
+  for (const m of vMounted.values()) m.source.style.transform = `scale(${W / m.entry.width})`;
+}
+function vLayout(keep) {
+  if (!vhost || !pages.length) return;
+  let anchor = page, frac = 0;
+  if (keep && vTops.length) {
+    const st = vhost.scrollTop;
+    anchor = vIndexAt(st);
+    frac = (st - vTops[anchor]) / Math.max(1, vTops[anchor + 1] - vTops[anchor]);
+  }
+  for (const index of [...vMounted.keys()]) vUnmount(index);
+  if (vSlots.length !== pages.length) {
+    vhost.replaceChildren();
+    vSlots = []; vRatios = [];
+    for (let i = 0; i < pages.length; i++) {
+      const slot = document.createElement('div'); slot.className = 'vslot'; slot.dataset.page = String(i);
+      vhost.appendChild(slot); vSlots.push(slot);
+    }
+  }
+  vApplyMarks();
+  pages.forEach((entry, i) => vSetRatio(i, entry.width > 0 ? entry.height / entry.width : 1.414));
+  vRatios.length = pages.length;
+  vSize();
   vhost.scrollTop = vTops[anchor] + frac * (vTops[anchor + 1] - vTops[anchor]);
   vUpdate();
 }
@@ -912,11 +931,11 @@ function vMount(index) {
   const source = original ? entry.source : entry.source.cloneNode(true);
   if (original) vOwner.set(entry.source, index);
   preparePageSource(source, entry, index);
-  const slot = vSlots[index], W = parseFloat(slot.style.width) || vhost.clientWidth, scale = W / entry.width;
+  const slot = vSlots[index], scale = vPageWidth() / entry.width;
   const frame = document.createElement('section');
   frame.className = 'page'; frame.dataset.page = String(index);
   frame.dataset.width = String(entry.width); frame.dataset.height = String(entry.height);
-  frame.style.width = `${entry.width * scale}px`; frame.style.height = `${entry.height * scale}px`;
+  frame.style.width = '100%'; frame.style.height = '100%';
   source.style.transform = `scale(${scale})`;
   frame.appendChild(source); slot.appendChild(frame);
   vMounted.set(index, { frame, source, original, entry });
@@ -1159,21 +1178,26 @@ function headingCandidates() {
 
 // ── 확대해 둔 화면을 선명하게: 앱이 화면 그림을 키우는 대신, 쪽 상자 자체를 그 배율로 다시 그림 ──
 // (앱은 그 배율만큼 화면 그림을 되돌려 겹치게 하므로 보이는 자리는 그대로, 글씨만 선명해짐)
-let zoomView = null; // [배율, 가로 이동, 세로 이동] (CSS px)
+let zoomView = null, zoomBase = [0, 0]; // [배율, 가로 이동, 세로 이동] (CSS px), 확대 전 문서 화면 크기
 function setView(s, tx, ty) {
-  if (!(s > 1.001)) { zoomView = null; host.style.transform = ''; host.style.transformOrigin = ''; return true; }
+  // 늘린 그림을 보여 주지 않고 그 배율로 다시 그림(CSS zoom) — 확대해도, 움직이는 동안에도 글씨가 또렷하고 빠진 곳이 없음
+  if (!(s > 1.001)) {
+    zoomView = null;
+    Object.assign(host.style, { zoom: '', width: '', height: '', position: '', left: '', top: '' });
+    return true;
+  }
+  if (!zoomView) zoomBase = [host.clientWidth, host.clientHeight];
   zoomView = [s, tx, ty];
-  host.style.transformOrigin = '0 0';
-  host.style.transform = `matrix(${s},0,0,${s},${tx},${ty})`;
+  Object.assign(host.style, { zoom: String(s), width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px`, position: 'relative', left: `${tx / s}px`, top: `${ty / s}px` });
   return true;
 }
 // 자리를 재는 일(쪽 위치·글자 상자·표시)은 확대하지 않은 자리로 (앱 쪽 좌표와 맞게)
 function withoutZoom(fn) {
   return function (...args) {
     if (!zoomView) return fn.apply(this, args);
-    const t = host.style.transform;
-    host.style.transform = '';
-    try { return fn.apply(this, args); } finally { host.style.transform = t; }
+    const keep = { zoom: host.style.zoom, left: host.style.left, top: host.style.top };
+    Object.assign(host.style, { zoom: '', left: '0px', top: '0px' });
+    try { return fn.apply(this, args); } finally { Object.assign(host.style, keep); }
   };
 }
 window.freaderDocx = { setView, resetScrollZoom: vResetZoom, setScrollMarks, mostVisiblePage: vMostVisible, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy, setVertical, scrollToRatio: vScrollToRatio,

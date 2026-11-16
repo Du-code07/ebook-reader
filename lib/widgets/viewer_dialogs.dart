@@ -35,12 +35,21 @@ TapZone tapZoneAt(Offset local, Size size) {
 }
 
 /// 가운데에 뜨는 둥근 창 (페이지 표시·화면 회전 등 짧은 고르기)
+/// 고르기 창이 열리고 닫히는 시간 (빠르게)
+Duration get _dialogDur => Anim.ms(160);
+
+/// 바꾼 것이 있을 때만: 닫히는 움직임이 끝난 뒤에 적용 (화면 회전·쪽 다시 배치가 닫히는 움직임과 겹쳐 끊기지 않게)
+Future<void> _afterDialogClosed() async {
+  final d = _dialogDur;
+  if (d > Duration.zero) await Future<void>.delayed(d);
+}
+
 Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) async {
   final Offset? popFrom = TapOrigin.last; // 연 자리 (그쪽에서 살짝 다가오듯 열리고, 그쪽으로 살짝 물러나듯 닫힘)
   // 도구 모음이 닫히며 화면을 다시 그리는 프레임과 겹치지 않게, 그 프레임이 끝난 뒤 창을 띄움 (뜰 때 덜 버벅임)
   await WidgetsBinding.instance.endOfFrame;
   if (!context.mounted) return null;
-  final Duration dur = Anim.ms(260);
+  final Duration dur = _dialogDur;
   final T? result = await showGeneralDialog<T>(
     context: context,
     barrierDismissible: true,
@@ -50,8 +59,6 @@ Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) 
     pageBuilder: (ctx, _, __) => SafeArea(child: Center(child: builder(ctx))),
     transitionBuilder: (ctx, anim, _, child) => _softDialogTransition(ctx, anim, child, popFrom),
   );
-  // 닫히는 움직임이 다 끝난 뒤에 고른 것을 적용 (화면 회전·쪽 다시 배치가 닫히는 움직임과 겹쳐 끊기지 않게)
-  if (dur > Duration.zero) await Future<void>.delayed(dur);
   return result;
 }
 
@@ -399,7 +406,10 @@ Future<void> showPageDisplayDialog(
       ),
     );
   });
-  if (selected != current) onChanged(selected);
+  if (selected != current) {
+    await _afterDialogClosed();
+    onChanged(selected);
+  }
 }
 
 /// 화면 회전: 자동 / 세로 고정 / 가로 고정 ('auto' / 'portrait' / 'landscape'). 누르면 고르고, 창이 닫힐 때 바뀌었으면 돌려줌
@@ -428,7 +438,9 @@ Future<String?> showRotationDialog(BuildContext context, {required String curren
       ),
     );
   });
-  return selected == current ? null : selected;
+  if (selected == current) return null;
+  await _afterDialogClosed();
+  return selected;
 }
 
 /// 화면 회전 아이콘 (설정 창과 도구 모음이 같은 모양): 자동 / 세로 고정 / 가로 고정

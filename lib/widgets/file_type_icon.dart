@@ -67,7 +67,6 @@ class FileTypeIcon extends StatelessWidget {
     return null;
   }
 
-  static const Color imageGreen = Color(0xFF8BC34A); // 사진(jpg·png 등): 연두색
   static const Color epubBrown = Color(0xFF795548); // EPUB: 갈색
 
   @override
@@ -81,20 +80,14 @@ class FileTypeIcon extends StatelessWidget {
           // 다른 형식처럼 끝이 접힌 종이 + 안에 줄 2개, 검은색 (어두운 화면에서는 밝게)
           return _TxtIcon(size: size, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.black87);
       }
-      // 이미지: 테두리와 안의 산 모양을 초록색으로
+      // 그 밖의 형식: 빈 종이
       final fill = IconInnerFill.of(context);
-      final img = Icon(Icons.image_outlined, size: size, color: imageGreen);
-      if (fill == null) return img;
+      final Color c = this.color ?? fallbackColor;
       return SizedBox.square(
         dimension: size,
-        child: Stack(children: [
-          Positioned.fill(
-            child: Padding(
-              padding: EdgeInsets.all(size * 3.5 / 24),
-              child: DecoratedBox(decoration: BoxDecoration(color: fill, borderRadius: BorderRadius.circular(size * 2 / 24))),
-            ),
-          ),
-          img,
+        child: Stack(alignment: Alignment.center, children: [
+          if (fill != null) Icon(Icons.insert_drive_file, size: size, color: fill),
+          Icon(Icons.insert_drive_file_outlined, size: size, color: c),
         ]),
       );
     }
