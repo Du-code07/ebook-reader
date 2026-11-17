@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
+import 'pop_dialog.dart';
 
 /// 고르기 창의 선택지
 class ChoiceOption<T> {
@@ -13,21 +14,43 @@ class ChoiceOption<T> {
 /// 아래에서 올라오는 '하나 고르기' 창.
 /// 제목 + 선택지 목록(고른 줄은 강조, 오른쪽 동그라미) + 아래 '확인' 버튼.
 /// '확인'을 눌러야 고른 값이 돌아오고, 그냥 닫으면 null.
+/// [centered]면 화면 가운데에 뜨는 창으로 (앱 스타일 '심플')
 Future<T?> showChoiceSheet<T>({
   required BuildContext context,
   required String title,
   required List<ChoiceOption<T>> options,
   required T current,
   String confirmLabel = '',
+  bool centered = false,
 }) async {
-  final r = await showModalBottomSheet<(T, bool)>(
+  final r = await _showChoice<(T, bool)>(
+    context,
+    centered,
+    (ctx) => _ChoiceSheet<T>(title: title, options: options, current: current, confirmLabel: confirmLabel, centered: centered),
+  );
+  return r?.$1;
+}
+
+/// 고르기 창 띄우기: 밑에서 위로(기본) 또는 화면 가운데(심플)
+Future<R?> _showChoice<R>(BuildContext context, bool centered, WidgetBuilder builder) {
+  if (centered) {
+    return showPopDialog<R>(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        clipBehavior: Clip.antiAlias,
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 440), child: builder(ctx)),
+      ),
+    );
+  }
+  return showModalBottomSheet<R>(
     sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    builder: (ctx) => _ChoiceSheet<T>(title: title, options: options, current: current, confirmLabel: confirmLabel),
+    builder: builder,
   );
-  return r?.$1;
 }
 
 /// 하나 고르기 + 아래에 켜기/끄기 스위치 한 줄이 함께 있는 창.
@@ -60,13 +83,13 @@ Future<(T, bool)?> showChoiceSheetWithToggle<T>({
   ValueChanged<(T, bool)>? onChanged,
   /// 첫 스위치 아래에 더 붙일 스위치들
   List<SheetToggle> moreToggles = const [],
+  bool centered = false,
 }) {
-  return showModalBottomSheet<(T, bool)>(
-    sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (ctx) => _ChoiceSheet<T>(
+  return _showChoice<(T, bool)>(
+    context,
+    centered,
+    (ctx) => _ChoiceSheet<T>(
+      centered: centered,
       title: title,
       options: options,
       current: current,
@@ -93,8 +116,11 @@ class _ChoiceSheet<T> extends StatefulWidget {
     this.toggleValue = false,
     this.onChanged,
     this.moreToggles = const [],
+    this.centered = false,
   });
 
+  /// 가운데 창으로 띄웠는지 (아래 여백을 위아래 같게)
+  final bool centered;
   final String title;
   final List<ChoiceOption<T>> options;
   final T current;
@@ -147,6 +173,7 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
     final cs = Theme.of(context).colorScheme;
     return SafeArea(
       top: false,
+      bottom: !widget.centered,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -268,7 +295,7 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                 ),
               ),
             ),
-          const SizedBox(height: 16),
+          SizedBox(height: widget.centered ? 18 : 16),
         ],
       ),
     );

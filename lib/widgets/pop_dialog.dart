@@ -57,18 +57,21 @@ Future<T?> showPopDialog<T>({
 /// 단추 바로 아래로 펼쳐지는 작은 창 (그룹 목록과 같은 움직임: 단추에서 튀어나오고, 닫힐 때 단추 안으로 들어감)
 /// [alignRight]면 창 오른쪽 끝을 단추 오른쪽 끝에 맞춤
 class PopPanelRoute<T> extends PopupRoute<T> {
-  PopPanelRoute({required this.anchor, required this.builder, this.width = 360, this.alignRight = true, this.barrierLabel});
+  PopPanelRoute({required this.anchor, required this.builder, this.width = 360, this.alignRight = true, this.barrierLabel, this.fromBottom = false});
 
   final Rect anchor;
   final WidgetBuilder builder;
   final double width;
   final bool alignRight;
 
+  /// 단추 아래가 아니라 화면 밑에서 위로 올라오는 창으로 (앱 스타일 '기본'의 아래 막대에서 열 때)
+  final bool fromBottom;
+
   @override
   final String? barrierLabel;
 
   @override
-  Color? get barrierColor => Colors.black.withValues(alpha: 0.18);
+  Color? get barrierColor => Colors.black.withValues(alpha: fromBottom ? 0.32 : 0.18);
 
   @override
   bool get barrierDismissible => true;
@@ -83,6 +86,17 @@ class PopPanelRoute<T> extends PopupRoute<T> {
   Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) {
     final Size screen = MediaQuery.sizeOf(context);
     final EdgeInsets pad = MediaQuery.paddingOf(context);
+    if (fromBottom) {
+      return BottomRise(
+        animation: animation,
+        child: Material(
+          color: Theme.of(context).colorScheme.surfaceContainerHigh,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          clipBehavior: Clip.antiAlias,
+          child: SafeArea(top: false, child: SingleChildScrollView(child: Builder(builder: builder))),
+        ),
+      );
+    }
     final double w = width.clamp(200.0, screen.width - 16).toDouble();
     final double left = alignRight ? (anchor.right - w).clamp(8.0, screen.width - 8 - w).toDouble() : anchor.left.clamp(8.0, screen.width - 8 - w).toDouble();
     final double top = anchor.bottom + 4;
@@ -115,5 +129,25 @@ class PopPanelRoute<T> extends PopupRoute<T> {
         ),
       ),
     ]);
+  }
+}
+
+/// 화면 밑에서 위로 올라오는 창 자리 (아래쪽에 붙고, 넓은 화면에서는 가운데 640까지, 높이는 화면의 85%까지)
+class BottomRise extends StatelessWidget {
+  const BottomRise({super.key, required this.animation, required this.child});
+  final Animation<double> animation;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final Size screen = MediaQuery.sizeOf(context);
+    final slide = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: SlideTransition(
+        position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(slide),
+        child: ConstrainedBox(constraints: BoxConstraints(maxHeight: screen.height * 0.85, maxWidth: 640), child: child),
+      ),
+    );
   }
 }

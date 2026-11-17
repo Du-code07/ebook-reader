@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'app_colors.dart';
 import 'group_jump_menu.dart';
+import 'pop_dialog.dart';
 import 'group_stack_icon.dart';
 import 'ui_scale.dart';
 import 'file_type_icon.dart';
@@ -35,7 +36,11 @@ class GroupDropdownRoute extends PopupRoute<String> {
     required this.onDelete,
     required this.onAdd,
     this.barrierLabel,
+    this.fromBottom = false,
   });
+
+  /// 단추 아래가 아니라 화면 밑에서 위로 올라오는 창으로 (앱 스타일 '기본'의 아래 막대에서 열 때)
+  final bool fromBottom;
 
   /// [☰ 그룹] 단추의 화면 위치
   final Rect anchor;
@@ -65,7 +70,7 @@ class GroupDropdownRoute extends PopupRoute<String> {
   final String? barrierLabel;
 
   @override
-  Color? get barrierColor => Colors.black.withValues(alpha: 0.18);
+  Color? get barrierColor => Colors.black.withValues(alpha: fromBottom ? 0.32 : 0.18);
 
   @override
   bool get barrierDismissible => true;
@@ -79,6 +84,7 @@ class GroupDropdownRoute extends PopupRoute<String> {
 
   @override
   Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) {
+    if (fromBottom) return BottomRise(animation: animation, child: _GroupDropdownPanel(route: this));
     final Size screen = MediaQuery.sizeOf(context);
     final EdgeInsets pad = MediaQuery.paddingOf(context);
     final double left = math.max(8.0, anchor.left);
@@ -286,11 +292,12 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
     return Material(
       key: _panelKey,
       color: cs.surfaceContainerHigh,
-      elevation: 6,
-      borderRadius: BorderRadius.circular(14),
+      elevation: r.fromBottom ? 0 : 6,
+      // 밑에서 올라오는 창은 위쪽 모서리만 둥글게
+      borderRadius: r.fromBottom ? const BorderRadius.vertical(top: Radius.circular(24)) : BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
+        padding: EdgeInsets.only(top: r.fromBottom ? 14 : 6, bottom: 6 + (r.fromBottom ? MediaQuery.paddingOf(context).bottom : 0)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

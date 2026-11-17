@@ -362,6 +362,17 @@ class StorageService {
     await (await SharedPreferences.getInstance()).setBool('list_swipe_off_v99', off);
   }
 
+  /// 앱 스타일: 'basic'(기본: 아래 막대·한 네모 편집창·밑에서 올라오는 창) / 'simple'(심플: 위 막대·아이콘만 편집창·가운데 창)
+  static final ValueNotifier<String> appStyle = ValueNotifier<String>('basic');
+  static bool get simpleStyle => appStyle.value == 'simple';
+  static Future<void> loadAppStyle() async {
+    appStyle.value = (await SharedPreferences.getInstance()).getString('app_style_v140') == 'simple' ? 'simple' : 'basic';
+  }
+  static Future<void> setAppStyle(String style) async {
+    appStyle.value = style == 'simple' ? 'simple' : 'basic';
+    await (await SharedPreferences.getInstance()).setString('app_style_v140', appStyle.value);
+  }
+
   /// 표지형: 책갈피를 잡아당겨 북마크하는 움직임 끄기
   static Future<void> setRibbonAnimationOff(bool off) async {
     final prefs = await SharedPreferences.getInstance();

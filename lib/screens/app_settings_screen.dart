@@ -121,10 +121,30 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ChoiceOption('comfort', _themeLabel('comfort'), icon: Icons.wb_incandescent_outlined),
       ],
       current: _themeMode,
+      centered: StorageService.simpleStyle, // 심플: 가운데 창
     );
     if (v == null || !mounted) return;
     setState(() => _themeMode = v);
     await widget.onChangeThemeMode(v);
+  }
+
+  String _styleLabel(String style) =>
+      style == 'simple' ? _t('심플', 'Simple', '简洁', 'シンプル') : _t('기본', 'Default', '默认', '標準');
+
+  Future<void> _pickStyle() async {
+    final v = await showChoiceSheet<String>(
+      context: context,
+      title: _t('앱 스타일', 'App Style', '应用样式', 'アプリのスタイル'),
+      options: [
+        ChoiceOption('basic', _styleLabel('basic'), icon: Icons.space_dashboard_outlined),
+        ChoiceOption('simple', _styleLabel('simple'), icon: Icons.crop_square_rounded),
+      ],
+      current: StorageService.appStyle.value,
+      centered: StorageService.simpleStyle, // 심플: 가운데 창
+    );
+    if (v == null || !mounted) return;
+    await StorageService.setAppStyle(v);
+    if (mounted) setState(() {});
   }
 
   Future<void> _pickLanguage() async {
@@ -133,6 +153,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       title: _t('언어', 'Language', '语言', '言語'),
       options: [for (final code in LanguageSelectScreen.options) ChoiceOption(code, languageOptionLabel(code))],
       current: _langSetting,
+      centered: StorageService.simpleStyle, // 심플: 가운데 창
     );
     if (v == null || !mounted) return;
     widget.onChangeLanguage(v);
@@ -153,6 +174,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         ChoiceOption('grid', _viewModeLabel('grid'), icon: Icons.grid_view_rounded),
       ],
       current: _viewMode,
+      centered: StorageService.simpleStyle, // 심플: 가운데 창
       toggleIcon: Icons.visibility_off_outlined,
       toggleLabel: _t('파일 형식 숨기기', 'Hide file type', '隐藏文件类型', 'ファイル形式を隠す'),
       toggleSubtitle: _t('.docx, .pdf 등', '.docx, .pdf, etc', '.docx、.pdf 等', '.docx、.pdf など'),
@@ -454,6 +476,13 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               title: _t('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'),
               subtitle: _themeLabel(_themeMode),
               onTap: _pickTheme,
+            ),
+            // 앱 스타일: 기본(아래 막대) / 심플(위 막대)
+            _item(
+              icon: Icons.dashboard_customize_outlined,
+              title: _t('앱 스타일', 'App Style', '应用样式', 'アプリのスタイル'),
+              subtitle: _styleLabel(StorageService.appStyle.value),
+              onTap: _pickStyle,
             ),
             _item(
               icon: Icons.language,
