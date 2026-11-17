@@ -453,38 +453,60 @@ String pagesLabel(int page, int? next, ViewerTr tr) => next == null
 String bookmarkModeOf({required bool scroll, required bool tap, required bool slide}) =>
     scroll ? 'scroll' : (tap && slide ? 'tap+slide' : (slide ? 'slide' : 'tap'));
 
-/// 북마크 이름: '12페이지 (회전, 페이지 표시, 페이지 모드)'
-String bookmarkFullTitle(String pages, BookmarkItem bm, ViewerTr tr) {
-  final parts = <String>[
-    switch (bm.rotation) {
-      'portrait' => tr('세로 고정', 'Portrait lock', '锁定竖屏', '縦に固定'),
-      'landscape' => tr('가로 고정', 'Landscape lock', '锁定横屏', '横に固定'),
-      null => '',
-      _ => tr('자동 회전', 'Auto-rotate', '自动旋转', '自動回転'),
-    },
-    if (!bm.scroll)
-      switch (bm.display) {
-        'one' => tr('한 페이지', 'One page', '单页', '1ページ'),
-        'two' => tr('두 페이지', 'Two pages', '双页', '2ページ'),
-        null => '',
-        _ => tr('자동 표시', 'Auto display', '自动显示', '自動表示'),
-      },
-    switch (bm.mode ?? (bm.scroll ? 'scroll' : null)) {
-      'scroll' => tr('스크롤', 'Scroll', '滚动', 'スクロール'),
-      'slide' => tr('슬라이드', 'Slide', '滑动', 'スライド'),
-      'tap+slide' => tr('탭·슬라이드', 'Tap & slide', '点击·滑动', 'タップ・スライド'),
-      'tap' => tr('탭', 'Tap', '点击', 'タップ'),
-      _ => '',
-    },
-  ].where((e) => e.isNotEmpty).toList();
-  return parts.isEmpty ? pages : '$pages (${parts.join(', ')})';
+/// 북마크한 때의 보기 방식: 화면 회전·페이지 표시(스크롤 모드 말고)·페이지 모드를 아이콘과 이름으로
+List<(Widget Function(double size, Color color), String)> _bookmarkModes(BookmarkItem bm, ViewerTr tr) => [
+      if (bm.rotation != null)
+        ((sz, c) => rotationGlyph(bm.rotation!, size: sz, color: c), switch (bm.rotation) {
+          'portrait' => tr('세로 고정', 'Portrait lock', '锁定竖屏', '縦に固定'),
+          'landscape' => tr('가로 고정', 'Landscape lock', '锁定横屏', '横に固定'),
+          _ => tr('자동 회전', 'Auto-rotate', '自动旋转', '自動回転'),
+        }),
+      if (!bm.scroll && bm.display != null)
+        ((sz, c) => pageDisplayGlyph(bm.display!, size: sz, color: c), switch (bm.display) {
+          'one' => tr('한 페이지', 'One page', '单页', '1ページ'),
+          'two' => tr('두 페이지', 'Two pages', '双页', '2ページ'),
+          _ => tr('자동 표시', 'Auto display', '自动显示', '自動表示'),
+        }),
+      if ((bm.mode ?? (bm.scroll ? 'scroll' : null)) case final String m)
+        ((sz, c) => PageModeIcon(mode: m, size: sz, color: c), switch (m) {
+          'scroll' => tr('스크롤', 'Scroll', '滚动', 'スクロール'),
+          'slide' => tr('슬라이드', 'Slide', '滑动', 'スライド'),
+          'tap+slide' => tr('탭·슬라이드', 'Tap & slide', '点击·滑动', 'タップ・スライド'),
+          _ => tr('탭', 'Tap', '点击', 'タップ'),
+        }),
+    ];
+
+/// 북마크 목록 한 줄 아래쪽: 보기 방식(아이콘 + 이름)과 저장 시각
+Widget bookmarkSubtitle(BuildContext context, BookmarkItem bm, ViewerTr tr) {
+  final Color c = Theme.of(context).colorScheme.onSurfaceVariant;
+  final modes = _bookmarkModes(bm, tr);
+  final saved = Text(tr('저장 시각: ${bm.createdAt}', 'Saved: ${bm.createdAt}', '保存时间：${bm.createdAt}', '保存日時: ${bm.createdAt}'));
+  if (modes.isEmpty) return saved;
+  return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+    Padding(
+      padding: const EdgeInsets.only(top: 3, bottom: 2),
+      child: Wrap(spacing: 12, runSpacing: 2, children: [
+        for (final (icon, label) in modes)
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            icon(16, c),
+            const SizedBox(width: 4),
+            Text(label, style: TextStyle(fontSize: 12.5, color: c, fontWeight: FontWeight.w600)),
+          ]),
+      ]),
+    ),
+    saved,
+  ]);
 }
 
-/// 북마크 목록 위 줄: 제목, [모두 지우기], [현재 페이지 북마크]
+/// 북마크 목록 위 줄: 북마크 아이콘 + 제목, [모두 지우기], [현재 페이지 북마크] (아이콘만)
 Widget bookmarkSheetHeader(BuildContext context,
     {required ViewerTr tr, required bool already, required bool canClear, required String addLabel, VoidCallback? onAdd, required VoidCallback onClearAll}) {
   return ListTile(
-    title: Text(tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+    title: Row(children: [
+      Icon(Icons.bookmarks_outlined, size: 22, color: Theme.of(context).colorScheme.onSurface),
+      const SizedBox(width: 8),
+      Flexible(child: Text(tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18))),
+    ]),
     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
       TextButton.icon(
         style: TextButton.styleFrom(foregroundColor: Colors.redAccent, visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
@@ -494,10 +516,13 @@ Widget bookmarkSheetHeader(BuildContext context,
       ),
       const SizedBox(width: 4),
       // 같은 쪽(같은 보기 방식)은 한 번만 북마크
-      ElevatedButton.icon(
-        icon: Icon(already ? Icons.bookmark_added : Icons.bookmark_add, size: 16),
-        label: Text(already ? tr('북마크한 페이지예요', 'Already bookmarked', '已添加书签', 'ブックマーク済みです') : addLabel),
-        onPressed: already ? null : onAdd,
+      Tooltip(
+        message: already ? tr('북마크한 페이지예요', 'Already bookmarked', '已添加书签', 'ブックマーク済みです') : addLabel,
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(minimumSize: const Size(52, 40), padding: const EdgeInsets.symmetric(horizontal: 14)),
+          onPressed: already ? null : onAdd,
+          child: Icon(already ? Icons.bookmark_added : Icons.bookmark_add, size: 20),
+        ),
       ),
     ]),
   );
@@ -535,6 +560,82 @@ Widget pageDisplayGlyph(String mode, {double? size, Color? color}) => switch (mo
       'auto' => _AutoPageIcon(size: size, color: color),
       _ => Icon(Icons.insert_drive_file_outlined, size: size, color: color),
     };
+
+/// 페이지 모드 아이콘: 탭(쪽 + 누른 자리) / 슬라이드(쪽 + 좌우 화살) / 스크롤(쪽 + 위아래 화살), 'tap+slide'는 둘을 나란히
+class PageModeIcon extends StatelessWidget {
+  const PageModeIcon({super.key, required this.mode, this.size, this.color});
+  final String mode; // 'tap' / 'slide' / 'scroll' / 'tap+slide'
+  final double? size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final it = IconTheme.of(context);
+    final double sz = size ?? it.size ?? 24;
+    final Color c = color ?? it.color ?? Theme.of(context).colorScheme.onSurface;
+    if (mode == 'tap+slide') {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        CustomPaint(size: Size.square(sz), painter: _PageModePainter(c, 'tap')),
+        CustomPaint(size: Size.square(sz), painter: _PageModePainter(c, 'slide')),
+      ]);
+    }
+    return CustomPaint(size: Size.square(sz), painter: _PageModePainter(c, mode));
+  }
+}
+
+class _PageModePainter extends CustomPainter {
+  _PageModePainter(this.color, this.mode);
+  final Color color;
+  final String mode;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double u = size.width / 24; // 24칸 기준
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8 * u
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    void chevron(List<double> p) => canvas.drawPath(
+        Path()
+          ..moveTo(p[0] * u, p[1] * u)
+          ..lineTo(p[2] * u, p[3] * u)
+          ..lineTo(p[4] * u, p[5] * u),
+        stroke);
+    void page(Rect r, List<(double, double, double)> lines) {
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(r.left * u, r.top * u, r.right * u, r.bottom * u), Radius.circular(1.8 * u)), stroke);
+      for (final (y, x1, x2) in lines) {
+        canvas.drawLine(Offset(x1 * u, y * u), Offset(x2 * u, y * u), stroke);
+      }
+    }
+
+    switch (mode) {
+      case 'slide':
+        // 쪽 한 장 + 양옆 화살 (옆으로 밀어 넘김)
+        page(const Rect.fromLTRB(8, 3.5, 16, 20.5), [(9, 10.6, 13.4), (12, 10.6, 13.4), (15, 10.6, 12.4)]);
+        chevron([5, 9, 2, 12, 5, 15]);
+        chevron([19, 9, 22, 12, 19, 15]);
+      case 'scroll':
+        // 쪽 한 장 + 위아래 화살 (위아래로 이어 봄)
+        page(const Rect.fromLTRB(5.5, 7, 18.5, 17), [(10.5, 8.6, 15.4), (13.5, 8.6, 13.4)]);
+        chevron([9, 5, 12, 2, 15, 5]);
+        chevron([9, 19, 12, 22, 15, 19]);
+      default:
+        // 탭: 쪽 한 장 + 오른쪽 아래를 누른 자리(점과 둘레) — '자동 표시'의 톱니처럼 귀퉁이에 얹음
+        canvas.saveLayer(Offset.zero & size, Paint());
+        page(const Rect.fromLTRB(4, 2.5, 16.5, 19.5), [(7, 7, 13.5), (10.5, 7, 12.5), (14, 7, 10)]);
+        final Offset c = Offset(17.2 * u, 17.2 * u);
+        canvas.drawCircle(c, 6.4 * u, Paint()..blendMode = BlendMode.clear);
+        canvas.drawCircle(c, 4.7 * u, stroke);
+        canvas.drawCircle(c, 2.1 * u, Paint()..color = color);
+        canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PageModePainter old) => old.color != color || old.mode != mode;
+}
 
 /// 스크롤 모드: 쪽들을 간격 없이 세로로 이어 붙여 보여 주는 목록
 class ContinuousPageController {

@@ -27,20 +27,18 @@ Future<void> shareFile(BuildContext context, String path, {String? title}) async
 }
 
 /// 공유: PDF에 메모가 있으면 쪽마다 메모(펜 자국)를 PDF 주석으로 얹은 사본을 공유 (그 밖의 파일·메모가 없으면 파일 그대로)
-/// [memos]가 없으면 저장된 메모를 읽음 (서재의 점 3개 메뉴에서 공유할 때)
-Future<void> shareFileWithMemos(BuildContext context, String path, {String? title, Map<int, List<Map<String, Object?>>>? memos}) async {
+/// 저장된 메모를 읽어서 넣음 (서재의 점 3개 메뉴에서 공유할 때)
+Future<void> shareFileWithMemos(BuildContext context, String path, {String? title}) async {
   String tr(String ko, String en, String zh, String ja) => AppI18n.t(StorageService.appLangNotifier.value, ko: ko, en: en, zh: zh, ja: ja);
   if (!path.toLowerCase().endsWith('.pdf')) return shareFile(context, path, title: title);
-  if (memos == null) {
-    memos = {};
-    int pages = 0;
-    try {
-      pages = await const MethodChannel('ebook_reader/pdf_renderer').invokeMethod<int>('pdfPageCount', {'filePath': path}) ?? 0;
-    } catch (_) {}
-    for (int i = 0; i < pages; i++) {
-      final strokes = await StorageService.getPageMemoStrokes(path, i);
-      if (strokes.isNotEmpty) memos[i] = [for (final s in strokes) s.toJson()];
-    }
+  final Map<int, List<Map<String, Object?>>> memos = {};
+  int pages = 0;
+  try {
+    pages = await const MethodChannel('ebook_reader/pdf_renderer').invokeMethod<int>('pdfPageCount', {'filePath': path}) ?? 0;
+  } catch (_) {}
+  for (int i = 0; i < pages; i++) {
+    final strokes = await StorageService.getPageMemoStrokes(path, i);
+    if (strokes.isNotEmpty) memos[i] = [for (final s in strokes) s.toJson()];
   }
   if (!context.mounted) return;
   if (memos.isEmpty) return shareFile(context, path, title: title);

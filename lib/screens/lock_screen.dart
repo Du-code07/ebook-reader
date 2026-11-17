@@ -95,7 +95,7 @@ class _LockScreenState extends State<LockScreen> {
         child: LayoutBuilder(
           builder: (context, box) => SingleChildScrollView(
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: box.maxHeight),
+              constraints: BoxConstraints(minHeight: box.maxHeight, minWidth: box.maxWidth), // 넓은 화면에서도 가운데로
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -198,12 +198,12 @@ class _LockSetupPageState extends State<LockSetupPage> {
         ? _tr('숫자 4~8자리', '4–8 digits', '4~8 位数字', '数字4〜8桁')
         : _tr('점을 4개 이상 이어 주세요', 'Connect at least 4 dots', '请连接至少 4 个点', '点を4つ以上つないでください');
     return Scaffold(
-      appBar: AppBar(title: Text(_pin ? _tr('비밀번호(PIN)', 'PIN', '密码 (PIN)', '暗証番号(PIN)') : _tr('패턴', 'Pattern', '图案', 'パターン'), style: const TextStyle(fontWeight: FontWeight.w800))),
+      appBar: AppBar(title: Text(_pin ? _tr('비밀번호', 'PIN', '密码', '暗証番号') : _tr('패턴', 'Pattern', '图案', 'パターン'), style: const TextStyle(fontWeight: FontWeight.w800))),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, box) => SingleChildScrollView(
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: box.maxHeight),
+              constraints: BoxConstraints(minHeight: box.maxHeight, minWidth: box.maxWidth), // 넓은 화면에서도 가운데로
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [

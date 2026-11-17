@@ -34,7 +34,6 @@ import '../widgets/morph_icons.dart';
 import '../widgets/word_selection_layer.dart';
 import '../widgets/ui_scale.dart';
 import '../widgets/sheet_pull_to_close.dart';
-import '../services/file_share.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/after_route_transition.dart';
 import '../widgets/direction_arrow_icon.dart';
@@ -227,6 +226,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   String _epubBgTheme = 'white'; // 'white', 'sepia', 'dark'
   // 파일 안 테마 '편안한 모드' (EPUB·PPT·엑셀 제외): 라이트로 그리고 화면 위에 따뜻한 색을 덮음
   bool _docComfort = false;
+  final ViewerTintHold _tintHold = ViewerTintHold();
   bool get _docComfortAllowed => !_isPresentation && !_isSpreadsheet;
   // 페이지 표시: 'one' / 'two' / 'auto'(화면이 넓으면 두 페이지)
   String _pageDisplay = 'one';
@@ -486,7 +486,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   void initState() {
     super.initState();
-    ComfortTint.viewerOpened(); // 파일을 보는 동안 편안한 모드 덮개를 걷음
+    // 파일 안 편안한 모드: 저장값을 바로 알아 처음부터 덮음 (서재에서 넘어올 때 덮개가 끊기지 않게)
+    _docComfort = ComfortTint.filePref && _docComfortAllowed;
+    ComfortTint.setFile(this, _docComfort);
+    _tintHold.open(); // 파일을 보는 동안 편안한 모드 덮개를 걷음
     _epubZoomController.addListener(_onZoomMatrixChanged);
     SystemBars.enterViewer(); // 파일 열람 중에는 상태표시줄·내비게이션 바를 모두 숨김
     _activeFilePath = widget.filePath;
@@ -494,6 +497,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     WidgetsBinding.instance.addObserver(this);
     _startOutlineCacheRead(); // 저장해 둔 목차를 문서가 열리는 동안 미리 읽어 둠
     _initReader();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tintHold.watch(context);
   }
 
   /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 전환 버튼'
@@ -801,7 +810,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     // 읽기 방향: 직접 정한 적이 없으면 모든 파일 좌→우로 시작
     final bool isRtl = await StorageService.getBookReadingDirectionRtlOrNull(widget.filePath) ?? false;
     final savedBg = await StorageService.getEpubBgTheme();
-    final bool savedDocComfort = await StorageService.getDocComfort();
     final footerMode = await StorageService.getFooterInfoMode();
     final barPos = await StorageService.getProgressBarPosition();
     final memoBarPos = await StorageService.getMemoToolbarPosition();
@@ -841,9 +849,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _isMangaRtlMode = isRtl && !_isTxt; // TXT는 읽기 방향 전환 없음
       // 기본값은 라이트. 종이색은 EPUB에서만 쓰므로 다른 문서에서는 라이트로 보여 준다.
       _epubBgTheme = savedBg.isEmpty || (savedBg == 'sepia' && !_isEpub) || _isPresentation || _isSpreadsheet ? 'white' : savedBg; // PPT는 배경 색상을 적용하지 않음
-      _docComfort = savedDocComfort && _docComfortAllowed;
       if (_docComfort) _epubBgTheme = 'white';
-      ComfortTint.fileOn = _docComfort;
       _footerInfoMode = footerMode;
       _progressBarPosSetting = barPos;
       _memoToolbarPos = memoBarPos;
@@ -2280,8 +2286,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     final bm = bookmarks[idx];
                     return ListTile(
                       leading: Icon(bm.spread ? Icons.menu_book : Icons.bookmark, color: Colors.amber),
-                      title: Text(bookmarkFullTitle(_bookmarkTitle(bm), bm, _tr)),
-                      subtitle: Text(_tr('저장 시각: ${bm.createdAt}', 'Saved: ${bm.createdAt}', '保存时间：${bm.createdAt}', '保存日時: ${bm.createdAt}')),
+                      title: Text(_bookmarkTitle(bm)),
+                      subtitle: bookmarkSubtitle(ctx, bm, _tr),
                       trailing: IconButton(
                         icon: const TrashLidIcon(open: false),
                         onPressed: () async {
@@ -3728,8 +3734,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 파일 안 '편안한 모드': 화면 전체(상단바·목차 포함) 위에 앱의 편안한 모드와 같은 따뜻한 색
+  /// 앱도 편안한 모드면 앱 덮개가 그대로 덮고 있으므로 따로 덮지 않음 (두 번 덮이면 진해짐)
   Widget _withDocComfort(Widget child) {
-    if (!_docComfort) return child;
+    if (!_docComfort || ComfortTint.on) return child;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -3754,9 +3761,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       items: [
         ('white', _tr('라이트', 'Light', '浅色', 'ライト'), Icons.light_mode_outlined, null),
         ('dark', _tr('다크', 'Dark', '深色', 'ダーク'), Icons.dark_mode_outlined, null),
+        ('comfort', _tr('편안한 모드', 'Comfort mode', '护眼模式', '目に優しいモード'), Icons.wb_incandescent_outlined, null),
         // 세피아: 옛날 종이 모양 (선으로만)
         if (_isEpub) ('sepia', _tr('세피아', 'Sepia', '棕褐色', 'セピア'), Icons.description_outlined, null),
-        ('comfort', _tr('편안한 모드', 'Comfort mode', '护眼模式', '目に優しいモード'), Icons.wb_incandescent_outlined, null),
       ],
       leadingFor: (v) => v == 'sepia' ? ParchmentIcon(size: 17, color: Theme.of(context).colorScheme.onSurfaceVariant) : null,
     ));
@@ -3766,7 +3773,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final bool comfort = picked == 'comfort';
     if (comfort != _docComfort) {
       await StorageService.setDocComfort(comfort);
-      ComfortTint.fileOn = comfort;
+      ComfortTint.filePref = comfort;
+      ComfortTint.setFile(this, comfort);
       setState(() => _docComfort = comfort);
     }
     final String mode = comfort ? 'white' : picked;
@@ -4103,8 +4111,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   void dispose() {
     _framesTimer?.cancel();
-    ComfortTint.viewerClosed();
-    ComfortTint.fileOn = false;
+    _tintHold.dispose();
+    ComfortTint.releaseFile(this);
     _epubZoomController.removeListener(_onZoomMatrixChanged);
     _docShownView.dispose();
     _dropIdleShot();
@@ -5000,15 +5008,6 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                                   _showControls = false;
                                 }),
                               ),
-                            // 공유: 이 파일을 형식 그대로 다른 앱으로 (파일 내 검색 오른쪽)
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.share_outlined, color: Colors.white, size: 18),
-                              tooltip: _tr('공유', 'Share', '分享', '共有'),
-                              onPressed: () => shareFile(context, widget.filePath, title: widget.bookTitle),
-                            ),
                             // PPT에서만: 슬라이드 쇼
                             if (_isPresentation)
                               IconButton(

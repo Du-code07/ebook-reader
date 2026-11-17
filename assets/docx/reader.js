@@ -1243,7 +1243,10 @@ function setView(s, tx, ty) {
     zoomRedraw();
   } else {
     zoomView = [s, tx, ty];
-    zoomApply();
+    // 많이 줄이는 중: 크게 그려 둔 쪽을 통째로 화면에 보이려면 그림 메모리가 모자라(태블릿처럼 큰 화면)
+    // 일부가 그려지지 않고 비므로, 그만큼 줄었으면 손가락이 멈추기를 기다리지 않고 지금 배율로 다시 놓음
+    // (화면에 보이는 그림 크기를 늘 화면의 2.5배 안으로)
+    if (s < zoomDrawn * 0.63) { zoomDrawn = s; zoomRedraw(); } else zoomApply();
   }
   clearTimeout(zoomSettle);
   zoomSettle = setTimeout(() => {

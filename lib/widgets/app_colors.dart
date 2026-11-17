@@ -88,8 +88,28 @@ class ComfortTint {
   static const Color color = Color(0x1FFF9100);
   static bool on = false;
 
-  /// 파일 안 테마 '편안한 모드'로 파일을 보는 중 (파일 화면 위에 같은 색을 덮음)
-  static bool fileOn = false;
+  /// 파일 안 테마 '편안한 모드'로 파일을 보는 중
+  /// 앱도 편안한 모드면 앱 덮개를 그대로 두고(파일을 열고 닫을 때 끊기지 않게), 아니면 파일 화면 위에만 같은 색을 덮음
+  static bool _fileOn = false;
+  static Object? _fileOwner; // 다음·이전 파일로 넘어갈 때 닫히는 화면이 새 화면의 값을 지우지 않게
+  static bool get fileOn => _fileOn;
+  static void setFile(Object owner, bool v) {
+    _fileOwner = owner;
+    _fileOn = v;
+    Future.microtask(() => fileShown.value = v);
+  }
+
+  static void releaseFile(Object owner) {
+    if (_fileOwner != owner) return;
+    _fileOwner = null;
+    setFile(owner, false);
+    _fileOwner = null;
+  }
+
+  static final ValueNotifier<bool> fileShown = ValueNotifier<bool>(false);
+
+  /// 파일 안 '편안한 모드' 저장값 (파일을 열자마자 바로 알 수 있게 앱을 켤 때 읽어 둠)
+  static bool filePref = false;
 
   /// 열려 있는 파일 보기 화면 수: 파일을 볼 때는 덮지 않음 (파일 색은 파일 테마대로)
   static final ValueNotifier<int> viewers = ValueNotifier<int>(0);
@@ -98,8 +118,53 @@ class ComfortTint {
   static void viewerOpened() => Future.microtask(() => viewers.value++);
   static void viewerClosed() => Future.microtask(() => viewers.value = math.max(0, viewers.value - 1));
 
+  /// 앱 덮개를 보일지: 파일 화면이 없거나, 파일도 편안한 모드일 때
+  static bool get appShown => viewers.value == 0 || fileShown.value;
+
   /// 화면 복사 때 걷어낼 색 (덮개가 보이지 않으면 0)
   static int get untint => (on && viewers.value == 0) || fileOn ? color.toARGB32() : 0;
+}
+
+/// 파일 보기 화면이 열려 있는 동안 앱의 편안한 모드 덮개를 걷음
+/// 닫기 시작하면(뒤로 가기 움직임이 시작될 때) 바로 다시 덮기 시작해, 서재가 덮개 없이 잠깐 하얗게 보이지 않게
+class ViewerTintHold {
+  ModalRoute<dynamic>? _route;
+  bool _open = false;
+
+  void open() {
+    if (_open) return;
+    _open = true;
+    ComfortTint.viewerOpened();
+  }
+
+  void _close() {
+    if (!_open) return;
+    _open = false;
+    ComfortTint.viewerClosed();
+  }
+
+  /// didChangeDependencies에서: 화면이 닫히는 움직임을 지켜봄
+  void watch(BuildContext context) {
+    final route = ModalRoute.of(context);
+    if (route == _route) return;
+    _route?.animation?.removeStatusListener(_onStatus);
+    _route = route;
+    route?.animation?.addStatusListener(_onStatus);
+  }
+
+  void _onStatus(AnimationStatus s) {
+    if (s == AnimationStatus.reverse) {
+      _close();
+    } else if (s == AnimationStatus.forward || s == AnimationStatus.completed) {
+      open(); // 뒤로 가기를 하다 그만두면 다시 걷음
+    }
+  }
+
+  void dispose() {
+    _route?.animation?.removeStatusListener(_onStatus);
+    _route = null;
+    _close();
+  }
 }
 
 class Anim {

@@ -32,8 +32,6 @@ class AppLock {
   static int pinLength = 0;
   static bool hasSecret = false;
 
-  /// 한 번 풀면 앱을 나가기 전까지는 파일을 다시 물어보지 않음
-  static bool _filesOpen = false;
   static DateTime? _leftAt;
 
   /// 앱을 나갔다가 이만큼 지나 돌아오면 다시 잠금 (파일 고르기·공유 창처럼 잠깐 다녀오는 것은 그대로)
@@ -62,7 +60,6 @@ class AppLock {
       final left = _leftAt;
       _leftAt = null;
       if (left == null || DateTime.now().difference(left) < relockAfter) return;
-      _filesOpen = false;
       if (appLock.value) locked.value = true;
     }
   }
@@ -135,15 +132,12 @@ class AppLock {
     }
   }
 
-  /// 풀었음: 앱 잠금이 풀리면 파일도 같이 풀림
-  static void unlocked() {
-    _filesOpen = true;
-    locked.value = false;
-  }
+  /// 앱 잠금을 풂
+  static void unlocked() => locked.value = false;
 
-  /// 파일을 열기 전에: 모든 파일 잠금이면 (아직 풀지 않았을 때) 잠금 화면을 띄움. 풀었으면 true
+  /// 파일을 열기 전에: 모든 파일 잠금이면 열 때마다 잠금 화면을 띄움. 풀었으면 true
   static Future<bool> unlockForFile(BuildContext context, Widget Function() lockPage) async {
-    if (!fileLock.value || !hasSecret || _filesOpen) return true;
+    if (!fileLock.value || !hasSecret) return true;
     final bool? ok = await Navigator.of(context).push<bool>(PageRouteBuilder<bool>(
       opaque: true,
       transitionDuration: const Duration(milliseconds: 180),

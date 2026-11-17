@@ -71,6 +71,7 @@ void main() async {
   } catch (_) {}
   await StorageService.loadRememberPage();
   await AppLock.init(); // 사생활 보호: 앱 잠금이면 시작할 때부터 잠금 화면
+  ComfortTint.filePref = await StorageService.getDocComfort(); // 파일을 열자마자 편안한 모드인지 알게
   final initialThemeMode = await StorageService.getAppThemeMode();
   final initialLang = await StorageService.getAppLanguage();
   // 앱 처음 시작 시(언어를 고른 적 없을 때) 언어 선택 화면부터 보여 준다
@@ -410,13 +411,14 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         ComfortTint.on = _themeMode == 'comfort';
         if (_themeMode != 'comfort') return _withAppLock(app);
         // 편안한 모드: 앱 화면에 옅은 호박색을 덮어 푸른빛을 줄임. 파일을 볼 때는 덮지 않음 (파일 색은 파일 테마대로)
+        // 파일도 편안한 모드면 덮개를 그대로 두어 서재와 파일을 오갈 때 끊기지 않게
         return _withAppLock(Stack(fit: StackFit.expand, textDirection: TextDirection.ltr, children: [
           app,
           IgnorePointer(
-            child: ValueListenableBuilder<int>(
-              valueListenable: ComfortTint.viewers,
-              builder: (context, n, _) => AnimatedOpacity(
-                opacity: n > 0 ? 0 : 1,
+            child: ListenableBuilder(
+              listenable: Listenable.merge([ComfortTint.viewers, ComfortTint.fileShown]),
+              builder: (context, _) => AnimatedOpacity(
+                opacity: ComfortTint.appShown ? 1 : 0,
                 duration: const Duration(milliseconds: 220),
                 child: const ColoredBox(color: ComfortTint.color),
               ),
@@ -534,17 +536,17 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.add),
                 title: _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
-                desc: _tr('오른쪽 아래 [파일 추가]를 누르면 파일 추가·PDF 합치기·이미지 합치기(CBZ로 묶기)를 고를 수 있어요',
-                    'Tap [Add Files] at the bottom right to add files, merge PDFs, or merge images into a CBZ book',
-                    '点右下角[添加文件]可选择添加文件、合并 PDF、合并图片（打包为 CBZ）',
-                    '右下の[ファイル追加]から、ファイル追加・PDF結合・画像結合(CBZにまとめる)を選べます')),
+                desc: _tr('오른쪽 아래 [+]를 누르면 파일 추가·파일 탐색·PDF 합치기·이미지 합치기(CBZ로 묶기)를 고를 수 있어요\n파일 탐색은 그룹 이름이 파일 형식(PDF·워드·한글 등)일 때 기기에서 그 형식 파일을 찾아 그 그룹에 넣어요',
+                    'Tap [+] at the bottom right to add files, find files, merge PDFs, or merge images into a CBZ book\nFind Files works when the group is named after a file type (PDF, Word, HWP, etc.) and puts that type\'s files on your device into the group',
+                    '点右下角[+]可选择添加文件、查找文件、合并 PDF、合并图片（打包为 CBZ）\n分组名为文件格式（PDF·Word·韩文等）时，查找文件会在设备中找出该格式的文件放入该分组',
+                    '右下の[+]から、ファイル追加・ファイル検索・PDF結合・画像結合(CBZにまとめる)を選べます\nファイル検索は、グループ名がファイル形式(PDF・Word・ハングルなど)のとき、端末内のその形式のファイルを探してグループに入れます')),
             _row(context,
                 icon: const Icon(Icons.document_scanner_outlined),
                 title: _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'),
-                desc: _tr('[파일 추가]를 누르면 [닫기] 왼쪽에 나오는 [문서 스캔]으로 카메라로 문서를 여러 장 찍고, 스캔본처럼 선명하게 보정(필터: 강화·음영 제거·반전·원본, 진하기·회전·자르기)해 PDF 한 개로 만들어요\n문서 이름 줄 오른쪽 휴지통으로 보고 있는 쪽을 지워요',
-                    'Use [Scan Document], shown left of [Close] after tapping [Add Files], to photograph pages, clean them up like a scan (filters: Enhance, No Shadow, Invert, Original; darkness, rotate, crop) and save them as one PDF\nThe trash icon at the right of the name bar deletes the page you are viewing',
-                    '点[添加文件]后，在[关闭]左边出现的[扫描文档]中用相机拍摄多页，像扫描件一样清晰校正（滤镜：增强·去阴影·反色·原图，浓度·旋转·裁剪）后合成一个 PDF\n用文档名称栏右侧的回收站删除当前页',
-                    '[ファイル追加]を押すと[閉じる]の左に出る[文書スキャン]で書類を複数枚撮影し、スキャンのように補正(フィルター：強調・影除去・反転・元の写真、濃さ・回転・切り抜き)して1つのPDFにします\n文書名の行の右にあるゴミ箱で、表示中のページを削除します')),
+                desc: _tr('[+]를 누르면 [×] 왼쪽에 나오는 [문서 스캔]으로 카메라로 문서를 여러 장 찍고, 스캔본처럼 선명하게 보정(필터: 강화·음영 제거·반전·원본, 진하기·회전·자르기)해 PDF 한 개로 만들어요\n문서 이름 줄 오른쪽 휴지통으로 보고 있는 쪽을 지워요',
+                    'Use [Scan Document], shown left of [×] after tapping [+], to photograph pages, clean them up like a scan (filters: Enhance, No Shadow, Invert, Original; darkness, rotate, crop) and save them as one PDF\nThe trash icon at the right of the name bar deletes the page you are viewing',
+                    '点[+]后，在[×]左边出现的[扫描文档]中用相机拍摄多页，像扫描件一样清晰校正（滤镜：增强·去阴影·反色·原图，浓度·旋转·裁剪）后合成一个 PDF\n用文档名称栏右侧的回收站删除当前页',
+                    '[+]を押すと[×]の左に出る[文書スキャン]で書類を複数枚撮影し、スキャンのように補正(フィルター：強調・影除去・反転・元の写真、濃さ・回転・切り抜き)して1つのPDFにします\n文書名の行の右にあるゴミ箱で、表示中のページを削除します')),
             _row(context,
                 icon: GroupStackIcon(size: 19, spread: false, color: cs.onSurface),
                 title: _tr('그룹', 'Groups', '分组', 'グループ'),
@@ -562,10 +564,10 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.more_vert),
                 title: _tr('파일 메뉴 (점 3개)', 'File Menu (⋮)', '文件菜单 (⋮)', 'ファイルメニュー (⋮)'),
-                desc: _tr('공유·이름 변경·그룹 이동·휴지통 이동을 해요\n표지형에서는 표지 변경·원래 표지로도 있어요\n목록형에서 파일을 왼쪽으로 밀면 휴지통으로 가요\n(밀기는 앱 설정에서 끌 수 있어요)',
-                    'Share, rename, move to a group, or move to trash\nIn cover view you can also change or reset the cover\nIn list view, swipe a file left to trash it (swiping can be turned off in app settings)',
-                    '可分享、重命名、移动分组、移至回收站\n封面视图中还可更换或恢复封面\n列表视图中向左滑动文件即移至回收站（可在应用设置中关闭滑动）',
-                    '共有・名前変更・グループ移動・ゴミ箱へ移動ができます\n表紙表示では表紙の変更・元に戻すも\nリスト表示で左へスワイプするとゴミ箱へ（スワイプはアプリ設定でオフにできます）')),
+                desc: _tr('공유·이름 변경·그룹 이동·휴지통 이동을 해요\n공유하면 파일을 형식 그대로 다른 앱으로 보내고, PDF는 쓴 메모를 함께 넣어 보내요\n표지형에서는 표지 변경·원래 표지로도 있어요\n목록형에서 파일을 왼쪽으로 밀면 휴지통으로 가요\n(밀기는 앱 설정에서 끌 수 있어요)',
+                    'Share, rename, move to a group, or move to trash\nSharing sends the file to another app as it is; PDFs are sent with your memos\nIn cover view you can also change or reset the cover\nIn list view, swipe a file left to trash it (swiping can be turned off in app settings)',
+                    '可分享、重命名、移动分组、移至回收站\n分享时按原格式发送到其他应用，PDF 会连同笔记一起发送\n封面视图中还可更换或恢复封面\n列表视图中向左滑动文件即移至回收站（可在应用设置中关闭滑动）',
+                    '共有・名前変更・グループ移動・ゴミ箱へ移動ができます\n共有するとファイルをそのままの形式で他のアプリに送り、PDFは書いたメモも一緒に送ります\n表紙表示では表紙の変更・元に戻すも\nリスト表示で左へスワイプするとゴミ箱へ（スワイプはアプリ設定でオフにできます）')),
             _row(context,
                 icon: const Icon(Icons.checklist_rounded),
                 title: _tr('여러 파일 고르기', 'Select Multiple Files', '多选文件', '複数ファイルを選択'),
@@ -626,10 +628,6 @@ class UserManualScreen extends StatelessWidget {
                     'Switch light / dark / comfort mode (EPUB also has sepia)\nHangul, Word and TXT follow this setting; other files follow the app theme\nA file\'s own background color always comes first',
                     '切换浅色·深色·护眼模式（EPUB 另有棕褐色）\n韩文·Word·TXT 按此设置，其他文件按应用主题；文件自带背景色时优先使用',
                     'ライト・ダーク・目に優しいモードを切り替えます(EPUBはセピアも)\nハングル・Word・TXTはこの設定、それ以外はアプリのテーマに従い、ファイル自体の背景色があればそれが優先です')),
-            _row(context,
-                icon: const Icon(Icons.share_outlined),
-                title: _tr('공유', 'Share', '分享', '共有'),
-                desc: _tr('보고 있는 파일을 형식 그대로 다른 앱으로 보내요\nPDF는 쓴 메모를 함께 넣어 보내요\n서재에서는 파일의 점 3개 메뉴에서도 공유할 수 있어요', 'Sends the open file to another app as it is\nPDFs are sent with your memos\nIn the library you can also share from a file\'s ⋯ menu', '将正在查看的文件按原格式发送到其他应用\nPDF 会连同笔记一起发送\n在书架中也可从文件的 ⋯ 菜单分享', '開いているファイルをそのままの形式で他のアプリに送ります\nPDFは書いたメモも一緒に送ります\n本棚ではファイルの ⋯ メニューからも共有できます')),
             _row(context,
                 icon: const Icon(Icons.slideshow_outlined),
                 title: _tr('슬라이드 쇼 (PPT)', 'Slide Show (PPT)', '幻灯片放映 (PPT)', 'スライドショー (PPT)'),
@@ -2442,7 +2440,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   Future<void> _openFile(File file) async {
     // 사생활 보호: 모든 파일 잠금이면 먼저 풀어야 열림
-    if (!await AppLock.unlockForFile(context, () => const LockScreen(asRoute: true))) return;
+    if (!await AppLock.unlockForFile(context, () => LockScreen(asRoute: true, onCheck: () {}))) return;
     if (!mounted) return;
     // 이전·다음 파일 이동은 지금 보이는 목록 순서대로 (검색 결과에서 열면 그 그룹 순서로)
     LibraryNav.order = _searchOpen ? const [] : [for (final f in _visibleBooksNow) f.path];
@@ -2564,7 +2562,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   bool _fabOpen = false; // 파일 추가 버튼을 눌러 세 가지 메뉴가 펼쳐진 상태
 
-  /// 파일 추가 버튼: 누르면 위로 [파일 추가 / PDF 합치기 / 이미지 합치기] 세 버튼이 펼쳐짐
+  /// 파일 추가 버튼(+): 누르면 위로 [파일 추가 / 파일 탐색 / PDF 합치기 / 이미지 합치기] 버튼이 펼쳐짐
   /// 문서 스캔: 카메라로 찍어 보정한 뒤 PDF 한 개로 만들어 지금 그룹에 넣음
   Future<void> _openDocumentScanner() async {
     final targetGroup = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
@@ -2593,23 +2591,31 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   Widget _buildAddFab() {
     final cs = Theme.of(context).colorScheme;
-    Widget action(String tag, IconData icon, String label, VoidCallback onTap, {double bottom = 10}) => Padding(
+    // [onTap]이 없으면 흐리게 (누를 수 없음)
+    Widget action(String tag, Widget icon, String label, VoidCallback? onTap, {double bottom = 10}) => Padding(
           padding: EdgeInsets.only(bottom: bottom),
-          child: FloatingActionButton.extended(
-            heroTag: tag,
-            elevation: 2,
-            backgroundColor: cs.surfaceContainerHighest,
-            foregroundColor: cs.onSurface,
-            onPressed: () {
-              setState(() => _fabOpen = false);
-              _closeSearch();
-              onTap();
-            },
-            icon: Icon(icon),
-            // 회색 버튼 글씨에는 그림자 없음 (테마의 흰 글씨 그림자를 덮어씀)
-            label: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, shadows: <Shadow>[])),
+          child: Opacity(
+            opacity: onTap == null ? 0.45 : 1,
+            child: FloatingActionButton.extended(
+              heroTag: tag,
+              elevation: onTap == null ? 0 : 2,
+              backgroundColor: cs.surfaceContainerHighest,
+              foregroundColor: cs.onSurface,
+              onPressed: onTap == null
+                  ? null
+                  : () {
+                      setState(() => _fabOpen = false);
+                      _closeSearch();
+                      onTap();
+                    },
+              icon: icon,
+              // 회색 버튼 글씨에는 그림자 없음 (테마의 흰 글씨 그림자를 덮어씀)
+              label: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, shadows: <Shadow>[])),
+            ),
           ),
         );
+    // 파일 탐색: 그룹 이름이 파일 형식 이름일 때만 (기기에서 그 형식 파일을 찾아 이 그룹에 넣음)
+    final String? scanExt = _favoritesOnly || _selectedGroup == '전체' ? null : _groupFormatExt(_selectedGroup);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -2624,9 +2630,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             // 위에서 아래 순서
             final items = <Widget>[
               // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
-              action('fab_add_plain', Icons.create_new_folder_outlined, _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
-              action('fab_merge_pdf', Icons.picture_as_pdf_outlined, _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
-              action('fab_merge_img', Icons.photo_library_outlined, _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
+              action('fab_add_plain', const Icon(Icons.create_new_folder_outlined), _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
+              action('fab_scan_group', FolderSearchIcon(size: 24, color: cs.onSurface), _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'),
+                  scanExt == null || _groupScanBusy ? null : () => _scanFilesIntoGroup(_selectedGroup, scanExt)),
+              action('fab_merge_pdf', const Icon(Icons.picture_as_pdf_outlined), _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
+              action('fab_merge_img', const Icon(Icons.photo_library_outlined), _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
             ];
             const double rowH = 66; // 버튼 높이 56 + 사이 10
             final int n = items.length;
@@ -2678,19 +2686,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               },
               child: Padding(
                 padding: const EdgeInsets.only(right: 10),
-                child: action('fab_scan_doc', Icons.document_scanner_outlined, _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner, bottom: 0),
+                child: action('fab_scan_doc', const Icon(Icons.document_scanner_outlined), _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner, bottom: 0),
               ),
             ),
-            FloatingActionButton.extended(
+            // + 아이콘만 (펼치면 × 로 바뀜)
+            FloatingActionButton(
               heroTag: 'fab_add_files',
+              tooltip: _fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
               onPressed: () {
                 _closeSearch();
                 setState(() => _fabOpen = !_fabOpen);
               },
               // 아이콘 움직임: [전체] 그룹 아이콘과 같은 빠르기·느낌 (기본 움직임)
-              icon: PlusCloseIcon(open: _fabOpen, size: 24),
-              label: Text(_fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
-                  style: TextStyle(fontWeight: FontWeight.w800, shadows: AppColors.sigShadows(context))),
+              child: PlusCloseIcon(open: _fabOpen, size: 26),
             ),
           ],
         ),

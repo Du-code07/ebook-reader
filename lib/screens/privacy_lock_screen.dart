@@ -57,7 +57,6 @@ class _PrivacyLockScreenState extends State<PrivacyLockScreen> {
   Future<void> _toggle(bool on, Future<void> Function(bool) set) async {
     if (on ? !await _ensureSecret() : !await _confirmCurrent()) return;
     await set(on);
-    if (on) AppLock.unlocked(); // 방금 정했으니 지금은 풀린 상태
     if (mounted) setState(() {});
   }
 
@@ -73,7 +72,7 @@ class _PrivacyLockScreenState extends State<PrivacyLockScreen> {
     if (ok == true && mounted) {
       setState(() {});
       _say(kind == 'pin'
-          ? _t('비밀번호(PIN)로 잠가요', 'Now locked with a PIN', '已改为密码锁定', '暗証番号でロックします')
+          ? _t('비밀번호로 잠가요', 'Now locked with a PIN', '已改为密码锁定', '暗証番号でロックします')
           : _t('패턴으로 잠가요', 'Now locked with a pattern', '已改为图案锁定', 'パターンでロックします'));
     }
   }
@@ -156,10 +155,11 @@ class _PrivacyLockScreenState extends State<PrivacyLockScreen> {
           onTap: () => _pickMethod(kind),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 13),
+            // 아이콘을 글자 앞에 (고른 쪽도 같은 아이콘을 흰색으로)
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: on ? Colors.white : cs.onSurface, shadows: on ? shadows : null)),
+              Icon(icon, size: 18, color: on ? Colors.white : cs.onSurfaceVariant, shadows: on ? shadows : null),
               const SizedBox(width: 6),
-              Icon(on ? Icons.check_rounded : icon, size: 18, color: on ? Colors.white : cs.onSurfaceVariant, shadows: on ? shadows : null),
+              Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: on ? Colors.white : cs.onSurface, shadows: on ? shadows : null)),
             ]),
           ),
         ),
@@ -198,7 +198,7 @@ class _PrivacyLockScreenState extends State<PrivacyLockScreen> {
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(color: cs.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
                 child: Row(children: [
-                  _methodChip('pin', _t('비밀번호(PIN)', 'PIN', '密码 (PIN)', '暗証番号(PIN)'), Icons.dialpad_rounded),
+                  _methodChip('pin', _t('비밀번호', 'PIN', '密码', '暗証番号'), Icons.dialpad_rounded),
                   _methodChip('pattern', _t('패턴', 'Pattern', '图案', 'パターン'), Icons.apps_rounded),
                 ]),
               ),

@@ -21,7 +21,6 @@ import '../widgets/viewer_dialogs.dart';
 import '../widgets/app_colors.dart';
 import '../widgets/ui_scale.dart';
 import '../widgets/sheet_pull_to_close.dart';
-import '../services/file_share.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/direction_arrow_icon.dart';
 import '../widgets/find_in_file_bar.dart';
@@ -392,11 +391,19 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   @override
   void initState() {
     super.initState();
-    ComfortTint.viewerOpened(); // 파일을 보는 동안 편안한 모드 덮개를 걷음
+    _tintHold.open(); // 파일을 보는 동안 편안한 모드 덮개를 걷음
     SystemBars.enterViewer(); // 파일 열람 중에는 상태표시줄·내비게이션 바를 모두 숨김
     WidgetsBinding.instance.addObserver(this);
     _loadNeighborFiles();
     _initMedia();
+  }
+
+  final ViewerTintHold _tintHold = ViewerTintHold();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tintHold.watch(context);
   }
 
   /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 전환 버튼'
@@ -1498,12 +1505,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   /// 5. 위 상황에서 진행바가 메모 도구모음 쪽에서 비켜 주는 폭 (메모 도구모음 폭 48 + 간격 8)
   static const double _memoBarSideInset = 54.0;
 
-  /// 공유: PDF에 메모가 있으면 쪽마다 메모를 얹은 PDF를 새로 만들어 공유 (메모가 없거나 CBZ면 파일 그대로)
-  Future<void> _shareWithMemos() => shareFileWithMemos(context, widget.files.first.path, title: widget.title, memos: {
-        for (final e in _memoStrokesByPage.entries)
-          if (e.value.isNotEmpty) e.key: [for (final s in e.value) s.toJson()],
-      });
-
   Future<void> _openPenSettings() {
     return showPenSettingsPanel(
       context: context,
@@ -2324,8 +2325,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     final int bp = int.tryParse(bm.position) ?? 0;
                     return ListTile(
                       leading: Icon(bm.spread ? Icons.menu_book : Icons.bookmark, color: Colors.amber),
-                      title: Text(bookmarkFullTitle(pagesLabel(bp + 1, bm.spread && bp + 1 < _totalPages ? bp + 2 : null, _tr), bm, _tr)),
-                      subtitle: Text(_tr('저장 시각: ${bm.createdAt}', 'Saved: ${bm.createdAt}', '保存时间：${bm.createdAt}', '保存日時: ${bm.createdAt}')),
+                      title: Text(pagesLabel(bp + 1, bm.spread && bp + 1 < _totalPages ? bp + 2 : null, _tr)),
+                      subtitle: bookmarkSubtitle(ctx, bm, _tr),
                       trailing: IconButton(
                         icon: const TrashLidIcon(open: false),
                         onPressed: () async {
@@ -2660,7 +2661,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   void dispose() {
-    ComfortTint.viewerClosed();
+    _tintHold.dispose();
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
     SystemBars.leaveViewer();
     _book.dispose();
@@ -3111,15 +3112,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                               tooltip: _tr('파일 내 단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
                               onPressed: _openFind,
                             ),
-                          // 공유: 이 파일을 형식 그대로 다른 앱으로 (파일 내 검색 오른쪽)
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: btnPadding,
-                            constraints: btnConstraints,
-                            icon: const Icon(Icons.share_outlined, color: Colors.white, size: 18),
-                            tooltip: _tr('공유', 'Share', '分享', '共有'),
-                            onPressed: _shareWithMemos,
-                          ),
                           IconButton(
                             visualDensity: VisualDensity.compact,
                             padding: btnPadding,
