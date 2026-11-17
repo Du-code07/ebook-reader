@@ -731,6 +731,7 @@ function markRects(rects) {
   }
 }
 function destroy() {
+  if (zoomView) zoomClear();
   disposed = true; generation++; clearInterval(bridgeTimer); resizeObserver.disconnect();
   worker.terminate(); requests.forEach(resolve => resolve({ type: 'closed' })); requests.clear();
   if (incoming) incoming.fill(0); incoming = null; received = 0;
@@ -747,6 +748,7 @@ const vResize = new ResizeObserver(() => { if (vertical) vLayout(true); });
 function setVertical(on) {
   on = !!on;
   if (on === vertical) return;
+  if (zoomView) zoomClear();
   if (on) {
     vertical = true;
     renderSerial++;
@@ -1202,118 +1204,73 @@ function headingCandidates() {
     .slice(0, 3000).map(b => ({ title: b.head || b.text, page: b.page, bold: b.bold, boldRatio: b.boldRatio, centered: b.centered, fs: b.fs, body }));
 }
 
-// ── 확대해 둔 화면을 선명하게: 앱이 화면 그림을 키우는 대신, 쪽 상자 자체를 그 배율로 다시 그림 ──
-// (앱은 그 배율만큼 화면 그림을 되돌려 겹치게 하므로 보이는 자리는 그대로, 글씨만 선명해짐)
-let zoomView = null, zoomBase = [0, 0]; // [배율, 가로 이동, 세로 이동] (CSS px), 확대 전 문서 화면 크기
-// 넘겨 보기 확대: 손가락이 움직이는 동안에는 이미 그려 둔 그림을 옮기고 크기만 바꿔(빠름)
-// 손가락이 멈추면 그 배율로 쪽을 다시 놓아 또렷하게. 아직 안 그려진 가장자리는 밑그림(1배 쪽 복사본)이 채움
-// 크게 그린 쪽은 화면 둘레만 잘라 창(zoomWin)에 담아 보임: 큰 화면(태블릿)에서 확대한 쪽 전체를 한 장으로 그리면
-// 기기 그림 한도를 넘어 일부가 그려지지 않고 사라지므로, 그리는 크기를 늘 화면의 두 배 정도로 묶음
-let zoomDrawn = 1, zoomSettle = 0, zoomUnder = null;
-let zoomWin = null, zoomWinAt = [0, 0, 0, 0], zoomHome = null; // 창이 담은 자리 (쪽 좌표: 왼쪽, 위, 너비, 높이), 원래 자리
-const ZOOM_WIN_MARGIN = 0.4; // 창 = 화면 + 둘레로 화면의 40%씩
-function zoomApply() {
-  const [s, tx, ty] = zoomView, k = s / zoomDrawn;
-  if (zoomWin) zoomWin.style.transform = `matrix(${k}, 0, 0, ${k}, ${tx + zoomWinAt[0] * k}, ${ty + zoomWinAt[1] * k})`;
-  if (zoomUnder) zoomUnder.style.transform = `matrix(${s}, 0, 0, ${s}, ${tx}, ${ty})`;
-}
-/** 지금 보이는 곳(과 둘레)을 창에 담음 */
+// ── v138: 고정된 화면 안에서 현재 배율로 직접 다시 그림 ──
+// 잘라 둔 확대 그림/복사본을 축소하면 태블릿 WebView의 오래된 타일 경계가
+// 드러날 수 있다. 창은 화면 크기로 고정하고, 원본 DOM/SVG만 현재 크기로 배치한다.
+// 창 자체에 transform/will-change를 걸지 않아 확대된 화면 전체를 GPU 텍스처로
+// 보관하지 않는다. Flutter 쪽에서 요청을 직렬화하므로 항상 마지막 위치까지 적용된다.
+let zoomView = null, zoomBase = [0, 0];
+let zoomDrawn = 1, zoomWin = null, zoomHome = null;
 function zoomWindow() {
-  if (!zoomView) return;
-  const [s, tx, ty] = zoomView, k = s / zoomDrawn;
-  const vw = window.innerWidth, vh = window.innerHeight, W = zoomBase[0] * zoomDrawn, H = zoomBase[1] * zoomDrawn;
-  const mx = vw * ZOOM_WIN_MARGIN, my = vh * ZOOM_WIN_MARGIN;
-  const left = Math.max(0, Math.floor((-mx - tx) / k)), top = Math.max(0, Math.floor((-my - ty) / k));
-  const right = Math.min(W, Math.ceil((vw + mx - tx) / k)), bottom = Math.min(H, Math.ceil((vh + my - ty) / k));
-  zoomWinAt = [left, top, Math.max(1, right - left), Math.max(1, bottom - top)];
-  if (!zoomWin) {
-    zoomWin = document.createElement('div'); zoomWin.id = 'pages-win';
-    zoomHome = [host.parentNode, host.nextSibling];
-    host.parentNode.insertBefore(zoomWin, host);
-    zoomWin.appendChild(host);
-  }
-  Object.assign(zoomWin.style, { width: `${zoomWinAt[2]}px`, height: `${zoomWinAt[3]}px` });
-  Object.assign(host.style, { left: `${-left}px`, top: `${-top}px`, transform: '' });
+  if (zoomWin) return;
+  zoomWin = document.createElement('div'); zoomWin.id = 'pages-win';
+  zoomHome = [host.parentNode, host.nextSibling];
+  host.parentNode.insertBefore(zoomWin, host);
+  zoomWin.appendChild(host);
 }
-/** 보이는 곳이 창 안에 다 들어 있는지 */
-function zoomCovered() {
-  const [s, tx, ty] = zoomView, k = s / zoomDrawn;
-  const [l, t, w, h] = zoomWinAt, W = zoomBase[0] * zoomDrawn, H = zoomBase[1] * zoomDrawn;
-  const vl = Math.max(0, -tx / k), vt = Math.max(0, -ty / k);
-  const vr = Math.min(W, (window.innerWidth - tx) / k), vb = Math.min(H, (window.innerHeight - ty) / k);
-  return vl >= l - 1 && vt >= t - 1 && vr <= l + w + 1 && vb <= t + h + 1;
-}
-/** 창에서 꺼내 원래 자리로 */
 function zoomUnwrap() {
   if (!zoomWin) return;
   const [parent, next] = zoomHome;
   parent.insertBefore(host, next && next.parentNode === parent ? next : zoomWin);
   zoomWin.remove(); zoomWin = null; zoomHome = null;
-  Object.assign(host.style, { left: '', top: '' });
 }
-/** [zoomDrawn] 배율로 쪽을 다시 놓음 (문서 화면도 그만큼 크게 — 잘리는 곳이 없게) */
 function zoomRedraw() {
-  Object.assign(host.style, { width: `${zoomBase[0] * zoomDrawn}px`, height: `${zoomBase[1] * zoomDrawn}px`, gap: zoomDrawn === 1 ? '' : `${(8 / 3) * zoomDrawn}px` });
-  fitPages();
+  if (!zoomView) return;
   zoomWindow();
-  zoomApply();
-}
-function zoomMakeUnder() {
-  zoomUnder?.remove();
-  const u = host.cloneNode(true);
-  u.removeAttribute('id'); u.id = 'pages-under'; u.setAttribute('aria-hidden', 'true');
-  Object.assign(u.style, { transform: '', width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px`, display: '' });
-  host.parentNode.insertBefore(u, host);
-  zoomUnder = u;
+  const [s, tx, ty] = zoomView;
+  zoomDrawn = s;
+  // left/top 이동은 고정된 창 안에서 다시 칠해진다. 과거에 잘라 둔 영역을
+  // transform으로 옮기거나 줄이는 방식과 달리 새로 보이는 영역이 즉시 포함된다.
+  Object.assign(host.style, {
+    left: `${tx}px`, top: `${ty}px`, transform: '',
+    width: `${zoomBase[0] * s}px`, height: `${zoomBase[1] * s}px`,
+    gap: `${(8 / 3) * s}px`
+  });
+  fitPages();
 }
 function zoomClear() {
-  clearTimeout(zoomSettle); zoomSettle = 0;
   zoomView = null; zoomDrawn = 1;
   zoomUnwrap();
-  zoomUnder?.remove(); zoomUnder = null;
   host.classList.remove('zooming');
-  Object.assign(host.style, { transform: '', width: '', height: '', gap: '' });
+  Object.assign(host.style, { left: '', top: '', transform: '', width: '', height: '', gap: '' });
   fitPages();
 }
 function setView(s, tx, ty) {
-  if (!(s > 1.001)) { if (zoomView) zoomClear(); return true; }
+  if (![s, tx, ty].every(Number.isFinite)) return false;
+  if (vertical || !(s > 1.001)) { if (zoomView) zoomClear(); return true; }
   if (!zoomView) {
-    zoomBase = [host.clientWidth, host.clientHeight]; zoomDrawn = 1;
-    zoomMakeUnder();
+    zoomBase = [host.clientWidth, host.clientHeight];
     host.classList.add('zooming');
-    zoomView = [s, tx, ty];
-    zoomRedraw();
-  } else {
-    zoomView = [s, tx, ty];
-    if (s < zoomDrawn * 0.63) {
-      // 많이 줄였으면 손가락이 멈추기를 기다리지 않고 지금 배율로 다시 놓음
-      zoomDrawn = s; zoomRedraw();
-    } else {
-      zoomApply();
-      // 옮기다가 창 밖이 보이면(배율은 거의 그대로) 창을 지금 자리로 옮김 (줄이는 중에는 밑그림이 채움)
-      if (s >= zoomDrawn * 0.9 && !zoomCovered()) { zoomWindow(); zoomApply(); }
-    }
   }
-  clearTimeout(zoomSettle);
-  zoomSettle = setTimeout(() => {
-    zoomSettle = 0;
-    if (!zoomView) return;
-    if (Math.abs(zoomView[0] - zoomDrawn) >= 0.005) { zoomDrawn = zoomView[0]; zoomRedraw(); }
-    else if (!zoomCovered()) { zoomWindow(); zoomApply(); }
-  }, 140);
+  zoomView = [s, tx, ty];
+  zoomRedraw();
   return true;
 }
-// 자리를 재는 일(쪽 위치·글자 상자·표시)은 확대하지 않은 자리로 (앱 쪽 좌표와 맞게)
+// 회전/분할 화면에서도 확대 전 기준을 현재 WebView 크기와 맞춘다.
+window.addEventListener('resize', () => {
+  if (!zoomView) return;
+  zoomBase = [window.innerWidth, window.innerHeight];
+  zoomRedraw();
+});
+// 글 선택·메모의 기준 좌표는 확대 전 쪽 좌표. 같은 JS 작업 안에서 측정하고
+// 바로 복원하므로 중간 상태가 화면에 그려지거나 WebView가 재생성되지 않는다.
 function withoutZoom(fn) {
   return function (...args) {
     if (!zoomView) return fn.apply(this, args);
-    // 확대 전 자리로 잠깐 되돌려 잰 뒤 다시 확대
-    const keep = zoomDrawn;
     zoomDrawn = 1;
-    zoomUnwrap();
-    Object.assign(host.style, { transform: '', width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px`, gap: '' });
+    Object.assign(host.style, { left: '0px', top: '0px', transform: '', width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px`, gap: '' });
     fitPages();
-    try { return fn.apply(this, args); } finally { zoomDrawn = keep; zoomRedraw(); }
+    try { return fn.apply(this, args); } finally { zoomRedraw(); }
   };
 }
 window.freaderDocx = { setView, resetScrollZoom: vResetZoom, setScrollMarks, mostVisiblePage: vMostVisible, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy, setVertical, scrollToRatio: vScrollToRatio,

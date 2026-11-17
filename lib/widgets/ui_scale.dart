@@ -165,6 +165,12 @@ class _RenderBigChildBox extends RenderProxyBox {
   double width;
   double height;
 
+  // UiUnscale's child is larger than this layout box on tablets. Report that
+  // painted area too, so raster/culling bounds do not cut off its right/bottom.
+  @override
+  Rect get paintBounds => super.paintBounds.expandToInclude(
+      child?.paintBounds ?? Rect.fromLTWH(0, 0, width, height));
+
   @override
   void performLayout() {
     child?.layout(BoxConstraints.tightFor(width: width, height: height));
