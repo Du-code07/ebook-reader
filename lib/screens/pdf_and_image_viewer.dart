@@ -636,6 +636,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Future<void> _applyRotation(String mode) async {
+    _resetAnyZoom(); // 확대한 채로 돌리면 원래 크기로 보여 주며 돌림
     StorageService.desiredLandscapeNotifier.value = mode == 'auto' ? null : mode == 'landscape';
     setState(() => _rotateTapCount++);
     try {
@@ -1247,11 +1248,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _tapTimer = null;
       _lastTapAt = null;
       HapticFeedback.selectionClick();
-      if (_currentZoomScale > 1.0001) {
-        _zoomController.value = Matrix4.identity();
-        setState(() => _currentZoomScale = 1.0);
-      }
-      _scrollCtrl.resetZoom();
+      _resetAnyZoom();
       return;
     }
     if (zoomed) {
@@ -2991,9 +2988,32 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     await showTextCopySheet(context, text: text, tr: _tr);
   }
 
+  void _resetAnyZoom() {
+    if (_currentZoomScale > 1.0001) {
+      _zoomController.value = Matrix4.identity();
+      setState(() => _currentZoomScale = 1.0);
+    }
+    _scrollCtrl.resetZoom();
+  }
+
+  Orientation? _zoomOrientation;
+
+  /// 확대한 채로 화면을 돌리면 원래 크기로 돌려놓고 돌림
+  void _resetZoomOnRotate(BuildContext context) {
+    final Orientation o = MediaQuery.orientationOf(context);
+    final Orientation? prev = _zoomOrientation;
+    _zoomOrientation = o;
+    if (prev == null || prev == o) return;
+    if (!(_currentZoomScale > 1.0001 || _scrollCtrl.zoomed)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resetAnyZoom();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     _syncShakeListening();
+    _resetZoomOnRotate(context);
     // 메뉴를 띄운 동안에는 상태표시줄도 함께 보임
     SystemBars.viewerStatus(_showControls && !_isTouchLocked);
     if (_isPreparingPages || _pageController == null) {

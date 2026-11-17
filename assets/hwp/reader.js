@@ -302,6 +302,7 @@ function safeSvg(source) {
   return document.importNode(svg, true);
 }
 async function render() {
+  if (zoomView) zoomClear(); // 다른 쪽으로 바뀌면 확대 끝 (밑그림도 버림)
   if (!doc || disposed) return;
   const serial = ++renderSerial;
   const fragment = document.createDocumentFragment(), nextEntries = new Set();
@@ -483,7 +484,7 @@ function releaseDocument() {
   docReady = false;
   if (vertical) {
     vertical = false; vResize.disconnect(); vMounted.clear();
-    vhost?.remove(); vhost = null; vSlots = []; vTops = []; vRatios = []; host.style.display = '';
+    vhost?.remove(); vhost = null; vinner = null; vSlots = []; vTops = []; vRatios = []; host.style.display = '';
   }
   if (doc) { doc.free(); doc = null; }
   layoutCache.clear(); pageBoxCache.clear(); inkCache.clear(); searchState = { query: '', results: [], current: -1 };
@@ -512,6 +513,7 @@ function setVertical(on) {
     const old = activeEntries; activeEntries = new Set();
     for (const entry of old) releaseIfUnused(entry);
     vhost = document.createElement('div'); vhost.id = 'vpages';
+    vinner = document.createElement('div'); vinner.id = 'vinner'; vhost.appendChild(vinner);
     document.body.appendChild(vhost);
     vhost.addEventListener('scroll', vSchedule, { passive: true });
     vResize.observe(vhost);
@@ -522,13 +524,13 @@ function setVertical(on) {
     vertical = false;
     vResize.disconnect();
     for (const index of [...vMounted.keys()]) vUnmount(index);
-    vhost?.remove(); vhost = null; vSlots = []; vTops = []; vRatios = []; vZoom = 1; vPinch = null;
+    vhost?.remove(); vhost = null; vinner = null; vSlots = []; vTops = []; vRatios = []; vZoom = 1; vPinch = null;
     host.style.display = '';
     void render().then(reportLocation).catch(fail);
   }
 }
 // ── FReader: 스크롤 보기 두 손가락 확대·축소 (줄이면 쪽이 작아져 가운데에, 늘리면 옆으로도 움직일 수 있음) ──
-let vZoom = 1, vPinch = null;
+let vZoom = 1, vPinch = null, vinner = null;
 const V_ZOOM_MIN = 0.5, V_ZOOM_MAX = 3;
 function vTouchInfo(t) {
   return { d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 };
@@ -537,9 +539,12 @@ function vPinchStart(e) {
   if (!vertical || !vhost || e.touches.length !== 2 || !vTops.length) return;
   const t = vTouchInfo(e.touches);
   // 손가락 가운데에 있던 글 자리 (몇째 쪽의 어느 비율 자리인지) — 크기를 바꿔도 그 글이 손가락 아래 남게
-  const cy = vhost.scrollTop + t.y, i = vIndexAt(cy), slot = vSlots[i];
+  const cy = vhost.scrollTop + t.y, cx = vhost.scrollLeft + t.x, i = vIndexAt(cy);
   const sh = Math.max(1, vTops[i + 1] - vTops[i] - V_GAP), sw = Math.max(1, vPageWidth());
-  vPinch = { d0: Math.max(1, t.d), z0: vZoom, z: vZoom, i, fy: (cy - vTops[i]) / sh, fx: (vhost.scrollLeft + t.x - vLeft()) / sw, x: t.x, y: t.y, raf: 0 };
+  vPinch = { d0: Math.max(1, t.d), z0: vZoom, z: vZoom, i, fy: (cy - vTops[i]) / sh, fx: (cx - vLeft()) / sw, cx, cy, x: t.x, y: t.y, raf: 0 };
+  // 줄이면 화면에 들어올 위아래 쪽을 미리 붙여 둠 (줄이는 동안 빈 곳이 보이지 않게)
+  const r = V_ZOOM_MIN / vZoom, H = vhost.clientHeight || innerHeight;
+  vMountRange(vIndexAt(cy - t.y / r), vIndexAt(cy + (H - t.y) / r));
   e.preventDefault();
 }
 function vPinchMove(e) {
@@ -549,31 +554,39 @@ function vPinchMove(e) {
   const t = vTouchInfo(e.touches);
   vPinch.z = Math.max(V_ZOOM_MIN, Math.min(V_ZOOM_MAX, vPinch.z0 * t.d / vPinch.d0));
   vPinch.x = t.x; vPinch.y = t.y;
-  // 손가락이 움직이는 동안 바로 새 크기로 다시 놓음 (그림을 늘리지 않아 흐려지지 않고, 줄여도 빈 곳 없이 쪽을 채움)
-  if (!vPinch.raf) vPinch.raf = requestAnimationFrame(vPinchApply);
+  if (!vPinch.raf) vPinch.raf = requestAnimationFrame(vPinchFrame);
 }
-function vPinchApply() {
-  const p = vPinch; if (!p || !vhost) return;
+// 손가락이 움직이는 동안: 이미 그려 둔 쪽들을 통째로 옮기고 크기만 바꿈 (다시 그리지 않아 빠르고 빈 곳이 없음)
+function vPinchFrame() {
+  const p = vPinch; if (!p || !vinner) return;
   p.raf = 0;
-  if (p.z === vZoom && p.applied && p.ax === p.x && p.ay === p.y) return;
-  p.applied = true; p.ax = p.x; p.ay = p.y;
-  vZoom = p.z;
-  vSize();
-  const sh = Math.max(1, vTops[p.i + 1] - vTops[p.i] - V_GAP);
-  vhost.scrollTop = vTops[p.i] + p.fy * sh - p.y;
-  vhost.scrollLeft = vLeft() + p.fx * vPageWidth() - p.x;
-  vUpdate();
+  const r = p.z / p.z0;
+  const tx = p.x + vhost.scrollLeft - p.cx * r, ty = p.y + vhost.scrollTop - p.cy * r;
+  vinner.style.transform = `translate(${tx}px, ${ty}px) scale(${r})`;
 }
 function vPinchEnd(e) {
   if (!vPinch || !vhost) return;
   if (e.touches.length >= 2) return;
   const p = vPinch;
   if (p.raf) { cancelAnimationFrame(p.raf); p.raf = 0; }
+  vPinch = null;
   // 거의 원래 크기면 딱 원래 크기로
   if (Math.abs(p.z - 1) < 0.05) p.z = 1;
-  vPinchApply();
-  vPinch = null;
+  // 손가락을 떼면 그 크기로 다시 놓고 다시 그림 (또렷하게), 손가락 아래 글은 그대로
+  vZoom = p.z;
+  vSize();
+  vinner.style.transform = '';
+  const sh = Math.max(1, vTops[p.i + 1] - vTops[p.i] - V_GAP);
+  vhost.scrollTop = vTops[p.i] + p.fy * sh - p.y;
+  vhost.scrollLeft = vLeft() + p.fx * vPageWidth() - p.x;
+  vUpdate();
   vReportMetrics();
+}
+/** [a, b] 쪽을 한꺼번에 붙임 (두 손가락으로 줄이기 전에) */
+function vMountRange(a, b) {
+  for (let i = Math.max(0, a - 1); i <= Math.min(vSlots.length - 1, b + 1); i++) {
+    if (!vMounted.has(i)) { try { vMount(i); } catch (error) { console.warn(error); } }
+  }
 }
 // FReader: 스크롤 보기 북마크 — 북마크한 쪽 왼쪽 위에 책갈피 (쪽과 함께 움직이고 확대·축소돼도 보임)
 let vMarks = new Set();
@@ -656,11 +669,11 @@ function vLayout(keep) {
   }
   if (vSlots.length !== count) {
     for (const index of [...vMounted.keys()]) vUnmount(index);
-    vhost.replaceChildren();
+    vinner.replaceChildren();
     vSlots = []; vRatios = [];
     for (let i = 0; i < count; i++) {
       const slot = document.createElement('div'); slot.className = 'vslot'; slot.dataset.page = String(i);
-      vhost.appendChild(slot); vSlots.push(slot);
+      vinner.appendChild(slot); vSlots.push(slot);
     }
   }
   vApplyMarks();
@@ -904,24 +917,55 @@ function pageSizes() {
 // ── 확대해 둔 화면을 선명하게: 앱이 화면 그림을 키우는 대신, 쪽 상자 자체를 그 배율로 다시 그림 ──
 // (앱은 그 배율만큼 화면 그림을 되돌려 겹치게 하므로 보이는 자리는 그대로, 글씨만 선명해짐)
 let zoomView = null, zoomBase = [0, 0]; // [배율, 가로 이동, 세로 이동] (CSS px), 확대 전 문서 화면 크기
+// 넘겨 보기 확대: 손가락이 움직이는 동안에는 이미 그려 둔 그림을 옮기고 크기만 바꿔(빠름, 빠진 곳 없음)
+// 손가락이 멈추면 그 배율로 다시 그려 또렷하게(CSS zoom). 줄일 때 아직 안 그려진 가장자리는 밑그림(1배 쪽 복사본)이 채움
+let zoomDrawn = 1, zoomSettle = 0, zoomUnder = null;
+function zoomApply() {
+  const [s, tx, ty] = zoomView;
+  host.style.zoom = String(zoomDrawn);
+  host.style.transform = `translate(${tx / zoomDrawn}px, ${ty / zoomDrawn}px) scale(${s / zoomDrawn})`;
+  if (zoomUnder) zoomUnder.style.transform = `matrix(${s}, 0, 0, ${s}, ${tx}, ${ty})`;
+}
+function zoomMakeUnder() {
+  zoomUnder?.remove();
+  const u = host.cloneNode(true);
+  u.removeAttribute('id'); u.id = 'pages-under'; u.setAttribute('aria-hidden', 'true');
+  Object.assign(u.style, { zoom: '', transform: '', width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px`, display: '' });
+  host.parentNode.insertBefore(u, host);
+  zoomUnder = u;
+}
+function zoomClear() {
+  clearTimeout(zoomSettle); zoomSettle = 0;
+  zoomView = null; zoomDrawn = 1;
+  zoomUnder?.remove(); zoomUnder = null;
+  host.classList.remove('zooming');
+  Object.assign(host.style, { zoom: '', transform: '', width: '', height: '' });
+}
 function setView(s, tx, ty) {
-  // 늘린 그림을 보여 주지 않고 그 배율로 다시 그림(CSS zoom) — 확대해도, 움직이는 동안에도 글씨가 또렷하고 빠진 곳이 없음
-  if (!(s > 1.001)) {
-    zoomView = null;
-    Object.assign(host.style, { zoom: '', width: '', height: '', position: '', left: '', top: '' });
-    return true;
+  if (!(s > 1.001)) { if (zoomView) zoomClear(); return true; }
+  if (!zoomView) {
+    zoomBase = [host.clientWidth, host.clientHeight]; zoomDrawn = 1;
+    zoomMakeUnder();
+    host.classList.add('zooming');
+    Object.assign(host.style, { width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px` });
   }
-  if (!zoomView) zoomBase = [host.clientWidth, host.clientHeight];
   zoomView = [s, tx, ty];
-  Object.assign(host.style, { zoom: String(s), width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px`, position: 'relative', left: `${tx / s}px`, top: `${ty / s}px` });
+  zoomApply();
+  clearTimeout(zoomSettle);
+  zoomSettle = setTimeout(() => {
+    zoomSettle = 0;
+    if (!zoomView || Math.abs(zoomView[0] - zoomDrawn) < 0.005) return;
+    zoomDrawn = zoomView[0];
+    zoomApply();
+  }, 140);
   return true;
 }
 // 자리를 재는 일(쪽 위치·글자 상자·표시)은 확대하지 않은 자리로 (앱 쪽 좌표와 맞게)
 function withoutZoom(fn) {
   return function (...args) {
     if (!zoomView) return fn.apply(this, args);
-    const keep = { zoom: host.style.zoom, left: host.style.left, top: host.style.top };
-    Object.assign(host.style, { zoom: '', left: '0px', top: '0px' });
+    const keep = { zoom: host.style.zoom, transform: host.style.transform };
+    Object.assign(host.style, { zoom: '', transform: '' });
     try { return fn.apply(this, args); } finally { Object.assign(host.style, keep); }
   };
 }

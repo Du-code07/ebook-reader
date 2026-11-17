@@ -744,6 +744,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<void> _applyRotation(String mode) async {
+    if (_anyZoomed) _resetAnyZoom(); // 확대한 채로 돌리면 원래 크기로 보여 주며 돌림
     StorageService.desiredLandscapeNotifier.value = mode == 'auto' ? null : mode == 'landscape';
     setState(() => _rotateTapCount++);
     try {
@@ -3664,6 +3665,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   Offset _lastTapPos = Offset.zero;
   bool get _anyZoomed => _epubZoomScale > 1.03 || _scrollCtrl.zoomed || (_docVertical && (_hwpController.scrollZoom - 1).abs() > 0.01);
 
+  Orientation? _zoomOrientation;
+
+  /// 확대한 채로 화면을 돌리면 원래 크기로 돌려놓고 돌림
+  void _resetZoomOnRotate(BuildContext context) {
+    final Orientation o = MediaQuery.orientationOf(context);
+    final Orientation? prev = _zoomOrientation;
+    _zoomOrientation = o;
+    if (prev == null || prev == o || !_anyZoomed) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resetAnyZoom();
+    });
+  }
+
   void _resetAnyZoom() {
     if (_epubZoomScale > 1.0001) {
       _epubZoomController.value = Matrix4.identity();
@@ -4523,6 +4537,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     _syncShakeListening();
+    _resetZoomOnRotate(context);
     // 메뉴를 띄운 동안에는 상태표시줄도 함께 보임
     SystemBars.viewerStatus(_showControls && !_isTouchLocked);
     if (_isLoading) {
