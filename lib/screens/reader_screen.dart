@@ -3761,7 +3761,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       items: [
         ('white', _tr('라이트', 'Light', '浅色', 'ライト'), Icons.light_mode_outlined, null),
         ('dark', _tr('다크', 'Dark', '深色', 'ダーク'), Icons.dark_mode_outlined, null),
-        ('comfort', _tr('편안한 모드', 'Comfort mode', '护眼模式', '目に優しいモード'), Icons.wb_incandescent_outlined, null),
+        ('comfort', _tr('편안함', 'Comfort', '护眼', '目に優しい'), Icons.wb_incandescent_outlined, null),
         // 세피아: 옛날 종이 모양 (선으로만)
         if (_isEpub) ('sepia', _tr('세피아', 'Sepia', '棕褐色', 'セピア'), Icons.description_outlined, null),
       ],

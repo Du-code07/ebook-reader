@@ -624,10 +624,10 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const MoonMorphIcon(filled: false, size: 20),
                 title: _tr('배경 색상', 'Background Color', '背景颜色', '背景色'),
-                desc: _tr('라이트·다크·편안한 모드를 바꿔요(EPUB은 세피아도)\n한글·워드·TXT는 이 설정을, 그 밖의 파일은 앱 테마를 따르고, 파일에 배경색이 있으면 그 색이 먼저예요',
-                    'Switch light / dark / comfort mode (EPUB also has sepia)\nHangul, Word and TXT follow this setting; other files follow the app theme\nA file\'s own background color always comes first',
-                    '切换浅色·深色·护眼模式（EPUB 另有棕褐色）\n韩文·Word·TXT 按此设置，其他文件按应用主题；文件自带背景色时优先使用',
-                    'ライト・ダーク・目に優しいモードを切り替えます(EPUBはセピアも)\nハングル・Word・TXTはこの設定、それ以外はアプリのテーマに従い、ファイル自体の背景色があればそれが優先です')),
+                desc: _tr('라이트·다크·편안함을 바꿔요(EPUB은 세피아도)\n한글·워드·TXT는 이 설정을, 그 밖의 파일은 앱 테마를 따르고, 파일에 배경색이 있으면 그 색이 먼저예요',
+                    'Switch light / dark / comfort (EPUB also has sepia)\nHangul, Word and TXT follow this setting; other files follow the app theme\nA file\'s own background color always comes first',
+                    '切换浅色·深色·护眼（EPUB 另有棕褐色）\n韩文·Word·TXT 按此设置，其他文件按应用主题；文件自带背景色时优先使用',
+                    'ライト・ダーク・目に優しいを切り替えます(EPUBはセピアも)\nハングル・Word・TXTはこの設定、それ以外はアプリのテーマに従い、ファイル自体の背景色があればそれが優先です')),
             _row(context,
                 icon: const Icon(Icons.slideshow_outlined),
                 title: _tr('슬라이드 쇼 (PPT)', 'Slide Show (PPT)', '幻灯片放映 (PPT)', 'スライドショー (PPT)'),
@@ -2631,7 +2631,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             final items = <Widget>[
               // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
               action('fab_add_plain', const Icon(Icons.create_new_folder_outlined), _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
-              action('fab_scan_group', FolderSearchIcon(size: 24, color: cs.onSurface), _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'),
+              action(
+                  'fab_scan_group',
+                  _groupScanBusy
+                      ? SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2.2, color: cs.onSurface))
+                      : FolderSearchIcon(size: 24, color: cs.onSurface),
+                  _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'),
                   scanExt == null || _groupScanBusy ? null : () => _scanFilesIntoGroup(_selectedGroup, scanExt)),
               action('fab_merge_pdf', const Icon(Icons.picture_as_pdf_outlined), _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
               action('fab_merge_img', const Icon(Icons.photo_library_outlined), _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
@@ -2740,41 +2745,29 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       alignment: Alignment.centerLeft,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          ChoiceChip(
-            key: _allGroupChipKey,
-            // 시그니쳐 색 칸 안에서도 아이콘 안쪽은 바탕(흰색)으로
-            // 그룹 아이콘은 그룹 목록과 똑같이 (같은 크기, 안쪽은 목록 바탕색)
-            avatar: IconInnerFill(color: _favoritesOnly || _selectedGroup == '전체' ? cs.surface : cs.surfaceContainerHigh, child: groupIcon),
-            avatarBoxConstraints: _favoritesOnly || _selectedGroup == '전체' ? null : const BoxConstraints.tightFor(width: 20, height: 20),
-            showCheckmark: false,
-            // 아이콘과 글자 사이는 좁게, 글자 오른쪽 여백은 아이콘 왼쪽 여백과 같게 (칸 가운데에 오도록)
-            labelPadding: const EdgeInsets.only(left: 4, right: 2),
-            label: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 220),
-              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, shadows: AppColors.sigShadows(context))),
-            ),
-            selected: true,
-            onSelected: (_) {
-              if (_searchOpen) {
-                _closeSearch();
-                return;
-              }
-              if (_fabOpen) setState(() => _fabOpen = false);
-              _showGroupJumpMenu();
-            },
+        child: ChoiceChip(
+          key: _allGroupChipKey,
+          // 시그니쳐 색 칸 안에서도 아이콘 안쪽은 바탕(흰색)으로
+          // 그룹 아이콘은 그룹 목록과 똑같이 (같은 크기, 안쪽은 목록 바탕색)
+          avatar: IconInnerFill(color: _favoritesOnly || _selectedGroup == '전체' ? cs.surface : cs.surfaceContainerHigh, child: groupIcon),
+          avatarBoxConstraints: _favoritesOnly || _selectedGroup == '전체' ? null : const BoxConstraints.tightFor(width: 20, height: 20),
+          showCheckmark: false,
+          // 아이콘과 글자 사이는 좁게, 글자 오른쪽 여백은 아이콘 왼쪽 여백과 같게 (칸 가운데에 오도록)
+          labelPadding: const EdgeInsets.only(left: 4, right: 2),
+          label: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 220),
+            child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, shadows: AppColors.sigShadows(context))),
           ),
-          // 형식 그룹(PDF·워드 등): 기기에서 그 형식 파일을 찾아 이 그룹에 넣기
-          if (ext != null)
-            IconButton(
-              // 상단바 아이콘과 같은 크기·색
-              icon: _groupScanBusy
-                  ? SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: cs.onSurfaceVariant))
-                  : FolderSearchIcon(size: 21, color: cs.onSurfaceVariant),
-              tooltip: _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'),
-              onPressed: _groupScanBusy ? null : () => _scanFilesIntoGroup(_selectedGroup, ext),
-            ),
-        ]),
+          selected: true,
+          onSelected: (_) {
+            if (_searchOpen) {
+              _closeSearch();
+              return;
+            }
+            if (_fabOpen) setState(() => _fabOpen = false);
+            _showGroupJumpMenu();
+          },
+        ),
       ),
     );
   }

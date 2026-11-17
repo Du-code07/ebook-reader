@@ -44,7 +44,10 @@ body[data-theme="white"] .page::after, body[data-theme="white"] #vpages .vslot::
 
 /* FReader 확대: 손가락이 움직이는 동안에는 그려 둔 그림을 통째로 옮기고 크기만 바꿈 (멈추면 그 배율로 다시 그림) */
 #vinner { transform-origin: 0 0; will-change: transform; }
-#pages.zooming { position: relative; z-index: 1; transform-origin: 0 0; will-change: transform; background: transparent; }
+#pages.zooming { position: absolute; background: transparent; }
+/* 확대해 크게 그린 쪽을 화면 둘레만 담아 보이는 창 (앱이 보내는 확대·이동은 이 창을 옮김) */
+#pages-win { position: fixed; left: 0; top: 0; z-index: 1; overflow: hidden; transform-origin: 0 0; will-change: transform; pointer-events: none; }
+#pages-win > #pages { pointer-events: auto; }
 /* 넘겨 보기 확대 밑그림: 1배로 한 번 그려 둔 쪽 복사본 — 줄일 때 아직 안 그려진 가장자리를 채움 */
 #pages-under { position: fixed; left: 0; top: 0; z-index: 0; display: flex; align-items: center; justify-content: center; gap: calc(8px / 3); overflow: hidden; background: var(--backdrop, transparent); transform-origin: 0 0; will-change: transform; pointer-events: none; }
 #pages-under.rtl { flex-direction: row-reverse; }

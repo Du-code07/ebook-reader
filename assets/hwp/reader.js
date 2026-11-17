@@ -304,6 +304,8 @@ function safeSvg(source) {
 async function render() {
   if (zoomView) zoomClear(); // 다른 쪽으로 바뀌면 확대 끝 (밑그림도 버림)
   if (!doc || disposed) return;
+  // 두 쪽 보기는 PDF처럼 늘 (1·2), (3·4)… 짝으로: 짝수 쪽에서 두 쪽 보기로 바꾸면 그 쪽이 오른쪽으로 (앞 짝과 겹치지 않게)
+  if (options.spread && page % 2) { page -= 1; reportLocation(); }
   const serial = ++renderSerial;
   const fragment = document.createDocumentFragment(), nextEntries = new Set();
   const pages = options.spread && page + 1 < count ? [page, page + 1] : [page];
@@ -920,17 +922,56 @@ function pageSizes() {
 // (앱은 그 배율만큼 화면 그림을 되돌려 겹치게 하므로 보이는 자리는 그대로, 글씨만 선명해짐)
 let zoomView = null, zoomBase = [0, 0]; // [배율, 가로 이동, 세로 이동] (CSS px), 확대 전 문서 화면 크기
 // 넘겨 보기 확대: 손가락이 움직이는 동안에는 이미 그려 둔 그림을 옮기고 크기만 바꿔(빠름)
-// 손가락이 멈추면 그 배율로 쪽을 다시 놓아 또렷하게. 줄일 때 아직 안 그려진 가장자리는 밑그림(1배 쪽 복사본)이 채움
+// 손가락이 멈추면 그 배율로 쪽을 다시 놓아 또렷하게. 아직 안 그려진 가장자리는 밑그림(1배 쪽 복사본)이 채움
+// 크게 그린 쪽은 화면 둘레만 잘라 창(zoomWin)에 담아 보임: 큰 화면(태블릿)에서 확대한 쪽 전체를 한 장으로 그리면
+// 기기 그림 한도를 넘어 일부가 그려지지 않고 사라지므로, 그리는 크기를 늘 화면의 두 배 정도로 묶음
 let zoomDrawn = 1, zoomSettle = 0, zoomUnder = null;
+let zoomWin = null, zoomWinAt = [0, 0, 0, 0], zoomHome = null; // 창이 담은 자리 (쪽 좌표: 왼쪽, 위, 너비, 높이), 원래 자리
+const ZOOM_WIN_MARGIN = 0.4; // 창 = 화면 + 둘레로 화면의 40%씩
 function zoomApply() {
-  const [s, tx, ty] = zoomView;
-  host.style.transform = `translate(${tx}px, ${ty}px) scale(${s / zoomDrawn})`;
+  const [s, tx, ty] = zoomView, k = s / zoomDrawn;
+  if (zoomWin) zoomWin.style.transform = `matrix(${k}, 0, 0, ${k}, ${tx + zoomWinAt[0] * k}, ${ty + zoomWinAt[1] * k})`;
   if (zoomUnder) zoomUnder.style.transform = `matrix(${s}, 0, 0, ${s}, ${tx}, ${ty})`;
+}
+/** 지금 보이는 곳(과 둘레)을 창에 담음 */
+function zoomWindow() {
+  if (!zoomView) return;
+  const [s, tx, ty] = zoomView, k = s / zoomDrawn;
+  const vw = window.innerWidth, vh = window.innerHeight, W = zoomBase[0] * zoomDrawn, H = zoomBase[1] * zoomDrawn;
+  const mx = vw * ZOOM_WIN_MARGIN, my = vh * ZOOM_WIN_MARGIN;
+  const left = Math.max(0, Math.floor((-mx - tx) / k)), top = Math.max(0, Math.floor((-my - ty) / k));
+  const right = Math.min(W, Math.ceil((vw + mx - tx) / k)), bottom = Math.min(H, Math.ceil((vh + my - ty) / k));
+  zoomWinAt = [left, top, Math.max(1, right - left), Math.max(1, bottom - top)];
+  if (!zoomWin) {
+    zoomWin = document.createElement('div'); zoomWin.id = 'pages-win';
+    zoomHome = [host.parentNode, host.nextSibling];
+    host.parentNode.insertBefore(zoomWin, host);
+    zoomWin.appendChild(host);
+  }
+  Object.assign(zoomWin.style, { width: `${zoomWinAt[2]}px`, height: `${zoomWinAt[3]}px` });
+  Object.assign(host.style, { left: `${-left}px`, top: `${-top}px`, transform: '' });
+}
+/** 보이는 곳이 창 안에 다 들어 있는지 */
+function zoomCovered() {
+  const [s, tx, ty] = zoomView, k = s / zoomDrawn;
+  const [l, t, w, h] = zoomWinAt, W = zoomBase[0] * zoomDrawn, H = zoomBase[1] * zoomDrawn;
+  const vl = Math.max(0, -tx / k), vt = Math.max(0, -ty / k);
+  const vr = Math.min(W, (window.innerWidth - tx) / k), vb = Math.min(H, (window.innerHeight - ty) / k);
+  return vl >= l - 1 && vt >= t - 1 && vr <= l + w + 1 && vb <= t + h + 1;
+}
+/** 창에서 꺼내 원래 자리로 */
+function zoomUnwrap() {
+  if (!zoomWin) return;
+  const [parent, next] = zoomHome;
+  parent.insertBefore(host, next && next.parentNode === parent ? next : zoomWin);
+  zoomWin.remove(); zoomWin = null; zoomHome = null;
+  Object.assign(host.style, { left: '', top: '' });
 }
 /** [zoomDrawn] 배율로 쪽을 다시 놓음 (문서 화면도 그만큼 크게 — 잘리는 곳이 없게) */
 function zoomRedraw() {
   Object.assign(host.style, { width: `${zoomBase[0] * zoomDrawn}px`, height: `${zoomBase[1] * zoomDrawn}px`, gap: zoomDrawn === 1 ? '' : `${(8 / 3) * zoomDrawn}px` });
   fitPages();
+  zoomWindow();
   zoomApply();
 }
 function zoomMakeUnder() {
@@ -944,6 +985,7 @@ function zoomMakeUnder() {
 function zoomClear() {
   clearTimeout(zoomSettle); zoomSettle = 0;
   zoomView = null; zoomDrawn = 1;
+  zoomUnwrap();
   zoomUnder?.remove(); zoomUnder = null;
   host.classList.remove('zooming');
   Object.assign(host.style, { transform: '', width: '', height: '', gap: '' });
@@ -959,17 +1001,21 @@ function setView(s, tx, ty) {
     zoomRedraw();
   } else {
     zoomView = [s, tx, ty];
-    // 많이 줄이는 중: 크게 그려 둔 쪽을 통째로 화면에 보이려면 그림 메모리가 모자라(태블릿처럼 큰 화면)
-    // 일부가 그려지지 않고 비므로, 그만큼 줄었으면 손가락이 멈추기를 기다리지 않고 지금 배율로 다시 놓음
-    // (화면에 보이는 그림 크기를 늘 화면의 2.5배 안으로)
-    if (s < zoomDrawn * 0.63) { zoomDrawn = s; zoomRedraw(); } else zoomApply();
+    if (s < zoomDrawn * 0.63) {
+      // 많이 줄였으면 손가락이 멈추기를 기다리지 않고 지금 배율로 다시 놓음
+      zoomDrawn = s; zoomRedraw();
+    } else {
+      zoomApply();
+      // 옮기다가 창 밖이 보이면(배율은 거의 그대로) 창을 지금 자리로 옮김 (줄이는 중에는 밑그림이 채움)
+      if (s >= zoomDrawn * 0.9 && !zoomCovered()) { zoomWindow(); zoomApply(); }
+    }
   }
   clearTimeout(zoomSettle);
   zoomSettle = setTimeout(() => {
     zoomSettle = 0;
-    if (!zoomView || Math.abs(zoomView[0] - zoomDrawn) < 0.005) return;
-    zoomDrawn = zoomView[0];
-    zoomRedraw();
+    if (!zoomView) return;
+    if (Math.abs(zoomView[0] - zoomDrawn) >= 0.005) { zoomDrawn = zoomView[0]; zoomRedraw(); }
+    else if (!zoomCovered()) { zoomWindow(); zoomApply(); }
   }, 140);
   return true;
 }
@@ -980,6 +1026,7 @@ function withoutZoom(fn) {
     // 확대 전 자리로 잠깐 되돌려 잰 뒤 다시 확대
     const keep = zoomDrawn;
     zoomDrawn = 1;
+    zoomUnwrap();
     Object.assign(host.style, { transform: '', width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px`, gap: '' });
     fitPages();
     try { return fn.apply(this, args); } finally { zoomDrawn = keep; zoomRedraw(); }

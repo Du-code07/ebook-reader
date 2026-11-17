@@ -323,59 +323,68 @@ class _PhonePainter extends CustomPainter {
   final Color color;
   final String mode;
 
-  void _phone(Canvas canvas, double u, Paint stroke) {
-    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(6.5 * u, 2.5 * u, 17.5 * u, 21.5 * u), Radius.circular(2.6 * u)), stroke);
-    canvas.drawLine(Offset(10.3 * u, 5.4 * u), Offset(13.7 * u, 5.4 * u), stroke);
-    canvas.drawCircle(Offset(12 * u, 18.4 * u), 1.05 * u, Paint()..color = color);
+  /// 자물쇠 모양을 뚫음 (몸통 + 고리), [c] 가운데, [k] 크기 배율
+  void _lockHole(Canvas canvas, double u, Offset c, double k) {
+    final clear = Paint()..blendMode = BlendMode.clear;
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromCenter(center: c + Offset(0, 2.0 * k * u), width: 6.6 * k * u, height: 5.2 * k * u), Radius.circular(1.0 * k * u)), clear);
+    final double r = 2.05 * k * u, top = c.dy - 1.6 * k * u;
+    canvas.drawPath(
+        Path()
+          ..moveTo(c.dx - r, c.dy + 0.6 * k * u)
+          ..lineTo(c.dx - r, top)
+          ..arcTo(Rect.fromCircle(center: Offset(c.dx, top), radius: r), math.pi, math.pi, false)
+          ..lineTo(c.dx + r, c.dy + 0.6 * k * u),
+        Paint()
+          ..blendMode = BlendMode.clear
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.55 * k * u);
   }
 
   @override
   void paint(Canvas canvas, Size size) {
     final double u = size.width / 24;
-    final stroke = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.8 * u
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
+    final fill = Paint()..color = color;
     final Offset c = size.center(Offset.zero);
     if (mode == 'auto') {
-      // 자동: 세로 고정과 같은 휴대폰을 작게 기울이고, 양쪽에 도는 화살표
+      // 자동: 가운데 기운 휴대폰(채움) + 둘레를 시계 방향으로 도는 화살표 두 개
       canvas.save();
       canvas.translate(c.dx, c.dy);
-      canvas.rotate(math.pi / 4);
-      canvas.scale(0.66);
-      canvas.translate(-c.dx, -c.dy);
-      final thin = Paint()
+      canvas.rotate(-math.pi / 4);
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset.zero, width: 6.2 * u, height: 9.6 * u), Radius.circular(1.6 * u)), fill);
+      canvas.restore();
+      final stroke = Paint()
         ..color = color
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.8 * u / 0.66 * 0.85
+        ..strokeWidth = 1.8 * u
         ..strokeCap = StrokeCap.round;
-      _phone(canvas, u, thin);
-      canvas.restore();
-      final double r = 10.3 * u;
+      final double r = 9.3 * u;
       final rect = Rect.fromCircle(center: c, radius: r);
-      for (final double start in [190.0, 10.0]) {
-        final double a0 = start * math.pi / 180, sweep = 62 * math.pi / 180;
+      for (final double start in [205.0, 25.0]) {
+        final double a0 = start * math.pi / 180, sweep = 128 * math.pi / 180;
         canvas.drawArc(rect, a0, sweep, false, stroke);
-        // 화살촉: 호 끝에서 도는 방향(시계 방향)으로
+        // 화살촉(채운 세모): 호 끝에서 도는 방향으로
         final double a1 = a0 + sweep;
-        final Offset tip = c + Offset(math.cos(a1), math.sin(a1)) * r;
-        final Offset back = Offset(math.sin(a1), -math.cos(a1)); // 도는 방향의 반대
-        for (final double t in [0.75, -0.75]) {
-          final Offset d = Offset(back.dx * math.cos(t) - back.dy * math.sin(t), back.dx * math.sin(t) + back.dy * math.cos(t));
-          canvas.drawLine(tip, tip + d * 2.8 * u, stroke);
-        }
+        final Offset end = c + Offset(math.cos(a1), math.sin(a1)) * r;
+        final Offset out = Offset(math.cos(a1), math.sin(a1)); // 바깥 방향
+        final Offset fwd = Offset(-math.sin(a1), math.cos(a1)); // 도는 방향
+        canvas.drawPath(
+            Path()
+              ..moveTo((end + out * 2.7 * u).dx, (end + out * 2.7 * u).dy)
+              ..lineTo((end - out * 2.7 * u).dx, (end - out * 2.7 * u).dy)
+              ..lineTo((end + fwd * 3.4 * u).dx, (end + fwd * 3.4 * u).dy)
+              ..close(),
+            fill);
       }
       return;
     }
-    if (mode == 'landscape') {
-      // 세로 모양을 왼쪽으로 돌려 가로로 (스피커가 왼쪽)
-      canvas.translate(c.dx, c.dy);
-      canvas.rotate(-math.pi / 2);
-      canvas.translate(-c.dx, -c.dy);
-    }
-    _phone(canvas, u, stroke);
+    // 세로 고정: 채운 휴대폰에 자물쇠를 뚫음 / 가로 고정: 같은 휴대폰을 눕힘 (자물쇠는 똑바로)
+    canvas.saveLayer(Offset.zero & size, Paint());
+    final bool land = mode == 'landscape';
+    final Rect body = land ? Rect.fromLTRB(2.5 * u, 6 * u, 21.5 * u, 18 * u) : Rect.fromLTRB(6 * u, 2.5 * u, 18 * u, 21.5 * u);
+    canvas.drawRRect(RRect.fromRectAndRadius(body, Radius.circular(2.6 * u)), fill);
+    _lockHole(canvas, u, land ? c + Offset(0, -0.4 * u) : c + Offset(0, -0.6 * u), land ? 0.82 : 1.0);
+    canvas.restore();
   }
 
   @override
@@ -453,7 +462,7 @@ String pagesLabel(int page, int? next, ViewerTr tr) => next == null
 String bookmarkModeOf({required bool scroll, required bool tap, required bool slide}) =>
     scroll ? 'scroll' : (tap && slide ? 'tap+slide' : (slide ? 'slide' : 'tap'));
 
-/// 북마크한 때의 보기 방식: 화면 회전·페이지 표시(스크롤 모드 말고)·페이지 모드를 아이콘과 이름으로
+/// 북마크한 때의 보기 방식: 화면 회전·페이지 표시(스크롤 모드 말고)·페이지 모드의 아이콘과 이름
 List<(Widget Function(double size, Color color), String)> _bookmarkModes(BookmarkItem bm, ViewerTr tr) => [
       if (bm.rotation != null)
         ((sz, c) => rotationGlyph(bm.rotation!, size: sz, color: c), switch (bm.rotation) {
@@ -476,7 +485,7 @@ List<(Widget Function(double size, Color color), String)> _bookmarkModes(Bookmar
         }),
     ];
 
-/// 북마크 목록 한 줄 아래쪽: 보기 방식(아이콘 + 이름)과 저장 시각
+/// 북마크 목록 한 줄 아래쪽: 보기 방식(아이콘만, 이름은 길게 누르면)과 저장 시각
 Widget bookmarkSubtitle(BuildContext context, BookmarkItem bm, ViewerTr tr) {
   final Color c = Theme.of(context).colorScheme.onSurfaceVariant;
   final modes = _bookmarkModes(bm, tr);
@@ -487,11 +496,7 @@ Widget bookmarkSubtitle(BuildContext context, BookmarkItem bm, ViewerTr tr) {
       padding: const EdgeInsets.only(top: 3, bottom: 2),
       child: Wrap(spacing: 12, runSpacing: 2, children: [
         for (final (icon, label) in modes)
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            icon(16, c),
-            const SizedBox(width: 4),
-            Text(label, style: TextStyle(fontSize: 12.5, color: c, fontWeight: FontWeight.w600)),
-          ]),
+          Tooltip(message: label, child: icon(18, c)),
       ]),
     ),
     saved,
