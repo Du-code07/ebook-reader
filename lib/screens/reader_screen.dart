@@ -357,6 +357,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _viewSending = false;
   Matrix4? _viewPending;
   double _epubZoomScale = 1.0;
+  double _uiScale = 1.0;
 
   // 1 & 3. S펜 전용 페이지별 필기 및 지우개 상태 (필기 모드에서 S펜이 닿으면 화면 이동 100% 차단 + 해당 페이지에서만 필기 표시)
   bool _isMemoMode = false;
@@ -1282,19 +1283,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           // (그림을 늘려 보이지 않아 움직이는 동안에도 글씨가 흐려지지 않음)
           child: AnimatedBuilder(
           animation: _epubZoomController,
-          builder: (innerContext, child) {
+          builder: (context, child) {
             final Matrix4 m = _epubZoomController.value;
-            if (!_docLiveZoom || _sameMatrix(m, Matrix4.identity())) {
-              return child!;
+            Matrix4 inv = Matrix4.identity();
+            if (_docLiveZoom && !_sameMatrix(m, Matrix4.identity())) {
+              final double s = m.getMaxScaleOnAxis();
+              final t = m.getTranslation();
+              inv = Matrix4.identity()
+                ..scaleByDouble(1 / s, 1 / s, 1, 1)
+                ..translateByDouble(-t.x * _uiScale, -t.y * _uiScale, 0, 1);
             }
-            // 태블릿(UiScale != 1)에서는 InteractiveViewer가 UiUnscale 바깥(1/u 좌표계)에 있고
-            // 이 Transform은 UiUnscale 안쪽(1배 좌표계)에 있으므로 이동량에 u를 곱해 되돌려야 WebView가 밀리지 않음
-            final double u = UiScale.of(context);
-            final double s = m.getMaxScaleOnAxis();
-            final t = m.getTranslation();
-            final Matrix4 inv = Matrix4.identity()
-              ..scaleByDouble(1 / s, 1 / s, 1, 1)
-              ..translateByDouble(-t.x * u, -t.y * u, 0, 1);
             return Transform(transform: inv, child: child);
           },
           child: HwpViewer(
@@ -2674,10 +2672,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _viewSending = true;
     final double s = m.getMaxScaleOnAxis();
     final t = m.getTranslation();
-    final double u = mounted ? UiScale.of(context) : 1.0;
     final Matrix4 shown = s < 1.001 ? Matrix4.identity() : m;
     try {
-      await _hwpController.setView(s < 1.001 ? 1 : s, s < 1.001 ? 0 : t.x * u, s < 1.001 ? 0 : t.y * u);
+      await _hwpController.setView(s < 1.001 ? 1 : s, s < 1.001 ? 0 : t.x * _uiScale, s < 1.001 ? 0 : t.y * _uiScale);
     } catch (_) {}
     _viewSending = false;
     if (!mounted) return;
@@ -4431,6 +4428,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
+    _uiScale = UiScale.of(context);
     _resetZoomOnRotate(context);
     // 메뉴를 띄운 동안에는 상태표시줄도 함께 보임
     SystemBars.viewerStatus(_showControls);

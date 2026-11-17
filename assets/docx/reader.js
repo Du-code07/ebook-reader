@@ -736,7 +736,7 @@ function destroy() {
   if (incoming) incoming.fill(0); incoming = null; received = 0;
   clearPages(); pendingEvents = [];
 }
-const resizeObserver = new ResizeObserver(() => { if (!zoomView) fitPages(); }); resizeObserver.observe(host);
+const resizeObserver = new ResizeObserver(fitPages); resizeObserver.observe(host);
 // ── FReader: 스크롤 보기 — 쪽을 그대로 세로로 늘어놓고 쪽 사이를 살짝 띄움 (보이는 쪽 근처만 그림) ──
 let vertical = false, vhost = null, vSlots = [], vTops = [], vRaf = 0, vMetricsTimer = 0, vSerial = 0;
 const vMounted = new Map(); // 쪽 번호 → { frame, source, original, entry }
@@ -1285,13 +1285,13 @@ function setView(s, tx, ty) {
     zoomRedraw();
   } else {
     zoomView = [s, tx, ty];
-    if (s < zoomDrawn * 0.63 || (s < zoomDrawn * 0.9 && !zoomCovered())) {
-      // 많이 줄였거나 줄이는 중 창 가장자리가 화면 안으로 들어오면 바로 지금 배율로 다시 놓아 잘리지 않게 함
+    if (s < zoomDrawn * 0.63) {
+      // 많이 줄였으면 손가락이 멈추기를 기다리지 않고 지금 배율로 다시 놓음
       zoomDrawn = s; zoomRedraw();
     } else {
       zoomApply();
-      // 옮기다가 창 밖이 보이면 창을 지금 자리로 옮김
-      if (!zoomCovered()) { zoomWindow(); zoomApply(); }
+      // 옮기다가 창 밖이 보이면(배율은 거의 그대로) 창을 지금 자리로 옮김 (줄이는 중에는 밑그림이 채움)
+      if (s >= zoomDrawn * 0.9 && !zoomCovered()) { zoomWindow(); zoomApply(); }
     }
   }
   clearTimeout(zoomSettle);
