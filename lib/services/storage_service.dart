@@ -22,6 +22,9 @@ class BookmarkItem {
   /// 스크롤 보기에서 한 북마크 (스크롤 보기에서만 책갈피가 보이고, 누르면 스크롤 보기로 돌아가 보여 줌)
   final bool scroll;
 
+  /// 북마크할 때의 페이지 모드: 'tap' · 'slide' · 'tap+slide' · 'scroll' (목록에 함께 보여 줌)
+  final String? mode;
+
   BookmarkItem({
     required this.id,
     required this.label,
@@ -32,6 +35,7 @@ class BookmarkItem {
     this.landscape,
     this.display,
     this.scroll = false,
+    this.mode,
   });
 
   Map<String, dynamic> toJson() => {
@@ -44,6 +48,7 @@ class BookmarkItem {
         if (landscape != null) 'landscape': landscape,
         if (display != null) 'display': display,
         if (scroll) 'scroll': true,
+        if (mode != null) 'mode': mode,
       };
 
   factory BookmarkItem.fromJson(Map<String, dynamic> json) => BookmarkItem(
@@ -56,6 +61,7 @@ class BookmarkItem {
         landscape: json['landscape'] is bool ? json['landscape'] as bool : null,
         display: json['display'] is String ? json['display'] as String : null,
         scroll: json['scroll'] == true,
+        mode: json['mode'] is String ? json['mode'] as String : null,
       );
 }
 
@@ -163,7 +169,7 @@ class StorageService {
     await prefs.setBool('anim_off_v109', off);
   }
 
-  // 탭 존 가이드라인 끄기 (기본: 켜짐 = 파일을 열 때마다 화면 구역 안내를 보여 줌)
+  // 탭 존 가이드라인 끄기 (기본: 켜짐 = 파일을 열 때마다 화면 영역 안내를 보여 줌)
   static bool tapGuideOff = false;
 
   static Future<void> setTapGuideOff(bool off) async {
@@ -469,27 +475,6 @@ class StorageService {
     return isNowFav;
   }
 
-  // 2. 흔들어서 끄기 기본값에서 비활성(false)으로 설정
-  static Future<void> setUseShakeLock(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('use_shake_lock_v27', enabled);
-  }
-
-  static Future<bool> getUseShakeLock() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('use_shake_lock_v27') ?? false;
-  }
-
-  static Future<void> setUseVolumeComboLock(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('use_volume_combo_lock', enabled);
-  }
-
-  static Future<bool> getUseVolumeComboLock() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('use_volume_combo_lock') ?? true;
-  }
-
   static Future<void> setEpubBgTheme(String theme) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('epub_bg_theme', theme);
@@ -747,6 +732,12 @@ class StorageService {
       'bm_$bookPath',
       list.map((e) => jsonEncode(e.toJson())).toList(),
     );
+  }
+
+  /// 이 파일의 북마크를 모두 지움
+  static Future<void> clearBookmarks(String bookPath) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('bm_$bookPath');
   }
 
   static Future<void> removeBookmark(String bookPath, String id) async {

@@ -3,6 +3,7 @@ import '../widgets/favorite_ribbon.dart';
 import '../widgets/file_type_icon.dart';
 import 'user_fonts_screen.dart';
 import 'tap_zone_screen.dart';
+import 'privacy_lock_screen.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -461,6 +462,16 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               subtitle: languageOptionLabel(_langSetting),
               onTap: _pickLanguage,
             ),
+            // 사생활 보호: 앱 잠금·모든 파일 잠금 (비밀번호·패턴·생체 인식)
+            _item(
+              icon: Icons.lock_outline,
+              title: _t('사생활 보호', 'Privacy', '隐私保护', 'プライバシー保護'),
+              subtitle: _t('앱·파일을 비밀번호·패턴·생체 인식으로 잠가요', 'Lock the app and files with a PIN, pattern or biometrics', '用密码·图案·生物识别锁定应用和文件', 'アプリ・ファイルを暗証番号・パターン・生体認証でロックします'),
+              onTap: () async {
+                await Navigator.of(context).push(MaterialPageRoute(builder: (_) => PrivacyLockScreen(t: _t)));
+                if (mounted) setState(() {});
+              },
+            ),
             // 애니메이션 끄기: 앱 전체의 움직임을 바로 바뀌게
             ValueListenableBuilder<bool>(
               valueListenable: Anim.off,
@@ -501,7 +512,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             _item(
               icon: Icons.touch_app_outlined,
               title: _t('탭 가이드라인 끄기', 'Turn Off Tap Guide', '关闭点击指引', 'タップガイドをオフ'),
-              subtitle: _t('파일을 열 때마다 탭 구역 안내를 보여 주지 않아요', 'Does not show the tap zone guide each time a file opens', '每次打开文件时不显示点击区域指引', 'ファイルを開くたびにタップ区域の案内を表示しません'),
+              subtitle: _t('파일을 열 때마다 탭 영역 안내를 보여 주지 않아요', 'Does not show the tap zone guide each time a file opens', '每次打开文件时不显示点击区域指引', 'ファイルを開くたびにタップ領域の案内を表示しません'),
               onTap: () => _setTapGuideOff(!_tapGuideOff),
               trailing: Switch(value: _tapGuideOff, onChanged: _setTapGuideOff),
             ),

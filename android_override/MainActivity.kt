@@ -21,10 +21,6 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -52,9 +48,8 @@ import java.io.FileOutputStream
 import java.util.concurrent.Executors
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
-import kotlin.math.sqrt
 
-class MainActivity : FlutterActivity(), SensorEventListener {
+class MainActivity : FlutterActivity() {
     private val METHOD_CHANNEL = "ebook_reader/volume_control"
     private val EVENT_CHANNEL = "ebook_reader/volume_events"
     private val PDF_CHANNEL = "ebook_reader/pdf_renderer"
@@ -151,30 +146,12 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     private var eventSink: EventChannel.EventSink? = null
     private var pdfMethodChannel: MethodChannel? = null
 
-    private var isVolUpPressed = false
-    private var isVolDownPressed = false
-    private var comboTriggered = false
-    private var lastVolUpDownTime = 0L
-    private var lastVolDownDownTime = 0L
-    private var lastVolUpEventTime = 0L
-    private var lastVolDownEventTime = 0L
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var pendingVolUpRunnable: Runnable? = null
-    private var pendingVolDownRunnable: Runnable? = null
 
     private var lastSpenSingleTime = 0L
     private var wasStylusButtonPressed = false
     private var mediaSession: MediaSession? = null
 
-    private var sensorManager: SensorManager? = null
-    private var accelerometer: Sensor? = null
-    private var accelCurrent = SensorManager.GRAVITY_EARTH
-    private var accelLast = SensorManager.GRAVITY_EARTH
-    private var shakeAccel = 0.0f
-    private var lastShakeTimestamp = 0L
-    private var lastShakePeakTime = 0L
-    private var shakeCount = 0
-    private var firstShakeTime = 0L
     private val thumbExecutor = Executors.newFixedThreadPool(4)
     // 문서 스캔 (카메라 화면에서 돌아올 때 결과를 받을 자리)
     private val REQ_SCAN_CAMERA = 4821
@@ -191,9 +168,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         mainHandler.removeCallbacks(reHideStatusBarRunnable)
         mainHandler.postDelayed(reHideStatusBarRunnable, 1500L)
     }
-
-    // 흔들기(화면 잠금 해제)용 가속도 센서는 뷰어에서 '화면 잠금'이 켜져 있을 때만 켠다
-    private var shakeListeningRequested = false
 
     private fun isStatusBarCurrentlyVisible(): Boolean {
         return try {
@@ -504,22 +478,37 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
+    /** 생체 인식(지문·얼굴): 0 = 쓸 수 없음, 1 = 쓸 수 있음, 2 = 등록된 것이 없음 */
+    private fun biometricStatus(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val bm = getSystemService(android.hardware.biometrics.BiometricManager::class.java) ?: return 0
+            val r = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                bm.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK)
+            } else {
+                @Suppress("DEPRECATION") bm.canAuthenticate()
+            }
+            return when (r) {
+                android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS -> 1
+                android.hardware.biometrics.BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> 2
+                else -> 0
+            }
+        }
+        return if (packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_FINGERPRINT)) 1 else 0
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         hideSystemStatusBar()
         mainHandler.postDelayed({ hideSystemStatusBar() }, 200L)
         mainHandler.postDelayed({ hideSystemStatusBar() }, 600L)
         setupSpenMediaSession()
-        setupShakeSensor()
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method == "setIntercept") {
                     val enabled = call.argument<Boolean>("enabled") ?: false
                     isVolumeInterceptEnabled = enabled
-                    if (!enabled) {
-                        setShakeListening(false)
-                    }
                     updateMediaSessionState(enabled)
                     result.success(null)
                 } else if (call.method == "statusBarHeight") {
@@ -537,9 +526,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                         if (id > 0) px = resources.getDimensionPixelSize(id)
                     }
                     result.success(px)
-                } else if (call.method == "setShakeListening") {
-                    setShakeListening(call.argument<Boolean>("enabled") ?: false)
-                    result.success(null)
                 } else if (call.method == "setScreenOrientation") {
                     val mode = call.argument<String>("mode") ?: "unspecified"
                     runOnUiThread {
@@ -685,6 +671,42 @@ class MainActivity : FlutterActivity(), SensorEventListener {
                     } catch (e: Throwable) {
                         runOnUiThread { result.success(emptyList<Any>()) }
                     }
+                }
+            } else if (call.method == "lockHash") {
+                // 앱 잠금: 비밀번호·패턴은 그대로 저장하지 않고 소금(salt)을 섞은 SHA-256 값만 저장
+                val text = call.argument<String>("text") ?: ""
+                val md = java.security.MessageDigest.getInstance("SHA-256")
+                result.success(md.digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) })
+            } else if (call.method == "biometricStatus") {
+                // 0 = 이 기기에서 쓸 수 없음, 1 = 쓸 수 있음, 2 = 기기는 되지만 등록된 지문·얼굴이 없음
+                result.success(biometricStatus())
+            } else if (call.method == "biometricAuth") {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                    result.success(false)
+                    return@setMethodCallHandler
+                }
+                val title = call.argument<String>("title") ?: ""
+                val cancel = call.argument<String>("cancel") ?: "Cancel"
+                var answered = false
+                fun answer(ok: Boolean) {
+                    if (answered) return
+                    answered = true
+                    result.success(ok)
+                }
+                try {
+                    val builder = android.hardware.biometrics.BiometricPrompt.Builder(this)
+                        .setTitle(title)
+                        .setNegativeButton(cancel, mainExecutor) { _, _ -> answer(false) }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        builder.setAllowedAuthenticators(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK)
+                    }
+                    builder.build().authenticate(android.os.CancellationSignal(), mainExecutor,
+                        object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                            override fun onAuthenticationSucceeded(r: android.hardware.biometrics.BiometricPrompt.AuthenticationResult?) = answer(true)
+                            override fun onAuthenticationError(code: Int, msg: CharSequence?) = answer(false)
+                        })
+                } catch (_: Throwable) {
+                    answer(false)
                 }
             } else if (call.method == "pdfPageCount") {
                 // 서재: 열지 않은 PDF의 전체 쪽 수
@@ -1314,42 +1336,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
     }
 
-    private fun setupShakeSensor() {
-        try {
-            sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-            accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-            accelCurrent = SensorManager.GRAVITY_EARTH
-            accelLast = SensorManager.GRAVITY_EARTH
-            shakeAccel = 0.0f
-        } catch (_: Exception) {}
-    }
-
-    private fun setShakeListening(enabled: Boolean) {
-        shakeListeningRequested = enabled
-        if (enabled && isActivityResumed) {
-            registerShakeSensorListener()
-        } else if (!enabled) {
-            try {
-                sensorManager?.unregisterListener(this)
-            } catch (_: Exception) {}
-            shakeCount = 0
-            shakeAccel = 0.0f
-        }
-    }
-
-    private fun registerShakeSensorListener() {
-        try {
-            if (sensorManager == null || accelerometer == null) {
-                setupShakeSensor()
-            }
-            accelerometer?.let {
-                sensorManager?.unregisterListener(this, it)
-                // 흔들기 감지는 빠를 필요가 없어 UI 빠르기로 (배터리 절약)
-                sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-            }
-        } catch (_: Exception) {}
-    }
-
     private fun compareNaturalStrings(a: String, b: String): Int {
         val reg = Regex("(\\d+)|(\\D+)")
         val ma = reg.findAll(a).map { it.value }.toList()
@@ -1365,48 +1351,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         }
         return ma.size.compareTo(mb.size)
     }
-
-    override fun onSensorChanged(event: SensorEvent?) {
-        if (!isVolumeInterceptEnabled || event == null) return
-        if (event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
-
-        val x = event.values[0]
-        val y = event.values[1]
-        val z = event.values[2]
-        val magnitude = sqrt((x * x + y * y + z * z).toDouble()).toFloat()
-        accelLast = accelCurrent
-        accelCurrent = magnitude
-        val delta = kotlin.math.abs(accelCurrent - accelLast)
-        shakeAccel = shakeAccel * 0.80f + delta
-        val gForce = magnitude / SensorManager.GRAVITY_EARTH
-
-        // 일상적인 흔들림이나 손 움직임에서는 반응하지 않도록 임계값을 높이고, 명확하게 2번 흔들었을 때만 해제되도록 설정
-        if (gForce > 2.42f && shakeAccel > 11.8f) {
-            val now = SystemClock.uptimeMillis()
-            if (now - lastShakeTimestamp < 1100L) return
-            // 한 번 흔드는 동작의 시작·멈춤이 2번으로 중복 인식되지 않도록 최소 220ms 간격 보장
-            if (now - lastShakePeakTime < 220L) return
-            lastShakePeakTime = now
-
-            if (now - firstShakeTime > 800L) {
-                shakeCount = 1
-                firstShakeTime = now
-            } else {
-                shakeCount++
-            }
-
-            if (shakeCount >= 2) {
-                shakeCount = 0
-                shakeAccel = 0.0f
-                lastShakeTimestamp = now
-                mainHandler.post {
-                    eventSink?.success("SHAKE_TOGGLE")
-                }
-            }
-        }
-    }
-
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun handleInstantSpenClick() {
         val now = SystemClock.uptimeMillis()
@@ -1549,7 +1493,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         hideSystemStatusBar(alsoHideNavBar = true)
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 250L)
         scheduleStatusBarReHide()
-        if (shakeListeningRequested) registerShakeSensorListener()
         if (isVolumeInterceptEnabled) {
             updateMediaSessionState(true)
         }
@@ -1558,9 +1501,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
     override fun onPause() {
         isActivityResumed = false
         mainHandler.removeCallbacks(reHideStatusBarRunnable)
-        try {
-            sensorManager?.unregisterListener(this)
-        } catch (_: Exception) {}
         super.onPause()
     }
 
@@ -1568,7 +1508,6 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         isActivityResumed = false
         mainHandler.removeCallbacks(reHideStatusBarRunnable)
         try {
-            sensorManager?.unregisterListener(this)
             mediaSession?.isActive = false
             mediaSession?.release()
         } catch (_: Exception) {}
@@ -1640,69 +1579,10 @@ class MainActivity : FlutterActivity(), SensorEventListener {
         val action = event.action
 
         if (isVolumeInterceptEnabled) {
-            val now = SystemClock.uptimeMillis()
-            if (isVolUpPressed && (now - lastVolUpEventTime > 1800L)) {
-                isVolUpPressed = false
-            }
-            if (isVolDownPressed && (now - lastVolDownEventTime > 1800L)) {
-                isVolDownPressed = false
-            }
-            if (!isVolUpPressed && !isVolDownPressed && (now - lastVolUpDownTime > 500L) && (now - lastVolDownDownTime > 500L)) {
-                comboTriggered = false
-            }
-
-            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                if (action == KeyEvent.ACTION_DOWN) {
-                    lastVolUpEventTime = now
-                    if (event.repeatCount == 0) {
-                        lastVolUpDownTime = now
-                        isVolUpPressed = true
-                        if (isVolDownPressed || (now - lastVolDownDownTime in 0L..420L)) {
-                            comboTriggered = true
-                            pendingVolDownRunnable?.let { mainHandler.removeCallbacks(it) }
-                            pendingVolUpRunnable?.let { mainHandler.removeCallbacks(it) }
-                            eventSink?.success("VOL_BOTH_UNLOCK")
-                            return true
-                        }
-                        val r = Runnable {
-                            if (!comboTriggered) {
-                                eventSink?.success("UP")
-                            }
-                        }
-                        pendingVolUpRunnable = r
-                        mainHandler.postDelayed(r, 130L)
-                    }
-                } else if (action == KeyEvent.ACTION_UP) {
-                    isVolUpPressed = false
-                    if (!isVolDownPressed) comboTriggered = false
-                }
-                return true
-            }
-
-            if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                if (action == KeyEvent.ACTION_DOWN) {
-                    lastVolDownEventTime = now
-                    if (event.repeatCount == 0) {
-                        lastVolDownDownTime = now
-                        isVolDownPressed = true
-                        if (isVolUpPressed || (now - lastVolUpDownTime in 0L..420L)) {
-                            comboTriggered = true
-                            pendingVolUpRunnable?.let { mainHandler.removeCallbacks(it) }
-                            pendingVolDownRunnable?.let { mainHandler.removeCallbacks(it) }
-                            eventSink?.success("VOL_BOTH_UNLOCK")
-                            return true
-                        }
-                        val r = Runnable {
-                            if (!comboTriggered) {
-                                eventSink?.success("DOWN")
-                            }
-                        }
-                        pendingVolDownRunnable = r
-                        mainHandler.postDelayed(r, 130L)
-                    }
-                } else if (action == KeyEvent.ACTION_UP) {
-                    isVolDownPressed = false
-                    if (!isVolUpPressed) comboTriggered = false
+            // 음량 버튼: 누르면 바로 쪽 넘김 (꾹 누르고 있어도 한 번만)
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    eventSink?.success(if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) "UP" else "DOWN")
                 }
                 return true
             }

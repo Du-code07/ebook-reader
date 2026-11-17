@@ -12,6 +12,7 @@ import '../services/library_nav.dart';
 import '../services/storage_service.dart';
 import '../services/system_bars.dart';
 import '../services/pdf_outline_service.dart';
+import '../widgets/morph_icons.dart';
 import '../widgets/outline_progress.dart';
 import '../widgets/text_copy_sheet.dart';
 import '../services/volume_key_service.dart';
@@ -262,9 +263,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   final Map<int, Size> _scrollSizes = {};
   bool _lastIsSpreadMode = false;
 
-  bool _isTouchLocked = false;
-  bool _useShakeLock = false;
-  bool _useVolumeComboLock = true;
 
   bool _useSwipeTurn = true;
 
@@ -386,33 +384,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     _onPageModeChanged();
   }
 
-  String _buildLockScreenMessage() {
-    if (_useShakeLock && _useVolumeComboLock) {
-      return _tr(
-        '화면 잠금 (흔들어서 끄기 또는 음량 버튼 동시에 눌러서 끄기)',
-        'Screen Lock (Shake or press both volume keys to unlock)',
-        '屏幕锁定 (摇晃或同时按音量键关闭)',
-        '画面ロック (振るか音量ボタン同時押しで解除)',
-      );
-    } else if (_useShakeLock) {
-      return _tr(
-        '화면 잠금 (흔들어서 끄기)',
-        'Screen Lock (Shake to unlock)',
-        '屏幕锁定 (摇晃关闭)',
-        '画面ロック (振って解除)',
-      );
-    } else if (_useVolumeComboLock) {
-      return _tr(
-        '화면 잠금 (음량 버튼 동시에 눌러서 끄기)',
-        'Screen Lock (Press both volume keys to unlock)',
-        '屏幕锁定 (同时按音量键关闭)',
-        '画面ロック (音量ボタン同時押しで解除)',
-      );
-    } else {
-      return _tr('화면 잠금', 'Screen Lock', '屏幕锁定', '画面ロック');
-    }
-  }
-
   String get _bookKey => widget.customBookKey ?? widget.files.first.path;
 
   String _tr(String ko, String en, String zh, String ja) =>
@@ -426,37 +397,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     WidgetsBinding.instance.addObserver(this);
     _loadNeighborFiles();
     _initMedia();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_isTouchLocked &&
-        (state == AppLifecycleState.paused ||
-            state == AppLifecycleState.inactive ||
-            state == AppLifecycleState.detached ||
-            state == AppLifecycleState.hidden)) {
-      setState(() => _isTouchLocked = false);
-    }
-  }
-
-  void _toggleTouchScreenLock({required bool byVolume}) {
-    if (!mounted) return;
-    // 4. 흔들어서 끄기 / 음량 버튼 동시에 눌러서 끄기: 잠금 상태일 때만 잠금을 해제하도록 변경!
-    if (!_isTouchLocked) return;
-    final bool neitherEnabled = !_useShakeLock && !_useVolumeComboLock;
-    if (byVolume && !_useVolumeComboLock && !neitherEnabled) return;
-    if (!byVolume && !_useShakeLock && !neitherEnabled) return;
-
-    setState(() {
-      _isTouchLocked = false;
-    });
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(_tr('화면 잠금 해제', 'Screen Unlocked', '屏幕锁定已解除', '画面ロック解除')),
-        duration: const Duration(seconds: 1),
-      ),
-    );
   }
 
   /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 전환 버튼'
@@ -566,12 +506,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   /// 페이지 모드가 바뀌었을 때: 스크롤로 바꾸면 쪽 크기를 미리 다 알아 둠 (한 번에 이어 붙여 끊김 없이)
-  /// 뷰어 설정 초기화: 음량 버튼 동시에 눌러 끄기 / 탭 + 슬라이드 / 음량 버튼 / 진행도 하단 / 메모 도구 모음 하단 / 정보 표시 없음
+  /// 뷰어 설정 초기화: 탭 + 슬라이드 / 음량 버튼 / 진행도 하단 / 메모 도구 모음 하단 / 정보 표시 없음
   Future<void> _resetViewerSettings(StateSetter setModalState) async {
     final bool scrollWas = _pageModeScroll;
     setState(() {
-      _useVolumeComboLock = true;
-      _useShakeLock = false;
       _pageModeTap = true;
       _useSwipeTurn = true;
       _pageModeScroll = false;
@@ -585,8 +523,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     ScrollThumbBar.leftHanded.value = false;
     ScrollThumbBar.off.value = false;
     setModalState(() {});
-    await StorageService.setUseVolumeComboLock(true);
-    await StorageService.setUseShakeLock(false);
     await StorageService.setPageModeTap(true);
     await StorageService.setUseSwipeTurn(true);
     await StorageService.setPageModeScroll(false);
@@ -779,8 +715,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _pageModeScroll = await StorageService.getPageModeScroll();
       if (_pageModeScroll) _pageModeTap = false; // 스크롤은 탭과 함께 쓰지 않음
       _isMangaRtlMode = await StorageService.getBookReadingDirectionRtl(_bookKey);
-      _useShakeLock = await StorageService.getUseShakeLock();
-      _useVolumeComboLock = await StorageService.getUseVolumeComboLock();
       _useVolumeTurn = await StorageService.getUseVolumeTurn();
       _useQuickNavTurn = await StorageService.getUseQuickNavTurn();
       _useSwipeTurn = await StorageService.getUseSwipeTurn() && !_pageModeScroll;
@@ -903,8 +837,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       onVolumeDown: () {
         if (_useVolumeTurn) _stepPage(1);
       },
-      onVolumeBothUnlock: () => _toggleTouchScreenLock(byVolume: true),
-      onShakeToggle: () => _toggleTouchScreenLock(byVolume: false),
       onSpenSinglePress: () {
         if (_useSpenTurn) _stepPage(1, fastResponse: true);
       },
@@ -1342,7 +1274,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   void _toggleControls() {
-    if (_isTouchLocked) return;
     setState(() => _showControls = !_showControls);
   }
 
@@ -1555,7 +1486,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   /// 세로 공간이 좁으므로 메모 도구모음은 바닥까지 길게 내려온다.
   bool get _memoBarToFloorLandscape =>
       _isMemoMode &&
-      !_isTouchLocked &&
       _showControls &&
       _isLandscapeNow &&
       (_memoToolbarPos == 'left' || _memoToolbarPos == 'right');
@@ -1569,45 +1499,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   static const double _memoBarSideInset = 54.0;
 
   /// 공유: PDF에 메모가 있으면 쪽마다 메모를 얹은 PDF를 새로 만들어 공유 (메모가 없거나 CBZ면 파일 그대로)
-  Future<void> _shareWithMemos() async {
-    final String path = widget.files.first.path;
-    final Map<int, List<Map<String, Object?>>> memos = {
-      for (final e in _memoStrokesByPage.entries)
-        if (e.value.isNotEmpty) e.key: [for (final s in e.value) s.toJson()],
-    };
-    if (!_isPdfFile || memos.isEmpty) {
-      await shareFile(context, path, title: widget.title);
-      return;
-    }
-    final messenger = ScaffoldMessenger.of(context);
-    messenger
-      ..clearSnackBars()
-      ..showSnackBar(SnackBar(
-        content: Text(_tr('메모를 넣은 PDF를 만들고 있어요', 'Preparing the PDF with memos', '正在生成含笔记的 PDF', 'メモ入りのPDFを作成しています')),
-        duration: const Duration(minutes: 1),
-      ));
-    String? made;
-    try {
-      // 공유용 파일은 한 개만 남김 (예전에 만든 것은 지움)
-      final dir = Directory('${(await getTemporaryDirectory()).path}/share');
-      if (await dir.exists()) await dir.delete(recursive: true);
-      await dir.create(recursive: true);
-      String name = widget.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
-      if (name.isEmpty) name = 'memo';
-      if (!name.toLowerCase().endsWith('.pdf')) name = '$name.pdf';
-      final String out = '${dir.path}/$name';
-      if (await PdfOutlineService.writeWithMemos(path, out, memos)) made = out;
-    } catch (_) {}
-    messenger.hideCurrentSnackBar();
-    if (!mounted) return;
-    if (made == null) {
-      messenger.showSnackBar(SnackBar(
-        content: Text(_tr('메모를 넣지 못해 원래 파일을 공유해요', 'Could not add memos, sharing the original file', '无法加入笔记，将分享原文件', 'メモを入れられなかったため元のファイルを共有します')),
-      ));
-      made = path;
-    }
-    await shareFile(context, made, title: widget.title);
-  }
+  Future<void> _shareWithMemos() => shareFileWithMemos(context, widget.files.first.path, title: widget.title, memos: {
+        for (final e in _memoStrokesByPage.entries)
+          if (e.value.isNotEmpty) e.key: [for (final s in e.value) s.toJson()],
+      });
 
   Future<void> _openPenSettings() {
     return showPenSettingsPanel(
@@ -1823,31 +1718,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
                 _settingsHeader(Icons.tune, _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'), isTitle: true),
                 const SizedBox(height: 12),
-                _settingsHeader(Icons.lock_open_outlined, _tr('화면 잠금 끄기 설정 (동시 사용 가능)', 'Screen Unlock Settings (Multiple allowed)', '解除屏幕锁定设置 (可同时启用)', '画面ロック解除設定 (同時使用可)')),
-                const SizedBox(height: 8),
-                SettingGroup(
-                  children: [
-                    SettingToggle(
-                      label: Text(_tr('음량 버튼 동시에 눌러서 끄기', 'Press Both Volume Keys to Unlock', '同时按音量键关闭锁定', '音量ボタン同時押しで解除')),
-                      selected: _useVolumeComboLock,
-                      onSelected: (val) async {
-                        await StorageService.setUseVolumeComboLock(val);
-                        setState(() => _useVolumeComboLock = val);
-                        setModalState(() {});
-                      },
-                    ),
-                    SettingToggle(
-                      label: Text(_tr('흔들어서 끄기', 'Shake to Unlock', '摇晃关闭锁定', '振って解除')),
-                      selected: _useShakeLock,
-                      onSelected: (val) async {
-                        await StorageService.setUseShakeLock(val);
-                        setState(() => _useShakeLock = val);
-                        setModalState(() {});
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 26),
                 ..._pageModeSettings(setModalState),
 
                 const SizedBox(height: 26),
@@ -1959,7 +1829,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     ),
                   ],
                 ),
-                // 초기화: 기본값으로 (화면 잠금 끄기·페이지 모드·페이지 전환 버튼·진행도 UI·메모 도구 모음·도구 모음 형태·하단 정보)
+                // 초기화: 기본값으로 (페이지 모드·페이지 전환 버튼·진행도 UI·메모 도구 모음·하단 정보)
                 SettingDoneButton(label: _tr('초기화', 'Reset', '重置', 'リセット'), onPressed: () => _resetViewerSettings(setModalState)),
               ],
             ),
@@ -2066,7 +1936,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Future<void> _startTextSelect(Offset global) async {
-    if (_isMemoMode || _isTouchLocked || _activeTouchPointerIds.length >= 2 || _currentZoomScale > 1.03 || _pageModeScroll) return;
+    if (_isMemoMode || _activeTouchPointerIds.length >= 2 || _currentZoomScale > 1.03 || _pageModeScroll) return;
     final box = _textLayerKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
     final int gen = ++_textSelGen;
@@ -2124,7 +1994,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final start = _curlDownPos, t0 = _curlDownTime;
     if (start == null || t0 == null || _curlMulti || _book.busy) return;
     if (!_curlOn || _textSel.active) return;
-    if (_isTouchLocked || _currentZoomScale > 1.03) return;
+    if (_currentZoomScale > 1.03) return;
     if (_isMemoMode && (e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus || _allowFingerDrawing)) return;
     final Offset d = e.position - start;
     // 옆으로 움직이기 시작하면 그때 지금 쪽을 찍어 둠 (그냥 누르기만 할 때는 찍지 않음)
@@ -2180,7 +2050,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       return;
     }
     if (start == null || t0 == null || _curlMulti || !_curlOn) return;
-    if (_isTouchLocked || _currentZoomScale > 1.03) return;
+    if (_currentZoomScale > 1.03) return;
     if (_isMemoMode && (e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus || _allowFingerDrawing)) return;
     // 길게 누르기(글 고르기, 0.5초)와 겹치지 않게
     if (DateTime.now().difference(t0).inMilliseconds > 450) return;
@@ -2403,36 +2273,40 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              title: Text(_tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.w800)),
-              // 같은 쪽(같은 보기 방식)은 한 번만 북마크
-              trailing: ElevatedButton.icon(
-                icon: Icon(already ? Icons.bookmark_added : Icons.bookmark_add, size: 16),
-                label: Text(already
-                    ? _tr('북마크한 페이지예요', 'Already bookmarked', '已添加书签', 'ブックマーク済みです')
-                    : _tr('현재 페이지 북마크 추가', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク')),
-                onPressed: already ? null : () async {
-                  final now = DateTime.now();
-                  final bool spread = spreadNow;
-                  final int first = target;
-                  await StorageService.addBookmark(
-                    _bookKey,
-                    BookmarkItem(
-                      id: now.millisecondsSinceEpoch.toString(),
-                      label: spread && first + 1 < _totalPages ? '${first + 1}, ${first + 2}페이지' : '${first + 1}페이지',
-                      position: first.toString(),
-                      createdAt: '${now.month}/${now.day} ${now.hour}:${now.minute.toString().padLeft(2, '0')}',
-                      spread: spread,
-                      rotation: _rotationModeNow,
-                      landscape: MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height,
-                      display: _pageDisplay,
-                      scroll: _pageModeScroll,
-                    ),
-                  );
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  _showBookmarkSheet();
-                },
-              ),
+            bookmarkSheetHeader(
+              ctx,
+              tr: _tr,
+              already: already,
+              canClear: bookmarks.isNotEmpty,
+              addLabel: _tr('현재 페이지 북마크', 'Bookmark This Page', '添加当前页书签', '現在ページをブックマーク'),
+              onClearAll: () async {
+                if (!await confirmClearBookmarks(ctx, _tr)) return;
+                await StorageService.clearBookmarks(_bookKey);
+                if (ctx.mounted) Navigator.pop(ctx);
+                _showBookmarkSheet();
+              },
+              onAdd: () async {
+                final now = DateTime.now();
+                final bool spread = spreadNow;
+                final int first = target;
+                await StorageService.addBookmark(
+                  _bookKey,
+                  BookmarkItem(
+                    id: now.millisecondsSinceEpoch.toString(),
+                    label: spread && first + 1 < _totalPages ? '${first + 1}, ${first + 2}페이지' : '${first + 1}페이지',
+                    position: first.toString(),
+                    createdAt: '${now.month}/${now.day} ${now.hour}:${now.minute.toString().padLeft(2, '0')}',
+                    spread: spread,
+                    rotation: _rotationModeNow,
+                    landscape: MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height,
+                    display: _pageDisplay,
+                    scroll: _pageModeScroll,
+                    mode: bookmarkModeOf(scroll: _pageModeScroll, tap: _pageModeTap, slide: _useSwipeTurn),
+                  ),
+                );
+                if (ctx.mounted) Navigator.pop(ctx);
+                _showBookmarkSheet();
+              },
             ),
             const Divider(height: 1),
             if (bookmarks.isEmpty)
@@ -2450,10 +2324,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     final int bp = int.tryParse(bm.position) ?? 0;
                     return ListTile(
                       leading: Icon(bm.spread ? Icons.menu_book : Icons.bookmark, color: Colors.amber),
-                      title: Text(bm.spread && bp + 1 < _totalPages ? '${bp + 1}, ${bp + 2}페이지' : '${bp + 1}페이지'),
-                      subtitle: Text('저장 시각: ${bm.createdAt}'),
+                      title: Text(bookmarkFullTitle(pagesLabel(bp + 1, bm.spread && bp + 1 < _totalPages ? bp + 2 : null, _tr), bm, _tr)),
+                      subtitle: Text(_tr('저장 시각: ${bm.createdAt}', 'Saved: ${bm.createdAt}', '保存时间：${bm.createdAt}', '保存日時: ${bm.createdAt}')),
                       trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline),
+                        icon: const TrashLidIcon(open: false),
                         onPressed: () async {
                           await StorageService.removeBookmark(_bookKey, bm.id);
                           if (ctx.mounted) Navigator.pop(ctx);
@@ -2508,7 +2382,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final bool allowed = fromProgressBar
         ? (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
         : (_footerInfoMode == 'page' || _footerInfoMode == 'both');
-    if (_isTouchLocked || !allowed) return;
+    if (!allowed) return;
     final ctrl = TextEditingController(text: '${_currentPage + 1}');
     ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
 
@@ -2580,7 +2454,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   /// 6. 진행도 UI의 화살표를 맨 처음(0페이지)과 맨 마지막(_totalPages - 1 페이지)으로 즉시 이동하는 용도로 변경!
   /// + 하단 배치 시 우측 하단 페이지 이동 버튼과 절대 겹치지 않도록 슬림/컴팩트 사이즈로 축소 및 여백 확보!
   Widget _buildProgressControlBar(double bottomInset) {
-    if (!_showControls || _isTouchLocked || _totalPages <= 1 || _progressBarPos == 'hidden') {
+    if (!_showControls || _totalPages <= 1 || _progressBarPos == 'hidden') {
       return const Positioned(
         key: ValueKey('progress_bar_hidden'),
         left: 0,
@@ -2670,7 +2544,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     final double topInset = MediaQuery.paddingOf(context).top;
-    final bool memoBarVisible = _isMemoMode && !_isTouchLocked;
+    final bool memoBarVisible = _isMemoMode;
     // 메모 도구모음이 상단/하단에 있으면 세로 진행바가 그만큼 비켜 준다
     final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
     final double safeBottomOffset = baseBottom + ((memoBarVisible && _memoToolbarPos == 'bottom') ? 96.0 : (_useQuickNavTurn && _progressBarPos == 'right' ? 48.0 : 8.0));
@@ -2791,7 +2665,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     SystemBars.leaveViewer();
     _book.dispose();
     _textSel.dispose();
-    if (_shakeListeningSent == true) VolumeKeyService.setShakeListening(false);
     // 서재로 완전히 복귀할 때 방향이 초기화됨
     _zoomController.dispose();
     WidgetsBinding.instance.removeObserver(this);
@@ -2802,15 +2675,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       FileImage(f).evict().catchError((_) => false);
     }
     super.dispose();
-  }
-
-  // 흔들기 센서는 화면 잠금 중(그리고 흔들기 해제가 허용될 때)에만 켠다
-  bool? _shakeListeningSent;
-  void _syncShakeListening() {
-    final bool want = _isTouchLocked && (_useShakeLock || !_useVolumeComboLock);
-    if (_shakeListeningSent == want) return;
-    _shakeListeningSent = want;
-    VolumeKeyService.setShakeListening(want);
   }
 
   // 도구 모음(화면 아래 가로 막대)에 들어가는 기능들
@@ -2828,24 +2692,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         tooltip: _tr('다음 파일로 이동', 'Next File', '下一个文件', '次のファイル'),
         onTap: () => _openAdjacentFileInSameGroup(1),
         enabled: _nextFilePath != null,
-        closeAfterTap: true,
-      ),
-      QuickToolItem(
-        icon: const Icon(Icons.lock_outline, color: Colors.white, size: 17),
-        tooltip: _tr('화면 잠금', 'Lock Screen', '锁定屏幕', '画面ロック'),
-        onTap: () {
-          setState(() {
-            _isTouchLocked = true;
-            _showControls = false;
-            _volumeKeyService.ensureInterceptActive();
-            _isMemoMode = false;
-            _allowFingerDrawing = false;
-            _isStylusDown = false;
-          });
-          ScaffoldMessenger.of(context).clearSnackBars();
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(_buildLockScreenMessage()), duration: const Duration(seconds: 2)));
-        },
         closeAfterTap: true,
       ),
       QuickToolItem(
@@ -3012,10 +2858,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   Widget build(BuildContext context) {
-    _syncShakeListening();
     _resetZoomOnRotate(context);
     // 메뉴를 띄운 동안에는 상태표시줄도 함께 보임
-    SystemBars.viewerStatus(_showControls && !_isTouchLocked);
+    SystemBars.viewerStatus(_showControls);
     if (_isPreparingPages || _pageController == null) {
       return Scaffold(
         backgroundColor: _backdrop(context),
@@ -3044,9 +2889,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           _closeFind(); // 뒤로 가기: 검색만 닫음
           return;
         }
-        if (_isTouchLocked) {
-          _isTouchLocked = false;
-        }
       },
       child: Scaffold(
       key: _scaffoldKey,
@@ -3059,9 +2901,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         fit: StackFit.expand,
         children: [
           Positioned.fill(
-            child: AbsorbPointer(
-              absorbing: _isTouchLocked,
-              child: Listener(
+            child: Listener(
                 behavior: HitTestBehavior.translucent,
                 onPointerDown: (event) {
                   _curlTrackDown(event); // (손가락 목록에 넣기 전에 확인)
@@ -3112,7 +2952,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   // PDF: 길게 누르면 그 자리의 낱말을 고르고 손잡이로 범위를 조절 → [복사 | 모두 선택 | 공유]
                   // (글자 정보가 없는 쪽은 그림 속 글자를 읽어 복사하는 창)
                   onLongPressStart: _isPdfFile ? (d) {
-                    if (_isMemoMode || _isTouchLocked || _activeTouchPointerIds.length >= 2 || _currentZoomScale > 1.03) return;
+                    if (_isMemoMode || _activeTouchPointerIds.length >= 2 || _currentZoomScale > 1.03) return;
                     if (_pageModeScroll) {
                       HapticFeedback.selectionClick();
                       _openTextCopySheet();
@@ -3130,8 +2970,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     key: ValueKey('pageview_spread_$isSpread'),
                     controller: _pageController,
                     reverse: _isMangaRtlMode,
-                    physics: (_isTouchLocked ||
-                            !_useSwipeTurn ||
+                    physics: (!_useSwipeTurn ||
                             _curlOn ||
                             _activeTouchPointerIds.length >= 2 ||
                             _currentZoomScale > 1.03 ||
@@ -3164,7 +3003,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       transformationController: _zoomController,
                       // 메모 중에도 (손으로 그리기가 아니면) 손가락으로 확대한 쪽을 옮김 (삼성 노트처럼: 펜은 쓰고 손가락은 움직임)
                       panEnabled: (!_isMemoMode || !_allowFingerDrawing) && (_currentZoomScale > 1.03 || _activeTouchPointerIds.length >= 2),
-                      scaleEnabled: !_isTouchLocked && (!_isMemoMode || !_allowFingerDrawing),
+                      scaleEnabled: (!_isMemoMode || !_allowFingerDrawing),
                       minScale: 1.0,
                       maxScale: 5.0,
                       onInteractionUpdate: (_) {
@@ -3191,7 +3030,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                   )),
                 ),
               ),
-            ),
           ),
 
           if (footerText.isNotEmpty)
@@ -3200,7 +3038,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               right: 20 + _safeSides.right,
               bottom: math.max<double>(bottomInset + 4.0, 8.0),
               child: IgnorePointer(
-                ignoring: _isTouchLocked || !(_footerInfoMode == 'page' || _footerInfoMode == 'both'),
+                ignoring: !(_footerInfoMode == 'page' || _footerInfoMode == 'both'),
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: GestureDetector(
@@ -3224,16 +3062,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
             ),
 
-          if (_isMemoMode && !_isTouchLocked) _buildMemoToolbar(bottomInset),
+          if (_isMemoMode) _buildMemoToolbar(bottomInset),
 
-          if (_findOpen && !_isTouchLocked)
+          if (_findOpen)
             Positioned(
               top: 0,
               left: 0,
               right: 0,
               child: FindInFileBar(onSearch: _findSearch, onGoto: _findGoto, onClose: _closeFind, tr: _tr),
             ),
-          if (_showControls && !_isTouchLocked && !_findOpen)
+          if (_showControls && !_findOpen)
             Positioned(
               top: 0,
               left: 0,
@@ -3325,11 +3163,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
           _buildProgressControlBar(bottomInset),
 
-          if (_useQuickNavTurn && !_isTouchLocked && _totalPages > 1)
+          if (_useQuickNavTurn && _totalPages > 1)
             _buildQuickNavButtons(bottomInset),
 
           // 도구 모음: 화면 아래 가로 막대 (상단바·진행바와 함께 보였다 사라짐)
-          if (_showControls && !_isTouchLocked)
+          if (_showControls)
             Positioned(
               left: 12.0 + _safeSides.left,
               right: 12.0 + _safeSides.right,

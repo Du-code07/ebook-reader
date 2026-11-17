@@ -20,7 +20,7 @@ class QuickToolItem {
   final String tooltip;
   final VoidCallback onTap;
 
-  /// 누른 뒤 메뉴를 닫을지 여부 (파일 이동·화면 잠금처럼 화면이 바뀌는 기능)
+  /// 누른 뒤 메뉴를 닫을지 여부 (파일 이동처럼 화면이 바뀌는 기능)
   final bool closeAfterTap;
 }
 

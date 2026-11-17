@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
+import 'morph_icons.dart';
 
 /// 메뉴 한 줄: (값, 보이는 이름, 아이콘, 글자·아이콘 색(없으면 기본))
 typedef ScaleMenuItem<T> = (T, String, IconData, Color?);
@@ -91,7 +92,7 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     child: Row(
                       children: [
-                        leadingFor?.call(value) ?? Icon(icon, size: 16, color: color ?? cs.onSurfaceVariant),
+                        leadingFor?.call(value) ?? menuIcon(icon, size: 16, color: color ?? cs.onSurfaceVariant),
                         const SizedBox(width: 10),
                         Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, color: color))),
                         if (selected != null && selected == value) ...[
@@ -212,7 +213,7 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(icon, size: 20, color: fg, shadows: danger ? shadows : null),
+                    menuIcon(icon, size: 20, color: fg, shadows: danger ? shadows : null),
                     const SizedBox(width: 8),
                     Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: fg, shadows: danger ? shadows : null)),
                   ],

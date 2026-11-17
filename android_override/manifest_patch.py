@@ -4,6 +4,9 @@ p = sys.argv[1]
 s = open(p, encoding='utf-8').read()
 if 'android.permission.CAMERA' not in s:
     s = s.replace('<application', '<uses-permission android:name="android.permission.CAMERA"/>\n    <uses-feature android:name="android.hardware.camera" android:required="false"/>\n    <application', 1)
+# 앱 잠금: 지문·얼굴 인식으로 잠금 해제
+if 'android.permission.USE_BIOMETRIC' not in s:
+    s = s.replace('<application', '<uses-permission android:name="android.permission.USE_BIOMETRIC"/>\n    <application', 1)
 if 'FREADER_OPEN_WITH' not in s:
     mimes = [
         'application/pdf', 'application/epub+zip', 'text/plain',
@@ -14,7 +17,6 @@ if 'FREADER_OPEN_WITH' not in s:
         'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'application/vnd.ms-excel.sheet.macroEnabled.12',
         'application/x-cbz', 'application/vnd.comicbook+zip',
-        'image/jpeg', 'image/png', 'image/webp',
     ]
     data = ''.join(f'<data android:mimeType="{m}"/>' for m in mimes)
     f1 = ('<!-- FREADER_OPEN_WITH: 다른 앱의 연결 앱 목록에 FReader가 보이게 -->'

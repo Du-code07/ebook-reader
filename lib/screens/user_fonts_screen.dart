@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import '../widgets/app_colors.dart';
+import '../widgets/morph_icons.dart';
 import '../widgets/pop_dialog.dart';
 
 import '../services/user_fonts.dart';
@@ -238,7 +239,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
       trailing: onDelete == null
           ? null
           : IconButton(
-              icon: const Icon(Icons.delete_outline),
+              icon: const TrashLidIcon(open: false),
               tooltip: _t('삭제', 'Delete', '删除', '削除'),
               onPressed: onDelete,
             ),
@@ -349,7 +350,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
               trailing: IconButton(
-                icon: const Icon(Icons.delete_outline),
+                icon: const TrashLidIcon(open: false),
                 tooltip: _t('삭제', 'Delete', '删除', '削除'),
                 onPressed: () => _remove(e),
               ),

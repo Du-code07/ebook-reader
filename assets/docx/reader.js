@@ -661,7 +661,9 @@ function fitPages() {
   const boxes = frames.map(trimBox);
   const trimming = boxes.some((b, i) => b.w < Number(frames[i].dataset.width) - 0.5 || b.h < Number(frames[i].dataset.height) - 0.5);
   const pad = trimming ? 0.96 : 1; // 잘라 낸 쪽은 화면 끝에 딱 붙지 않게 살짝 띄움
-  const availW = host.clientWidth - (8 / 3) * (frames.length - 1), availH = host.clientHeight;
+  // 확대해 다시 그릴 때: 확대 전 화면 크기로 자리를 정한 뒤 모든 크기에 배율(Z)을 곱함 (CSS zoom을 쓰지 않아 기기 브라우저 버전에 따라 달라지지 않음)
+  const Z = zoomView ? zoomDrawn : 1;
+  const availW = (zoomView ? zoomBase[0] : host.clientWidth) - (8 / 3) * (frames.length - 1), availH = zoomView ? zoomBase[1] : host.clientHeight;
   const totalWidth = boxes.reduce((sum, b) => sum + b.w, 0);
   const height = Math.max(...boxes.map(b => b.h));
   const scale = Math.max(0.01, Math.min(availW * pad / totalWidth, availH * pad / height));
@@ -672,12 +674,12 @@ function fitPages() {
     const clamp = (v, lo) => Math.min(0, Math.max(lo, v));
     const tx = clamp((slotW - b.w * scale) / 2 - b.x * scale, slotW - W * scale);
     const ty = clamp((slotH - b.h * scale) / 2 - b.y * scale, slotH - H * scale);
-    frame.style.width = `${slotW}px`;
-    frame.style.height = `${slotH}px`;
+    frame.style.width = `${slotW * Z}px`;
+    frame.style.height = `${slotH * Z}px`;
     // 쪽 전체 자리·여백 줄이기 네모 (앱이 메모를 쪽에 붙이고, 화면을 돌릴 때 새 자리를 미리 계산하는 데 씀)
     frame.dataset.fit = JSON.stringify([tx, ty, W * scale, H * scale, b.x / W, b.y / H, b.w / W, b.h / H]);
     frame.dataset.scale = String(scale);
-    if (frame.firstElementChild) frame.firstElementChild.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    if (frame.firstElementChild) frame.firstElementChild.style.transform = `translate(${tx * Z}px, ${ty * Z}px) scale(${scale * Z})`;
   });
 }
 // FReader: 쪽 뒤 바탕 = 문서 자체 배경색(있으면) > 앱 테마 색(흰색/검은색). 쪽 사이 간격 줄은 고정 색
@@ -1201,20 +1203,25 @@ function headingCandidates() {
 // ── 확대해 둔 화면을 선명하게: 앱이 화면 그림을 키우는 대신, 쪽 상자 자체를 그 배율로 다시 그림 ──
 // (앱은 그 배율만큼 화면 그림을 되돌려 겹치게 하므로 보이는 자리는 그대로, 글씨만 선명해짐)
 let zoomView = null, zoomBase = [0, 0]; // [배율, 가로 이동, 세로 이동] (CSS px), 확대 전 문서 화면 크기
-// 넘겨 보기 확대: 손가락이 움직이는 동안에는 이미 그려 둔 그림을 옮기고 크기만 바꿔(빠름, 빠진 곳 없음)
-// 손가락이 멈추면 그 배율로 다시 그려 또렷하게(CSS zoom). 줄일 때 아직 안 그려진 가장자리는 밑그림(1배 쪽 복사본)이 채움
+// 넘겨 보기 확대: 손가락이 움직이는 동안에는 이미 그려 둔 그림을 옮기고 크기만 바꿔(빠름)
+// 손가락이 멈추면 그 배율로 쪽을 다시 놓아 또렷하게. 줄일 때 아직 안 그려진 가장자리는 밑그림(1배 쪽 복사본)이 채움
 let zoomDrawn = 1, zoomSettle = 0, zoomUnder = null;
 function zoomApply() {
   const [s, tx, ty] = zoomView;
-  host.style.zoom = String(zoomDrawn);
-  host.style.transform = `translate(${tx / zoomDrawn}px, ${ty / zoomDrawn}px) scale(${s / zoomDrawn})`;
+  host.style.transform = `translate(${tx}px, ${ty}px) scale(${s / zoomDrawn})`;
   if (zoomUnder) zoomUnder.style.transform = `matrix(${s}, 0, 0, ${s}, ${tx}, ${ty})`;
+}
+/** [zoomDrawn] 배율로 쪽을 다시 놓음 (문서 화면도 그만큼 크게 — 잘리는 곳이 없게) */
+function zoomRedraw() {
+  Object.assign(host.style, { width: `${zoomBase[0] * zoomDrawn}px`, height: `${zoomBase[1] * zoomDrawn}px`, gap: zoomDrawn === 1 ? '' : `${(8 / 3) * zoomDrawn}px` });
+  fitPages();
+  zoomApply();
 }
 function zoomMakeUnder() {
   zoomUnder?.remove();
   const u = host.cloneNode(true);
   u.removeAttribute('id'); u.id = 'pages-under'; u.setAttribute('aria-hidden', 'true');
-  Object.assign(u.style, { zoom: '', transform: '', width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px`, display: '' });
+  Object.assign(u.style, { transform: '', width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px`, display: '' });
   host.parentNode.insertBefore(u, host);
   zoomUnder = u;
 }
@@ -1223,7 +1230,8 @@ function zoomClear() {
   zoomView = null; zoomDrawn = 1;
   zoomUnder?.remove(); zoomUnder = null;
   host.classList.remove('zooming');
-  Object.assign(host.style, { zoom: '', transform: '', width: '', height: '' });
+  Object.assign(host.style, { transform: '', width: '', height: '', gap: '' });
+  fitPages();
 }
 function setView(s, tx, ty) {
   if (!(s > 1.001)) { if (zoomView) zoomClear(); return true; }
@@ -1231,16 +1239,18 @@ function setView(s, tx, ty) {
     zoomBase = [host.clientWidth, host.clientHeight]; zoomDrawn = 1;
     zoomMakeUnder();
     host.classList.add('zooming');
-    Object.assign(host.style, { width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px` });
+    zoomView = [s, tx, ty];
+    zoomRedraw();
+  } else {
+    zoomView = [s, tx, ty];
+    zoomApply();
   }
-  zoomView = [s, tx, ty];
-  zoomApply();
   clearTimeout(zoomSettle);
   zoomSettle = setTimeout(() => {
     zoomSettle = 0;
     if (!zoomView || Math.abs(zoomView[0] - zoomDrawn) < 0.005) return;
     zoomDrawn = zoomView[0];
-    zoomApply();
+    zoomRedraw();
   }, 140);
   return true;
 }
@@ -1248,9 +1258,12 @@ function setView(s, tx, ty) {
 function withoutZoom(fn) {
   return function (...args) {
     if (!zoomView) return fn.apply(this, args);
-    const keep = { zoom: host.style.zoom, transform: host.style.transform };
-    Object.assign(host.style, { zoom: '', transform: '' });
-    try { return fn.apply(this, args); } finally { Object.assign(host.style, keep); }
+    // 확대 전 자리로 잠깐 되돌려 잰 뒤 다시 확대
+    const keep = zoomDrawn;
+    zoomDrawn = 1;
+    Object.assign(host.style, { transform: '', width: `${zoomBase[0]}px`, height: `${zoomBase[1]}px`, gap: '' });
+    fitPages();
+    try { return fn.apply(this, args); } finally { zoomDrawn = keep; zoomRedraw(); }
   };
 }
 window.freaderDocx = { setView, resetScrollZoom: vResetZoom, setScrollMarks, mostVisiblePage: vMostVisible, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy, setVertical, scrollToRatio: vScrollToRatio,

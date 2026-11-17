@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/storage_service.dart';
+import '../widgets/morph_icons.dart';
 import '../widgets/app_colors.dart';
 import '../widgets/pop_dialog.dart';
 
@@ -903,7 +904,7 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
         actions: [
           IconButton(
             tooltip: _tr('이 쪽 지우기', 'Delete This Page', '删除此页', 'このページを削除'),
-            icon: Icon(Icons.delete_outline, color: _fg),
+            icon: TrashLidIcon(open: false, color: _fg),
             onPressed: _deleteCurrentPage,
           ),
           const SizedBox(width: 4),

@@ -8,6 +8,7 @@ import 'package:flutter/gestures.dart' show DeviceGestureSettings, EagerGestureR
 import 'package:flutter/scheduler.dart';
 import 'app_colors.dart';
 import 'bookmark_ribbon.dart';
+import 'morph_icons.dart';
 import 'pop_dialog.dart';
 import '../services/storage_service.dart';
 
@@ -441,6 +442,81 @@ Future<String?> showRotationDialog(BuildContext context, {required String curren
   if (selected == current) return null;
   await _afterDialogClosed();
   return selected;
+}
+
+/// 쪽 번호 이름: '12페이지' · '12, 13페이지'
+String pagesLabel(int page, int? next, ViewerTr tr) => next == null
+    ? tr('$page페이지', 'Page $page', '第$page页', '${page}ページ')
+    : tr('$page, $next페이지', 'Pages $page, $next', '第$page、$next页', '$page、${next}ページ');
+
+/// 북마크할 때의 페이지 모드 이름 ('tap' · 'slide' · 'tap+slide' · 'scroll')
+String bookmarkModeOf({required bool scroll, required bool tap, required bool slide}) =>
+    scroll ? 'scroll' : (tap && slide ? 'tap+slide' : (slide ? 'slide' : 'tap'));
+
+/// 북마크 이름: '12페이지 (회전, 페이지 표시, 페이지 모드)'
+String bookmarkFullTitle(String pages, BookmarkItem bm, ViewerTr tr) {
+  final parts = <String>[
+    switch (bm.rotation) {
+      'portrait' => tr('세로 고정', 'Portrait lock', '锁定竖屏', '縦に固定'),
+      'landscape' => tr('가로 고정', 'Landscape lock', '锁定横屏', '横に固定'),
+      null => '',
+      _ => tr('자동 회전', 'Auto-rotate', '自动旋转', '自動回転'),
+    },
+    if (!bm.scroll)
+      switch (bm.display) {
+        'one' => tr('한 페이지', 'One page', '单页', '1ページ'),
+        'two' => tr('두 페이지', 'Two pages', '双页', '2ページ'),
+        null => '',
+        _ => tr('자동 표시', 'Auto display', '自动显示', '自動表示'),
+      },
+    switch (bm.mode ?? (bm.scroll ? 'scroll' : null)) {
+      'scroll' => tr('스크롤', 'Scroll', '滚动', 'スクロール'),
+      'slide' => tr('슬라이드', 'Slide', '滑动', 'スライド'),
+      'tap+slide' => tr('탭·슬라이드', 'Tap & slide', '点击·滑动', 'タップ・スライド'),
+      'tap' => tr('탭', 'Tap', '点击', 'タップ'),
+      _ => '',
+    },
+  ].where((e) => e.isNotEmpty).toList();
+  return parts.isEmpty ? pages : '$pages (${parts.join(', ')})';
+}
+
+/// 북마크 목록 위 줄: 제목, [모두 지우기], [현재 페이지 북마크]
+Widget bookmarkSheetHeader(BuildContext context,
+    {required ViewerTr tr, required bool already, required bool canClear, required String addLabel, VoidCallback? onAdd, required VoidCallback onClearAll}) {
+  return ListTile(
+    title: Text(tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+      TextButton.icon(
+        style: TextButton.styleFrom(foregroundColor: Colors.redAccent, visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
+        icon: TrashLidIcon(open: false, size: 16, color: canClear ? Colors.redAccent : Theme.of(context).disabledColor),
+        label: Text(tr('모두 지우기', 'Clear All', '全部删除', 'すべて削除')),
+        onPressed: canClear ? onClearAll : null,
+      ),
+      const SizedBox(width: 4),
+      // 같은 쪽(같은 보기 방식)은 한 번만 북마크
+      ElevatedButton.icon(
+        icon: Icon(already ? Icons.bookmark_added : Icons.bookmark_add, size: 16),
+        label: Text(already ? tr('북마크한 페이지예요', 'Already bookmarked', '已添加书签', 'ブックマーク済みです') : addLabel),
+        onPressed: already ? null : onAdd,
+      ),
+    ]),
+  );
+}
+
+/// 북마크를 모두 지울지 물어봄
+Future<bool> confirmClearBookmarks(BuildContext context, ViewerTr tr) async {
+  final ok = await showPopDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(tr('모두 지우기', 'Clear All', '全部删除', 'すべて削除')),
+      content: Text(tr('이 파일의 북마크를 모두 지울까요?', 'Delete all bookmarks in this file?', '要删除此文件的所有书签吗？', 'このファイルのブックマークをすべて削除しますか？')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('취소', 'Cancel', '取消', 'キャンセル'))),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr('지우기', 'Delete', '删除', '削除'), style: const TextStyle(color: Colors.redAccent))),
+      ],
+    ),
+  );
+  return ok == true;
 }
 
 /// 화면 회전 아이콘 (설정 창과 도구 모음이 같은 모양): 자동 / 세로 고정 / 가로 고정

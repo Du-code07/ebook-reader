@@ -33,6 +33,9 @@ import 'services/user_fonts.dart';
 import 'package:flutter_epub_viewer/flutter_epub_viewer.dart' show EpubBookServer;
 import 'services/doc_thumbnail_service.dart';
 import 'services/page_count_service.dart';
+import 'services/app_lock.dart';
+import 'services/file_share.dart';
+import 'screens/lock_screen.dart';
 import 'widgets/pop_dialog.dart';
 
 /// 상태표시줄 본래 높이(기기 픽셀). 태블릿에서 상단바를 이 높이에 맞춰 항상 내려 둔다
@@ -67,6 +70,7 @@ void main() async {
     await UserFonts.loadAppFont();
   } catch (_) {}
   await StorageService.loadRememberPage();
+  await AppLock.init(); // 사생활 보호: 앱 잠금이면 시작할 때부터 잠금 화면
   final initialThemeMode = await StorageService.getAppThemeMode();
   final initialLang = await StorageService.getAppLanguage();
   // 앱 처음 시작 시(언어를 고른 적 없을 때) 언어 선택 화면부터 보여 준다
@@ -319,6 +323,22 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     );
   }
 
+  /// 사생활 보호: 앱이 잠겨 있으면 모든 화면 위에 잠금 화면
+  Widget _withAppLock(Widget app) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppLock.locked,
+      builder: (context, locked, child) => Stack(
+        fit: StackFit.expand,
+        textDirection: TextDirection.ltr,
+        children: [
+          child!,
+          if (locked) const Positioned.fill(child: LockScreen()),
+        ],
+      ),
+      child: app,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<String?>(
@@ -388,9 +408,9 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
           ),
         );
         ComfortTint.on = _themeMode == 'comfort';
-        if (_themeMode != 'comfort') return app;
+        if (_themeMode != 'comfort') return _withAppLock(app);
         // 편안한 모드: 앱 화면에 옅은 호박색을 덮어 푸른빛을 줄임. 파일을 볼 때는 덮지 않음 (파일 색은 파일 테마대로)
-        return Stack(fit: StackFit.expand, textDirection: TextDirection.ltr, children: [
+        return _withAppLock(Stack(fit: StackFit.expand, textDirection: TextDirection.ltr, children: [
           app,
           IgnorePointer(
             child: ValueListenableBuilder<int>(
@@ -402,7 +422,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
               ),
             ),
           ),
-        ]);
+        ]));
       },
       // 시작 화면: 앱을 켤 때마다 맨 위에 잠깐 (첫 실행이면 언어 선택보다 먼저). 그 아래 화면은 미리 준비됨
       home: Stack(
@@ -542,10 +562,10 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.more_vert),
                 title: _tr('파일 메뉴 (점 3개)', 'File Menu (⋮)', '文件菜单 (⋮)', 'ファイルメニュー (⋮)'),
-                desc: _tr('이름 변경·그룹 이동·휴지통 이동을 해요\n표지형에서는 표지 변경·원래 표지로도 있어요\n목록형에서 파일을 왼쪽으로 밀면 휴지통으로 가요\n(밀기는 앱 설정에서 끌 수 있어요)',
-                    'Rename, move to a group, or move to trash\nIn cover view you can also change or reset the cover\nIn list view, swipe a file left to trash it (swiping can be turned off in app settings)',
-                    '可重命名、移动分组、移至回收站\n封面视图中还可更换或恢复封面\n列表视图中向左滑动文件即移至回收站（可在应用设置中关闭滑动）',
-                    '名前変更・グループ移動・ゴミ箱へ移動ができます\n表紙表示では表紙の変更・元に戻すも\nリスト表示で左へスワイプするとゴミ箱へ（スワイプはアプリ設定でオフにできます）')),
+                desc: _tr('공유·이름 변경·그룹 이동·휴지통 이동을 해요\n표지형에서는 표지 변경·원래 표지로도 있어요\n목록형에서 파일을 왼쪽으로 밀면 휴지통으로 가요\n(밀기는 앱 설정에서 끌 수 있어요)',
+                    'Share, rename, move to a group, or move to trash\nIn cover view you can also change or reset the cover\nIn list view, swipe a file left to trash it (swiping can be turned off in app settings)',
+                    '可分享、重命名、移动分组、移至回收站\n封面视图中还可更换或恢复封面\n列表视图中向左滑动文件即移至回收站（可在应用设置中关闭滑动）',
+                    '共有・名前変更・グループ移動・ゴミ箱へ移動ができます\n表紙表示では表紙の変更・元に戻すも\nリスト表示で左へスワイプするとゴミ箱へ（スワイプはアプリ設定でオフにできます）')),
             _row(context,
                 icon: const Icon(Icons.checklist_rounded),
                 title: _tr('여러 파일 고르기', 'Select Multiple Files', '多选文件', '複数ファイルを選択'),
@@ -558,7 +578,7 @@ class UserManualScreen extends StatelessWidget {
                 title: _tr('검색', 'Search', '搜索', '検索'),
                 desc: _tr('파일 이름으로 찾아요', 'Find files by name', '按文件名查找', 'ファイル名で探します')),
             _row(context,
-                icon: const Icon(Icons.delete_outline),
+                icon: const TrashLidIcon(open: false),
                 title: _tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
                 desc: _tr('지운 파일을 되살리거나 완전히 지워요\n빨간 숫자는 휴지통에 있는 파일 수예요',
                     'Restore or permanently delete removed files\nThe red number shows how many files are in the trash',
@@ -574,17 +594,17 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.settings_outlined),
                 title: _tr('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
-                desc: _tr('앱 테마(기본 시스템·라이트·다크·편안한 모드), 언어, 애니메이션 끄기, 파일 표시 방식(목록형·표지형, 형식 숨기기, 밀기 끄기, 파일 아이콘만, 터치로 즐겨찾기, 그룹 이름·페이지 수 표시), 페이지 기억하기, 탭 영역(3×3 칸), 탭 가이드라인 끄기, 글꼴(한글·워드·EPUB·앱 글꼴, 글꼴 찾기), 캐시·데이터 지우기, 사용 설명서가 있어요',
-                    'App theme (system, light, dark, comfort), language, turn off animations, file display (list/cover, hide file type, turn off swipes, icons only, tap to favorite, show group name and page count), remember last page, tap zones (3×3 cells), turn off the tap guide, fonts (HWP·Word, EPUB and app fonts, Find Fonts), clear cache and data, and this manual',
-                    '包含应用主题（跟随系统·浅色·深色·护眼）、语言、关闭动画、文件显示方式（列表·封面，隐藏格式、关闭滑动、只显示图标、轻触收藏、显示分组名·页数）、记住页面、点击区域（3×3 格）、关闭点击指引、字体（韩文·Word、EPUB、应用字体，查找字体）、清除缓存·数据和使用说明书',
-                    'アプリのテーマ(システム・ライト・ダーク・目に優しいモード)、言語、アニメーションをオフ、ファイル表示(リスト・表紙、形式を隠す、スワイプをオフ、アイコンのみ、タップでお気に入り、グループ名・ページ数の表示)、ページを記憶、タップ領域(3×3マス)、タップガイドをオフ、フォント(ハングル・Word・EPUB・アプリ、フォント検索)、キャッシュ・データの削除、取扱説明書があります')),
+                desc: _tr('앱 테마(기본 시스템·라이트·다크·편안한 모드), 언어, 사생활 보호(앱·파일 잠금), 애니메이션 끄기, 파일 표시 방식(목록형·표지형, 형식 숨기기, 밀기 끄기, 파일 아이콘만, 터치로 즐겨찾기, 그룹 이름·페이지 수 표시), 페이지 기억하기, 탭 영역(3×3 칸), 탭 가이드라인 끄기, 글꼴(한글·워드·EPUB·앱 글꼴, 글꼴 찾기), 캐시·데이터 지우기, 사용 설명서가 있어요',
+                    'App theme (system, light, dark, comfort), language, privacy (app and file lock), turn off animations, file display (list/cover, hide file type, turn off swipes, icons only, tap to favorite, show group name and page count), remember last page, tap zones (3×3 cells), turn off the tap guide, fonts (HWP·Word, EPUB and app fonts, Find Fonts), clear cache and data, and this manual',
+                    '包含应用主题（跟随系统·浅色·深色·护眼）、语言、隐私保护（应用·文件锁定）、关闭动画、文件显示方式（列表·封面，隐藏格式、关闭滑动、只显示图标、轻触收藏、显示分组名·页数）、记住页面、点击区域（3×3 格）、关闭点击指引、字体（韩文·Word、EPUB、应用字体，查找字体）、清除缓存·数据和使用说明书',
+                    'アプリのテーマ(システム・ライト・ダーク・目に優しいモード)、言語、プライバシー保護(アプリ・ファイルのロック)、アニメーションをオフ、ファイル表示(リスト・表紙、形式を隠す、スワイプをオフ、アイコンのみ、タップでお気に入り、グループ名・ページ数の表示)、ページを記憶、タップ領域(3×3マス)、タップガイドをオフ、フォント(ハングル・Word・EPUB・アプリ、フォント検索)、キャッシュ・データの削除、取扱説明書があります')),
 
             // ── 2. 파일 보기 ──
             _section(context, _tr('2. 파일 보기', '2. Reading Files', '2. 查看文件', '2. ファイルを見る')),
             _row(context,
                 icon: const Icon(Icons.touch_app_outlined),
                 title: _tr('화면 누르기 (탭 존)', 'Tap Zones', '点击区域', 'タップゾーン'),
-                desc: _tr('탭 넘김일 때 화면을 3×3 칸으로 나눠, 기본은 위 6칸이 메뉴, 맨 아래 왼쪽 칸이 이전 쪽, 나머지 두 칸이 다음 쪽이에요\n칸마다 할 일은 앱 설정 → 탭 영역에서 바꿀 수 있어요\n슬라이드·스크롤일 때는 어디를 눌러도 메뉴예요\n파일을 열 때마다 구역 안내가 나오고, 앱 설정에서 끌 수 있어요',
+                desc: _tr('탭 넘김일 때 화면을 3×3 칸으로 나눠, 기본은 위 6칸이 메뉴, 맨 아래 왼쪽 칸이 이전 쪽, 나머지 두 칸이 다음 쪽이에요\n칸마다 할 일은 앱 설정 → 탭 영역에서 바꿀 수 있어요\n슬라이드·스크롤일 때는 어디를 눌러도 메뉴예요\n파일을 열 때마다 영역 안내가 나오고, 앱 설정에서 끌 수 있어요',
                     'With tap turning, the screen is split into 3×3 cells: by default the top six open the menu, the bottom-left cell goes to the previous page and the other two to the next page\nChange each cell in app settings → Tap Zones\nIn slide or scroll mode, any tap opens the menu\nA zone guide appears each time a file opens; turn it off in app settings',
                     '点击翻页时，屏幕分成 3×3 格：默认上方 6 格是菜单，最下行左格是上一页，其余两格是下一页\n可在应用设置 → 点击区域中更改每一格\n滑动·滚动模式下点任意处都是菜单\n每次打开文件会显示区域指引，可在应用设置中关闭',
                     'タップめくりでは画面を3×3マスに分け、初期設定は上6マスがメニュー、一番下の左マスが前のページ、残り2マスが次のページです\n各マスの動作はアプリ設定 → タップ領域で変えられます\nスライド・スクロールではどこを押してもメニューです\nファイルを開くたびに区域の案内が出て、アプリ設定でオフにできます')),
@@ -602,14 +622,14 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const MoonMorphIcon(filled: false, size: 20),
                 title: _tr('배경 색상', 'Background Color', '背景颜色', '背景色'),
-                desc: _tr('라이트·다크를 바꿔요(EPUB은 세피아도)\n한글·워드·TXT는 이 설정을, 그 밖의 파일은 앱 테마를 따르고, 파일에 배경색이 있으면 그 색이 먼저예요',
-                    'Switch light / dark (EPUB also has sepia)\nHangul, Word and TXT follow this setting; other files follow the app theme\nA file\'s own background color always comes first',
-                    '切换浅色·深色（EPUB 另有棕褐色）\n韩文·Word·TXT 按此设置，其他文件按应用主题；文件自带背景色时优先使用',
-                    'ライト・ダークを切り替えます(EPUBはセピアも)\nハングル・Word・TXTはこの設定、それ以外はアプリのテーマに従い、ファイル自体の背景色があればそれが優先です')),
+                desc: _tr('라이트·다크·편안한 모드를 바꿔요(EPUB은 세피아도)\n한글·워드·TXT는 이 설정을, 그 밖의 파일은 앱 테마를 따르고, 파일에 배경색이 있으면 그 색이 먼저예요',
+                    'Switch light / dark / comfort mode (EPUB also has sepia)\nHangul, Word and TXT follow this setting; other files follow the app theme\nA file\'s own background color always comes first',
+                    '切换浅色·深色·护眼模式（EPUB 另有棕褐色）\n韩文·Word·TXT 按此设置，其他文件按应用主题；文件自带背景色时优先使用',
+                    'ライト・ダーク・目に優しいモードを切り替えます(EPUBはセピアも)\nハングル・Word・TXTはこの設定、それ以外はアプリのテーマに従い、ファイル自体の背景色があればそれが優先です')),
             _row(context,
                 icon: const Icon(Icons.share_outlined),
                 title: _tr('공유', 'Share', '分享', '共有'),
-                desc: _tr('보고 있는 파일을 형식 그대로 다른 앱으로 보내요', 'Sends the open file to another app as it is', '将正在查看的文件按原格式发送到其他应用', '開いているファイルをそのままの形式で他のアプリに送ります')),
+                desc: _tr('보고 있는 파일을 형식 그대로 다른 앱으로 보내요\nPDF는 쓴 메모를 함께 넣어 보내요\n서재에서는 파일의 점 3개 메뉴에서도 공유할 수 있어요', 'Sends the open file to another app as it is\nPDFs are sent with your memos\nIn the library you can also share from a file\'s ⋯ menu', '将正在查看的文件按原格式发送到其他应用\nPDF 会连同笔记一起发送\n在书架中也可从文件的 ⋯ 菜单分享', '開いているファイルをそのままの形式で他のアプリに送ります\nPDFは書いたメモも一緒に送ります\n本棚ではファイルの ⋯ メニューからも共有できます')),
             _row(context,
                 icon: const Icon(Icons.slideshow_outlined),
                 title: _tr('슬라이드 쇼 (PPT)', 'Slide Show (PPT)', '幻灯片放映 (PPT)', 'スライドショー (PPT)'),
@@ -620,17 +640,17 @@ class UserManualScreen extends StatelessWidget {
             _row(context,
                 icon: const Icon(Icons.tune),
                 title: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
-                desc: _tr('글자 크기(EPUB), 페이지 모드(탭·슬라이드는 함께, 스크롤은 따로 — 슬라이드면 책처럼 넘기기, 스크롤이면 스크롤바 끄기), 챕터 넘김 버튼·페이지 전환 버튼(음량·S펜), 화면 잠금 끄는 방법(흔들기·음량 버튼 동시에), 진행도 UI 위치, 메모 도구 모음 위치, 왼손잡이, 하단 정보 표시를 정해요',
-                    'Font size (EPUB), page mode (tap and slide together, scroll on its own — page curl for slide, hide the scroll bar for scroll), chapter and page-turn buttons (volume, S Pen), how to unlock the screen (shake / both volume keys), progress bar position, memo toolbar position, left-handed mode and footer info',
-                    '设置字号（EPUB）、翻页模式（点击和滑动可同时使用，滚动单独使用——滑动时可选仿真翻页，滚动时可隐藏滚动条）、翻章·翻页按键（音量·S Pen）、解除锁屏方式（摇晃·同时按音量键）、进度条位置、笔记工具栏位置、左手模式和底部信息',
-                    '文字サイズ(EPUB)、ページモード(タップとスライドは併用、スクロールは単独 — スライドは本のようにめくる、スクロールはスクロールバーを隠す)、章・ページめくりボタン(音量・Sペン)、画面ロックの解除方法(振る・音量ボタン同時押し)、進行度バーの位置、メモツールバーの位置、左利き、下部情報表示を設定します')),
+                desc: _tr('글자 크기(EPUB), 페이지 모드(탭·슬라이드는 함께, 스크롤은 따로 — 슬라이드면 책처럼 넘기기, 스크롤이면 스크롤바 끄기), 챕터 넘김 버튼·페이지 전환 버튼(음량·S펜), 진행도 UI 위치, 메모 도구 모음 위치, 왼손잡이, 하단 정보 표시를 정해요',
+                    'Font size (EPUB), page mode (tap and slide together, scroll on its own — page curl for slide, hide the scroll bar for scroll), chapter and page-turn buttons (volume, S Pen), progress bar position, memo toolbar position, left-handed mode and footer info',
+                    '设置字号（EPUB）、翻页模式（点击和滑动可同时使用，滚动单独使用——滑动时可选仿真翻页，滚动时可隐藏滚动条）、翻章·翻页按键（音量·S Pen）、进度条位置、笔记工具栏位置、左手模式和底部信息',
+                    '文字サイズ(EPUB)、ページモード(タップとスライドは併用、スクロールは単独 — スライドは本のようにめくる、スクロールはスクロールバーを隠す)、章・ページめくりボタン(音量・Sペン)、進行度バーの位置、メモツールバーの位置、左利き、下部情報表示を設定します')),
             _row(context,
                 icon: const Icon(Icons.grid_view_rounded),
                 title: _tr('도구 모음', 'Toolbox', '工具箱', 'ツールボックス'),
-                desc: _tr('이전·다음 파일(같은 그룹), 화면 잠금, 화면 회전(자동·세로 고정·가로 고정), 페이지 표시(한 페이지·두 페이지·자동 — EPUB과 한 쪽뿐인 파일은 늘 한 페이지), 읽기 방향(좌→우·우→좌, 파일마다 기억), 메모, 글자 복사, 북마크(EPUB·TXT 제외, 북마크할 때의 페이지 모드·화면 회전·페이지 표시까지 기억), 확대·축소가 있어요\n화면 회전·페이지 표시는 창에서 고르고, 창이 닫힐 때 적용돼요',
-                    'Previous / next file (same group), lock screen, rotate (auto / portrait / landscape), page display (one / two pages / auto — EPUB and one-page files always show one page), reading direction (L→R / R→L, remembered per file), memo, copy text, bookmarks (not for EPUB / TXT; also remember the page mode, rotation and page display at that time), and zoom\nRotation and page display apply when their window closes',
-                    '包括上一个·下一个文件（同一分组）、锁定屏幕、旋转屏幕（自动·固定竖屏·固定横屏）、页面显示（单页·双页·自动——EPUB 和只有一页的文件始终单页）、阅读方向（左→右·右→左，按文件记忆）、笔记、复制文字、书签（EPUB·TXT 除外，同时记住当时的翻页模式·屏幕旋转·页面显示）、放大·缩小\n旋转屏幕和页面显示在窗口关闭时生效',
-                    '前・次のファイル(同じグループ)、画面ロック、画面回転(自動・縦固定・横固定)、ページ表示(1ページ・2ページ・自動 — EPUBと1ページだけのファイルは常に1ページ)、読む方向(左→右・右→左、ファイルごとに記憶)、メモ、文字コピー、ブックマーク(EPUB・TXTを除く、そのときのページモード・画面回転・ページ表示も記憶)、拡大・縮小があります\n画面回転・ページ表示はウィンドウを閉じたときに適用されます')),
+                desc: _tr('이전·다음 파일(같은 그룹), 화면 회전(자동·세로 고정·가로 고정), 페이지 표시(한 페이지·두 페이지·자동 — EPUB과 한 쪽뿐인 파일은 늘 한 페이지), 읽기 방향(좌→우·우→좌, 파일마다 기억), 메모, 글자 복사, 북마크(EPUB·TXT 제외, 북마크할 때의 페이지 모드·화면 회전·페이지 표시까지 기억), 확대·축소가 있어요\n화면 회전·페이지 표시는 창에서 고르고, 창이 닫힐 때 적용돼요',
+                    'Previous / next file (same group), rotate (auto / portrait / landscape), page display (one / two pages / auto — EPUB and one-page files always show one page), reading direction (L→R / R→L, remembered per file), memo, copy text, bookmarks (not for EPUB / TXT; also remember the page mode, rotation and page display at that time), and zoom\nRotation and page display apply when their window closes',
+                    '包括上一个·下一个文件（同一分组）、旋转屏幕（自动·固定竖屏·固定横屏）、页面显示（单页·双页·自动——EPUB 和只有一页的文件始终单页）、阅读方向（左→右·右→左，按文件记忆）、笔记、复制文字、书签（EPUB·TXT 除外，同时记住当时的翻页模式·屏幕旋转·页面显示）、放大·缩小\n旋转屏幕和页面显示在窗口关闭时生效',
+                    '前・次のファイル(同じグループ)、画面回転(自動・縦固定・横固定)、ページ表示(1ページ・2ページ・自動 — EPUBと1ページだけのファイルは常に1ページ)、読む方向(左→右・右→左、ファイルごとに記憶)、メモ、文字コピー、ブックマーク(EPUB・TXTを除く、そのときのページモード・画面回転・ページ表示も記憶)、拡大・縮小があります\n画面回転・ページ表示はウィンドウを閉じたときに適用されます')),
             _row(context,
                 icon: const Icon(Icons.swap_vert_rounded),
                 title: _tr('스크롤 보기', 'Scroll View', '滚动视图', 'スクロール表示'),
@@ -2421,6 +2441,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   }
 
   Future<void> _openFile(File file) async {
+    // 사생활 보호: 모든 파일 잠금이면 먼저 풀어야 열림
+    if (!await AppLock.unlockForFile(context, () => const LockScreen(asRoute: true))) return;
+    if (!mounted) return;
     // 이전·다음 파일 이동은 지금 보이는 목록 순서대로 (검색 결과에서 열면 그 그룹 순서로)
     LibraryNav.order = _searchOpen ? const [] : [for (final f in _visibleBooksNow) f.path];
     _closeSearch(); // 파일을 열면 검색은 처음 상태로
@@ -2748,9 +2771,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     );
   }
 
-  /// 파일의 점 3개 메뉴: 이름 변경 / 그룹 이동 (표지형은 휴지통 이동도)
+  /// 파일의 점 3개 메뉴: 공유 / 이름 변경 / 그룹 이동 (표지형은 휴지통 이동도)
   Future<void> _showFileMenu(BuildContext anchor, File file, {bool withTrash = false}) async {
     final action = await showScaleMenu<String>(anchor, [
+      ('share', _tr('공유', 'Share', '分享', '共有'), Icons.share_outlined, null),
       ('rename', _tr('이름 변경', 'Rename', '重命名', '名前変更'), Icons.edit_outlined, null),
       ('move_group', _tr('그룹 이동', 'Move Group', '移动分组', 'グループ移動'), Icons.drive_file_move_outline, null),
       if (_bookshelfViewMode == 'grid') ('cover', _tr('표지 변경', 'Change Cover', '更换封面', '表紙を変更'), Icons.image_outlined, null),
@@ -2759,7 +2783,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       if (withTrash) ('trash', _tr('휴지통 이동', 'Move to Trash', '移至回收站', 'ゴミ箱へ移動'), Icons.delete_outline, Colors.redAccent),
     ], compact: true);
     if (!mounted || action == null) return;
-    if (action == 'rename') {
+    if (action == 'share') {
+      // PDF는 메모를 넣어서 (뷰어의 공유와 같음)
+      shareFileWithMemos(context, file.path, title: _formatDisplayFileName(file.path.split(Platform.pathSeparator).last));
+    } else if (action == 'rename') {
       _renameFileDialog(file);
     } else if (action == 'move_group') {
       _assignGroupDialog(file);
@@ -3092,7 +3119,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             child: Column(
               children: [
                 ListTile(
-                  leading: const Icon(Icons.delete_outline),
+                  leading: const TrashLidIcon(open: false),
                   title: Text(
                     '${_tr("휴지통", "Trash", "回收站", "ゴミ箱")} (${_trashedBooks.length})',
                     style: const TextStyle(fontWeight: FontWeight.w800),
@@ -3119,7 +3146,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         ),
                         TextButton.icon(
                           style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
-                          icon: const Icon(Icons.delete_forever, color: Colors.redAccent, size: 16),
+                          icon: const TrashLidIcon(open: false, color: Colors.redAccent, size: 16),
                           label: Text(_tr('휴지통 비우기', 'Empty Trash', '清空回收站', 'ゴミ箱を空にする'), style: const TextStyle(color: Colors.redAccent)),
                           onPressed: () async {
                             final confirmEmpty = await showPopDialog<bool>(
@@ -3193,7 +3220,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                     },
                                   ),
                                   IconButton(
-                                    icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
+                                    icon: const TrashLidIcon(open: false, color: Colors.redAccent),
                                     tooltip: _tr('영구 삭제', 'Delete Forever', '永久删除', '完全削除'),
                                     onPressed: () async {
                                       final confirmDelete = await showPopDialog<bool>(
@@ -3970,7 +3997,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                const Icon(Icons.delete_outline, color: Colors.white),
+                                const TrashLidIcon(open: false, color: Colors.white),
                                 const SizedBox(width: 6),
                                 Text(_tr('휴지통 이동', 'Move to Trash', '移至回收站', 'ゴミ箱へ移動'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                               ],
@@ -4156,7 +4183,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     extendedPadding: const EdgeInsets.symmetric(horizontal: 13),
                     extendedIconLabelSpacing: 6,
                     onPressed: _selectedFilePaths.isNotEmpty ? _deleteSelectedFilesBatch : null,
-                    icon: Icon(Icons.delete_outline, size: 16, shadows: AppColors.sigShadows(context)),
+                    icon: const TrashLidIcon(open: false, size: 16),
                     label: Text(
                       '${_tr("삭제", "Delete", "删除", "削除")} (${_selectedFilePaths.length})',
                       style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, shadows: AppColors.sigShadows(context)),

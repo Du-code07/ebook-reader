@@ -12,8 +12,6 @@ class VolumeKeyService {
   Future<void> startListening({
     required VoidCallback onVolumeUp,
     required VoidCallback onVolumeDown,
-    VoidCallback? onVolumeBothUnlock,
-    VoidCallback? onShakeToggle,
     VoidCallback? onSpenSinglePress,
     VoidCallback? onSpenDoublePress,
     VoidCallback? onSpenDoubleRevert,
@@ -32,10 +30,6 @@ class VolumeKeyService {
         onVolumeUp();
       } else if (event == 'DOWN') {
         onVolumeDown();
-      } else if (event == 'VOL_BOTH_UNLOCK') {
-        onVolumeBothUnlock?.call();
-      } else if (event == 'SHAKE_TOGGLE' || event == 'SHAKE_LOCK_TOGGLE') {
-        onShakeToggle?.call();
       } else if (event == 'SPEN_SINGLE') {
         onSpenSinglePress?.call();
       } else if (event == 'SPEN_DOUBLE') {
@@ -48,22 +42,6 @@ class VolumeKeyService {
         }
       }
     });
-  }
-
-  /// 뷰어 내에서 화면 잠금 활성화 또는 다이얼로그/시트 닫힘 후 가로채기 상태를 재확인할 때 호출
-  Future<void> ensureInterceptActive() async {
-    if (_isRegistered) {
-      try {
-        await _methodChannel.invokeMethod('setIntercept', {'enabled': true});
-      } catch (_) {}
-    }
-  }
-
-  /// 흔들어서 화면 잠금 해제용 가속도 센서 켜기/끄기 (잠금 중에만 켜서 배터리 절약)
-  static Future<void> setShakeListening(bool enabled) async {
-    try {
-      await _methodChannel.invokeMethod('setShakeListening', {'enabled': enabled});
-    } catch (_) {}
   }
 
   Future<void> stopListening() async {

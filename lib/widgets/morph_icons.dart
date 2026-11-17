@@ -203,6 +203,12 @@ class _ParchmentPainter extends CustomPainter {
   bool shouldRepaint(_ParchmentPainter old) => old.appear != appear || old.open != open || old.color != color;
 }
 
+/// 메뉴 아이콘: 휴지통 모양은 앱 어디서나 서재 위 휴지통과 같은 모양으로
+Widget menuIcon(IconData icon, {double? size, Color? color, List<Shadow>? shadows}) {
+  if (icon == Icons.delete_outline || icon == Icons.delete || icon == Icons.delete_forever) return TrashLidIcon(open: false, size: size, color: color);
+  return Icon(icon, size: size, color: color, shadows: shadows);
+}
+
 /// 휴지통 아이콘: [open]이면 뚜껑이 왼쪽 끝을 축으로 들리고, 닫히면 다시 덮임
 class TrashLidIcon extends StatelessWidget {
   const TrashLidIcon({super.key, required this.open, this.size, this.color});
