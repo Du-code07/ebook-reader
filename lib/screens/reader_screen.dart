@@ -33,7 +33,6 @@ import '../widgets/app_colors.dart';
 import '../widgets/morph_icons.dart';
 import '../widgets/word_selection_layer.dart';
 import '../widgets/ui_scale.dart';
-import '../widgets/document_zoom_surface.dart';
 import '../widgets/sheet_pull_to_close.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/after_route_transition.dart';
@@ -350,8 +349,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   final TransformationController _epubZoomController = TransformationController();
 
   // ── 한글·워드 확대를 선명하게 ──
-  // WebView 크기·위치는 고정하고 문서 DOM/SVG만 현재 배율로 다시 그림.
-  // InteractiveViewer 역변환은 UiUnscale 밖에서, JS 이동 좌표는 태블릿 UI 배율을 반영.
+  // 화면 그림을 키우기만 하면 글씨가 뭉개져서, 확대가 멈추면 문서 화면이 그 배율로 쪽을 다시 그리게 하고(JS)
+  // 문서 화면에는 그만큼 되돌리는 변환을 걸어 보이는 자리는 그대로 둠. 바꾸는 순간은 가만히 읽던 때의 화면 그림으로 가림
+  // 한글·워드·PPT 확대: 화면 그림을 늘리지 않고 문서가 직접 그 배율로 그림 (움직이는 동안에도 늘 선명)
   // 문서가 지금 그려 보여 주는 확대 (메모·책갈피가 글과 같은 순간에 따라가게)
   final ValueNotifier<Matrix4> _docShownView = ValueNotifier<Matrix4>(Matrix4.identity());
   bool _viewSending = false;
@@ -1278,6 +1278,25 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         // 스크롤 보기 그림이 다 덮고 있거나 목차를 여닫는 동안: 문서 화면(WebView)을 잠시 숨겨 움직임이 끊기지 않게
         Offstage(
           offstage: _tocFreeze != null,
+          // 확대·이동은 문서가 직접 그 배율로 그리므로, 화면 확대(InteractiveViewer)는 문서 화면에 걸리지 않게 그대로 되돌림
+          // (그림을 늘려 보이지 않아 움직이는 동안에도 글씨가 흐려지지 않음)
+          child: AnimatedBuilder(
+          animation: _epubZoomController,
+          builder: (innerContext, child) {
+            final Matrix4 m = _epubZoomController.value;
+            if (!_docLiveZoom || _sameMatrix(m, Matrix4.identity())) {
+              return child!;
+            }
+            // 태블릿(UiScale != 1)에서는 InteractiveViewer가 UiUnscale 바깥(1/u 좌표계)에 있고
+            // 이 Transform은 UiUnscale 안쪽(1배 좌표계)에 있으므로 이동량에 u를 곱해 되돌려야 WebView가 밀리지 않음
+            final double u = UiScale.of(context);
+            final double s = m.getMaxScaleOnAxis();
+            final t = m.getTranslation();
+            final Matrix4 inv = Matrix4.identity()
+              ..scaleByDouble(1 / s, 1 / s, 1, 1)
+              ..translateByDouble(-t.x * u, -t.y * u, 0, 1);
+            return Transform(transform: inv, child: child);
+          },
           child: HwpViewer(
           key: ValueKey('document:${widget.filePath}'),
           filePath: widget.filePath,
@@ -1300,6 +1319,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           onCancelled: () {
             if (mounted) Navigator.of(context).pop();
           },
+        ),
         ),
         ),
         if (_tocFreeze != null && !_pageModeScroll)
@@ -2630,9 +2650,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 문서가 확대를 직접 그리는 파일 (한글·워드 쪽 넘김 보기. PPT는 슬라이드가 그림이라 제외)
   bool get _docLiveZoom => _isOfflineDocument && !_isTxt && !_isSpreadsheet && !_isPresentation && !_pageModeScroll && !_docVertical;
 
-  static bool _sameMatrix(Matrix4 a, Matrix4 b, {double tolerance = 0.01}) {
+  static bool _sameMatrix(Matrix4 a, Matrix4 b) {
     for (int i = 0; i < 16; i++) {
-      if ((a.storage[i] - b.storage[i]).abs() > tolerance) return false;
+      if ((a.storage[i] - b.storage[i]).abs() > 0.01) return false;
     }
     return true;
   }
@@ -2643,7 +2663,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void _onZoomMatrixChanged() {
     if (!_docLiveZoom) return;
     final Matrix4 m = _epubZoomController.value.clone();
-    if (m.getMaxScaleOnAxis() > 1.001) _snapHide();
     if (_viewSending) {
       _viewPending = m;
       return;
@@ -2653,21 +2672,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   Future<void> _sendDocView(Matrix4 m) async {
     _viewSending = true;
-    final view = documentViewMatrix(m, UiScale.of(context));
-    final double s = view.getMaxScaleOnAxis();
-    final t = view.getTranslation();
+    final double s = m.getMaxScaleOnAxis();
+    final t = m.getTranslation();
+    final double u = mounted ? UiScale.of(context) : 1.0;
     final Matrix4 shown = s < 1.001 ? Matrix4.identity() : m;
     try {
-      await _hwpController.setView(s < 1.001 ? 1 : s, s < 1.001 ? 0 : t.x, s < 1.001 ? 0 : t.y);
+      await _hwpController.setView(s < 1.001 ? 1 : s, s < 1.001 ? 0 : t.x * u, s < 1.001 ? 0 : t.y * u);
     } catch (_) {}
     _viewSending = false;
     if (!mounted) return;
     _docShownView.value = shown;
     final Matrix4? next = _viewPending;
     _viewPending = null;
-    // 마지막 1배 복원도 반드시 전달. 화면 표시용 오차(0.01)로 비교하면
-    // 작은 마지막 축소 요청이 빠져 문서 안에 이전 확대 상태가 남을 수 있음.
-    if (next != null && !_sameMatrix(next, m, tolerance: 0.0000001)) _sendDocView(next);
+    if (next != null && !_sameMatrix(next, m)) _sendDocView(next);
   }
 
   void _scheduleIdleShot() {
@@ -4609,11 +4626,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                           setState(() => _epubZoomScale = s);
                         }
                       },
-                      // WebView는 고정 크기 그대로. 역변환은 태블릿 UiUnscale과
-                      // 문서 Stack의 잘림 영역 바깥에서 적용해야 가장자리가 사라지지 않음.
-                      child: DocumentZoomSurface(
-                      enabled: _docLiveZoom,
-                      controller: _epubZoomController,
                       child: RawGestureDetector(
                         behavior: HitTestBehavior.translucent,
                         // 빠르게 튕기는 스와이프는 WebView보다 먼저 Flutter가 받아 직접 페이지를 넘긴다.
@@ -4810,7 +4822,6 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                               ),
                             ),
                         ]))),
-                      ),
                       ),
                     ),
                     ),
