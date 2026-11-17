@@ -357,7 +357,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _viewSending = false;
   Matrix4? _viewPending;
   double _epubZoomScale = 1.0;
-  double _uiScale = 1.0;
+  double _uiScale = 1.0; // 앱 화면 배율 (태블릿 16/14, 휴대폰 1): 확대 이동 값을 문서 단위로 바꿀 때
 
   // 1 & 3. S펜 전용 페이지별 필기 및 지우개 상태 (필기 모드에서 S펜이 닿으면 화면 이동 100% 차단 + 해당 페이지에서만 필기 표시)
   bool _isMemoMode = false;
@@ -1284,6 +1284,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           child: AnimatedBuilder(
           animation: _epubZoomController,
           builder: (context, child) {
+            // 태블릿은 앱 화면을 크게(UiScale) 보이고 문서는 UiUnscale로 원래 크기라, 확대 화면의 이동 값(앱 단위)을
+            // 문서 단위로 바꿔(× _uiScale) 되돌려야 함 — 그대로 뒤집으면 문서 화면 자체가 비껴 놓여 오른쪽·아래가 잘려 보였음
             final Matrix4 m = _epubZoomController.value;
             Matrix4 inv = Matrix4.identity();
             if (_docLiveZoom && !_sameMatrix(m, Matrix4.identity())) {
@@ -2674,6 +2676,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final t = m.getTranslation();
     final Matrix4 shown = s < 1.001 ? Matrix4.identity() : m;
     try {
+      // 이동 값은 문서 단위(CSS px)로: 태블릿은 앱 화면이 크게 보이므로 × _uiScale
       await _hwpController.setView(s < 1.001 ? 1 : s, s < 1.001 ? 0 : t.x * _uiScale, s < 1.001 ? 0 : t.y * _uiScale);
     } catch (_) {}
     _viewSending = false;
