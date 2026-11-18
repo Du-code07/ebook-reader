@@ -3,6 +3,7 @@ import '../widgets/favorite_ribbon.dart';
 import '../widgets/file_type_icon.dart';
 import 'user_fonts_screen.dart';
 import 'tap_zone_screen.dart';
+import 'legal_screen.dart';
 import 'privacy_lock_screen.dart';
 import 'dart:io';
 
@@ -586,9 +587,24 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             _section(_t('도움말', 'Help', '帮助', 'ヘルプ')),
             _item(
               icon: Icons.lightbulb_outline,
-              title: _t('버튼 안내', 'Button Guide', '按钮指南', 'ボタンガイド'),
+              title: _t('가이드', 'Guide', '指南', 'ガイド'),
               subtitle: _t('예시 화면에서 단추를 하나씩 알려 줘요', 'Explains each button on a sample screen', '在示例画面上逐个介绍按钮', '見本の画面でボタンを一つずつ説明します'),
               onTap: () => widget.onOpenGuide(_lang),
+            ),
+            _item(
+              icon: Icons.gavel_outlined,
+              title: _t('이용 약관', 'Terms of Service', '使用条款', '利用規約'),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalScreen(doc: LegalDoc.terms))),
+            ),
+            _item(
+              icon: Icons.privacy_tip_outlined,
+              title: _t('개인정보 처리방침', 'Privacy Policy', '隐私政策', 'プライバシーポリシー'),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalScreen(doc: LegalDoc.privacy))),
+            ),
+            _item(
+              icon: Icons.article_outlined,
+              title: _t('오픈소스 라이선스', 'Open Source Licenses', '开源许可', 'オープンソースライセンス'),
+              onTap: () => showLicensePage(context: context, applicationName: 'FReader'),
             ),
           ],
         ),

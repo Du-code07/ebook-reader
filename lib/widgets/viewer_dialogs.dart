@@ -36,8 +36,8 @@ TapZone tapZoneAt(Offset local, Size size) {
 }
 
 /// 가운데에 뜨는 둥근 창 (페이지 표시·화면 회전 등 짧은 고르기)
-/// 고르기 창이 열리고 닫히는 시간 (빠르게)
-Duration get _dialogDur => Anim.ms(160);
+/// 고르기 창이 열리고 닫히는 시간 (도구 모음 단추로 여는 창: 빠르게)
+Duration get _dialogDur => Anim.ms(80);
 
 /// 바꾼 것이 있을 때만: 닫히는 움직임이 끝난 뒤에 적용 (화면 회전·쪽 다시 배치가 닫히는 움직임과 겹쳐 끊기지 않게)
 Future<void> _afterDialogClosed() async {
@@ -652,7 +652,7 @@ Widget pageDisplayGlyph(String mode, {double? size, Color? color}) => switch (mo
       _ => Icon(Icons.insert_drive_file_outlined, size: size, color: color),
     };
 
-/// 페이지 모드 아이콘: 탭(쪽 + 누른 자리) / 슬라이드(쪽 + 좌우 화살) / 스크롤(쪽 + 위아래 화살), 'tap+slide'는 슬라이드 귀퉁이에 누른 자리
+/// 페이지 모드 아이콘: 탭(쪽 + 누른 자리) / 슬라이드(쪽 + 아래 양쪽 화살) / 스크롤(쪽 + 오른쪽 위아래 화살), 'tap+slide'는 슬라이드 귀퉁이에 누른 자리
 class PageModeIcon extends StatelessWidget {
   const PageModeIcon({super.key, required this.mode, this.size, this.color});
   final String mode; // 'tap' / 'slide' / 'scroll' / 'tap+slide'(슬라이드 아이콘 귀퉁이에 탭 표시)
@@ -695,28 +695,37 @@ class _PageModePainter extends CustomPainter {
       }
     }
 
+    // 양쪽 화살 (가로: 쪽 아래 / 세로: 쪽 오른쪽)
+    void hArrow(double y, double x1, double x2) {
+      chevron([x1, y, x2, y, x2, y]);
+      chevron([x1 + 2.7, y - 2.5, x1, y, x1 + 2.7, y + 2.5]);
+      chevron([x2 - 2.7, y - 2.5, x2, y, x2 - 2.7, y + 2.5]);
+    }
+    void vArrow(double x, double y1, double y2) {
+      chevron([x, y1, x, y2, x, y2]);
+      chevron([x - 2.5, y1 + 2.7, x, y1, x + 2.5, y1 + 2.7]);
+      chevron([x - 2.5, y2 - 2.7, x, y2, x + 2.5, y2 - 2.7]);
+    }
+
     switch (mode) {
       case 'slide':
-        // 쪽 한 장 + 양옆 화살 (옆으로 밀어 넘김)
-        page(const Rect.fromLTRB(8, 3.5, 16, 20.5), [(9, 10.6, 13.4), (12, 10.6, 13.4), (15, 10.6, 12.4)]);
-        chevron([5, 9, 2, 12, 5, 15]);
-        chevron([19, 9, 22, 12, 19, 15]);
+        // 쪽 한 장 + 아래에 양쪽 화살 (옆으로 밀어 넘김)
+        page(const Rect.fromLTRB(6, 2, 18, 16.5), [(6, 9, 15), (9.5, 9, 15), (13, 9, 12)]);
+        hArrow(20.5, 3.5, 20.5);
       case 'tap+slide':
-        // 탭+슬라이드: 슬라이드 아이콘(조금 위로) + 오른쪽 아래 귀퉁이에 탭처럼 누른 자리
+        // 탭+슬라이드: 슬라이드 아이콘(아래 화살은 짧게) + 오른쪽 아래 귀퉁이에 탭처럼 누른 자리
         canvas.saveLayer(Offset.zero & size, Paint());
-        page(const Rect.fromLTRB(8, 2, 16, 17.5), [(7, 10.6, 13.4), (10, 10.6, 13.4), (13, 10.6, 12.4)]);
-        chevron([5, 6.5, 2, 9.5, 5, 12.5]);
-        chevron([19, 6.5, 22, 9.5, 19, 12.5]);
-        final Offset c = Offset(18.4 * u, 18.4 * u);
+        page(const Rect.fromLTRB(5, 2, 17, 16.5), [(6, 8, 14), (9.5, 8, 14), (13, 8, 11)]);
+        hArrow(20.5, 2.5, 13);
+        final Offset c = Offset(18.6 * u, 18.6 * u);
         canvas.drawCircle(c, 5.6 * u, Paint()..blendMode = BlendMode.clear);
         canvas.drawCircle(c, 4.1 * u, stroke);
         canvas.drawCircle(c, 1.8 * u, Paint()..color = color);
         canvas.restore();
       case 'scroll':
-        // 쪽 한 장 + 위아래 화살 (위아래로 이어 봄)
-        page(const Rect.fromLTRB(5.5, 7, 18.5, 17), [(10.5, 8.6, 15.4), (13.5, 8.6, 13.4)]);
-        chevron([9, 5, 12, 2, 15, 5]);
-        chevron([9, 19, 12, 22, 15, 19]);
+        // 쪽 한 장 + 오른쪽에 위아래 화살 (위아래로 이어 봄)
+        page(const Rect.fromLTRB(3, 3, 14.5, 21), [(7.5, 6, 11.5), (11, 6, 11.5), (14.5, 6, 9)]);
+        vArrow(20.5, 3.5, 20.5);
       default:
         // 탭: 쪽 한 장 + 오른쪽 아래를 누른 자리(점과 둘레) — '자동 표시'의 톱니처럼 귀퉁이에 얹음
         canvas.saveLayer(Offset.zero & size, Paint());

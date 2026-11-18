@@ -61,7 +61,7 @@ class GroupJumpMenuRoute<T> extends PopupRoute<T> {
     final bool alignRight = beside ? besideRight != null : anchor.center.dx > screen.width / 2;
     final bool above = !beside && anchor.bottom + 6 + menuHeight > screen.height - pad.bottom - 8 && anchor.top - 6 - menuHeight > pad.top;
     final double edgeX = beside
-        ? (besideRight != null ? besideRight! - 8 : math.min(anchor.right + 28, screen.width - 8 - 140))
+        ? (besideRight != null ? besideRight! - 14 /* 목록 오른쪽 끝에서 살짝 안쪽 */ : math.min(anchor.right + 28, screen.width - 8 - 140))
         : alignRight ? math.min(screen.width - 8, anchor.right) : math.max(8.0, anchor.left);
     // 위아래 어디로도 다 들어가지 않으면 화면 안에 들어오도록 올려서 펼침
     final double edgeY = beside
@@ -215,7 +215,7 @@ class ActionButtonsRoute<T> extends PopupRoute<T> {
     final double d = math.min(46.0, (screen.width - 16 - gap * (cols - 1)) / cols);
     final double boxW = cols * d + (cols - 1) * gap, boxH = rows * d + (rows - 1) * gap;
     final bool alignRight = besideRight != null || anchor.center.dx > screen.width / 2;
-    final double rightEdge = besideRight != null ? besideRight! - 8 : anchor.right;
+    final double rightEdge = besideRight != null ? besideRight! - 14 : anchor.right;
     final double left = (alignRight ? rightEdge - boxW : anchor.left).clamp(8.0, math.max(8.0, screen.width - 8 - boxW)).toDouble();
     final bool above = besideRight == null && anchor.bottom + 8 + boxH > screen.height - pad.bottom - 8;
     final double top = besideRight != null

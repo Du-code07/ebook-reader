@@ -1634,7 +1634,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     // 내용이 맨 위일 때 아래로 끌면 창이 따라 내려오고, 충분히 내리면 닫힘
     final sheetCtrl = BottomSheet.createAnimationController(this);
     await showModalBottomSheet(
-      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
+      sheetAnimationStyle: Anim.toolSheet,
       context: context,
       isScrollControlled: true,
       // 화면의 2/3까지만 가림 (나머지는 스크롤)
@@ -2210,7 +2210,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         : (spreadNow ? (_currentPage ~/ 2) * 2 : _currentPage);
     final bool already = _isBookmarkedAt(target, spreadNow, scroll: _pageModeScroll);
     showModalBottomSheet(
-      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
+      sheetAnimationStyle: Anim.toolSheet,
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(

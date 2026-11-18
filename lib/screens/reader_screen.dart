@@ -2014,7 +2014,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       ..duration = Anim.ms(250)
       ..reverseDuration = Anim.ms(200);
     await showModalBottomSheet(
-      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
+      sheetAnimationStyle: Anim.toolSheet,
       context: context,
       isScrollControlled: true,
       // 화면의 2/3까지만 가림 (나머지는 스크롤)
@@ -2322,7 +2322,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final bool already = target != null && _isBookmarkedAt(target);
 
     showModalBottomSheet(
-      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
+      sheetAnimationStyle: Anim.toolSheet,
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(

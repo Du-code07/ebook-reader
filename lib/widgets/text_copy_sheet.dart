@@ -10,7 +10,7 @@ Future<void> showTextCopySheet(
 }) {
   final cleaned = text.replaceAll(RegExp(r'[ \t]+\n'), '\n').replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
   return showModalBottomSheet<void>(
-    sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
+    sheetAnimationStyle: Anim.toolSheet,
     context: context,
     isScrollControlled: true,
     builder: (ctx) {

@@ -172,6 +172,11 @@ class Anim {
 
   /// 움직임 시간. 멈추기를 켜면 1ms (0이면 일부 스크롤 움직임이 오류를 내므로)
   static Duration ms(int v) => Duration(milliseconds: off.value ? 1 : v);
+
+  /// 파일 도구 모음 단추로 여는 아래 창 (뷰어 설정·북마크·글자 복사): 보통 창보다 2배 빠르게
+  static AnimationStyle get toolSheet => off.value
+      ? AnimationStyle.noAnimation
+      : const AnimationStyle(duration: Duration(milliseconds: 125), reverseDuration: Duration(milliseconds: 100));
 }
 
 /// 밑에서 올라오는 창 맨 위: 가운데 회색 막대 + 그 아래 제목까지의 간격

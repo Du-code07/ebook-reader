@@ -15,6 +15,7 @@ import 'screens/reader_screen.dart';
 import 'screens/language_select_screen.dart';
 import 'screens/permission_guide_screen.dart';
 import 'screens/app_settings_screen.dart';
+import 'services/asset_licenses.dart';
 import 'screens/button_guide_screen.dart';
 import 'widgets/sheet_pull_to_close.dart';
 import 'widgets/file_type_icon.dart';
@@ -53,6 +54,7 @@ Future<void> _readStatusBarHeight() async {
 const List<Shadow> _whiteTextShadows = [Shadow(color: Color(0x66000000), blurRadius: 3, offset: Offset(0, 0.6))];
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  registerAssetLicenses(); // 함께 넣은 문서 엔진·글꼴 라이선스 (도움말 → 오픈소스 라이선스)
   // 데이터 지우기 중 '모든 파일 접근'을 끄면 안드로이드가 앱을 다시 시작함 → 이어서 바로 지움
   if (await StorageService.takePendingClearData()) {
     try {
@@ -3033,7 +3035,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final confirmed = await showPopDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(_tr('"$groupName" 그룹 삭제', 'Delete "$groupName"', '删除 "$groupName"', '「$groupName」グループ削除')),
+        title: Text(_tr('그룹 삭제', 'Delete Group', '删除分组', 'グループ削除')),
         content: Text(
           _tr(
             '"$groupName" 그룹을 삭제할까요?\n그룹 안의 파일은 지워지지 않고 미분류로 옮겨져 [내 서재]에서 볼 수 있어요',
@@ -3222,7 +3224,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   ),
                   trailing: _trashedBooks.isNotEmpty
                       ? Row(mainAxisSize: MainAxisSize.min, children: [
-                        // 모두 복원: 휴지통의 파일을 모두 서재로 되돌림 (휴지통 비우기 왼쪽)
+                        // 모두 복원: 휴지통의 파일을 모두 서재로 되돌림 (비우기 왼쪽)
                         TextButton.icon(
                           style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
                           icon: const Icon(Icons.restore_from_trash, size: 16),
@@ -3243,12 +3245,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         TextButton.icon(
                           style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
                           icon: const TrashLidIcon(open: false, color: Colors.redAccent, size: 16),
-                          label: Text(_tr('휴지통 비우기', 'Empty Trash', '清空回收站', 'ゴミ箱を空にする'), style: const TextStyle(color: Colors.redAccent)),
+                          label: Text(_tr('비우기', 'Empty', '清空', '空にする'), style: const TextStyle(color: Colors.redAccent)),
                           onPressed: () async {
                             final confirmEmpty = await showPopDialog<bool>(
                               context: ctx,
                               builder: (dCtx) => AlertDialog(
-                                title: Text(_tr('휴지통 비우기', 'Empty Trash', '清空回收站', 'ゴミ箱を空にする')),
+                                title: Text(_tr('비우기', 'Empty', '清空', '空にする')),
                                 content: Text(_tr('휴지통의 모든 파일을 영구 삭제할까요?', 'Permanently delete all files in Trash?', '确定永久删除回收站中的所有文件吗？', 'ゴミ箱内のすべてのファイルを完全に削除しますか？')),
                                 actions: [
                                   TextButton(onPressed: () => Navigator.pop(dCtx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),

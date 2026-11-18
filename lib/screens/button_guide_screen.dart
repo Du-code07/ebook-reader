@@ -14,7 +14,7 @@ import '../widgets/viewer_dialogs.dart';
 
 typedef _Tr = String Function(String ko, String en, String zh, String ja);
 
-/// 도움말 '버튼 안내': 예시 화면 위에서 단추를 하나씩 비추며 알려 주는 가이드
+/// 도움말 '가이드': 예시 화면 위에서 단추를 하나씩 비추며 알려 주는 가이드
 /// (메인 화면 / 파일 상단바·도구 모음 / 메모 도구 모음 / 설정)
 class ButtonGuideScreen extends StatelessWidget {
   const ButtonGuideScreen({super.key, required this.appLang});
@@ -36,7 +36,7 @@ class ButtonGuideScreen extends StatelessWidget {
           _tr('앱 설정의 항목', 'Items in the app settings', '应用设置中的各项', 'アプリ設定の項目')),
     ];
     return Scaffold(
-      appBar: AppBar(title: Text(_tr('버튼 안내', 'Button Guide', '按钮指南', 'ボタンガイド'), style: const TextStyle(fontWeight: FontWeight.w800))),
+      appBar: AppBar(title: Text(_tr('가이드', 'Guide', '指南', 'ガイド'), style: const TextStyle(fontWeight: FontWeight.w800))),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -259,7 +259,7 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('tapguide', tr('탭 가이드라인 끄기', 'Turn Off Tap Guide', '关闭点击指引', 'タップガイドをオフ'),
               tr('파일을 열 때마다 탭 영역 안내를 보여 주지 않아요', 'Does not show the tap zone guide each time a file opens', '打开文件时不再显示点击区域指引', 'ファイルを開くたびにタップ領域の案内を表示しません')),
           _Step('docfont', tr('한글·워드 글꼴', 'HWP·Word Fonts', 'HWP·Word 字体', 'HWP・Wordフォント'),
-              tr('문서에 쓰인 글꼴이 기기에 없을 때 대신할 글꼴을 받아요', 'Download fonts to stand in for ones a document uses but your device lacks', '下载字体，代替文档中设备没有的字体', '文書で使われていて端末にないフォントの代わりをダウンロードします')),
+              tr('문서에 쓰인 글꼴이 기기에 없을 때 대신 쓸 글꼴 파일을 넣어요', 'Add font files to stand in for ones a document uses but your device lacks', '添加字体文件，代替文档中设备没有的字体', '文書で使われていて端末にないフォントの代わりになるフォントファイルを追加します')),
           _Step('appfont', tr('앱 글꼴', 'App Font', '应用字体', 'アプリのフォント'),
               tr('메뉴·목록·설정 화면 글꼴을 바꿔요', 'Change the font for menus, lists and settings', '更改菜单、列表、设置的字体', 'メニュー・一覧・設定画面のフォントを変えます')),
           _Step('epubfont', tr('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント'),
@@ -268,7 +268,12 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
               tr('다시 만들 수 있는 임시 파일만 지워요', 'Deletes only temporary files that can be rebuilt', '只删除可以重新生成的临时文件', '作り直せる一時ファイルだけを削除します')),
           _Step('data', tr('데이터 지우기', 'Clear Data', '清除数据', 'データを削除'),
               tr('파일·메모·설정·접근 권한을 모두 지우고 처음 상태로', 'Delete all files, notes, settings and permissions and start over', '删除所有文件·笔记·设置·访问权限，恢复初始状态', 'ファイル・メモ・設定・アクセス権限をすべて削除して初期状態に')),
-          _Step('guide', tr('버튼 안내', 'Button Guide', '按钮指南', 'ボタンガイド'), tr('지금 보고 있는 이 안내를 다시 열어요', 'Opens this guide again', '再次打开本指南', 'このガイドをもう一度開きます')),
+          _Step('guide', tr('가이드', 'Guide', '指南', 'ガイド'), tr('지금 보고 있는 이 안내를 다시 열어요', 'Opens this guide again', '再次打开本指南', 'このガイドをもう一度開きます')),
+          _Step('terms', tr('이용 약관', 'Terms of Service', '使用条款', '利用規約'), tr('앱 이용 약관을 봐요', 'Read the terms of service', '查看使用条款', '利用規約を見ます')),
+          _Step('privacy', tr('개인정보 처리방침', 'Privacy Policy', '隐私政策', 'プライバシーポリシー'),
+              tr('앱이 정보를 어떻게 다루는지 봐요', 'See how the app handles information', '查看应用如何处理信息', 'アプリが情報をどう扱うかを見ます')),
+          _Step('licenses', tr('오픈소스 라이선스', 'Open Source Licenses', '开源许可', 'オープンソースライセンス'),
+              tr('앱에 들어 있는 오픈소스 소프트웨어·글꼴의 라이선스를 봐요', 'See the licenses of open source software and fonts in the app', '查看应用中开源软件·字体的许可', 'アプリに含まれるオープンソースソフトウェア・フォントのライセンスを見ます')),
         ];
     }
   }
@@ -861,7 +866,10 @@ class _SettingsMock extends StatelessWidget {
           item('cache', const Icon(Icons.cleaning_services_outlined), tr('캐시 지우기', 'Clear Cache', '清除缓存', 'キャッシュを削除')),
           item('data', const Icon(Icons.delete_forever_outlined), tr('데이터 지우기', 'Clear Data', '清除数据', 'データを削除')),
           section(tr('도움말', 'Help', '帮助', 'ヘルプ')),
-          item('guide', const Icon(Icons.lightbulb_outline), tr('버튼 안내', 'Button Guide', '按钮指南', 'ボタンガイド')),
+          item('guide', const Icon(Icons.lightbulb_outline), tr('가이드', 'Guide', '指南', 'ガイド')),
+          item('terms', const Icon(Icons.gavel_outlined), tr('이용 약관', 'Terms of Service', '使用条款', '利用規約')),
+          item('privacy', const Icon(Icons.privacy_tip_outlined), tr('개인정보 처리방침', 'Privacy Policy', '隐私政策', 'プライバシーポリシー')),
+          item('licenses', const Icon(Icons.article_outlined), tr('오픈소스 라이선스', 'Open Source Licenses', '开源许可', 'オープンソースライセンス')),
         ],
       ),
     );
