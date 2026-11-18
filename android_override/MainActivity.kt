@@ -60,87 +60,75 @@ class MainActivity : FlutterActivity() {
         info.requestedPermissions?.contains(name) == true
     } catch (_: Throwable) { false }
 
-    private fun fontScanAllowed(): Boolean =
-        if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
-        else checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    // ── 탐색할 폴더 (저장소 접근 프레임워크): 사용자가 시스템 폴더 선택 창에서 고른 폴더만 읽음 (따로 권한 없음) ──
+    private val REQ_PICK_TREE = 4831
+    private var pendingTreeResult: MethodChannel.Result? = null
 
-    /// 파일 찾기: 기기 저장소에서 [exts] 형식의 파일 경로 (숨은 폴더·Android 폴더 제외, 최대 3000개)
-    private fun scanDocFiles(exts: List<String>): List<String> {
-        val out = ArrayList<String>()
-        if (!fontScanAllowed()) return out
-        val want = exts.map { it.lowercase().trimStart('.') }.toSet()
-        val root = Environment.getExternalStorageDirectory()
-        val stack = ArrayDeque<Pair<java.io.File, Int>>()
-        stack.add(root to 0)
-        var visited = 0
-        while (stack.isNotEmpty() && visited < 40000 && out.size < 3000) {
-            val (dir, depth) = stack.removeLast()
-            visited++
-            val kids = dir.listFiles() ?: continue
-            for (f in kids) {
-                val name = f.name
-                if (f.isDirectory) {
-                    if (name.startsWith(".") || (depth == 0 && name == "Android")) continue
-                    if (depth < 12) stack.add(f to depth + 1)
-                } else {
-                    val dot = name.lastIndexOf('.')
-                    if (dot <= 0 || name.startsWith(".")) continue
-                    if (want.contains(name.substring(dot + 1).lowercase()) && f.length() > 0) out.add(f.absolutePath)
-                }
-            }
+    private fun pickScanFolder(result: MethodChannel.Result) {
+        pendingTreeResult?.success(null)
+        pendingTreeResult = result
+        try {
+            val i = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT_TREE)
+            i.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            startActivityForResult(i, REQ_PICK_TREE)
+        } catch (e: Throwable) {
+            pendingTreeResult = null
+            result.success(null)
         }
-        return out
     }
 
-    /// 글꼴 찾기: 기기 저장소의 글꼴 파일(.ttf·.otf·.ttc)과 설치된 글꼴 앱(삼성 글꼴 스타일·FlipFont) 안의 글꼴
-    private fun scanFontFiles(): List<String> {
-        val out = LinkedHashSet<String>()
-        fun isFont(n: String) = n.endsWith(".ttf") || n.endsWith(".otf") || n.endsWith(".ttc")
-        if (fontScanAllowed()) {
-            val root = Environment.getExternalStorageDirectory()
-            val stack = ArrayDeque<Pair<java.io.File, Int>>()
-            stack.add(root to 0)
-            var visited = 0
-            while (stack.isNotEmpty() && visited < 30000) {
-                val (dir, depth) = stack.removeLast()
+    /// 폴더 이름 (예: "Documents/회의") — 문서 id "primary:Documents/회의"에서
+    private fun treeLabel(tree: android.net.Uri): String {
+        return try {
+            val id = android.provider.DocumentsContract.getTreeDocumentId(tree)
+            val path = id.substringAfter(':', id)
+            if (path.isEmpty()) id.substringBefore(':') else path
+        } catch (_: Throwable) { tree.lastPathSegment ?: tree.toString() }
+    }
+
+    /// 고른 폴더들 안(하위 폴더 포함)에서 [exts] 형식 파일을 찾음 (숨은 파일·폴더 제외, 최대 3000개)
+    private fun scanTreeFiles(trees: List<String>, exts: Set<String>, minSize: Long, maxSize: Long): List<Map<String, Any>> {
+        val out = ArrayList<Map<String, Any>>()
+        val cols = arrayOf(
+            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE,
+            android.provider.DocumentsContract.Document.COLUMN_SIZE,
+        )
+        var visited = 0
+        for (t in trees) {
+            val tree = try { android.net.Uri.parse(t) } catch (_: Throwable) { continue }
+            val rootId = try { android.provider.DocumentsContract.getTreeDocumentId(tree) } catch (_: Throwable) { continue }
+            val stack = ArrayDeque<Pair<String, Int>>()
+            stack.add(rootId to 0)
+            while (stack.isNotEmpty() && visited < 20000 && out.size < 3000) {
+                val (docId, depth) = stack.removeLast()
                 visited++
-                val kids = dir.listFiles() ?: continue
-                for (f in kids) {
-                    val name = f.name
-                    if (f.isDirectory) {
-                        // 숨은 폴더·앱 전용 폴더(Android/data 등)는 건너뜀
-                        if (name.startsWith(".") || (depth == 0 && name == "Android")) continue
-                        if (depth < 12) stack.add(f to depth + 1)
-                    } else if (isFont(name.lowercase()) && f.length() in 1024L..(80L shl 20)) {
-                        out.add(f.absolutePath)
-                    }
-                }
-            }
-        }
-        // 설치된 글꼴 앱: 앱 파일(apk) 안 assets 폴더의 글꼴을 꺼내 둠 (권한 없이도 읽힘)
-        try {
-            val base = java.io.File(cacheDir, "fontapps").apply { mkdirs() }
-            for (app in packageManager.getInstalledApplications(0)) {
-                val pkg = app.packageName
-                if (!pkg.startsWith("com.monotype.android.font.") || pkg.endsWith(".foundation")) continue
-                val apk = java.io.File(app.sourceDir ?: continue)
-                if (!apk.canRead()) continue
+                val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId)
                 try {
-                    java.util.zip.ZipFile(apk).use { zip ->
-                        for (e in zip.entries()) {
-                            val en = e.name.lowercase()
-                            if (e.isDirectory || !en.startsWith("assets/") || !isFont(en)) continue
-                            val dst = java.io.File(base, pkg + "_" + e.name.substringAfterLast('/'))
-                            if (!dst.exists() || dst.length() != e.size) zip.getInputStream(e).use { inp -> dst.outputStream().use { inp.copyTo(it) } }
-                            out.add(dst.absolutePath)
+                    contentResolver.query(children, cols, null, null, null)?.use { c ->
+                        while (c.moveToNext()) {
+                            val id = c.getString(0) ?: continue
+                            val name = c.getString(1) ?: continue
+                            if (name.startsWith(".")) continue
+                            val mime = c.getString(2) ?: ""
+                            if (mime == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
+                                if (depth < 12) stack.add(id to depth + 1)
+                                continue
+                            }
+                            val dot = name.lastIndexOf('.')
+                            if (dot <= 0 || !exts.contains(name.substring(dot + 1).lowercase())) continue
+                            val size = if (c.isNull(3)) 0L else c.getLong(3)
+                            if (size < minSize || size > maxSize) continue
+                            val uri = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, id)
+                            out.add(mapOf("uri" to uri.toString(), "name" to name, "size" to size))
                         }
                     }
                 } catch (_: Throwable) {}
             }
-        } catch (_: Throwable) {}
-        return out.toList()
+        }
+        return out
     }
-
 
     private var isVolumeInterceptEnabled = false
     private var eventSink: EventChannel.EventSink? = null
@@ -402,34 +390,19 @@ class MainActivity : FlutterActivity() {
         pendingPermResult?.success(false)
         pendingPermResult = result
         if (ask.isEmpty()) {
-            askAllFilesAccess()
+            result.success(true)
+            pendingPermResult = null
             return
         }
         requestPermissions(ask.toTypedArray(), 4712)
     }
 
-    // 파일 열람: 안드로이드 11 이상은 '모든 파일 접근'을 설정 화면에서 켜야 함 → 그 화면을 열고, 돌아오면 끝
-    private var waitingAllFiles = false
-
-    private fun askAllFilesAccess() {
-        if (Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) {
-            try {
-                val i = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    android.net.Uri.parse("package:$packageName"))
-                try { startActivity(i) } catch (_: Throwable) {
-                    startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                }
-                waitingAllFiles = true
-                return
-            } catch (_: Throwable) {}
-        }
-        pendingPermResult?.success(true)
-        pendingPermResult = null
-    }
-
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 4712) askAllFilesAccess()
+        if (requestCode == 4712) {
+            pendingPermResult?.success(true)
+            pendingPermResult = null
+        }
         if (requestCode == REQ_CAMERA_PERM_MAIN) {
             val cb = pendingCameraPermResult
             pendingCameraPermResult = null
@@ -564,23 +537,41 @@ class MainActivity : FlutterActivity() {
         val pChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PDF_CHANNEL)
         pdfMethodChannel = pChannel
         pChannel.setMethodCallHandler { call, result ->
-            if (call.method == "fontScanAllowed") {
-                // 글꼴 찾기: 기기 저장소의 글꼴 파일을 읽어도 되는지
-                result.success(fontScanAllowed())
-            } else if (call.method == "requestFontScan") {
-                // 안드로이드 11 이상: '모든 파일 접근' 허용 화면 / 그 아래: 저장소 읽기 권한 묻기
+            if (call.method == "pickScanFolder") {
+                // 탐색할 폴더 고르기 (시스템 폴더 선택 창) → {uri, name} 또는 null
+                pickScanFolder(result)
+            } else if (call.method == "releaseScanFolder") {
+                val u = call.argument<String>("uri") ?: ""
                 try {
-                    if (Build.VERSION.SDK_INT >= 30) {
-                        val i = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                            android.net.Uri.parse("package:$packageName"))
-                        try { startActivity(i) } catch (_: Throwable) {
-                            startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                        }
-                    } else {
-                        requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), 4711)
-                    }
-                    result.success(true)
-                } catch (e: Throwable) { result.success(false) }
+                    contentResolver.releasePersistableUriPermission(android.net.Uri.parse(u), android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (_: Throwable) {}
+                result.success(true)
+            } else if (call.method == "scanFolderUsable") {
+                // 등록한 폴더를 아직 읽을 수 있는지 (폴더를 지웠거나 허락이 풀렸으면 false)
+                val u = call.argument<String>("uri") ?: ""
+                result.success(contentResolver.persistedUriPermissions.any { it.uri.toString() == u && it.isReadPermission })
+            } else if (call.method == "scanTreeFiles") {
+                // 등록한 폴더들에서 그 형식의 파일 찾기
+                val trees = call.argument<List<String>>("trees") ?: emptyList()
+                val exts = (call.argument<List<String>>("exts") ?: emptyList()).map { it.lowercase().trimStart('.') }.toSet()
+                val minSize = (call.argument<Number>("minSize") ?: 1).toLong()
+                val maxSize = (call.argument<Number>("maxSize") ?: Long.MAX_VALUE).toLong()
+                Thread {
+                    val files = try { scanTreeFiles(trees, exts, minSize, maxSize) } catch (e: Throwable) { emptyList<Map<String, Any>>() }
+                    runOnUiThread { result.success(files) }
+                }.start()
+            } else if (call.method == "copyUriTo") {
+                // 찾은 파일을 앱 안으로 복사 (서재·글꼴로 넣을 때)
+                val u = call.argument<String>("uri") ?: ""
+                val dest = call.argument<String>("dest") ?: ""
+                Thread {
+                    val ok = try {
+                        val out = File(dest)
+                        out.parentFile?.mkdirs()
+                        contentResolver.openInputStream(android.net.Uri.parse(u))?.use { inp -> FileOutputStream(out).use { o -> inp.copyTo(o) } } != null
+                    } catch (_: Throwable) { false }
+                    runOnUiThread { result.success(ok) }
+                }.start()
             } else if (call.method == "shareText") {
                 // 고른 글을 다른 앱으로 보내기 (안드로이드 공유 창)
                 val text = call.argument<String>("text") ?: ""
@@ -623,19 +614,6 @@ class MainActivity : FlutterActivity() {
                     val am = getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
                     result.success(am.clearApplicationUserData())
                 } catch (e: Throwable) { result.success(false) }
-            } else if (call.method == "scanDocFiles") {
-                // 그룹의 파일 찾기: 그 형식의 파일을 기기 저장소에서 모두 찾음
-                val exts = call.argument<List<String>>("exts") ?: emptyList()
-                // 썸네일 만들기 줄에 끼면 한참 기다리게 되므로 따로 돌림
-                Thread {
-                    val files = try { scanDocFiles(exts) } catch (e: Throwable) { emptyList<String>() }
-                    runOnUiThread { result.success(files) }
-                }.start()
-            } else if (call.method == "scanFontFiles") {
-                thumbExecutor.execute {
-                    val files = try { scanFontFiles() } catch (e: Throwable) { emptyList<String>() }
-                    runOnUiThread { result.success(files) }
-                }
             } else if (call.method == "pdfSearchSupported") {
                 result.success(pdfSearchSupported())
             } else if (call.method == "pdfSearch") {
@@ -1495,12 +1473,6 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         isActivityResumed = true
-        if (waitingAllFiles) {
-            // '모든 파일 접근' 설정 화면에서 돌아옴 (켰든 안 켰든 다음으로)
-            waitingAllFiles = false
-            pendingPermResult?.success(true)
-            pendingPermResult = null
-        }
         hideSystemStatusBar(alsoHideNavBar = true)
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 250L)
         scheduleStatusBarReHide()
@@ -2190,6 +2162,21 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        if (requestCode == REQ_PICK_TREE) {
+            val cb = pendingTreeResult
+            pendingTreeResult = null
+            val tree = data?.data
+            if (cb == null) return
+            if (resultCode != android.app.Activity.RESULT_OK || tree == null) {
+                cb.success(null)
+                return
+            }
+            try {
+                contentResolver.takePersistableUriPermission(tree, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Throwable) {}
+            cb.success(mapOf("uri" to tree.toString(), "name" to treeLabel(tree)))
+            return
+        }
         if (requestCode == REQ_SCAN_CAMERA) {
             val cb = pendingCameraResult
             pendingCameraResult = null
