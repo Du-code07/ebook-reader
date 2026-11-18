@@ -32,19 +32,24 @@ class _LicensesScreenState extends State<LicensesScreen> {
     await for (final entry in LicenseRegistry.licenses) {
       final text = entry.paragraphs.map((p) => '${'  ' * p.indent.clamp(0, 8)}${p.text}').join('\n\n');
       for (final pkg in entry.packages) {
-        (map[pkg] ??= []).add(text);
+        // 같은 엔진 파일을 PPT·엑셀에 함께 등록해 둔 경우 같은 전문이 두 번 나오지 않게
+        final bucket = map[pkg] ??= [];
+        if (!bucket.contains(text)) bucket.add(text);
       }
     }
     final list = map.entries.toList()..sort((a, b) => a.key.toLowerCase().compareTo(b.key.toLowerCase()));
     if (mounted) setState(() => _packages = list);
   }
 
-  /// 라이선스 글에서 종류를 짐작해 짧게 (MIT · Apache 2.0 · BSD · MPL 2.0 · OFL 1.1 …)
+  /// 라이선스 글에서 종류를 짐작해 짧게 (MIT · Apache 2.0 · BSD · Boost · MPL 2.0 · OFL 1.1 …)
   static String _kind(List<String> texts) {
     final kinds = <String>{};
     for (final t in texts) {
       final u = t.toUpperCase();
-      if (u.contains('MIT LICENSE') || u.contains('PERMISSION IS HEREBY GRANTED, FREE OF CHARGE')) {
+      // 부스트 라이선스도 'Permission is hereby granted, free of charge'로 시작해서 MIT보다 먼저 봄
+      if (u.contains('BOOST SOFTWARE LICENSE')) {
+        kinds.add('Boost 1.0');
+      } else if (u.contains('MIT LICENSE') || u.contains('PERMISSION IS HEREBY GRANTED, FREE OF CHARGE')) {
         kinds.add('MIT');
       } else if (u.contains('APACHE LICENSE')) {
         kinds.add('Apache 2.0');
