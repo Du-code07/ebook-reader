@@ -1,13 +1,15 @@
+import 'dart:io';
 import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import '../widgets/app_colors.dart';
 import '../widgets/morph_icons.dart';
 import '../widgets/pop_dialog.dart';
 
 import '../services/user_fonts.dart';
+import '../services/scan_folders.dart';
 
 typedef FontsTr = String Function(String ko, String en, String zh, String ja);
 
@@ -89,54 +91,38 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
         : _t('글꼴을 읽지 못했어요', 'Could not read the font', '无法读取字体', 'フォントを読み込めませんでした'));
   }
 
-  static const MethodChannel _ch = MethodChannel('ebook_reader/pdf_renderer');
 
-  /// 글꼴 찾기: 기기 저장소의 글꼴 파일과 설치된 글꼴 앱(삼성 글꼴 스타일 등)의 글꼴을 찾아 자동으로 넣음
+  /// 글꼴 찾기: 탐색할 폴더(앱 설정에서 등록, 파일 탐색과 같은 목록)에 있는 글꼴 파일을 찾아 자동으로 넣음
   Future<void> _scan() async {
     if (_busy) return;
-    bool allowed = await _ch.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
-    if (!allowed && mounted) {
-      final go = await showPopDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(_t('파일 접근 허용', 'Allow file access', '允许访问文件', 'ファイルへのアクセスを許可')),
-          content: Text(_t(
-              '기기에 저장된 글꼴 파일을 찾으려면 파일 접근 권한이 필요해요\n다음 화면에서 FReader를 허용해 주세요\n(허용하지 않아도 설치된 글꼴 앱의 글꼴은 찾아요)',
-              'To find font files on this device, FReader needs file access\nPlease allow it on the next screen\n(Fonts from installed font apps are found either way)',
-              '要查找设备中的字体文件，需要文件访问权限\n请在下一个页面允许 FReader\n（不允许也会查找已安装字体应用中的字体）',
-              '端末内のフォントファイルを探すにはファイルへのアクセス権限が必要です\n次の画面で FReader を許可してください\n（許可しなくてもインストール済みのフォントアプリのフォントは探します）')),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('그냥 찾기', 'Search anyway', '直接查找', 'そのまま探す'))),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_t('허용하러 가기', 'Allow', '去允许', '許可する'))),
-          ],
-        ),
-      );
-      if (go == null || !mounted) return;
-      if (go) {
-        // 허용 화면에서 돌아올 때까지 기다림
-        final back = Completer<void>();
-        final listener = AppLifecycleListener(onResume: () {
-          if (!back.isCompleted) back.complete();
-        });
-        await _ch.invokeMethod('requestFontScan').catchError((_) => null);
-        await back.future.timeout(const Duration(minutes: 3), onTimeout: () {});
-        listener.dispose();
-        allowed = await _ch.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
-        if (!mounted) return;
-      }
-    }
+    final folders = await ScanFolders.ensure(context, _t);
+    if (folders.isEmpty || !mounted) return;
     setState(() => _busy = true);
-    _snack(_t('기기에서 글꼴을 찾는 중이에요…', 'Searching for fonts…', '正在查找字体…', 'フォントを探しています…'));
-    final paths = await _ch.invokeListMethod<String>('scanFontFiles').catchError((_) => <String>[]) ?? const <String>[];
-    final n = paths.isEmpty ? 0 : await UserFonts.add(paths, category: widget.category, activate: false, skipExisting: true);
+    _snack(_t('폴더에서 글꼴을 찾는 중이에요…', 'Searching for fonts…', '正在查找字体…', 'フォントを探しています…'));
+    int n = 0;
+    try {
+      final found = await ScanFolders.scan(folders, const ['ttf', 'otf', 'ttc'], minSize: 1024, maxSize: 80 << 20);
+      if (found.isNotEmpty) {
+        // 앱 임시 폴더로 복사한 뒤 넣고, 복사본은 지움
+        final tmp = Directory('${(await getTemporaryDirectory()).path}/fontscan');
+        await tmp.create(recursive: true);
+        final paths = <String>[];
+        for (final f in found) {
+          final dest = '${tmp.path}/${f.name}';
+          if (await ScanFolders.copyTo(f, dest)) paths.add(dest);
+        }
+        if (paths.isNotEmpty) n = await UserFonts.add(paths, category: widget.category, activate: false, skipExisting: true);
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      }
+    } catch (_) {}
     if (!mounted) return;
     setState(() => _busy = false);
     await _reload();
     _snack(n > 0
         ? _t('글꼴 $n개를 찾아 넣었어요', 'Found and added $n font(s)', '已找到并添加 $n 个字体', '$n 個のフォントを見つけて追加しました')
-        : paths.isEmpty && !allowed
-            ? _t('파일 접근이 허용되지 않아 저장소의 글꼴은 찾지 못했어요', 'File access was not allowed, so storage was not searched', '未允许文件访问，无法查找存储中的字体', 'ファイルへのアクセスが許可されていないため、ストレージは検索できませんでした')
-            : _t('새로 넣을 글꼴을 찾지 못했어요', 'No new fonts found', '没有找到新的字体', '新しいフォントは見つかりませんでした'));
+        : _t('새로 넣을 글꼴을 찾지 못했어요', 'No new fonts found', '没有找到新的字体', '新しいフォントは見つかりませんでした'));
   }
 
   /// 초기화: 이 화면에 넣어 둔 글꼴을 모두 빼고 기본 글꼴로 되돌림 (먼저 물어봄)
@@ -265,7 +251,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          // 글꼴 찾기: 기기 저장소·글꼴 앱에 있는 글꼴을 찾아 한꺼번에 넣음
+          // 글꼴 찾기: 탐색할 폴더에 있는 글꼴을 찾아 한꺼번에 넣음
           FloatingActionButton.extended(
             heroTag: 'font_scan',
             elevation: 2,

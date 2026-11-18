@@ -281,19 +281,6 @@ class StorageService {
     return (prefs.getStringList('protected_docs_v115') ?? const <String>[]).contains(path);
   }
 
-  /// 데이터 지우기: 설정 화면에서 권한을 끄러 간 사이 앱이 다시 시작되면 이어서 지우기 위한 표시
-  static Future<void> setPendingClearData(bool v) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('pending_clear_data_v115', v);
-  }
-
-  static Future<bool> takePendingClearData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getBool('pending_clear_data_v115') ?? false;
-    if (v) await prefs.remove('pending_clear_data_v115');
-    return v;
-  }
-
   /// 처음 시작할 때 '앱 접근 권한 안내'를 본 적 있는지
   static Future<void> markPermissionGuideShown() async {
     final prefs = await SharedPreferences.getInstance();

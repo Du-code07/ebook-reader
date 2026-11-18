@@ -234,10 +234,10 @@ class _PrivacyLockScreenState extends State<PrivacyLockScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(28, 8, 28, 0),
               child: Text(
-                _t('앱을 나갔다가 1분이 지나면 다시 잠겨요\n비밀번호·패턴을 잊으면 앱 설정의 데이터 지우기나 휴대폰 설정에서 앱 데이터를 지워야 해요',
-                    'It locks again when you are away from the app for over a minute\nIf you forget the PIN or pattern, you must clear the app data',
-                    '离开应用超过 1 分钟后会再次锁定\n忘记密码或图案时需要清除应用数据',
-                    'アプリを離れて1分が過ぎると再びロックされます\n暗証番号・パターンを忘れたらアプリのデータを削除する必要があります'),
+                _t('앱을 나갔다가 1분이 지나면 다시 잠겨요\n비밀번호·패턴을 잊으면 앱 설정의 데이터 지우기나 휴대폰 설정에서 앱 데이터를 지워야 해요\n잠금은 FReader 화면에서 보는 것만 막고, 파일 자체를 암호화하지는 않아요',
+                    'It locks again when you are away from the app for over a minute\nIf you forget the PIN or pattern, you must clear the app data\nThe lock only protects viewing in FReader; it does not encrypt the files themselves',
+                    '离开应用超过 1 分钟后会再次锁定\n忘记密码或图案时需要清除应用数据\n锁定只限制在 FReader 中查看，不会加密文件本身',
+                    'アプリを離れて1分が過ぎると再びロックされます\n暗証番号・パターンを忘れたらアプリのデータを削除する必要があります\nロックはFReaderでの閲覧だけを制限し、ファイル自体は暗号化しません'),
                 style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant, height: 1.45),
               ),
             ),
