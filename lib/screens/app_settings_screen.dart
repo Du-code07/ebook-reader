@@ -5,6 +5,8 @@ import 'user_fonts_screen.dart';
 import 'tap_zone_screen.dart';
 import 'legal_screen.dart';
 import 'licenses_screen.dart';
+import 'scan_folders_screen.dart';
+import '../services/scan_folders.dart';
 import 'privacy_lock_screen.dart';
 import 'dart:io';
 
@@ -87,6 +89,13 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   void initState() {
     super.initState();
     _measureCache();
+    _countScanFolders();
+  }
+
+  int _scanFolderCount = 0;
+  Future<void> _countScanFolders() async {
+    final n = (await ScanFolders.load()).length;
+    if (mounted) setState(() => _scanFolderCount = n);
   }
 
   Future<void> _setTapGuideOff(bool v) async {
@@ -330,10 +339,10 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_t('데이터 지우기', 'Clear Data', '清除数据', 'データを削除')),
-        content: Text(_t('앱에 넣은 파일·메모·북마크·설정이 모두 지워지고 되돌릴 수 없어요\n허용해 둔 접근 권한도 해제되고, 지운 뒤 앱이 닫혀요',
-            'All files, notes, bookmarks and settings in the app will be deleted and cannot be restored\nGranted permissions are revoked and the app will close afterwards',
-            '应用中的所有文件、笔记、书签和设置都将被删除且无法恢复\n已授予的权限也将被撤销，删除后应用将关闭',
-            'アプリ内のファイル・メモ・ブックマーク・設定がすべて削除され、元に戻せません\n許可した権限も解除され、削除後アプリが閉じます')),
+        content: Text(_t('앱에 넣은 파일·메모·북마크·설정이 모두 지워지고 되돌릴 수 없어요\n허용해 둔 접근 권한도 해제되고, 지운 뒤 앱이 닫혀요\n합치기·스캔으로 만든 PDF도 앱 안에 저장돼 있어 함께 지워져요\nDownload 폴더 등에 있는 원본 파일과 공유로 다른 앱에 보낸 파일은 지워지지 않아요',
+            'All files, notes, bookmarks and settings in the app will be deleted and cannot be restored\nGranted permissions are revoked and the app will close afterwards\nPDFs made by merging or scanning are stored in the app and will be deleted too\nOriginal files in folders such as Download and files sent to other apps by sharing are not deleted',
+            '应用中的所有文件、笔记、书签和设置都将被删除且无法恢复\n已授予的权限也将被撤销，删除后应用将关闭\n合并·扫描生成的 PDF 也保存在应用中，将一并删除\nDownload 等文件夹中的原文件以及通过分享发送到其他应用的文件不会被删除',
+            'アプリ内のファイル・メモ・ブックマーク・設定がすべて削除され、元に戻せません\n許可した権限も解除され、削除後アプリが閉じます\n結合・スキャンで作ったPDFもアプリ内に保存されているため一緒に削除されます\nDownloadなどのフォルダにある元のファイルや、共有で他のアプリに送ったファイルは削除されません')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('취소', 'Cancel', '取消', 'キャンセル'))),
           ElevatedButton(
@@ -346,57 +355,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     );
     if (ok != true || !mounted) return;
     const ch = MethodChannel('ebook_reader/pdf_renderer');
-    // '모든 파일 접근'은 앱이 스스로 끌 수 없어서 안드로이드 설정 화면에서 끄고 돌아오게 함
-    bool asked = false;
-    while (mounted) {
-      final bool allFiles = await ch.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
-      if (!allFiles) break;
-      final go = await showPopDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(_t('파일 접근 권한 끄기', 'Turn Off File Access', '关闭文件访问权限', 'ファイルアクセス権限をオフ')),
-          content: Text(asked
-              ? _t('모든 파일 접근 권한이 아직 켜져 있어요\n설정에서 끄고 돌아오면 데이터를 지울게요',
-                  'All-files access is still on\nTurn it off in settings and come back to clear the data',
-                  '所有文件访问权限仍处于开启状态\n在设置中关闭后返回即可清除数据',
-                  'すべてのファイルへのアクセスがまだオンです\n設定でオフにして戻るとデータを削除します')
-              : _t('모든 파일 접근 권한은 안드로이드 설정에서 직접 꺼야 해요\n설정에서 끄고 돌아오면 데이터를 지울게요',
-                  'All-files access must be turned off in Android settings\nTurn it off and come back to clear the data',
-                  '所有文件访问权限需要在安卓设置中手动关闭\n关闭后返回即可清除数据',
-                  'すべてのファイルへのアクセスはAndroidの設定でオフにする必要があります\nオフにして戻るとデータを削除します')),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('그냥 지우기', 'Clear Anyway', '直接清除', 'そのまま削除'))),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_t('설정 열기', 'Open Settings', '打开设置', '設定を開く'))),
-          ],
-        ),
-      );
-      if (go == null || !mounted) {
-        await StorageService.setPendingClearData(false);
-        return;
-      }
-      if (!go) break;
-      asked = true;
-      // 권한을 끄면 안드로이드가 앱을 끄고 다시 시작할 수 있음 → 다시 시작할 때 이어서 지움
-      await StorageService.setPendingClearData(true);
-      // 설정 화면으로 실제로 넘어갔다가(앱이 가려짐) 다시 돌아왔을 때만 이어 감
-      // (설정 화면을 여는 순간 잠깐 생기는 '돌아옴' 신호에 속지 않게)
-      final back = Completer<void>();
-      bool left = false;
-      final listener = AppLifecycleListener(
-        onHide: () => left = true,
-        onPause: () => left = true,
-        onResume: () {
-          if (left && !back.isCompleted) back.complete();
-        },
-      );
-      await ch.invokeMethod('requestFontScan').catchError((_) => null);
-      await back.future;
-      listener.dispose();
-      // 설정에서 바뀐 권한이 앱에 반영될 틈
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-    }
-    if (!mounted) return;
-    await StorageService.setPendingClearData(false);
     final done = await ch.invokeMethod<bool>('clearAppData').catchError((_) => false) ?? false;
     if (!done && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('데이터를 지우지 못했어요', 'Could not clear data', '无法清除数据', 'データを削除できませんでした'))));
@@ -546,6 +504,18 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               subtitle: _t('파일을 열 때마다 탭 영역 안내를 보여 주지 않아요', 'Does not show the tap zone guide each time a file opens', '每次打开文件时不显示点击区域指引', 'ファイルを開くたびにタップ領域の案内を表示しません'),
               onTap: () => _setTapGuideOff(!_tapGuideOff),
               trailing: Switch(value: _tapGuideOff, onChanged: _setTapGuideOff),
+            ),
+            // 파일 탐색·글꼴 찾기가 찾아볼 폴더 (사용자가 고른 폴더만 읽음)
+            _item(
+              icon: Icons.folder_open_outlined,
+              title: _t('탐색할 폴더', 'Folders to Search', '要查找的文件夹', '探すフォルダ'),
+              subtitle: _scanFolderCount == 0
+                  ? _t('파일 탐색·글꼴 찾기가 찾을 폴더', 'Where Find Files and Find Fonts search', '查找文件·查找字体的位置', 'ファイル検索・フォント検索が探すフォルダ')
+                  : _t('폴더 $_scanFolderCount개', '$_scanFolderCount folder(s)', '$_scanFolderCount 个文件夹', 'フォルダ $_scanFolderCount 個'),
+              onTap: () async {
+                await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ScanFoldersScreen(appLang: _lang)));
+                _countScanFolders();
+              },
             ),
             // (스크롤 보기는 이제 문서 화면 안에서 바로 보여 주므로 미리 준비·준비 완료 알림 설정이 필요 없음)
             _section(_t('글꼴', 'Fonts', '字体', 'フォント')),
