@@ -140,12 +140,8 @@ jobs:
               sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET"/>' "$MANIFEST"
             fi
             # (알림 기능은 없앴음: 알림·진동 권한을 넣지 않음)
-            # 안드로이드 12 이하: 다른 앱이 보낸 파일 경로를 열 때 저장소 읽기
-            if ! grep -q 'android.permission.READ_EXTERNAL_STORAGE' "$MANIFEST"; then
-              sed -i '/<application/i\    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>' "$MANIFEST"
-            fi
-            # 모든 파일 접근·설치된 앱 목록 권한은 쓰지 않음 (파일 탐색·글꼴 찾기는 사용자가 고른 폴더만 읽음)
-            sed -i '/android.permission.MANAGE_EXTERNAL_STORAGE/d; /android.permission.QUERY_ALL_PACKAGES/d' "$MANIFEST"
+            # 저장소 읽기·모든 파일 접근·설치된 앱 목록 권한은 쓰지 않음 (파일은 선택 창·공유로 받고, 파일 탐색·글꼴 찾기는 사용자가 고른 폴더만 읽음)
+            sed -i '/android.permission.READ_EXTERNAL_STORAGE/d; /android.permission.MANAGE_EXTERNAL_STORAGE/d; /android.permission.QUERY_ALL_PACKAGES/d' "$MANIFEST"
             if ! grep -q "com.samsung.android.support.REMOTE_ACTION" "$MANIFEST"; then
               sed -i 's/<\/activity>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true"\/><property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><intent-filter><action android:name="com.samsung.android.support.REMOTE_ACTION"\/><\/intent-filter><meta-data android:name="com.samsung.android.support.REMOTE_ACTION" android:resource="@xml\/remote_action"\/><\/activity>/' "$MANIFEST"
               sed -i 's/<\/application>/<property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true"\/><property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false"\/><property android:name="android.window.PROPERTY_COMPAT_IGNORE_REQUESTED_ORIENTATION" android:value="false"\/><\/application>/' "$MANIFEST"
