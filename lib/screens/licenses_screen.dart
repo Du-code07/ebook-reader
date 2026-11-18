@@ -54,7 +54,7 @@ class _LicensesScreenState extends State<LicensesScreen> {
       } else if (u.contains('APACHE LICENSE')) {
         kinds.add('Apache 2.0');
       } else if (u.contains('MOZILLA PUBLIC LICENSE')) {
-        kinds.add('MPL 2.0');
+        kinds.add(u.contains('VERSION 1.1') ? 'MPL 1.1' : 'MPL 2.0');
       } else if (u.contains('OPEN FONT LICENSE')) {
         kinds.add('OFL 1.1');
       } else if (u.contains('GUST FONT LICENSE')) {

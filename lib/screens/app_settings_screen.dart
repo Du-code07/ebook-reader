@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../services/pro.dart';
+import 'pro_screen.dart';
 import '../widgets/favorite_ribbon.dart';
 import '../widgets/file_type_icon.dart';
 import 'user_fonts_screen.dart';
@@ -431,6 +433,23 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
           padding: const EdgeInsets.only(bottom: 16),
           children: [
             _section(_t('일반', 'General', '通用', '一般')),
+            // FReader 프로: 유료 기능 구매·복원과 무료 체험 상태
+            ValueListenableBuilder<bool>(
+              valueListenable: Pro.owned,
+              builder: (context, owned, _) => _item(
+                icon: Icons.workspace_premium_outlined,
+                title: _t('FReader 프로', 'FReader Pro', 'FReader 专业版', 'FReader プロ'),
+                subtitle: owned
+                    ? _t('구매했어요', 'Purchased', '已购买', '購入済み')
+                    : Pro.trialDaysLeft > 0
+                        ? _t('무료 체험 ${Pro.trialDaysLeft}일 남음', '${Pro.trialDaysLeft} day(s) of free trial left', '免费试用剩 ${Pro.trialDaysLeft} 天', '無料体験 残り${Pro.trialDaysLeft}日')
+                        : _t('무료 체험이 끝났어요', 'Your free trial has ended', '免费试用已结束', '無料体験は終了しました'),
+                onTap: () async {
+                  await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProScreen(lang: _lang)));
+                  if (mounted) setState(() {});
+                },
+              ),
+            ),
             // 앱 스타일: 기본(아래 막대) / 심플(위 막대)
             _item(
               icon: Icons.dashboard_customize_outlined,

@@ -37,6 +37,7 @@ import 'services/doc_thumbnail_service.dart';
 import 'services/page_count_service.dart';
 import 'services/app_lock.dart';
 import 'services/file_share.dart';
+import 'services/pro.dart';
 import 'screens/lock_screen.dart';
 import 'widgets/pop_dialog.dart';
 
@@ -68,6 +69,7 @@ void main() async {
   } catch (_) {}
   await StorageService.loadRememberPage();
   await AppLock.init(); // 사생활 보호: 앱 잠금이면 시작할 때부터 잠금 화면
+  await Pro.init(); // FReader 프로: 구매 여부·무료 체험 (Play 스토어 확인은 뒤에서)
   ComfortTint.filePref = await StorageService.getDocComfort(); // 파일을 열자마자 편안한 모드인지 알게
   await StorageService.loadAppStyle(); // 앱 스타일(기본/심플): 첫 화면부터 그 모양으로
   final initialThemeMode = await StorageService.getAppThemeMode();
@@ -1950,6 +1952,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   /// 이미지 합치기: 기기에서 그림을 2장 이상 골라 하나의 만화책 파일(.cbz)로 만듦
   Future<void> _showMergeExistingImagesDialog() async {
+    // 유료 기능 (FReader 프로): 무료 체험이 끝났고 사지 않았으면 구매 화면부터
+    if (!await Pro.ensure(context, widget.appLang) || !mounted) return;
     final result = await _pickFilesWithNotice(type: FileType.image, allowMultiple: true);
     if (result == null) return;
     final files = result.files.where((f) => f.path != null).map((f) => File(f.path!)).toList();
@@ -2147,6 +2151,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   }
 
   Future<void> _showMergeExistingPdfsDialog() async {
+    // 유료 기능 (FReader 프로): 무료 체험이 끝났고 사지 않았으면 구매 화면부터
+    if (!await Pro.ensure(context, widget.appLang) || !mounted) return;
     final existingPdfs = _allBooks.where((f) {
       final ext = f.path.split('.').last.toLowerCase();
       return ext == 'pdf';
@@ -2417,6 +2423,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   /// 파일 추가 버튼(+): 누르면 위로 [파일 추가 / 파일 탐색 / PDF 합치기 / 이미지 합치기] 버튼이 펼쳐짐
   /// 문서 스캔: 카메라로 찍어 보정한 뒤 PDF 한 개로 만들어 지금 그룹에 넣음
   Future<void> _openDocumentScanner() async {
+    // 유료 기능 (FReader 프로): 무료 체험이 끝났고 사지 않았으면 구매 화면부터
+    if (!await Pro.ensure(context, widget.appLang) || !mounted) return;
     final targetGroup = _selectedGroup == '전체' ? '미분류' : _selectedGroup;
     final File? createdPdf = await Navigator.push<File?>(
       context,

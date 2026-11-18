@@ -378,6 +378,119 @@ class MainActivity : FlutterActivity() {
         return out.absolutePath
     }
 
+    // ── FReader 프로: Google Play 결제 (1회 구매, 비소모성) ──────────────────────
+    private var billingClient: com.android.billingclient.api.BillingClient? = null
+    private var pendingBuyResult: MethodChannel.Result? = null
+    private var pendingBuyProduct: String = ""
+
+    private fun withBilling(onReady: (com.android.billingclient.api.BillingClient?) -> Unit) {
+        val existing = billingClient
+        if (existing != null && existing.isReady) { onReady(existing); return }
+        val client = existing ?: com.android.billingclient.api.BillingClient.newBuilder(this)
+            .setListener { br, purchases -> onPurchasesUpdated(br, purchases) }
+            .enablePendingPurchases(
+                com.android.billingclient.api.PendingPurchasesParams.newBuilder().enableOneTimeProducts().build()
+            )
+            .build().also { billingClient = it }
+        try {
+            client.startConnection(object : com.android.billingclient.api.BillingClientStateListener {
+                override fun onBillingSetupFinished(br: com.android.billingclient.api.BillingResult) {
+                    runOnUiThread { onReady(if (br.responseCode == com.android.billingclient.api.BillingClient.BillingResponseCode.OK) client else null) }
+                }
+                override fun onBillingServiceDisconnected() {}
+            })
+        } catch (_: Throwable) { onReady(null) }
+    }
+
+    /// 산 상품 중 [product]가 결제 완료 상태인지 (확인 안 된 구매는 확인 처리 — 3일 안에 하지 않으면 자동 환불됨)
+    private fun ownsProduct(purchases: List<com.android.billingclient.api.Purchase>?, product: String): Boolean {
+        var owned = false
+        for (p in purchases ?: emptyList()) {
+            if (!p.products.contains(product)) continue
+            if (p.purchaseState != com.android.billingclient.api.Purchase.PurchaseState.PURCHASED) continue
+            owned = true
+            if (!p.isAcknowledged) {
+                val params = com.android.billingclient.api.AcknowledgePurchaseParams.newBuilder().setPurchaseToken(p.purchaseToken).build()
+                try { billingClient?.acknowledgePurchase(params) { } } catch (_: Throwable) {}
+            }
+        }
+        return owned
+    }
+
+    private fun billingQuery(product: String, result: MethodChannel.Result) {
+        withBilling { client ->
+            if (client == null) { result.success(mapOf("owned" to null, "price" to null)); return@withBilling }
+            val qp = com.android.billingclient.api.QueryPurchasesParams.newBuilder()
+                .setProductType(com.android.billingclient.api.BillingClient.ProductType.INAPP).build()
+            client.queryPurchasesAsync(qp) { br, purchases ->
+                val ok = br.responseCode == com.android.billingclient.api.BillingClient.BillingResponseCode.OK
+                val owned: Boolean? = if (ok) ownsProduct(purchases, product) else null
+                queryDetails(client, product) { details ->
+                    val price = details?.oneTimePurchaseOfferDetails?.formattedPrice
+                    runOnUiThread { result.success(mapOf("owned" to owned, "price" to price)) }
+                }
+            }
+        }
+    }
+
+    private fun queryDetails(client: com.android.billingclient.api.BillingClient, product: String, done: (com.android.billingclient.api.ProductDetails?) -> Unit) {
+        val params = com.android.billingclient.api.QueryProductDetailsParams.newBuilder()
+            .setProductList(listOf(
+                com.android.billingclient.api.QueryProductDetailsParams.Product.newBuilder()
+                    .setProductId(product)
+                    .setProductType(com.android.billingclient.api.BillingClient.ProductType.INAPP)
+                    .build()
+            )).build()
+        try {
+            client.queryProductDetailsAsync(params) { _, res -> done(res.productDetailsList.firstOrNull()) }
+        } catch (_: Throwable) { done(null) }
+    }
+
+    private fun billingBuy(product: String, result: MethodChannel.Result) {
+        withBilling { client ->
+            if (client == null) { result.success("unavailable"); return@withBilling }
+            queryDetails(client, product) { details ->
+                runOnUiThread {
+                    if (details == null) { result.success("unavailable"); return@runOnUiThread }
+                    pendingBuyResult?.success("canceled")
+                    pendingBuyResult = result
+                    pendingBuyProduct = product
+                    val flow = com.android.billingclient.api.BillingFlowParams.newBuilder()
+                        .setProductDetailsParamsList(listOf(
+                            com.android.billingclient.api.BillingFlowParams.ProductDetailsParams.newBuilder()
+                                .setProductDetails(details).build()
+                        )).build()
+                    val br = client.launchBillingFlow(this, flow)
+                    if (br.responseCode != com.android.billingclient.api.BillingClient.BillingResponseCode.OK) {
+                        pendingBuyResult = null
+                        result.success(if (br.responseCode == com.android.billingclient.api.BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED) "owned" else "error")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun onPurchasesUpdated(br: com.android.billingclient.api.BillingResult, purchases: List<com.android.billingclient.api.Purchase>?) {
+        val code = br.responseCode
+        val status = when (code) {
+            com.android.billingclient.api.BillingClient.BillingResponseCode.OK -> {
+                val p = purchases?.firstOrNull { it.products.contains(pendingBuyProduct) }
+                when {
+                    ownsProduct(purchases, pendingBuyProduct) -> "purchased"
+                    p?.purchaseState == com.android.billingclient.api.Purchase.PurchaseState.PENDING -> "pending"
+                    else -> "error"
+                }
+            }
+            com.android.billingclient.api.BillingClient.BillingResponseCode.USER_CANCELED -> "canceled"
+            com.android.billingclient.api.BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> "owned"
+            else -> "error"
+        }
+        runOnUiThread {
+            pendingBuyResult?.success(status)
+            pendingBuyResult = null
+        }
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_CAMERA_PERM_MAIN) {
@@ -1081,6 +1194,12 @@ class MainActivity : FlutterActivity() {
                 } catch (e: Throwable) {
                     result.success(false)
                 }
+            } else if (call.method == "billingQuery") {
+                // FReader 프로: 구매 여부와 가격 (Play 스토어와 연결이 안 되면 owned=null)
+                billingQuery(call.argument<String>("product") ?: "", result)
+            } else if (call.method == "billingBuy") {
+                // FReader 프로 구매 창 (결과: purchased·pending·canceled·owned·unavailable·error)
+                billingBuy(call.argument<String>("product") ?: "", result)
             } else if (call.method == "shareFile") {
                 // 파일을 형식 그대로 다른 앱으로 공유 (안드로이드 공유 창)
                 val path = call.argument<String>("path") ?: ""
