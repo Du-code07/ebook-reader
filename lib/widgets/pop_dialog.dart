@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'app_colors.dart';
 
 /// 마지막으로 화면을 누른 자리 (앱 화면 기준). 창이 그 자리에서 커져 나오게 씀
@@ -139,6 +140,9 @@ class BottomRise extends StatefulWidget {
   /// 회색 막대 아래 간격 (제목이 있으면 제목까지)
   final double gripBelow;
 
+  /// 안쪽에서 손가락 끌기를 따로 쓰는 동안(그룹 순서 바꾸기 등) 창이 같이 내려가지 않게
+  static void holdPull(BuildContext context, bool hold) => context.findAncestorStateOfType<_BottomRiseState>()?._hold = hold;
+
   @override
   State<BottomRise> createState() => _BottomRiseState();
 }
@@ -153,6 +157,54 @@ class _BottomRiseState extends State<BottomRise> with SingleTickerProviderStateM
   void dispose() {
     _back.dispose();
     super.dispose();
+  }
+
+  // ── 내용을 끌어 창 내리기 (앱 설정 창처럼: 내용이 맨 위일 때 아래로 끌면 창이 따라 내려옴) ──
+  bool _innerAtTop = true; // 안쪽 목록이 맨 위인지 (목록이 없으면 늘 맨 위)
+  bool _hold = false;
+  int? _pointer;
+  bool _pulling = false;
+  Offset _pending = Offset.zero;
+  VelocityTracker? _velocity;
+
+  bool _onScroll(ScrollNotification n) {
+    if (n.metrics.axis == Axis.vertical) _innerAtTop = n.metrics.pixels <= n.metrics.minScrollExtent + 0.5;
+    return false;
+  }
+
+  void _onDown(PointerDownEvent e) {
+    if (_pointer != null) return;
+    _pointer = e.pointer;
+    _pulling = false;
+    _pending = Offset.zero;
+    _velocity = VelocityTracker.withKind(e.kind)..addPosition(e.timeStamp, e.position);
+  }
+
+  void _onMove(PointerMoveEvent e) {
+    if (e.pointer != _pointer || _hold) return;
+    _velocity?.addPosition(e.timeStamp, e.position);
+    if (!_pulling) {
+      if (!_innerAtTop) return;
+      _pending += e.delta;
+      // 아래로, 옆보다 세로로 더 움직였을 때만 (옆으로 미는 동작과 겹치지 않게)
+      if (_pending.dy > kTouchSlop && _pending.dy > _pending.dx.abs()) {
+        _pulling = true;
+        _back.stop();
+      } else if (_pending.dy < -kTouchSlop) {
+        _pointer = null; // 위로 올리면 평소 스크롤
+      }
+      return;
+    }
+    setState(() => _drag = math.max(0.0, _drag + e.delta.dy));
+  }
+
+  void _onUp(PointerEvent e) {
+    if (e.pointer != _pointer) return;
+    _pointer = null;
+    if (!_pulling) return;
+    _pulling = false;
+    final double v = _velocity?.getVelocity().pixelsPerSecond.dy ?? 0;
+    _end(DragEndDetails(primaryVelocity: v, velocity: Velocity(pixelsPerSecond: Offset(0, v))));
   }
 
   void _end(DragEndDetails d) {
@@ -193,7 +245,18 @@ class _BottomRiseState extends State<BottomRise> with SingleTickerProviderStateM
                     onVerticalDragEnd: _end,
                     child: SheetGrip(below: widget.gripBelow),
                   ),
-                  Flexible(child: widget.child),
+                  Flexible(
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: _onScroll,
+                      child: Listener(
+                        onPointerDown: _onDown,
+                        onPointerMove: _onMove,
+                        onPointerUp: _onUp,
+                        onPointerCancel: _onUp,
+                        child: widget.child,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

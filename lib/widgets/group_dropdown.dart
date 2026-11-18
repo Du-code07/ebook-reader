@@ -270,13 +270,19 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
               label: r.labelOf(g),
               onLongPress: () => _groupMenu(rowCtx, g),
               // 손잡이(≡)를 끌어 순서 바꾸기
-              handle: ReorderableDragStartListener(
+              handle: Listener(
+                // 손잡이를 끄는 동안에는 아래에서 올라온 창이 같이 내려가지 않게
+                onPointerDown: (_) => BottomRise.holdPull(context, true),
+                onPointerUp: (_) => BottomRise.holdPull(context, false),
+                onPointerCancel: (_) => BottomRise.holdPull(context, false),
+                child: ReorderableDragStartListener(
                 index: index,
                 child: SizedBox(
                   width: 40,
                   height: 46,
                   child: Icon(Icons.drag_handle, size: 20, color: sel ? AppColors.onSig(context) : cs.onSurfaceVariant.withValues(alpha: 0.7), shadows: sel ? AppColors.sigShadows(context) : null),
                 ),
+              ),
               ),
             ),
           ),

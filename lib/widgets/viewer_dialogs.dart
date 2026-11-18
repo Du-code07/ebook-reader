@@ -652,10 +652,10 @@ Widget pageDisplayGlyph(String mode, {double? size, Color? color}) => switch (mo
       _ => Icon(Icons.insert_drive_file_outlined, size: size, color: color),
     };
 
-/// 페이지 모드 아이콘: 탭(쪽 + 누른 자리) / 슬라이드(쪽 + 좌우 화살) / 스크롤(쪽 + 위아래 화살), 'tap+slide'는 둘을 나란히
+/// 페이지 모드 아이콘: 탭(쪽 + 누른 자리) / 슬라이드(쪽 + 좌우 화살) / 스크롤(쪽 + 위아래 화살), 'tap+slide'는 슬라이드 귀퉁이에 누른 자리
 class PageModeIcon extends StatelessWidget {
   const PageModeIcon({super.key, required this.mode, this.size, this.color});
-  final String mode; // 'tap' / 'slide' / 'scroll' / 'tap+slide'
+  final String mode; // 'tap' / 'slide' / 'scroll' / 'tap+slide'(슬라이드 아이콘 귀퉁이에 탭 표시)
   final double? size;
   final Color? color;
 
@@ -664,12 +664,6 @@ class PageModeIcon extends StatelessWidget {
     final it = IconTheme.of(context);
     final double sz = size ?? it.size ?? 24;
     final Color c = color ?? it.color ?? Theme.of(context).colorScheme.onSurface;
-    if (mode == 'tap+slide') {
-      return Row(mainAxisSize: MainAxisSize.min, children: [
-        CustomPaint(size: Size.square(sz), painter: _PageModePainter(c, 'tap')),
-        CustomPaint(size: Size.square(sz), painter: _PageModePainter(c, 'slide')),
-      ]);
-    }
     return CustomPaint(size: Size.square(sz), painter: _PageModePainter(c, mode));
   }
 }
@@ -707,6 +701,17 @@ class _PageModePainter extends CustomPainter {
         page(const Rect.fromLTRB(8, 3.5, 16, 20.5), [(9, 10.6, 13.4), (12, 10.6, 13.4), (15, 10.6, 12.4)]);
         chevron([5, 9, 2, 12, 5, 15]);
         chevron([19, 9, 22, 12, 19, 15]);
+      case 'tap+slide':
+        // 탭+슬라이드: 슬라이드 아이콘(조금 위로) + 오른쪽 아래 귀퉁이에 탭처럼 누른 자리
+        canvas.saveLayer(Offset.zero & size, Paint());
+        page(const Rect.fromLTRB(8, 2, 16, 17.5), [(7, 10.6, 13.4), (10, 10.6, 13.4), (13, 10.6, 12.4)]);
+        chevron([5, 6.5, 2, 9.5, 5, 12.5]);
+        chevron([19, 6.5, 22, 9.5, 19, 12.5]);
+        final Offset c = Offset(18.4 * u, 18.4 * u);
+        canvas.drawCircle(c, 5.6 * u, Paint()..blendMode = BlendMode.clear);
+        canvas.drawCircle(c, 4.1 * u, stroke);
+        canvas.drawCircle(c, 1.8 * u, Paint()..color = color);
+        canvas.restore();
       case 'scroll':
         // 쪽 한 장 + 위아래 화살 (위아래로 이어 봄)
         page(const Rect.fromLTRB(5.5, 7, 18.5, 17), [(10.5, 8.6, 15.4), (13.5, 8.6, 13.4)]);

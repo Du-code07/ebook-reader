@@ -4338,23 +4338,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           }
         },
       ),
+      // 메모를 쓸 수 없는 보기(한글·워드 밖의 스크롤 모드)에서는 메모 단추를 숨김
+      if (!_pageModeScroll || _docVertical)
       QuickToolItem(
         icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
-          // 스크롤 모드 메모는 한글·워드만 (그 밖의 파일은 쪽이 이어져 있어 메모를 쓰지 않음)
-          if (_pageModeScroll && !_docVertical) {
-            ScaffoldMessenger.of(context)
-              ..clearSnackBars()
-              ..showSnackBar(SnackBar(
-                content: Text(_tr('스크롤 모드에서는 메모를 쓸 수 없어요\n탭·슬라이드 모드에서 쓸 수 있어요',
-                    'Memos are not available in scroll mode\nUse them in tap/slide mode',
-                    '滚动模式下不能写笔记，请在点击/滑动模式下使用',
-                    'スクロールモードではメモを使えません\nタップ・スライドモードで使えます')),
-                duration: const Duration(seconds: 2),
-              ));
-            return;
-          }
           setState(() {
             _isMemoMode = !_isMemoMode;
             _isEraserMode = false;

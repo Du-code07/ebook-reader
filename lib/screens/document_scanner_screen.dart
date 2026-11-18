@@ -473,7 +473,7 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
     final res = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(_tr('스캔 문서 이름 변경', 'Rename Scanned Document', '重命名扫描文档', 'スキャン文書名を変更')),
+        title: Text(_tr('스캔 문서 이름 수정', 'Rename Scanned Document', '重命名扫描文档', 'スキャン文書名を変更')),
         content: TextField(
           controller: ctrl,
           autofocus: true,

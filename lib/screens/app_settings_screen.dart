@@ -34,7 +34,7 @@ class AppSettingsScreen extends StatefulWidget {
     required this.onChangeLanguage,
     required this.onChangeViewMode,
     required this.onChangeHideExtension,
-    required this.onOpenManual,
+    required this.onOpenGuide,
     this.scrollController,
     this.scrollPhysics,
     this.asSheet = false,
@@ -55,7 +55,7 @@ class AppSettingsScreen extends StatefulWidget {
   final ValueChanged<String> onChangeLanguage; // 'system' | ko/en/zh/ja
   final Future<void> Function(String mode) onChangeViewMode;
   final Future<void> Function(bool hide) onChangeHideExtension;
-  final void Function(String lang) onOpenManual;
+  final void Function(String lang) onOpenGuide;
 
   /// 아래에서 올라오는 창으로 띄울 때(위에서 아래로 끌어 닫기) 쓰는 스크롤 연결
   final ScrollController? scrollController;
@@ -585,9 +585,10 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             ),
             _section(_t('도움말', 'Help', '帮助', 'ヘルプ')),
             _item(
-              icon: Icons.menu_book_outlined,
-              title: _t('사용 설명서', 'User Manual', '使用说明书', '取扱説明書'),
-              onTap: () => widget.onOpenManual(_lang),
+              icon: Icons.lightbulb_outline,
+              title: _t('버튼 안내', 'Button Guide', '按钮指南', 'ボタンガイド'),
+              subtitle: _t('예시 화면에서 단추를 하나씩 알려 줘요', 'Explains each button on a sample screen', '在示例画面上逐个介绍按钮', '見本の画面でボタンを一つずつ説明します'),
+              onTap: () => widget.onOpenGuide(_lang),
             ),
           ],
         ),
