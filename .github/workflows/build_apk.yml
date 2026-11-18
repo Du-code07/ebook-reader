@@ -114,6 +114,8 @@ jobs:
             echo '    implementation("com.google.mlkit:text-recognition-korean:16.0.1")' >> android/app/build.gradle.kts
             # 문서 스캔: 원근 보정·화질 처리 (OpenCV, Apache 2.0)
             echo '    implementation("org.opencv:opencv:4.10.0")' >> android/app/build.gradle.kts
+            # FReader 프로: Google Play 결제 (1회 구매)
+            echo '    implementation("com.android.billingclient:billing:9.1.0")' >> android/app/build.gradle.kts
             echo '}' >> android/app/build.gradle.kts
           fi
 
