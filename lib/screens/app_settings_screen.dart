@@ -4,6 +4,7 @@ import '../widgets/file_type_icon.dart';
 import 'user_fonts_screen.dart';
 import 'tap_zone_screen.dart';
 import 'legal_screen.dart';
+import 'licenses_screen.dart';
 import 'privacy_lock_screen.dart';
 import 'dart:io';
 
@@ -604,7 +605,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             _item(
               icon: Icons.article_outlined,
               title: _t('오픈소스 라이선스', 'Open Source Licenses', '开源许可', 'オープンソースライセンス'),
-              onTap: () => showLicensePage(context: context, applicationName: 'FReader'),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => LicensesScreen(appLang: _lang))),
             ),
           ],
         ),

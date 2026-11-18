@@ -2198,7 +2198,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   Future<void> _showBookmarkSheet() async {
-    final bookmarks = await StorageService.getBookmarks(_bookKey);
+    var bookmarks = await StorageService.getBookmarks(_bookKey);
     if (mounted) {
       setState(() => _bookmarks = bookmarks);
     }
@@ -2208,16 +2208,23 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final int target = _pageModeScroll
         ? (_scrollCtrl.mostVisiblePage ?? _currentPage).clamp(0, math.max(0, _totalPages - 1)).toInt()
         : (spreadNow ? (_currentPage ~/ 2) * 2 : _currentPage);
-    final bool already = _isBookmarkedAt(target, spreadNow, scroll: _pageModeScroll);
-    showModalBottomSheet(
-      sheetAnimationStyle: Anim.toolSheet,
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
+    bool already = _isBookmarkedAt(target, spreadNow, scroll: _pageModeScroll);
+    // 북마크 목록: 페이지 모드 창처럼 가운데에 뜸. 더하거나 지우면 창 안만 다시 그림
+    Future<void> reload(StateSetter set) async {
+      final b = await StorageService.getBookmarks(_bookKey);
+      if (!mounted) return;
+      setState(() => _bookmarks = b);
+      set(() {
+        bookmarks = b;
+        already = _isBookmarkedAt(target, spreadNow, scroll: _pageModeScroll);
+      });
+    }
+
+    await showCenterPanel<void>(
+      context,
+      builder: (ctx, set) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 맨 위 회색 막대 + 제목까지 간격 (제목 줄 위 여백만큼 덜어 냄)
-            const SheetGrip(below: 26),
             bookmarkSheetHeader(
               ctx,
               tr: _tr,
@@ -2227,8 +2234,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               onClearAll: () async {
                 if (!await confirmClearBookmarks(ctx, _tr)) return;
                 await StorageService.clearBookmarks(_bookKey);
-                if (ctx.mounted) Navigator.pop(ctx);
-                _showBookmarkSheet();
+                await reload(set);
               },
               onAdd: () async {
                 final now = DateTime.now();
@@ -2249,8 +2255,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                     mode: bookmarkModeOf(scroll: _pageModeScroll, tap: _pageModeTap, slide: _useSwipeTurn),
                   ),
                 );
-                if (ctx.mounted) Navigator.pop(ctx);
-                _showBookmarkSheet();
+                await reload(set);
               },
             ),
             const Divider(height: 1),
@@ -2275,8 +2280,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         icon: const TrashLidIcon(open: false),
                         onPressed: () async {
                           await StorageService.removeBookmark(_bookKey, bm.id);
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          _showBookmarkSheet();
+                          await reload(set);
                         },
                       ),
                       onTap: () async {
@@ -2318,7 +2322,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
           ],
         ),
-      ),
     );
   }
 

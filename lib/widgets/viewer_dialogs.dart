@@ -63,6 +63,29 @@ Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) 
   return result;
 }
 
+/// 가운데 둥근 창 (북마크 목록 등): 페이지 모드 창과 같은 모양·움직임. [builder]의 setState로 창 안을 다시 그림
+Future<T?> showCenterPanel<T>(BuildContext context, {required Widget Function(BuildContext ctx, StateSetter setState) builder}) {
+  return _centerDialog<T>(context, (ctx) {
+    final cs = Theme.of(ctx).colorScheme;
+    final Size screen = MediaQuery.sizeOf(ctx);
+    return Material(
+      color: cs.surfaceContainerHigh,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: math.min(460, screen.width - 40),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: screen.height * 0.72),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 16, bottom: 8),
+            child: StatefulBuilder(builder: builder),
+          ),
+        ),
+      ),
+    );
+  });
+}
+
 /// 고르기 창이 열리고 닫히는 움직임: 크게 튀지 않고, 연 자리 쪽에서 살짝 다가오며 커지고 서서히 또렷해짐.
 /// 닫힐 때는 같은 길을 되돌아가며 뒤 배경 어두움과 같은 빠르기로 함께 사라짐 (창만 먼저 없어지지 않게)
 Widget _softDialogTransition(BuildContext context, Animation<double> animation, Widget child, Offset? from) {
@@ -596,7 +619,14 @@ Widget bookmarkSheetHeader(BuildContext context,
     title: Row(children: [
       Icon(Icons.bookmarks_outlined, size: 22, color: Theme.of(context).colorScheme.onSurface),
       const SizedBox(width: 8),
-      Flexible(child: Text(tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18))),
+      // 좁은 창에서도 제목이 두 줄로 꺾이지 않게 (넘치면 글씨만 살짝 줄임)
+      Flexible(
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(tr('북마크 목록', 'Bookmarks', '书签列表', 'ブックマーク一覧'), maxLines: 1, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+        ),
+      ),
     ]),
     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
       TextButton.icon(

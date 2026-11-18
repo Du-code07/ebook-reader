@@ -2313,23 +2313,30 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<void> _openBookmarkSheet() async {
-    final bookmarks = await StorageService.getBookmarks(widget.filePath);
+    var bookmarks = await StorageService.getBookmarks(widget.filePath);
     if (mounted) {
       setState(() => _bookmarks = bookmarks);
     }
     final String? target = await _bookmarkTarget();
     if (!mounted) return;
-    final bool already = target != null && _isBookmarkedAt(target);
+    bool already = target != null && _isBookmarkedAt(target);
 
-    showModalBottomSheet(
-      sheetAnimationStyle: Anim.toolSheet,
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
+    // 북마크 목록: 페이지 모드 창처럼 가운데에 뜸. 더하거나 지우면 창 안만 다시 그림
+    Future<void> reload(StateSetter set) async {
+      final b = await StorageService.getBookmarks(widget.filePath);
+      if (!mounted) return;
+      setState(() => _bookmarks = b);
+      set(() {
+        bookmarks = b;
+        already = target != null && _isBookmarkedAt(target);
+      });
+    }
+
+    await showCenterPanel<void>(
+      context,
+      builder: (ctx, set) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 맨 위 회색 막대 + 제목까지 간격 (제목 줄 위 여백만큼 덜어 냄)
-            const SheetGrip(below: 26),
             bookmarkSheetHeader(
               ctx,
               tr: _tr,
@@ -2339,8 +2346,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               onClearAll: () async {
                 if (!await confirmClearBookmarks(ctx, _tr)) return;
                 await StorageService.clearBookmarks(widget.filePath);
-                if (ctx.mounted) Navigator.pop(ctx);
-                _openBookmarkSheet();
+                await reload(set);
               },
               onAdd: target == null ? null : () async {
                 final now = DateTime.now();
@@ -2360,8 +2366,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     mode: bookmarkModeOf(scroll: _pageModeScroll, tap: _pageModeTap, slide: _useSwipeTurn),
                   ),
                 );
-                if (ctx.mounted) Navigator.pop(ctx);
-                _openBookmarkSheet();
+                await reload(set);
               },
             ),
             const Divider(height: 1),
@@ -2385,8 +2390,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         icon: const TrashLidIcon(open: false),
                         onPressed: () async {
                           await StorageService.removeBookmark(widget.filePath, bm.id);
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          _openBookmarkSheet();
+                          await reload(set);
                         },
                       ),
                       onTap: () {
@@ -2399,7 +2403,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               ),
           ],
         ),
-      ),
     );
   }
 

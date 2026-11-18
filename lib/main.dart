@@ -309,7 +309,22 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       radioTheme: RadioThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null)),
       // 밝은·편안한 테마: 흰 글씨(대표 색·진한 바탕 위)에 옅은 그림자를 넣어 잘 보이게 ('파일 추가' 단추와 같은 그림자)
       floatingActionButtonTheme: b == Brightness.dark ? null : const FloatingActionButtonThemeData(extendedTextStyle: TextStyle(shadows: _whiteTextShadows)),
-      filledButtonTheme: b == Brightness.dark ? null : FilledButtonThemeData(style: ButtonStyle(textStyle: const WidgetStatePropertyAll(TextStyle(shadows: _whiteTextShadows)))),
+      // 채운 단추는 모두 페이지 모드 창의 켜짐 스위치와 같은 대표 색 (라이트: 연두 + 흰 글씨·옅은 그림자 / 다크: 회색 + 흰 글씨)
+      filledButtonTheme: FilledButtonThemeData(
+        style: ButtonStyle(
+          backgroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? null : sig),
+          foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? null : Colors.white),
+          textStyle: b == Brightness.dark ? null : const WidgetStatePropertyAll(TextStyle(shadows: _whiteTextShadows)),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ButtonStyle(
+          backgroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? null : sig),
+          foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? null : Colors.white),
+          iconColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? null : Colors.white),
+          textStyle: b == Brightness.dark ? null : const WidgetStatePropertyAll(TextStyle(shadows: _whiteTextShadows)),
+        ),
+      ),
       chipTheme: b == Brightness.dark
           ? null
           // 고른 칩: 대표 색 바탕 위 흰 글씨 + 옅은 그림자. 고르지 않은 칩: 바탕이 밝으니 진한 글씨 (예전엔 색이 비어 흰 바탕에 안 보였음)
@@ -469,6 +484,24 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       ),
     );
   }
+}
+
+/// 오른쪽 아래 단추가 바뀔 때: 회전·이동 없이 그 자리에서 커지며 나타나고 작아지며 사라짐
+class _InPlaceFabAnimator extends FloatingActionButtonAnimator {
+  const _InPlaceFabAnimator();
+
+  @override
+  Offset getOffset({required Offset begin, required Offset end, required double progress}) => end;
+
+  @override
+  Animation<double> getScaleAnimation({required Animation<double> parent}) =>
+      CurvedAnimation(parent: parent, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+
+  @override
+  Animation<double> getRotationAnimation({required Animation<double> parent}) => const AlwaysStoppedAnimation<double>(1.0);
+
+  @override
+  double getAnimationRestart(double previousValue) => 0.0;
 }
 
 /// 그리드/리스트 스크롤 시 화면 밖으로 나간 카드 위젯과 디코딩된 썸네일 GPU 텍스처가 절대 파괴되지 않도록 유지하는 KeepAlive 래퍼
@@ -910,6 +943,34 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   String _tr(String ko, String en, String zh, String ja) =>
       AppI18n.t(widget.appLang, ko: ko, en: en, zh: zh, ja: ja);
+
+  // ── 새로 고침: 서재를 다시 읽음 (기본: 정렬 왼쪽 단추 / 심플: 목록을 위에서 아래로 당기면 숨어 있던 새로 고침 아이콘이 나오며) ──
+  double _refreshTurns = 0;
+  bool _refreshing = false;
+
+  Future<void> _refreshLibrary() async {
+    if (_refreshing) return;
+    setState(() {
+      _refreshing = true;
+      _refreshTurns += 1; // 단추 아이콘이 한 바퀴 돎
+    });
+    try {
+      await _loadLibrary();
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  /// 심플 스타일: 목록·표지를 맨 위에서 아래로 당기면 새로 고침
+  Widget _withPullRefresh(Widget child) {
+    if (!StorageService.simpleStyle || _isSelectionMode) return child;
+    return RefreshIndicator(
+      color: AppColors.onSig(context),
+      backgroundColor: AppColors.of(context),
+      onRefresh: _refreshLibrary,
+      child: child,
+    );
+  }
 
   /// 목록형 카드를 밀 때 뒤에 보이는 색 (카드와 같은 자리·같은 둥근 모양)
   Widget _listCardBack({required Color color, required Alignment alignment, required Widget child}) => Padding(
@@ -2412,26 +2473,31 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   Widget _buildAddFab() {
     final cs = Theme.of(context).colorScheme;
-    // [onTap]이 없으면 흐리게 (누를 수 없음)
-    Widget action(String tag, Widget icon, String label, VoidCallback? onTap, {double bottom = 10}) => Padding(
-          padding: EdgeInsets.only(bottom: bottom),
-          child: Opacity(
-            opacity: onTap == null ? 0.45 : 1,
-            child: FloatingActionButton.extended(
-              heroTag: tag,
-              elevation: onTap == null ? 0 : 2,
-              backgroundColor: cs.surfaceContainerHighest,
-              foregroundColor: cs.onSurface,
-              onPressed: onTap == null
-                  ? null
-                  : () {
-                      setState(() => _fabOpen = false);
-                      _closeSearch();
-                      onTap();
-                    },
-              icon: icon,
-              // 회색 버튼 글씨에는 그림자 없음 (테마의 흰 글씨 그림자를 덮어씀)
-              label: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, shadows: <Shadow>[])),
+    // 아이콘만 있는 둥근 단추 ([+] 위에 세로로). [onTap]이 없으면 흐리게 (누를 수 없음). 이름은 꾹 누르면 보임
+    Widget action(String tag, Widget icon, String label, VoidCallback? onTap) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: SizedBox(
+            width: 56,
+            child: Center(
+              child: Opacity(
+                opacity: onTap == null ? 0.45 : 1,
+                child: FloatingActionButton.small(
+                  heroTag: tag,
+                  tooltip: label,
+                  elevation: onTap == null ? 0 : 2,
+                  shape: const CircleBorder(),
+                  backgroundColor: cs.surfaceContainerHighest,
+                  foregroundColor: cs.onSurface,
+                  onPressed: onTap == null
+                      ? null
+                      : () {
+                          setState(() => _fabOpen = false);
+                          _closeSearch();
+                          onTap();
+                        },
+                  child: icon,
+                ),
+              ),
             ),
           ),
         );
@@ -2442,34 +2508,35 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         // 펼칠 때: 겹쳐 숨어 있던 버튼이 맨 아래 것부터 하나씩 차례로 빠져나옴
-        // 접을 때: 거꾸로, 맨 위 버튼부터 바로 아래 버튼 뒤로 겹쳐 들어감 (마지막은 파일 추가 버튼 뒤로)
+        // 접을 때: 거꾸로, 맨 위 버튼부터 바로 아래 버튼 뒤로 겹쳐 들어감 (마지막은 [+] 버튼 뒤로)
         TweenAnimationBuilder<double>(
           tween: Tween<double>(end: _fabOpen ? 1.0 : 0.0),
           duration: Anim.ms(_fabOpen ? 460 : 340),
           builder: (context, t, _) {
             if (t <= 0.001) return const SizedBox.shrink();
-            // 위에서 아래 순서
+            // 위에서 아래 순서: 파일 탐색 · 파일 추가 · PDF 합치기 · 이미지 합치기 · 문서 스캔
             final items = <Widget>[
-              // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
-              action('fab_add_plain', const Icon(Icons.create_new_folder_outlined), _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
               action(
                   'fab_scan_group',
                   _groupScanBusy
-                      ? SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2.2, color: cs.onSurface))
-                      : FolderSearchIcon(size: 24, color: cs.onSurface),
+                      ? SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: cs.onSurface))
+                      : FolderSearchIcon(size: 22, color: cs.onSurface),
                   _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'),
                   scanExt == null || _groupScanBusy ? null : () => _scanFilesIntoGroup(_selectedGroup, scanExt)),
-              action('fab_merge_pdf', const Icon(Icons.picture_as_pdf_outlined), _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
-              action('fab_merge_img', const Icon(Icons.photo_library_outlined), _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
+              // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
+              action('fab_add_plain', const Icon(Icons.create_new_folder_outlined, size: 22), _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
+              action('fab_merge_pdf', const Icon(Icons.picture_as_pdf_outlined, size: 22), _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
+              action('fab_merge_img', const Icon(Icons.photo_library_outlined, size: 22), _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
+              action('fab_scan_doc', const Icon(Icons.document_scanner_outlined, size: 22), _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner),
             ];
-            const double rowH = 66; // 버튼 높이 56 + 사이 10
+            const double rowH = 50; // 버튼 높이 40 + 사이 10
             final int n = items.length;
             final offsets = List<double>.filled(n, 0);
             final shown = List<double>.filled(n, 0);
             double below = 0; // 바로 아래 버튼이 아직 덜 올라온 만큼 (그 뒤에 붙어 함께 움직임)
             for (int k = 0; k < n; k++) {
               final int i = n - 1 - k; // 아래에서 k번째
-              final double raw = ((t - k * 0.22) / 0.56).clamp(0.0, 1.0);
+              final double raw = ((t - k * 0.18) / 0.5).clamp(0.0, 1.0);
               final double p = (_fabOpen ? Curves.easeOutBack : Curves.easeOutCubic).transform(raw);
               below += rowH * (1 - p);
               offsets[i] = below;
@@ -2492,41 +2559,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             );
           },
         ),
-        // 아래 줄: [문서 스캔] (펼쳤을 때만, [닫기] 버튼 뒤에서 왼쪽으로 빠져나옴) + [파일 추가/닫기]
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TweenAnimationBuilder<double>(
-              tween: Tween<double>(end: _fabOpen ? 1.0 : 0.0),
-              duration: Anim.ms(_fabOpen ? 420 : 300),
-              builder: (context, t, child) {
-                if (t <= 0.001) return const SizedBox.shrink();
-                final double p = (_fabOpen ? Curves.easeOutBack : Curves.easeOutCubic).transform(t.clamp(0.0, 1.0));
-                return IgnorePointer(
-                  ignoring: !_fabOpen,
-                  child: Transform.translate(
-                    offset: Offset(90 * (1 - p), 0),
-                    child: Opacity(opacity: (t * 3).clamp(0.0, 1.0), child: child),
-                  ),
-                );
-              },
-              child: Padding(
-                padding: const EdgeInsets.only(right: 10),
-                child: action('fab_scan_doc', const Icon(Icons.document_scanner_outlined), _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner, bottom: 0),
-              ),
-            ),
-            // + 아이콘만 (펼치면 × 로 바뀜)
-            FloatingActionButton(
-              heroTag: 'fab_add_files',
-              tooltip: _fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
-              onPressed: () {
-                _closeSearch();
-                setState(() => _fabOpen = !_fabOpen);
-              },
-              // 아이콘 움직임: [전체] 그룹 아이콘과 같은 빠르기·느낌 (기본 움직임)
-              child: PlusCloseIcon(open: _fabOpen, size: 26),
-            ),
-          ],
+        // + 아이콘만 (펼치면 × 로 바뀜)
+        FloatingActionButton(
+          heroTag: 'fab_add_files',
+          tooltip: _fabOpen ? _tr('닫기', 'Close', '关闭', '閉じる') : _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
+          onPressed: () {
+            _closeSearch();
+            setState(() => _fabOpen = !_fabOpen);
+          },
+          // 아이콘 움직임: [전체] 그룹 아이콘과 같은 빠르기·느낌 (기본 움직임)
+          child: PlusCloseIcon(open: _fabOpen, size: 26),
         ),
       ],
     );
@@ -3284,22 +3326,35 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                 Expanded(
                   child: _trashedBooks.isEmpty
                       ? Center(child: Text(_tr('휴지통이 비어 있어요', 'Trash is empty', '回收站为空', 'ゴミ箱は空です')))
-                      : ListView.separated(
+                      // 메인 화면 목록형처럼 파일마다 둥근 카드
+                      : ListView.builder(
                           // 창 위쪽에 생기던 빈 간격(상태표시줄 높이만큼 자동으로 들어가던 여백) 없앰
-                          padding: EdgeInsets.zero,
+                          padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
                           itemCount: _trashedBooks.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (_, idx) {
                             final tf = _trashedBooks[idx];
                             final fileName = tf.path.split(Platform.pathSeparator).last;
                             final trashExt = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
-                            return ListTile(
-                              // 줄 높이를 줄여 더 많이 보이게
-                              dense: true,
-                              visualDensity: VisualDensity.compact,
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 5),
+                              child: Container(
+                              decoration: BoxDecoration(
+                                // 창 바탕(회색)보다 한 단계 밝게
+                                color: widget.isDarkMode ? const Color(0xFF34343A) : Theme.of(ctx).colorScheme.surfaceContainerLowest,
+                                borderRadius: BorderRadius.circular(14),
+                                boxShadow: [
+                                  BoxShadow(color: Colors.black.withValues(alpha: widget.isDarkMode ? 0.28 : 0.13), blurRadius: 8, offset: const Offset(0, 2)),
+                                ],
+                              ),
+                              child: Material(
+                              type: MaterialType.transparency,
+                              child: ListTile(
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                              contentPadding: const EdgeInsets.only(left: 16, right: 6),
                               // 파일 이름 앞: 그 파일 형식 아이콘
-                              leading: FileTypeIcon(ext: trashExt, size: 24),
+                              leading: FileTypeIcon(ext: trashExt),
                               title: Text(_formatDisplayFileName(fileName), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              subtitle: trashExt.isEmpty ? null : Text('[$trashExt]', style: const TextStyle(fontSize: 12)),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -3318,7 +3373,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                     },
                                   ),
                                   IconButton(
-                                    icon: const TrashLidIcon(open: false, color: Colors.redAccent),
+                                    icon: const TrashLidIcon(open: false),
                                     tooltip: _tr('영구 삭제', 'Delete Forever', '永久删除', '完全削除'),
                                     onPressed: () async {
                                       final confirmDelete = await showPopDialog<bool>(
@@ -3355,6 +3410,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                   ),
                                 ],
                               ),
+                            ),
+                            ),
+                            ),
                             );
                           },
                         ),
@@ -3919,6 +3977,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   },
                 ),
                 ],
+                // 기본 스타일: 정렬 왼쪽에 새로 고침 (누르면 아이콘이 한 바퀴 돌며 서재를 다시 읽음)
+                if (!StorageService.simpleStyle)
+                  IconButton(
+                    icon: AnimatedRotation(
+                      turns: _refreshTurns,
+                      duration: Anim.ms(600),
+                      curve: Curves.easeInOutCubic,
+                      child: const Icon(Icons.refresh),
+                    ),
+                    tooltip: _tr('새로 고침', 'Refresh', '刷新', '更新'),
+                    onPressed: _refreshLibrary,
+                  ),
                 IconButton(
                   key: _sortBtnKey,
                   // 정렬 창을 열고 닫을 때 막대가 위아래로 자리를 바꿈
@@ -3986,7 +4056,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   : Row(
                       children: [
                         Expanded(
-                          child: Listener(
+                          child: _withPullRefresh(Listener(
                               behavior: HitTestBehavior.translucent,
                       // 선택: 파일을 꾹 누른 채 드래그 / 그냥 드래그: 목록 스크롤
                       // (꾹 누름이 인식되면 목록 스크롤은 자동으로 멈추고 선택만 진행됨)
@@ -4127,7 +4197,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                   : Theme.of(context).colorScheme.surfaceContainerLowest,
                               borderRadius: BorderRadius.circular(14),
                               boxShadow: [
-                                BoxShadow(color: Colors.black.withValues(alpha: widget.isDarkMode ? 0.28 : 0.07), blurRadius: 6, offset: const Offset(0, 1.5)),
+                                // 라이트: 카드와 바탕이 같은 흰색이라 그림자를 조금 더 진하게
+                                BoxShadow(color: Colors.black.withValues(alpha: widget.isDarkMode ? 0.28 : 0.13), blurRadius: 8, offset: const Offset(0, 2)),
                               ],
                             ),
                             child: Stack(
@@ -4257,7 +4328,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         ), slide: true);
                       },
                     ),
-                          ),
+                          )),
                         ),
                       ],
                     ),
@@ -4338,6 +4409,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             )
           // 기본: [+]는 아래 막대 가운데에
           : StorageService.simpleStyle ? _buildAddFab() : null,
+      // 선택 모드 단추·[+]: 돌면서 나오지 않고 그 자리에서 커지며 나타나고 작아지며 사라짐
+      floatingActionButtonAnimator: const _InPlaceFabAnimator(),
       bottomNavigationBar: _isSelectionMode || StorageService.simpleStyle ? null : _buildBottomBar(),
       ),
     );

@@ -1117,6 +1117,17 @@ class MainActivity : FlutterActivity() {
                 } catch (e: Throwable) {
                     result.error("CAPTURE_ERR", e.message, null)
                 }
+            } else if (call.method == "openUrl") {
+                // 웹 주소를 기기의 브라우저로 열기 (오픈소스 라이선스의 원본 링크 등)
+                val url = call.argument<String>("url") ?: ""
+                try {
+                    val view = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                    view.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(view)
+                    result.success(true)
+                } catch (e: Throwable) {
+                    result.success(false)
+                }
             } else if (call.method == "shareFile") {
                 // 파일을 형식 그대로 다른 앱으로 공유 (안드로이드 공유 창)
                 val path = call.argument<String>("path") ?: ""
