@@ -16,6 +16,7 @@ import 'screens/language_select_screen.dart';
 import 'screens/permission_guide_screen.dart';
 import 'screens/app_settings_screen.dart';
 import 'services/asset_licenses.dart';
+import 'services/scan_folders.dart';
 import 'screens/button_guide_screen.dart';
 import 'widgets/sheet_pull_to_close.dart';
 import 'widgets/file_type_icon.dart';
@@ -55,12 +56,6 @@ const List<Shadow> _whiteTextShadows = [Shadow(color: Color(0x66000000), blurRad
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   registerAssetLicenses(); // 함께 넣은 문서 엔진·글꼴 라이선스 (도움말 → 오픈소스 라이선스)
-  // 데이터 지우기 중 '모든 파일 접근'을 끄면 안드로이드가 앱을 다시 시작함 → 이어서 바로 지움
-  if (await StorageService.takePendingClearData()) {
-    try {
-      await const MethodChannel('ebook_reader/pdf_renderer').invokeMethod('clearAppData');
-    } catch (_) {}
-  }
   // 상태표시줄 본래 높이 (태블릿에서 상단바를 이만큼 항상 내려 둠)
   await _readStatusBarHeight();
   PaintingBinding.instance.imageCache.maximumSize = 3000;
@@ -1681,41 +1676,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       'cbz': ['cbz'],
     };
     final exts = extsOf[ext] ?? [ext];
-    bool allowed = await _pdfChannel.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
-    if (!allowed) {
-      if (!mounted) return;
-      final go = await showPopDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(_tr('파일 접근 허용', 'Allow file access', '允许访问文件', 'ファイルへのアクセスを許可')),
-          content: Text(_tr(
-            '기기에 저장된 파일을 찾으려면 파일 접근 권한이 필요해요\n다음 화면에서 FReader를 허용해 주세요',
-            'To find files on this device, FReader needs file access\nPlease allow it on the next screen',
-            '要查找设备中的文件，需要文件访问权限\n请在下一个页面允许 FReader',
-            '端末内のファイルを探すにはファイルへのアクセス権限が必要です\n次の画面で FReader を許可してください',
-          )),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_tr('허용하러 가기', 'Allow', '去允许', '許可する'))),
-          ],
-        ),
-      );
-      if (go != true || !mounted) return;
-      // 허용 화면에서 돌아올 때까지 기다림
-      final back = Completer<void>();
-      final listener = AppLifecycleListener(onResume: () {
-        if (!back.isCompleted) back.complete();
-      });
-      await _pdfChannel.invokeMethod('requestFontScan').catchError((_) => null);
-      await back.future.timeout(const Duration(minutes: 3), onTimeout: () {});
-      listener.dispose();
-      allowed = await _pdfChannel.invokeMethod<bool>('fontScanAllowed').catchError((_) => false) ?? false;
-      if (!mounted) return;
-      if (!allowed) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_tr('파일 접근이 허용되지 않아 찾지 못했어요', 'File access was not allowed', '未允许文件访问，无法查找', 'ファイルへのアクセスが許可されていません'))));
-        return;
-      }
-    }
+    // 찾을 곳: 사용자가 등록한 폴더 (없으면 먼저 하나 고르게 함) — 저장소 전체 접근 권한 없이
+    final folders = await ScanFolders.ensure(context, _tr);
+    if (folders.isEmpty || !mounted) return;
     setState(() => _groupScanBusy = true);
     try {
       final groupLabel = _localizeGroupName(group);
@@ -1744,10 +1707,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           searching = null;
         }
       }
-      // 너무 오래 걸리면 (기기 파일이 아주 많을 때) 10초에서 멈춤
-      List<String> paths;
+      // 너무 오래 걸리면 (폴더에 파일이 아주 많을 때) 20초에서 멈춤
+      List<FoundFile> found;
       try {
-        paths = await _pdfChannel.invokeListMethod<String>('scanDocFiles', {'exts': exts}).timeout(const Duration(seconds: 10)) ?? const <String>[];
+        found = await ScanFolders.scan(folders, exts).timeout(const Duration(seconds: 20));
       } catch (e) {
         closeSearching();
         if (e is! TimeoutException) rethrow;
@@ -1761,17 +1724,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       // 서재에 이미 있는 같은 형식 파일 (이름 기준) → 복사하지 않고 이 그룹으로만 옮김
       final library = <String, File>{for (final f in _allBooks) f.path.split('/').last: f};
       final seen = <String>{};
-      final newFiles = <String>[];
+      final newFiles = <FoundFile>[];
       final inLibrary = <File>[];
-      for (final p in paths) {
-        if (p.startsWith(appDir.path)) continue;
-        final name = p.split('/').last;
-        if (!seen.add(name)) continue;
+      for (final f in found) {
+        final name = f.name;
+        if (name.isEmpty || name.contains('/') || !seen.add(name)) continue;
         final have = library[name];
         if (have != null) {
           if (await StorageService.getBookGroup(have.path) != group) inLibrary.add(have);
         } else {
-          newFiles.add(p);
+          newFiles.add(f);
         }
       }
       for (final f in _allBooks) {
@@ -1806,12 +1768,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         await StorageService.setBookGroup(f.path, group);
         added++;
       }
-      for (final p in newFiles) {
-        try {
-          final saved = await File(p).copy('${appDir.path}/${p.split('/').last}');
-          await StorageService.setBookGroup(saved.path, group);
+      for (final f in newFiles) {
+        final dest = '${appDir.path}/${f.name}';
+        if (await ScanFolders.copyTo(f, dest)) {
+          await StorageService.setBookGroup(dest, group);
           added++;
-        } catch (_) {}
+        }
       }
       await _loadLibrary();
       if (!mounted) return;
@@ -2474,6 +2436,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Widget _buildAddFab() {
     final cs = Theme.of(context).colorScheme;
     // 아이콘만 있는 둥근 단추 ([+] 위에 세로로). [onTap]이 없으면 흐리게 (누를 수 없음). 이름은 꾹 누르면 보임
+    // 잘 보이게: 화면 바탕과 반대되는 색(라이트·편안함은 진한 색, 다크는 밝은 색) + 대표 색 테두리
+    final Color actBg = cs.inverseSurface;
+    final Color actFg = cs.onInverseSurface;
+    final Color actRing = AppColors.of(context);
     Widget action(String tag, Widget icon, String label, VoidCallback? onTap) => Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: SizedBox(
@@ -2484,10 +2450,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                 child: FloatingActionButton.small(
                   heroTag: tag,
                   tooltip: label,
-                  elevation: onTap == null ? 0 : 2,
-                  shape: const CircleBorder(),
-                  backgroundColor: cs.surfaceContainerHighest,
-                  foregroundColor: cs.onSurface,
+                  elevation: onTap == null ? 0 : 4,
+                  shape: CircleBorder(side: BorderSide(color: actRing, width: 2)),
+                  backgroundColor: actBg,
+                  foregroundColor: actFg,
                   onPressed: onTap == null
                       ? null
                       : () {
@@ -2519,8 +2485,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               action(
                   'fab_scan_group',
                   _groupScanBusy
-                      ? SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: cs.onSurface))
-                      : FolderSearchIcon(size: 22, color: cs.onSurface),
+                      ? SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: actFg))
+                      : FolderSearchIcon(size: 22, color: actFg),
                   _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'),
                   scanExt == null || _groupScanBusy ? null : () => _scanFilesIntoGroup(_selectedGroup, scanExt)),
               // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
@@ -4339,7 +4305,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       ),
       floatingActionButton: _isSelectionMode
           // 좁은 휴대폰에서 단추 세 개가 넘치지 않게 필요하면 살짝 줄여 맞춤
+          // (키가 서로 달라야 심플 스타일의 [+] ↔ 선택 단추가 바뀔 때도 나타나고 사라지는 움직임이 생김)
           ? ConstrainedBox(
+              key: const ValueKey('fab_selection'),
               constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width - 32),
               child: FittedBox(
               fit: BoxFit.scaleDown,
@@ -4408,7 +4376,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             ),
             )
           // 기본: [+]는 아래 막대 가운데에
-          : StorageService.simpleStyle ? _buildAddFab() : null,
+          : StorageService.simpleStyle ? KeyedSubtree(key: const ValueKey('fab_add'), child: _buildAddFab()) : null,
       // 선택 모드 단추·[+]: 돌면서 나오지 않고 그 자리에서 커지며 나타나고 작아지며 사라짐
       floatingActionButtonAnimator: const _InPlaceFabAnimator(),
       bottomNavigationBar: _isSelectionMode || StorageService.simpleStyle ? null : _buildBottomBar(),
