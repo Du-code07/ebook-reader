@@ -2,9 +2,9 @@
 import sys
 p = sys.argv[1]
 s = open(p, encoding='utf-8').read()
-# 쓰지 않는 민감 권한은 빼 둠 (모든 파일 접근·설치된 앱 목록)
+# 쓰지 않는 권한은 빼 둠 (저장소 읽기·모든 파일 접근·설치된 앱 목록)
 import re
-s = re.sub(r'\s*<uses-permission[^>]*(MANAGE_EXTERNAL_STORAGE|QUERY_ALL_PACKAGES)[^>]*/>', '', s)
+s = re.sub(r'\s*<uses-permission[^>]*(READ_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|QUERY_ALL_PACKAGES)[^>]*/>', '', s)
 if 'android.permission.CAMERA' not in s:
     s = s.replace('<application', '<uses-permission android:name="android.permission.CAMERA"/>\n    <uses-feature android:name="android.hardware.camera" android:required="false"/>\n    <application', 1)
 # 앱 잠금: 지문·얼굴 인식으로 잠금 해제

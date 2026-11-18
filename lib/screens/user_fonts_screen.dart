@@ -259,7 +259,8 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
             foregroundColor: cs.onSurface,
             onPressed: _busy ? null : _scan,
             icon: const Icon(Icons.manage_search),
-            label: Text(_t('글꼴 찾기', 'Find Fonts', '查找字体', 'フォント検索'), style: const TextStyle(fontWeight: FontWeight.w700)),
+            // 회색 바탕 위 진한 글씨라 대표 색 단추용 그림자를 끔 (그림자 때문에 글씨가 번져 보였음)
+            label: Text(_t('글꼴 찾기', 'Find Fonts', '查找字体', 'フォント検索'), style: const TextStyle(fontWeight: FontWeight.w700, shadows: [])),
           ),
           const SizedBox(height: 10),
           FloatingActionButton.extended(
@@ -288,7 +289,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
               ListTile(
                 dense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                leading: Icon(Icons.check_circle_outline, color: AppColors.mark(context), size: 20),
+                leading: Icon(Icons.check_circle_outline, color: Theme.of(context).brightness == Brightness.dark ? cs.onSurface : Colors.black, size: 20),
                 title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(note),
               ),

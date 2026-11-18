@@ -1283,7 +1283,7 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen>
                                 color: Colors.white,
                                 shadows: selected ? AppColors.sigShadows(context) : null,
                                 fontSize: 10.5,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
                               ),
                             ),
                           ),

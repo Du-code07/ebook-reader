@@ -341,10 +341,9 @@ class MainActivity : FlutterActivity() {
         Thread {
             val path = try { copyIncoming(uri, intent.type) } catch (_: Throwable) { null }
             runOnUiThread {
-                if (path != null) {
-                    pendingOpenPath = path
-                    openChannel?.invokeMethod("ping", null)
-                }
+                // 읽지 못하면 빈 값: 앱이 '파일 추가로 열어 달라'고 안내 (저장소 권한은 쓰지 않음)
+                pendingOpenPath = path ?: ""
+                openChannel?.invokeMethod("ping", null)
             }
         }.start()
     }
@@ -379,30 +378,8 @@ class MainActivity : FlutterActivity() {
         return out.absolutePath
     }
 
-    // ── 처음 시작 '앱 접근 권한 안내'의 [계속]: 카메라(와 안드로이드 12 이하 저장소 읽기) 허용 묻기 ──
-    private var pendingPermResult: MethodChannel.Result? = null
-
-    private fun requestStartupPermissions(result: MethodChannel.Result) {
-        val want = mutableListOf<String>()
-        if (declaredPermission(android.Manifest.permission.CAMERA)) want.add(android.Manifest.permission.CAMERA)
-        if (Build.VERSION.SDK_INT <= 32) want.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
-        val ask = want.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
-        pendingPermResult?.success(false)
-        pendingPermResult = result
-        if (ask.isEmpty()) {
-            result.success(true)
-            pendingPermResult = null
-            return
-        }
-        requestPermissions(ask.toTypedArray(), 4712)
-    }
-
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 4712) {
-            pendingPermResult?.success(true)
-            pendingPermResult = null
-        }
         if (requestCode == REQ_CAMERA_PERM_MAIN) {
             val cb = pendingCameraPermResult
             pendingCameraPermResult = null
@@ -583,8 +560,6 @@ class MainActivity : FlutterActivity() {
                     startActivity(android.content.Intent.createChooser(send, null))
                     result.success(true)
                 } catch (_: Throwable) { result.success(false) }
-            } else if (call.method == "requestStartupPermissions") {
-                requestStartupPermissions(result)
             } else if (call.method == "ensureCameraPermission") {
                 if (call.argument<Boolean>("ask") == false) {
                     result.success(if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
@@ -603,7 +578,7 @@ class MainActivity : FlutterActivity() {
                 } catch (_: Throwable) { result.success(false) }
             } else if (call.method == "clearAppData") {
                 // 앱 설정 > 데이터 지우기: 안드로이드 설정의 '데이터 삭제'와 같음 (앱이 바로 닫힘)
-                // 허용해 둔 권한(알림·카메라·저장소 읽기)도 함께 해제 (지우기는 권한을 처음 상태로 되돌리고, 13 이상은 직접 반납까지)
+                // 허용해 둔 권한(카메라)도 함께 해제 (지우기는 권한을 처음 상태로 되돌리고, 13 이상은 직접 반납까지)
                 try {
                     if (Build.VERSION.SDK_INT >= 33) {
                         val granted = listOf(

@@ -303,13 +303,14 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
       ),
       radioTheme: RadioThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? sig : null)),
       // 밝은·편안한 테마: 흰 글씨(대표 색·진한 바탕 위)에 옅은 그림자를 넣어 잘 보이게 ('파일 추가' 단추와 같은 그림자)
-      floatingActionButtonTheme: b == Brightness.dark ? null : const FloatingActionButtonThemeData(extendedTextStyle: TextStyle(shadows: _whiteTextShadows)),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(extendedTextStyle: TextStyle(fontWeight: FontWeight.w700, shadows: b == Brightness.dark ? null : _whiteTextShadows)),
       // 채운 단추는 모두 페이지 모드 창의 켜짐 스위치와 같은 대표 색 (라이트: 연두 + 흰 글씨·옅은 그림자 / 다크: 회색 + 흰 글씨)
       filledButtonTheme: FilledButtonThemeData(
         style: ButtonStyle(
           backgroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? null : sig),
           foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? null : Colors.white),
-          textStyle: b == Brightness.dark ? null : const WidgetStatePropertyAll(TextStyle(shadows: _whiteTextShadows)),
+          // 대표 색 바탕 위 흰 글씨는 굵게
+          textStyle: WidgetStatePropertyAll(TextStyle(fontWeight: FontWeight.w700, shadows: b == Brightness.dark ? null : _whiteTextShadows)),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
@@ -317,16 +318,16 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
           backgroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? null : sig),
           foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? null : Colors.white),
           iconColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? null : Colors.white),
-          textStyle: b == Brightness.dark ? null : const WidgetStatePropertyAll(TextStyle(shadows: _whiteTextShadows)),
+          textStyle: WidgetStatePropertyAll(TextStyle(fontWeight: FontWeight.w700, shadows: b == Brightness.dark ? null : _whiteTextShadows)),
         ),
       ),
       chipTheme: b == Brightness.dark
           ? null
           // 고른 칩: 대표 색 바탕 위 흰 글씨 + 옅은 그림자. 고르지 않은 칩: 바탕이 밝으니 진한 글씨 (예전엔 색이 비어 흰 바탕에 안 보였음)
-          : ChipThemeData(labelStyle: WidgetStateTextStyle.resolveWith((s) => s.contains(WidgetState.selected) ? const TextStyle(color: Colors.white, shadows: _whiteTextShadows) : TextStyle(color: scheme.onSurface))),
+          : ChipThemeData(labelStyle: WidgetStateTextStyle.resolveWith((s) => s.contains(WidgetState.selected) ? const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, shadows: _whiteTextShadows) : TextStyle(color: scheme.onSurface))),
       segmentedButtonTheme: b == Brightness.dark
           ? null
-          : SegmentedButtonThemeData(style: ButtonStyle(textStyle: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? const TextStyle(shadows: _whiteTextShadows) : null))),
+          : SegmentedButtonThemeData(style: ButtonStyle(textStyle: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? const TextStyle(fontWeight: FontWeight.w700, shadows: _whiteTextShadows) : null))),
       snackBarTheme: b == Brightness.dark ? null : const SnackBarThemeData(contentTextStyle: TextStyle(color: Colors.white, shadows: _whiteTextShadows)),
       // 아래에서 올라오는 창의 회색 막대는 창마다 SheetGrip으로 (제목과의 간격을 모든 창에서 같게)
       bottomSheetTheme: const BottomSheetThemeData(showDragHandle: false),
@@ -1042,6 +1043,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     try {
       final String? path = await _openFileChannel.invokeMethod<String>('take').catchError((_) => null);
       if (path == null || !mounted) return;
+      if (path.isEmpty) {
+        // 보낸 앱이 읽기 허락 없이 파일 경로만 넘긴 경우 (옛날 파일 관리자 등)
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(_tr('보낸 앱에서 파일을 읽을 수 없어요\n파일 추가로 열어 주세요', 'Could not read the file from the sending app\nPlease open it with Add Files',
+                '无法读取发送应用中的文件\n请通过添加文件打开', '送信元のアプリからファイルを読み込めません\nファイル追加で開いてください'))));
+        return;
+      }
       File src = File(path);
       if (!await src.exists()) return;
       String name = src.path.split(Platform.pathSeparator).last;
@@ -2436,10 +2444,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Widget _buildAddFab() {
     final cs = Theme.of(context).colorScheme;
     // 아이콘만 있는 둥근 단추 ([+] 위에 세로로). [onTap]이 없으면 흐리게 (누를 수 없음). 이름은 꾹 누르면 보임
-    // 잘 보이게: 화면 바탕과 반대되는 색(라이트·편안함은 진한 색, 다크는 밝은 색) + 대표 색 테두리
-    final Color actBg = cs.inverseSurface;
-    final Color actFg = cs.onInverseSurface;
-    final Color actRing = AppColors.of(context);
+    // 잘 보이게: 대표 색 바탕 + 흰 아이콘(그림자) + 테두리 (라이트·편안함은 대표 색보다 조금 진하게, 다크는 바탕과 구별되게 밝은 회색)
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
+    final Color actBg = AppColors.of(context);
+    final Color actFg = AppColors.onSig(context);
+    final Color actRing = dark ? cs.outline : Color.lerp(actBg, Colors.black, 0.22)!;
+    final List<Shadow>? actShadows = AppColors.sigShadows(context);
     Widget action(String tag, Widget icon, String label, VoidCallback? onTap) => Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: SizedBox(
@@ -2490,10 +2500,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'),
                   scanExt == null || _groupScanBusy ? null : () => _scanFilesIntoGroup(_selectedGroup, scanExt)),
               // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
-              action('fab_add_plain', const Icon(Icons.create_new_folder_outlined, size: 22), _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
-              action('fab_merge_pdf', const Icon(Icons.picture_as_pdf_outlined, size: 22), _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
-              action('fab_merge_img', const Icon(Icons.photo_library_outlined, size: 22), _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
-              action('fab_scan_doc', const Icon(Icons.document_scanner_outlined, size: 22), _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner),
+              action('fab_add_plain', Icon(Icons.create_new_folder_outlined, size: 22, shadows: actShadows), _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
+              action('fab_merge_pdf', Icon(Icons.picture_as_pdf_outlined, size: 22, shadows: actShadows), _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
+              action('fab_merge_img', Icon(Icons.photo_library_outlined, size: 22, shadows: actShadows), _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
+              action('fab_scan_doc', Icon(Icons.document_scanner_outlined, size: 22, shadows: actShadows), _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner),
             ];
             const double rowH = 50; // 버튼 높이 40 + 사이 10
             final int n = items.length;
@@ -4350,7 +4360,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     icon: Icon(Icons.drive_file_move_outline, size: 16, shadows: AppColors.sigShadows(context)),
                     label: Text(
                       '${_tr("그룹", "Group", "分组", "グループ")} (${_selectedFilePaths.length})',
-                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, shadows: AppColors.sigShadows(context)),
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, shadows: AppColors.sigShadows(context)),
                     ),
                   ),
                 ),

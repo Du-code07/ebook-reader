@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../services/storage_service.dart';
 import '../widgets/app_colors.dart';
@@ -12,15 +11,10 @@ class PermissionGuideScreen extends StatelessWidget {
   final String lang;
   final VoidCallback onDone;
 
-  static const MethodChannel _channel = MethodChannel('ebook_reader/pdf_renderer');
-
   String t(String ko, String en, String zh, String ja) => AppI18n.t(lang, ko: ko, en: en, zh: zh, ja: ja);
 
   Future<void> _continue() async {
-    // 카메라(와 안드로이드 12 이하의 저장소 읽기) 허용을 묻고, 이어서 '모든 파일 접근' 설정 화면을 엶 (돌아오면 다음으로)
-    try {
-      await _channel.invokeMethod('requestStartupPermissions');
-    } catch (_) {}
+    // 여기서는 허용 창을 띄우지 않음: 카메라는 문서 스캔을 처음 쓸 때 물음
     await StorageService.markPermissionGuideShown();
     onDone();
   }
@@ -97,12 +91,6 @@ class PermissionGuideScreen extends StatelessWidget {
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: cs.onSurface)),
                   const SizedBox(height: 18),
                   item(
-                    Icons.folder_open_rounded,
-                    t('파일 열람', 'Files', '文件访问', 'ファイルの閲覧'),
-                    t('기기에 있는 문서·글꼴 파일을 찾아 열고 가져오는 데 사용해요', 'Used to find, open and import documents and fonts on your device',
-                        '用于查找、打开和导入设备中的文档和字体文件', '端末内の文書・フォントファイルを探して開き、取り込むのに使います'),
-                  ),
-                  item(
                     Icons.photo_camera_rounded,
                     t('카메라', 'Camera', '相机', 'カメラ'),
                     t('문서를 스캔하는 데 사용해요', 'Used to scan documents', '用于扫描文档', '文書のスキャンに使います'),
@@ -118,9 +106,9 @@ class PermissionGuideScreen extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          t('선택적 접근권한에 동의하지 않아도 해당 기능 외 앱 서비스를 이용할 수 있어요',
-                              'You can use the rest of the app even if you don\'t allow optional permissions',
-                              '即使不同意可选权限，也可以使用该功能以外的应用服务', '任意の権限に同意しなくても、その機能以外のサービスは利用できます'),
+                          t('선택적 접근권한은 그 기능을 처음 쓸 때 허용 여부를 물어요\n허용하지 않아도 해당 기능 외 앱 서비스를 이용할 수 있어요',
+                              'Optional permissions are requested when you first use the feature\nYou can use the rest of the app even if you don\'t allow them',
+                              '可选权限会在首次使用相应功能时请求\n即使不允许，也可以使用该功能以外的应用服务', '任意の権限は、その機能を初めて使うときに許可を確認します\n許可しなくても、その機能以外のサービスは利用できます'),
                           style: TextStyle(fontSize: 13.5, height: 1.4, color: cs.onSurfaceVariant.withValues(alpha: 0.85)),
                         ),
                       ),

@@ -136,7 +136,7 @@ class _LanguageSelectScreenState extends State<LanguageSelectScreen> {
                               ? Icon(Icons.phone_android, size: 17, shadows: code == _selected ? AppColors.sigShadows(context) : null)
                               : Text(_badge(code), style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, shadows: code == _selected ? AppColors.sigShadows(context) : null)),
                         ),
-                        title: Text(languageOptionLabel(code), style: TextStyle(fontWeight: FontWeight.w600, shadows: code == _selected ? AppColors.sigShadows(context) : null)),
+                        title: Text(languageOptionLabel(code), style: TextStyle(fontWeight: code == _selected ? FontWeight.w700 : FontWeight.w600, shadows: code == _selected ? AppColors.sigShadows(context) : null)),
                         // 기본 시스템: 지금 휴대폰 언어에 따라 어떤 언어로 보일지
                         subtitle: code == 'system' ? Text(languageOptionLabel(StorageService.resolveSystemLanguage())) : null,
                         trailing: Icon(
@@ -266,7 +266,7 @@ class _ThemeSelectScreenState extends State<ThemeSelectScreen> {
                           foregroundColor: mode == _selected ? cs.onSecondaryContainer : cs.onSurfaceVariant,
                           child: Icon(_icon(mode), size: 18, shadows: mode == _selected ? AppColors.sigShadows(context) : null),
                         ),
-                        title: Text(_label(mode), style: TextStyle(fontWeight: FontWeight.w600, shadows: mode == _selected ? AppColors.sigShadows(context) : null)),
+                        title: Text(_label(mode), style: TextStyle(fontWeight: mode == _selected ? FontWeight.w700 : FontWeight.w600, shadows: mode == _selected ? AppColors.sigShadows(context) : null)),
                         trailing: Icon(
                           mode == _selected ? Icons.check_circle : Icons.radio_button_unchecked,
                           color: mode == _selected ? cs.onSecondaryContainer : cs.outline,
