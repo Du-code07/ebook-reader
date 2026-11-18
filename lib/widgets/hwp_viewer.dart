@@ -39,6 +39,24 @@ class HwpReaderController {
   /// 한글·워드 스크롤 보기: 북마크한 쪽들에 책갈피를 붙임
   Future<void> setScrollMarks(List<int> pages) async => _invoke?.call('setScrollMarks', [pages]);
 
+  /// 한글·워드 스크롤 보기 메모: 모든 쪽 메모 ({쪽: [{x, y, c(ARGB), w(쪽 너비 대비 굵기)}]})
+  Future<void> setScrollMemos(Map<int, List<Map<String, Object>>> all) async =>
+      _invoke?.call('setScrollMemos', [{for (final e in all.entries) '${e.key}': e.value}]);
+
+  /// 한글·워드 스크롤 보기 메모: 한 쪽만 바꿈
+  Future<void> setScrollMemo(int page, List<Map<String, Object>> strokes) async => _invoke?.call('setScrollMemo', [page, strokes]);
+
+  /// 한글·워드 스크롤 보기: 화면에 보이는 쪽들의 자리 (쪽 번호 → 화면 기준 네모, 쪽 전체 크기)
+  Future<Map<int, Rect>> visibleSlots() async {
+    final r = await _query?.call('visibleSlots', []);
+    if (r is! List) return const {};
+    double v(Object? x) => (x as num?)?.toDouble() ?? 0;
+    return {
+      for (final f in r)
+        if (f is Map) (f['page'] as num).toInt(): Rect.fromLTWH(v(f['left']), v(f['top']), v(f['width']), v(f['height'])),
+    };
+  }
+
   /// 한글·워드 스크롤 보기: 화면에 가장 많이 보이는 쪽 (모르면 null)
   Future<int?> mostVisiblePage() async {
     final r = await _query?.call('mostVisiblePage', []);

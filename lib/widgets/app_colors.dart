@@ -173,3 +173,26 @@ class Anim {
   /// 움직임 시간. 멈추기를 켜면 1ms (0이면 일부 스크롤 움직임이 오류를 내므로)
   static Duration ms(int v) => Duration(milliseconds: off.value ? 1 : v);
 }
+
+/// 밑에서 올라오는 창 맨 위: 가운데 회색 막대 + 그 아래 제목까지의 간격
+/// (밑에서 올라오는 모든 창이 같은 간격이 되게 함께 씀)
+class SheetGrip extends StatelessWidget {
+  const SheetGrip({super.key, this.below = 34});
+
+  /// 막대 아래 간격 (제목까지)
+  final double below;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(top: 10, bottom: below),
+      child: Center(
+        child: Container(
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(2)),
+        ),
+      ),
+    );
+  }
+}

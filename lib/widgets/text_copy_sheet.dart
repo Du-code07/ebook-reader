@@ -13,7 +13,6 @@ Future<void> showTextCopySheet(
     sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
     context: context,
     isScrollControlled: true,
-    showDragHandle: true,
     builder: (ctx) {
       final cs = Theme.of(ctx).colorScheme;
       return SafeArea(
@@ -23,6 +22,8 @@ Future<void> showTextCopySheet(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // 맨 위 회색 막대 + 제목까지 간격 (밑에서 올라오는 모든 창과 같게)
+              const SheetGrip(),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
                 child: Row(

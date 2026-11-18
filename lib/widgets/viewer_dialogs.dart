@@ -90,6 +90,10 @@ Widget _choiceDialogBody<T>(
   required List<(T, Widget, String, String)> options,
   required T selected,
   required ValueChanged<T> onTap,
+  /// 여러 개를 함께 고를 수 있을 때 (페이지 모드: 탭·슬라이드): 켜져 있는지
+  bool Function(T value)? isOn,
+  /// 고른 카드 바로 밑에 붙는 것 (예: 슬라이드 → 책처럼 넘기기)
+  Widget? Function(T value)? below,
 }) {
   final cs = Theme.of(context).colorScheme;
   final bool dark = Theme.of(context).brightness == Brightness.dark;
@@ -118,7 +122,7 @@ Widget _choiceDialogBody<T>(
       );
 
   Widget card(T value, Widget icon, String label, String desc) {
-    final bool on = value == selected;
+    final bool on = isOn?.call(value) ?? value == selected;
     final Widget tile = Container(
       width: wide ? 48 : 54,
       height: wide ? 48 : 54,
@@ -171,7 +175,7 @@ Widget _choiceDialogBody<T>(
               ],
             ),
           );
-    return Material(
+    final Widget m = Material(
       color: on ? selFill : offFill,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(22),
@@ -180,6 +184,9 @@ Widget _choiceDialogBody<T>(
       clipBehavior: Clip.antiAlias,
       child: InkWell(onTap: () => onTap(value), child: SizedBox(width: double.infinity, child: body)),
     );
+    final Widget? extra = below?.call(value);
+    if (extra == null) return m;
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [m, extra]);
   }
 
   final Widget dialog = Material(
@@ -420,6 +427,85 @@ Future<void> showPageDisplayDialog(
     await _afterDialogClosed();
     onChanged(selected);
   }
+}
+
+/// 페이지 모드 창에서 고른 것 (창을 닫을 때 바뀌었으면 돌려줌)
+typedef PageModeChoice = ({bool tap, bool slide, bool scroll, bool curl, bool barOff});
+
+/// 페이지 모드: 탭 / 슬라이드 / 스크롤 (탭과 슬라이드는 함께, 스크롤은 혼자)
+/// 슬라이드를 고르면 밑에 [책처럼 넘기기], 스크롤을 고르면 밑에 [스크롤바 끄기]가 나옴.
+/// 누를 때는 고르기만 하고, 창을 닫을 때 바뀐 것이 있으면 돌려줌
+Future<PageModeChoice?> showPageModeDialog(
+  BuildContext context, {
+  required ViewerTr tr,
+  required PageModeChoice current,
+  bool allowScroll = true,
+  bool allowCurl = true,
+}) async {
+  PageModeChoice c = current;
+  await _centerDialog<void>(context, (ctx) {
+    return StatefulBuilder(builder: (ctx, setState) {
+      final cs = Theme.of(ctx).colorScheme;
+      // 카드 밑에 붙는 켜기/끄기 한 줄
+      Widget sub(String label, bool value, ValueChanged<bool> onChanged) => Padding(
+            padding: const EdgeInsets.fromLTRB(18, 6, 4, 0),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => onChanged(!value),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                child: Row(children: [
+                  Icon(Icons.subdirectory_arrow_right_rounded, size: 20, color: cs.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(label, style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700, color: cs.onSurface))),
+                  Switch(value: value, onChanged: onChanged),
+                ]),
+              ),
+            ),
+          );
+      return _choiceDialogBody<String>(
+        ctx,
+        title: tr('페이지 모드', 'Page Mode', '翻页模式', 'ページモード'),
+        subtitle: tr('스크롤은 탭·슬라이드와 함께 쓸 수 없어요\n탭과 슬라이드는 함께 쓸 수 있어요', 'Scroll cannot be combined with Tap or Slide\nTap and Slide can be used together', '滚动不能与点击、滑动同时使用\n点击和滑动可以同时使用', 'スクロールはタップ・スライドと併用できません\nタップとスライドは併用できます'),
+        options: [
+          ('tap', const PageModeIcon(mode: 'tap'), tr('탭', 'Tap', '点击', 'タップ'), tr('화면 양옆을 눌러 넘기기', 'Tap the sides of the screen to turn', '点击屏幕两侧翻页', '画面の左右をタップしてめくる')),
+          ('slide', const PageModeIcon(mode: 'slide'), tr('슬라이드', 'Slide', '滑动', 'スライド'), tr('옆으로 밀어 넘기기', 'Swipe sideways to turn', '左右滑动翻页', '横にスワイプしてめくる')),
+          if (allowScroll)
+            ('scroll', const PageModeIcon(mode: 'scroll'), tr('스크롤', 'Scroll', '滚动', 'スクロール'), tr('쪽을 위아래로 이어 보기', 'Pages flow top to bottom', '页面上下连续显示', 'ページを上下に続けて表示')),
+        ],
+        selected: '',
+        isOn: (v) => switch (v) { 'tap' => c.tap, 'slide' => c.slide, _ => c.scroll },
+        below: (v) {
+          if (v == 'slide' && c.slide && allowCurl) {
+            return sub(tr('책처럼 넘기기', 'Book page turn', '书本翻页', '本のようにめくる'), c.curl, (b) => setState(() => c = (tap: c.tap, slide: c.slide, scroll: c.scroll, curl: b, barOff: c.barOff)));
+          }
+          if (v == 'scroll' && c.scroll) {
+            return sub(tr('스크롤바 끄기', 'Hide scroll bar', '隐藏滚动条', 'スクロールバーを隠す'), c.barOff, (b) => setState(() => c = (tap: c.tap, slide: c.slide, scroll: c.scroll, curl: c.curl, barOff: b)));
+          }
+          return null;
+        },
+        onTap: (v) => setState(() {
+          switch (v) {
+            case 'scroll':
+              // 스크롤을 켜면 탭·슬라이드는 꺼짐 (끄면 탭으로)
+              c = c.scroll ? (tap: true, slide: c.slide, scroll: false, curl: c.curl, barOff: c.barOff) : (tap: false, slide: false, scroll: true, curl: c.curl, barOff: c.barOff);
+            case 'tap':
+              final bool tap = !c.tap;
+              // 하나는 남겨 둠 (모두 끄면 넘길 수 없음)
+              if (!tap && !c.slide && !c.scroll) return;
+              c = (tap: tap, slide: c.slide, scroll: false, curl: c.curl, barOff: c.barOff);
+            default:
+              final bool slide = !c.slide;
+              if (!slide && !c.tap && !c.scroll) return;
+              c = (tap: c.tap, slide: slide, scroll: false, curl: c.curl, barOff: c.barOff);
+          }
+        }),
+      );
+    });
+  });
+  if (c == current) return null;
+  await _afterDialogClosed();
+  return c;
 }
 
 /// 화면 회전: 자동 / 세로 고정 / 가로 고정 ('auto' / 'portrait' / 'landscape'). 누르면 고르고, 창이 닫힐 때 바뀌었으면 돌려줌

@@ -836,6 +836,53 @@ function vMountRange(a, b) {
 let vMarks = new Set();
 function vApplyMarks() { vSlots.forEach((slot, i) => slot.classList.toggle('bm', vMarks.has(i))); }
 function setScrollMarks(pages) { vMarks = new Set((pages || []).map(Number)); vApplyMarks(); return true; }
+
+// FReader: 스크롤 보기 메모 — 넘겨 보기와 같은 쪽 메모(쪽 전체 크기 대비 0~1 자리)를 쪽 위에 그려 쪽과 함께 움직이고 확대·축소됨
+let vMemos = {}; // 쪽 번호 → [{ x: [..], y: [..], c: ARGB, w: 쪽 너비 대비 굵기 }]
+function vArgb(c) { c = Number(c) >>> 0; return `rgba(${(c >>> 16) & 255},${(c >>> 8) & 255},${c & 255},${((c >>> 24) & 255) / 255})`; }
+function vDrawMemo(i) {
+  const slot = vSlots[i]; if (!slot) return;
+  let svg = slot.querySelector(':scope > svg.vmemo');
+  const list = vMemos[i];
+  if (!list || !list.length) { svg?.remove(); return; }
+  const r = vRatios[i] || 1.414, H = 1000 * r;
+  if (!svg) {
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'vmemo'); svg.setAttribute('preserveAspectRatio', 'none');
+    slot.appendChild(svg);
+  }
+  svg.setAttribute('viewBox', `0 0 1000 ${H}`);
+  svg.innerHTML = list.map(s => {
+    const xs = s.x || [], ys = s.y || [];
+    if (!xs.length) return '';
+    let d = `M${(xs[0] * 1000).toFixed(1)} ${(ys[0] * H).toFixed(1)}`;
+    if (xs.length === 1) d += ` L${(xs[0] * 1000 + 0.1).toFixed(1)} ${(ys[0] * H).toFixed(1)}`;
+    for (let k = 1; k < xs.length; k++) d += ` L${(xs[k] * 1000).toFixed(1)} ${(ys[k] * H).toFixed(1)}`;
+    return `<path d="${d}" fill="none" stroke="${vArgb(s.c)}" stroke-width="${Math.max(0.5, (Number(s.w) || 0.004) * 1000).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }).join('');
+}
+function vApplyMemos() { for (let i = 0; i < vSlots.length; i++) vDrawMemo(i); }
+/** 모든 쪽 메모를 한꺼번에 ({쪽: 획들}) */
+function setScrollMemos(all) { vMemos = all || {}; vApplyMemos(); return true; }
+/** 한 쪽 메모만 바꿈 (쓰거나 지운 뒤) */
+function setScrollMemo(index, strokes) {
+  index = Number(index);
+  if (strokes && strokes.length) vMemos[index] = strokes; else delete vMemos[index];
+  vDrawMemo(index);
+  return true;
+}
+/** 화면에 보이는 쪽들의 자리 (화면 크기 대비 0~1): 메모를 쓸 때 쪽 안 자리로 바꾸는 데 씀 */
+function vVisibleSlots() {
+  if (!vertical || !vhost || !vTops.length) return [];
+  const W = window.innerWidth || 1, H = window.innerHeight || 1, st = vhost.scrollTop, VH = vhost.clientHeight || H;
+  const out = [];
+  for (let i = Math.max(0, vIndexAt(st) - 1); i < vSlots.length && vTops[i] < st + VH; i++) {
+    const q = vSlots[i].getBoundingClientRect();
+    if (q.bottom < 0 || q.top > H) continue;
+    out.push({ page: i, left: q.left / W, top: q.top / H, width: q.width / W, height: q.height / H });
+  }
+  return out;
+}
 // 화면에 가장 많이(비율로) 보이는 쪽 (스크롤 보기에서 북마크할 쪽)
 function vMostVisible() {
   if (!vertical || !vhost || !vSlots.length) return page;
@@ -884,6 +931,7 @@ function vSetRatio(i, r) {
   if (vRatios[i] === r) return;
   vRatios[i] = r;
   vSlots[i].style.height = `calc(var(--vw) * ${r})`;
+  if (vMemos[i]) vDrawMemo(i);
 }
 /** 지금 배율로 쪽 너비·자리를 다시 셈 (쪽을 다시 그리지 않음) */
 function vSize() {
@@ -925,6 +973,7 @@ function vLayout(keep) {
   pages.forEach((entry, i) => vSetRatio(i, entry.width > 0 ? entry.height / entry.width : 1.414));
   vRatios.length = pages.length;
   vSize();
+  vApplyMemos();
   vhost.scrollTop = vTops[anchor] + frac * (vTops[anchor + 1] - vTops[anchor]);
   vUpdate();
 }
@@ -1268,7 +1317,7 @@ function withoutZoom(fn) {
     try { return fn.apply(this, args); } finally { zoomDrawn = keep; zoomRedraw(); }
   };
 }
-window.freaderDocx = { setView, resetScrollZoom: vResetZoom, setScrollMarks, mostVisiblePage: vMostVisible, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy, setVertical, scrollToRatio: vScrollToRatio,
+window.freaderDocx = { setView, resetScrollZoom: vResetZoom, setScrollMarks, setScrollMemos, setScrollMemo, visibleSlots: vVisibleSlots, mostVisiblePage: vMostVisible, highlightBoxes: withoutZoom(highlightBoxes), beginDocument, appendChunk, openDocument, configure, display, next, previous, progress, highlightSelection: withoutZoom(highlightSelection), destroy, setVertical, scrollToRatio: vScrollToRatio,
   search, showSearchResult, clearSearch, headingCandidates, pageText, visibleTextBoxes: withoutZoom(visibleTextBoxes), pageRect: withoutZoom(pageRect), pageSizes,
   getState: () => ({ ready, page, count: pages.length, received, spread: options.spread, awaitingPassword, unavailableImages, imageCacheBytes, cachedImages: imageCache.size, visibleImages: activeImagePaths.size, maxBytes: MAX_BYTES, format: detectedFormat }) };
 window.addEventListener('pagehide', destroy, { once: true });

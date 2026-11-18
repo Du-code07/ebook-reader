@@ -57,7 +57,10 @@ Future<R?> _showChoice<R>(BuildContext context, bool centered, WidgetBuilder bui
 /// '확인'을 누르면 (고른 값, 스위치 값)을 돌려준다. 그냥 닫으면 null.
 /// 고르기 창 아래에 붙는 스위치 하나 (켜고 끌 때마다 [onChanged]가 바로 불림)
 class SheetToggle {
-  const SheetToggle({required this.label, this.subtitle, this.icon, required this.value, required this.onChanged, this.onlyFor});
+  const SheetToggle({required this.label, this.subtitle, this.icon, required this.value, required this.onChanged, this.onlyFor, this.defaultValue = false});
+
+  /// [초기화]를 누르면 돌아가는 값
+  final bool defaultValue;
 
   final String label;
   final String? subtitle;
@@ -84,6 +87,9 @@ Future<(T, bool)?> showChoiceSheetWithToggle<T>({
   /// 첫 스위치 아래에 더 붙일 스위치들
   List<SheetToggle> moreToggles = const [],
   bool centered = false,
+  /// 있으면 맨 아래 [완료] 대신 [초기화]: 누르면 고르기는 [resetTo], 스위치는 모두 기본값으로 (창은 열린 채)
+  String? resetLabel,
+  T? resetTo,
 }) {
   return _showChoice<(T, bool)>(
     context,
@@ -100,6 +106,8 @@ Future<(T, bool)?> showChoiceSheetWithToggle<T>({
       toggleValue: toggleValue,
       onChanged: onChanged,
       moreToggles: moreToggles,
+      resetLabel: resetLabel,
+      resetTo: resetTo,
     ),
   );
 }
@@ -117,7 +125,12 @@ class _ChoiceSheet<T> extends StatefulWidget {
     this.onChanged,
     this.moreToggles = const [],
     this.centered = false,
+    this.resetLabel,
+    this.resetTo,
   });
+
+  final String? resetLabel;
+  final T? resetTo;
 
   /// 가운데 창으로 띄웠는지 (아래 여백을 위아래 같게)
   final bool centered;
@@ -140,6 +153,21 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
   late T _selected = widget.current;
   late bool _toggle = widget.toggleValue;
   late final List<bool> _more = [for (final t in widget.moreToggles) t.value];
+
+  void _reset() {
+    setState(() {
+      if (widget.resetTo != null) _selected = widget.resetTo as T;
+      _toggle = false;
+    });
+    widget.onChanged?.call((_selected, _toggle));
+    for (int i = 0; i < widget.moreToggles.length; i++) {
+      final t = widget.moreToggles[i];
+      if (_more[i] != t.defaultValue) {
+        setState(() => _more[i] = t.defaultValue);
+        t.onChanged(t.defaultValue);
+      }
+    }
+  }
 
   Widget _toggleRow(ColorScheme cs, {IconData? icon, required String label, String? subtitle, required bool value, required ValueChanged<bool> onChanged}) {
     return InkWell(
@@ -178,8 +206,10 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // 밑에서 올라오는 창: 맨 위 회색 막대 + 제목까지 간격 (가운데 창은 위 여백만)
+          if (widget.centered) const SizedBox(height: 22) else const SheetGrip(),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 22, 24, 14),
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 14),
             child: Text(widget.title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
           ),
           Flexible(
@@ -277,8 +307,26 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
               ),
             ),
           ),
+          // 초기화: 고르기와 스위치를 모두 기본값으로 (바로 적용, 창은 열린 채)
+          if (widget.resetLabel != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+              child: SizedBox(
+                height: 52,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: cs.onSurface,
+                    foregroundColor: cs.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  icon: const Icon(Icons.refresh_rounded),
+                  onPressed: _reset,
+                  label: Text(widget.resetLabel!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            )
           // 스위치가 함께 있는 창은 맨 아래 '완료'로 닫음
-          if (widget.toggleLabel != null)
+          else if (widget.toggleLabel != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
               child: SizedBox(

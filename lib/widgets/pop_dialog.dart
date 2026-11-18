@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
 
@@ -89,12 +90,8 @@ class PopPanelRoute<T> extends PopupRoute<T> {
     if (fromBottom) {
       return BottomRise(
         animation: animation,
-        child: Material(
-          color: Theme.of(context).colorScheme.surfaceContainerHigh,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          clipBehavior: Clip.antiAlias,
-          child: SafeArea(top: false, child: SingleChildScrollView(child: Builder(builder: builder))),
-        ),
+        gripBelow: 8, // 바로 아래 제목 줄(ListTile)에 위 여백이 있어 합치면 다른 창과 같은 간격
+        child: SafeArea(top: false, child: SingleChildScrollView(child: Builder(builder: builder))),
       );
     }
     final double w = width.clamp(200.0, screen.width - 16).toDouble();
@@ -132,21 +129,76 @@ class PopPanelRoute<T> extends PopupRoute<T> {
   }
 }
 
-/// 화면 밑에서 위로 올라오는 창 자리 (아래쪽에 붙고, 넓은 화면에서는 가운데 640까지, 높이는 화면의 85%까지)
-class BottomRise extends StatelessWidget {
-  const BottomRise({super.key, required this.animation, required this.child});
+/// 화면 밑에서 위로 올라오는 창 (아래쪽에 붙고, 넓은 화면에서는 가운데 640까지, 높이는 화면의 85%까지)
+/// 맨 위 회색 막대를 아래로 끌면 따라 내려오고, 충분히 내리면 닫힘
+class BottomRise extends StatefulWidget {
+  const BottomRise({super.key, required this.animation, required this.child, this.gripBelow = 34});
   final Animation<double> animation;
   final Widget child;
+
+  /// 회색 막대 아래 간격 (제목이 있으면 제목까지)
+  final double gripBelow;
+
+  @override
+  State<BottomRise> createState() => _BottomRiseState();
+}
+
+class _BottomRiseState extends State<BottomRise> with SingleTickerProviderStateMixin {
+  double _drag = 0; // 아래로 끌어 내린 만큼
+  late final AnimationController _back = AnimationController(vsync: this, duration: Anim.ms(200))
+    ..addListener(() => setState(() => _drag = _from * (1 - Curves.easeOutCubic.transform(_back.value))));
+  double _from = 0;
+
+  @override
+  void dispose() {
+    _back.dispose();
+    super.dispose();
+  }
+
+  void _end(DragEndDetails d) {
+    // 많이 내렸거나 빠르게 내리면 닫음, 아니면 제자리로
+    if (_drag > 90 || (d.primaryVelocity ?? 0) > 700) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+    _from = _drag;
+    _back.forward(from: 0);
+  }
 
   @override
   Widget build(BuildContext context) {
     final Size screen = MediaQuery.sizeOf(context);
-    final slide = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    final slide = CurvedAnimation(parent: widget.animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
     return Align(
       alignment: Alignment.bottomCenter,
       child: SlideTransition(
         position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(slide),
-        child: ConstrainedBox(constraints: BoxConstraints(maxHeight: screen.height * 0.85, maxWidth: 640), child: child),
+        child: Transform.translate(
+          offset: Offset(0, _drag),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: screen.height * 0.85, maxWidth: 640),
+            child: Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 회색 막대 자리: 아래로 끌어 창 내리기
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onVerticalDragStart: (_) => _back.stop(),
+                    onVerticalDragUpdate: (d) => setState(() => _drag = math.max(0.0, _drag + d.delta.dy)),
+                    onVerticalDragEnd: _end,
+                    child: SheetGrip(below: widget.gripBelow),
+                  ),
+                  Flexible(child: widget.child),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

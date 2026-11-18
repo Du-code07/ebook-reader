@@ -155,7 +155,7 @@ class _TapZoneScreenState extends State<TapZoneScreen> {
               child: OutlinedButton.icon(
                 onPressed: isDefault ? null : () => _save(StorageService.tapZonesDefault),
                 icon: const Icon(Icons.refresh_rounded),
-                label: Text(_t('기본값으로 되돌리기', 'Restore Default', '恢复默认', 'デフォルトに戻す')),
+                label: Text(_t('초기화', 'Reset', '重置', 'リセット')),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: cs.onSurface,
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),

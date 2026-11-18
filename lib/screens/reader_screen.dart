@@ -506,79 +506,49 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _tintHold.watch(context);
   }
 
-  /// 뷰어 설정의 '페이지 모드'(탭·스크롤·슬라이드)와 '페이지 전환 버튼'
-  /// 스크롤은 탭·슬라이드와 함께 켤 수 없음 (스크롤을 켜면 둘 다 꺼짐). 탭과 슬라이드는 함께 사용 가능
-  List<Widget> _pageModeSettings(StateSetter setModalState) {
-    Future<void> apply(VoidCallback change) async {
-      setState(change);
-      setModalState(() {});
-      // 스크롤로 설정된 채 PPT를 보는 중: 여기서 바꾼 것은 이 파일에서만 (다른 파일은 다시 스크롤)
-      if (_isPresentation && _storedPageModeScroll) {
-        _onPageModeChanged();
-        return;
+  /// 페이지 모드 고르기 (도구 모음): 탭 / 슬라이드(책처럼 넘기기) / 스크롤(스크롤바 끄기). 창을 닫을 때 적용
+  Future<void> _pickPageMode() async {
+    final r = await showPageModeDialog(
+      context,
+      tr: _tr,
+      current: (tap: _pageModeTap, slide: _useSwipeTurn, scroll: _pageModeScroll, curl: StorageService.pageCurl, barOff: ScrollThumbBar.off.value),
+      allowScroll: !_isPresentation, // PPT는 스크롤 보기 없음 (슬라이드 단위로 넘김)
+      allowCurl: !_isPresentation && !_isSpreadsheet,
+    );
+    if (r == null || !mounted) return;
+    final bool tapBefore = _pageModeTap;
+    final bool modeChanged = r.tap != _pageModeTap || r.slide != _useSwipeTurn || r.scroll != _pageModeScroll;
+    setState(() {
+      if (r.scroll != _pageModeScroll) _mutateScrollMode(r.scroll);
+      if (!r.scroll) {
+        _pageModeTap = r.tap;
+        _useSwipeTurn = r.slide;
       }
-      await StorageService.setPageModeTap(_pageModeTap);
-      await StorageService.setPageModeScroll(_pageModeScroll);
-      await StorageService.setUseSwipeTurn(_useSwipeTurn);
+    });
+    if (r.curl != StorageService.pageCurl) {
+      await StorageService.setPageCurl(r.curl);
+      _syncCurlSwipe();
+    }
+    if (r.barOff != ScrollThumbBar.off.value) {
+      ScrollThumbBar.off.value = r.barOff;
+      await StorageService.setScrollBarOff(r.barOff);
+    }
+    if (modeChanged) {
+      // 스크롤로 설정된 채 PPT를 보는 중: 여기서 바꾼 것은 이 파일에서만 (다른 파일은 다시 스크롤)
+      if (!(_isPresentation && _storedPageModeScroll)) {
+        await StorageService.setPageModeTap(_pageModeTap);
+        await StorageService.setPageModeScroll(_pageModeScroll);
+        await StorageService.setUseSwipeTurn(_useSwipeTurn);
+      }
       _onPageModeChanged();
     }
+    // 탭을 켜면 탭 영역 안내를 보여 줌
+    if (mounted && !tapBefore && _pageModeTap && !StorageService.tapGuideOff) _showTapGuide();
+  }
 
+  /// 뷰어 설정의 '페이지 전환 버튼' (음량 버튼·S펜 버튼)
+  List<Widget> _pageSwitchSettings(StateSetter setModalState) {
     return [
-      _settingsHeader(Icons.swipe_outlined, _tr('페이지 모드', 'Page Mode', '翻页模式', 'ページモード')),
-      const SizedBox(height: 4),
-      Text(
-        _tr('스크롤은 탭·슬라이드와 함께 쓸 수 없어요\n탭과 슬라이드는 함께 쓸 수 있어요', 'Scroll cannot be combined with Tap or Slide\nTap and Slide can be used together', '滚动不能与点击、滑动同时使用；点击和滑动可以同时使用', 'スクロールはタップ・スライドと併用できません\nタップとスライドは併用できます'),
-        style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-      ),
-      const SizedBox(height: 6),
-      SettingGroup(
-        children: [
-          SettingToggle(
-            label: Text(_tr('탭', 'Tap', '点击', 'タップ')),
-            selected: _pageModeTap,
-            onSelected: (val) => apply(() {
-              _pageModeTap = val;
-              if (val) _pageModeScroll = false;
-            }),
-          ),
-          SettingToggle(
-            label: Text(_tr('슬라이드', 'Slide', '滑动', 'スライド')),
-            selected: _useSwipeTurn,
-            onSelected: (val) => apply(() {
-              _useSwipeTurn = val;
-              if (val) _pageModeScroll = false;
-            }),
-          ),
-          // 슬라이드를 고르면 바로 밑에: 책처럼 넘기기 (PPT·엑셀은 쓰지 않으므로 숨김)
-          if (_useSwipeTurn && !_isPresentation && !_isSpreadsheet)
-            SettingToggle(
-              label: Text(_tr('책처럼 넘기기', 'Book page turn', '书本翻页', '本のようにめくる')),
-              selected: StorageService.pageCurl,
-              onSelected: (val) => apply(() {
-                StorageService.setPageCurl(val);
-                _syncCurlSwipe();
-              }),
-            ),
-          // PPT는 스크롤 보기 없음 (슬라이드 단위로 넘김)
-          if (!_isPresentation)
-          SettingToggle(
-            label: Text(_tr('스크롤', 'Scroll', '滚动', 'スクロール')),
-            selected: _pageModeScroll,
-            onSelected: (val) => apply(() => _mutateScrollMode(val)),
-          ),
-          // 스크롤을 고르면 바로 밑에: 오른쪽(왼손잡이는 왼쪽) 회색 스크롤 막대 끄기
-          if (_pageModeScroll)
-            SettingToggle(
-              label: Text(_tr('스크롤바 끄기', 'Hide scroll bar', '隐藏滚动条', 'スクロールバーを隠す')),
-              selected: ScrollThumbBar.off.value,
-              onSelected: (val) => apply(() {
-                ScrollThumbBar.off.value = val;
-                StorageService.setScrollBarOff(val);
-              }),
-            ),
-        ],
-      ),
-      const SizedBox(height: 26),
       // EPUB 스크롤 보기에서는 버튼이 챕터를 넘김
       _settingsHeader(Icons.smart_button_outlined, _isEpub && _pageModeScroll
           ? _tr('챕터 넘김 버튼 (동시 사용 가능)', 'Chapter Turn Buttons (Multiple allowed)', '翻章按钮 (可同时启用)', '章めくりボタン (同時使用可)')
@@ -617,13 +587,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     });
   }
 
-  /// 뷰어 설정 초기화: 탭 + 슬라이드 / 음량 버튼 / 진행도 하단 / 메모 도구 모음 하단 / 정보 표시 없음
+  /// 뷰어 설정 초기화: 왼손잡이 끔 / 음량 버튼 / 진행도 하단 / 메모 도구 모음 하단 / 정보 표시 없음
+  /// (페이지 모드는 도구 모음의 [페이지 모드]에서 정함)
   Future<void> _resetViewerSettings(StateSetter setModalState) async {
-    final bool scrollWas = _pageModeScroll;
     setState(() {
-      _pageModeTap = !_isSpreadsheet;
-      _useSwipeTurn = true;
-      _pageModeScroll = false;
       _useVolumeTurn = true;
       _useSpenTurn = false;
       _progressBarPosSetting = 'bottom';
@@ -632,28 +599,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _quickMenuSide = 'right'; // 왼손잡이 끔
     });
     ScrollThumbBar.leftHanded.value = false;
-    ScrollThumbBar.off.value = false;
     setModalState(() {});
-    await StorageService.setPageModeTap(true);
-    await StorageService.setUseSwipeTurn(true);
-    await StorageService.setPageModeScroll(false);
     await StorageService.setUseVolumeTurn(true);
     await StorageService.setUseSpenTurn(false);
     await StorageService.setProgressBarPosition('bottom');
     await StorageService.setMemoToolbarPosition('bottom');
     await StorageService.setFooterInfoMode('none');
     await StorageService.setQuickMenuSide('right');
-    await StorageService.setScrollBarOff(false);
-    await StorageService.setPageCurl(true);
-    _syncCurlSwipe();
-    _storedPageModeScroll = false;
-    if (scrollWas) {
-      _onPageModeChanged();
-    } else if (!_isOfflineDocument) {
-      try {
-        _epubController.setSwipeEnabled(_useSwipeTurn && !_curlOn);
-      } catch (_) {}
-    }
   }
 
   /// 페이지 모드가 바뀌었을 때: 보던 자리에서 다시 보여 줌 (EPUB은 넘김/스크롤 방식이 바뀌어 다시 염)
@@ -661,14 +613,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (!mounted) return;
     setState(() {
       _initialCfi = _currentCfi;
-      // 스크롤 보기에서는 메모를 쓰지 않음
-      if (_pageModeScroll) {
+      // 스크롤 보기에서는 메모를 쓰지 않음 (한글·워드는 스크롤에서도 쪽 메모를 씀)
+      if (_pageModeScroll && !_docVertical) {
         _isMemoMode = false;
         _isEraserMode = false;
         _allowFingerDrawing = false;
         _isStylusDown = false;
       }
     });
+    if (_docVertical) unawaited(_pushScrollMemos());
     // 스크롤을 끄면 스크롤에서 보던 쪽을 그대로 이어서
     if (!_pageModeScroll && _isOfflineDocument && !_isTxt && !_isSpreadsheet && _docPageCount > 0) {
       unawaited(_hwpController.display('$_documentPositionPrefix:$_docPage'));
@@ -1181,6 +1134,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _chapters = const [];
     });
     if (_isTxt || _isSpreadsheet) return;
+    if (_isWordOrHwp) unawaited(_pushScrollMemos());
     // 쪽 크기: 두 쪽 보기 메모를 쪽마다 나눌 때 씀 (받은 뒤 두 쪽 보기면 메모를 다시 읽음)
     _hwpController.pageSizes().then((sizes) {
       if (!mounted || sizes == null) return;
@@ -1572,19 +1526,148 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   // ── 메모 되돌리기 / 다시 실행 (현재 보고 있는 페이지 위치 기준) ──
   Future<void> _applyMemoStrokes(String locKey, List<MemoStroke> strokes) async {
+    final pg = RegExp(r'^pg:(\d+)$').firstMatch(locKey);
+    if (_docVertical && pg != null) {
+      await _setScrollPageMemo(int.parse(pg.group(1)!), strokes);
+      if (mounted) setState(() {});
+      return;
+    }
     if (locKey == _currentPageLocationKey) {
       setState(() => _memoStrokes = List<MemoStroke>.of(strokes));
     }
     await _saveMemo(locKey, strokes);
   }
 
+  /// 되돌리기 대상: 스크롤 보기는 문서의 모든 쪽 (가장 최근에 고친 쪽부터), 그 밖은 지금 보기
+  List<Object> get _memoHistoryKeys =>
+      _docVertical ? [for (int i = 0; i < _docPageCount; i++) 'pg:$i'] : [_currentPageLocationKey];
+
+  List<MemoStroke> _memoNow(Object key) {
+    final pg = key is String ? RegExp(r'^pg:(\d+)$').firstMatch(key) : null;
+    if (_docVertical && pg != null) return _scrollMemos[int.parse(pg.group(1)!)] ?? const [];
+    return _memoStrokes;
+  }
+
+  // ── 한글·워드 스크롤 보기 메모: 넘겨 보기와 같은 쪽 메모('pg:쪽')를 문서가 쪽 위에 그려 쪽과 함께 스크롤·확대됨 ──
+  Map<int, List<MemoStroke>> _scrollMemos = {};
+  Map<int, Rect> _scrollSlots = {}; // 화면에 보이는 쪽 자리 (메모 그리는 층 좌표, 쪽 전체)
+  Future<void>? _scrollSlotsLoad;
+  final Map<int, List<MemoStroke>> _scrollEraseBefore = {};
+
+  static List<Map<String, Object>> _jsStrokes(List<MemoStroke> list) => [
+        for (final s in list)
+          if (s.dxList.isNotEmpty)
+            {'x': s.dxList, 'y': s.dyList, 'c': s.colorValue, 'w': s.strokeWidth < 0.5 ? s.strokeWidth : s.strokeWidth / 400},
+      ];
+
+  /// 저장된 모든 쪽 메모를 문서에 알림 (문서를 열었을 때·스크롤 보기로 바꿨을 때)
+  Future<void> _pushScrollMemos() async {
+    if (!_isWordOrHwp) return;
+    final all = await StorageService.getAllPageStrokes(widget.filePath);
+    if (!mounted) return;
+    _scrollMemos = all;
+    await _hwpController.setScrollMemos({for (final e in all.entries) e.key: _jsStrokes(e.value)});
+  }
+
+  /// 한 쪽 메모를 바꿈 (문서에 다시 그리고, [save]면 저장)
+  Future<void> _setScrollPageMemo(int page, List<MemoStroke> strokes, {bool save = true}) async {
+    if (strokes.isEmpty) {
+      _scrollMemos.remove(page);
+    } else {
+      _scrollMemos[page] = strokes;
+    }
+    await _hwpController.setScrollMemo(page, _jsStrokes(strokes));
+    if (save) await StorageService.saveLocationStrokes(widget.filePath, 'pg:$page', strokes);
+  }
+
+  /// 화면에 보이는 쪽 자리를 다시 받음 (펜을 댈 때마다: 그 사이 스크롤·확대했을 수 있어서)
+  Future<void> _refreshScrollSlots() async {
+    final f = await _hwpController.visibleSlots();
+    if (!mounted) return;
+    final stageBox = _book.layerKey.currentContext?.findRenderObject() as RenderBox?;
+    final layerBox = _memoLayerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (stageBox == null || layerBox == null || !stageBox.attached || !layerBox.attached || !stageBox.hasSize) return;
+    final Offset shift = layerBox.globalToLocal(stageBox.localToGlobal(Offset.zero));
+    final Size z = stageBox.size;
+    _scrollSlots = {
+      for (final e in f.entries)
+        e.key: Rect.fromLTWH(e.value.left * z.width, e.value.top * z.height, e.value.width * z.width, e.value.height * z.height).shift(shift),
+    };
+  }
+
+  /// 획이 시작한 쪽 (그 쪽 안이 아니면 가장 가까운 쪽)
+  MapEntry<int, Rect>? _scrollSlotAt(Offset p) {
+    MapEntry<int, Rect>? best;
+    double bestD = double.infinity;
+    for (final e in _scrollSlots.entries) {
+      final r = e.value;
+      final double dx = p.dx < r.left ? r.left - p.dx : (p.dx > r.right ? p.dx - r.right : 0.0);
+      final double dy = p.dy < r.top ? r.top - p.dy : (p.dy > r.bottom ? p.dy - r.bottom : 0.0);
+      final double d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  /// 스크롤 보기: 다 쓴 획을 시작한 쪽에 그 쪽 좌표로 저장
+  Future<void> _finishScrollStroke() async {
+    await _scrollSlotsLoad;
+    if (!mounted) return;
+    final pts = List<Offset>.of(_activeStrokePoints);
+    final slot = pts.isEmpty ? null : _scrollSlotAt(pts.first);
+    if (slot == null || slot.value.width <= 0 || slot.value.height <= 0) {
+      setState(() => _activeStrokePoints.clear());
+      return;
+    }
+    final Rect r = slot.value;
+    final stroke = MemoStroke(
+      dxList: [for (final p in pts) (p.dx - r.left) / r.width],
+      dyList: [for (final p in pts) (p.dy - r.top) / r.height],
+      colorValue: _penColor.toARGB32(),
+      // 굵기는 쪽 너비에 대한 비율 (확대해 쓰면 그만큼 가늘게 저장 → 넘겨 보기와 같은 굵기)
+      strokeWidth: _penWidth * _hwpController.scrollZoom / r.width,
+    );
+    final before = _scrollMemos[slot.key] ?? const <MemoStroke>[];
+    _memoHistory.record('pg:${slot.key}', before);
+    await _setScrollPageMemo(slot.key, [...before, stroke]);
+    if (mounted) setState(() => _activeStrokePoints.clear());
+  }
+
+  /// 스크롤 보기 지우개: 보이는 쪽마다 닿은 획을 지움 (저장은 펜을 뗄 때)
+  void _eraseScrollAt(Offset pos) {
+    final Offset prev = _lastEraserPos ?? pos;
+    _lastEraserPos = pos;
+    for (final e in _scrollSlots.entries) {
+      final list = _scrollMemos[e.key];
+      if (list == null || list.isEmpty) continue;
+      final next = _erasedStrokes(list, prev, pos, _MemoMap.rect(e.value));
+      if (next == null) continue;
+      _scrollEraseBefore.putIfAbsent(e.key, () => list);
+      unawaited(_setScrollPageMemo(e.key, next, save: false));
+    }
+  }
+
+  /// 스크롤 보기 지우개를 뗐을 때: 지운 쪽들을 저장하고 되돌리기 기록에 남김
+  Future<void> _finishScrollErase() async {
+    final changed = Map<int, List<MemoStroke>>.of(_scrollEraseBefore);
+    _scrollEraseBefore.clear();
+    for (final e in changed.entries) {
+      _memoHistory.record('pg:${e.key}', e.value);
+      await StorageService.saveLocationStrokes(widget.filePath, 'pg:${e.key}', _scrollMemos[e.key] ?? const []);
+    }
+    if (changed.isNotEmpty && mounted) setState(() {});
+  }
+
   Future<void> _undoMemo() async {
-    final r = _memoHistory.undo([_currentPageLocationKey], (_) => _memoStrokes);
+    final r = _memoHistory.undo(_memoHistoryKeys, _memoNow);
     if (r != null) await _applyMemoStrokes(r.$1 as String, r.$2);
   }
 
   Future<void> _redoMemo() async {
-    final r = _memoHistory.redo([_currentPageLocationKey], (_) => _memoStrokes);
+    final r = _memoHistory.redo(_memoHistoryKeys, _memoNow);
     if (r != null) await _applyMemoStrokes(r.$1 as String, r.$2);
   }
 
@@ -1631,13 +1714,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       MemoToolButton(
         icon: Icons.undo,
         label: _tr('되돌리기', 'Undo', '撤销', '元に戻す'),
-        enabled: _memoHistory.canUndo([_currentPageLocationKey]),
+        enabled: _memoHistory.canUndo(_memoHistoryKeys),
         onTap: _undoMemo,
       ),
       MemoToolButton(
         icon: Icons.redo,
         label: _tr('다시 실행', 'Redo', '重做', 'やり直し'),
-        enabled: _memoHistory.canRedo([_currentPageLocationKey]),
+        enabled: _memoHistory.canRedo(_memoHistoryKeys),
         onTap: _redoMemo,
       ),
       MemoToolButton(
@@ -1645,6 +1728,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         color: Colors.redAccent,
         label: _tr('전체 지우기', 'Clear All Strokes', '清空全部手写', '手書きを全消去'),
         onTap: () async {
+          // 스크롤 보기: 화면에 가장 많이 보이는 쪽의 메모를 지움
+          if (_docVertical) {
+            final int? p = await _hwpController.mostVisiblePage();
+            if (p == null || !mounted) return;
+            final before = _scrollMemos[p] ?? const <MemoStroke>[];
+            if (before.isEmpty) return;
+            _memoHistory.record('pg:$p', before);
+            await _setScrollPageMemo(p, []);
+            if (mounted) setState(() {});
+            return;
+          }
           final locKey = _currentPageLocationKey;
           if (_memoStrokes.isNotEmpty) _memoHistory.record(locKey, _memoStrokes);
           setState(() => _memoStrokes = []);
@@ -1700,7 +1794,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       default:
         return Positioned(
           key: const ValueKey('memo_toolbar_bottom'),
-          bottom: baseBottom + bottomBarSpace,
+          // 파일 도구 모음이 보이면 그 위에 (도구 모음 높이 52 + 사이 8)
+          bottom: baseBottom + bottomBarSpace + (_showControls ? 60.0 : 0.0),
           left: 12 + _safeSides.left,
           right: 12 + _safeSides.right,
           child: Center(child: MemoToolbar(children: items)),
@@ -1776,7 +1871,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
     final Offset prevPos = _lastEraserPos ?? localPos;
     _lastEraserPos = localPos;
+    final next = _erasedStrokes(_memoStrokes, prevPos, localPos, map);
+    if (next != null) setState(() => _memoStrokes = next);
+  }
 
+  /// [prevPos]→[localPos]로 문지른 지우개에 닿은 부분을 뺀 획들 (지운 게 없으면 null)
+  List<MemoStroke>? _erasedStrokes(List<MemoStroke> strokes, Offset prevPos, Offset localPos, _MemoMap map) {
     final double hitRadius = math.max<double>(15.0, _penWidth * 3.2);
     final double minEraserX = math.min(prevPos.dx, localPos.dx) - hitRadius;
     final double maxEraserX = math.max(prevPos.dx, localPos.dx) + hitRadius;
@@ -1786,7 +1886,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     bool modifiedAny = false;
     final nextStrokes = <MemoStroke>[];
 
-    for (final s in _memoStrokes) {
+    for (final s in strokes) {
       if (s.dxList.isEmpty) continue;
 
       double sMinX = double.infinity, sMaxX = double.negativeInfinity;
@@ -1872,9 +1972,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       flushRun();
     }
 
-    if (modifiedAny) {
-      setState(() => _memoStrokes = nextStrokes);
-    }
+    return modifiedAny ? nextStrokes : null;
   }
 
   /// 뷰어 표시 설정 (PDF 뷰어와 같은 UI + EPUB 글자 크기·다크 모드 설정 포함)
@@ -1911,16 +2009,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<void> _showViewerSettingsSheet() async {
-    // 뷰어 설정에서 탭을 켜고 나가면 탭 존 가이드라인을 보여 줌
-    final bool tapBefore = _pageModeTap;
-    try {
-      await _showViewerSettingsSheetInner();
-    } finally {
-      if (mounted && !tapBefore && _pageModeTap && !StorageService.tapGuideOff) _showTapGuide();
-    }
-  }
-
-  Future<void> _showViewerSettingsSheetInner() async {
     // 내용이 맨 위일 때 아래로 끌면 창이 따라 내려오고, 충분히 내리면 닫힘
     final sheetCtrl = BottomSheet.createAnimationController(this)
       ..duration = Anim.ms(250)
@@ -1940,20 +2028,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           child: SingleChildScrollView(
             controller: sheetScroll,
             physics: sheetPhysics,
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 위쪽 가운데 회색 막대 (앱 설정 창처럼)
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 14),
-                    decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(2)),
-                  ),
-                ),
+                // 위쪽 가운데 회색 막대 + 제목까지 간격 (밑에서 올라오는 모든 창과 같게)
+                const SheetGrip(),
                 _settingsHeader(Icons.tune, _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'), isTitle: true),
                 const SizedBox(height: 12),
                 // 글자 크기 (EPUB): 구역 이름 띠는 남은 너비만큼 (예전에는 띠가 끝없이 넓어지려 해 줄 전체가 안 보였음)
@@ -1984,9 +2065,27 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ),
                   ],
                 ),
+                if (!_isOfflineDocument) const SizedBox(height: 26),
+                // 왼손잡이: 스크롤 막대를 왼쪽에 (끄면 오른쪽)
+                _settingsHeader(Icons.back_hand_outlined, _tr('왼손잡이', 'Left-handed', '左手模式', '左利き')),
+                const SizedBox(height: 8),
+                SettingGroup(
+                  children: [
+                    SettingToggle(
+                      label: Text(_tr('스크롤 막대를 왼쪽으로', 'Scroll bar on the left', '滚动条放在左侧', 'スクロールバーを左に')),
+                      selected: _quickMenuSide == 'left',
+                      onSelected: (val) async {
+                        final side = val ? 'left' : 'right';
+                        await StorageService.setQuickMenuSide(side);
+                        ScrollThumbBar.leftHanded.value = val;
+                        setState(() => _quickMenuSide = side);
+                        setModalState(() {});
+                      },
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 26),
-                ..._pageModeSettings(setModalState),
-
+                ..._pageSwitchSettings(setModalState),
                 const SizedBox(height: 26),
                 _settingsHeader(Icons.linear_scale, _tr('진행도 UI 위치', 'Progress Bar Position', '进度条位置', '進行度バーの位置')),
                 const SizedBox(height: 8),
@@ -2053,25 +2152,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   ],
                 ),
                 const SizedBox(height: 26),
-                // 왼손잡이: 스크롤 막대를 왼쪽에 (끄면 오른쪽)
-                _settingsHeader(Icons.back_hand_outlined, _tr('왼손잡이', 'Left-handed', '左手模式', '左利き')),
-                const SizedBox(height: 8),
-                SettingGroup(
-                  children: [
-                    SettingToggle(
-                      label: Text(_tr('스크롤 막대를 왼쪽으로', 'Scroll bar on the left', '滚动条放在左侧', 'スクロールバーを左に')),
-                      selected: _quickMenuSide == 'left',
-                      onSelected: (val) async {
-                        final side = val ? 'left' : 'right';
-                        await StorageService.setQuickMenuSide(side);
-                        ScrollThumbBar.leftHanded.value = val;
-                        setState(() => _quickMenuSide = side);
-                        setModalState(() {});
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 26),
                 _settingsHeader(Icons.info_outline, _tr('하단 정보 표시', 'Footer Info Display', '底部信息显示', '下部情報表示')),
                 const SizedBox(height: 8),
                 SettingGroup(
@@ -2096,7 +2176,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     ),
                   ],
                 ),
-                // 초기화: 기본값으로 (페이지 모드·페이지 전환 버튼·진행도 UI·메모 도구 모음·하단 정보)
+                // 초기화: 기본값으로 (왼손잡이·페이지 전환 버튼·진행도 UI·메모 도구 모음·하단 정보)
                 SettingDoneButton(label: _tr('초기화', 'Reset', '重置', 'リセット'), onPressed: () => _resetViewerSettings(setModalState)),
               ],
             ),
@@ -2248,6 +2328,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // 맨 위 회색 막대 + 제목까지 간격 (제목 줄 위 여백만큼 덜어 냄)
+            const SheetGrip(below: 26),
             bookmarkSheetHeader(
               ctx,
               tr: _tr,
@@ -2965,7 +3047,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final stageBox = _book.layerKey.currentContext?.findRenderObject() as RenderBox?;
     if (stageBox == null || !stageBox.hasSize || stageBox.size.isEmpty) return img;
     final Size stage = stageBox.size;
-    final List<MemoStroke> strokes = _memoStrokes;
+    final List<MemoStroke> strokes = _docVertical ? const [] : _memoStrokes;
     final bool ribbon = !_pageModeScroll && _isCurrentPageBookmarked && _epubZoomScale <= 1.03;
     if (strokes.isEmpty && !ribbon) return img;
     final rec = ui.PictureRecorder();
@@ -3276,8 +3358,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       clipBehavior: Clip.none,
       children: [
         content,
-        // 저장된 메모: 넘기는 종이 밑 (넘길 때 함께 넘어가고, 새 쪽 메모는 드러나는 만큼만 보임)
-        if (_memoStrokes.isNotEmpty)
+        // 저장된 메모: 넘기는 종이 밑 (넘길 때 함께 넘어가고, 새 쪽 메모는 드러나는 만큼만 보임).
+        // 한글·워드 스크롤 보기는 문서가 쪽 위에 직접 그림 (쪽과 함께 스크롤)
+        if (_memoStrokes.isNotEmpty && !_docVertical)
           Positioned.fill(
             child: IgnorePointer(
               child: LayoutBuilder(
@@ -3770,6 +3853,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       anchor: tl & box.size,
       barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
       selected: _docComfort ? 'comfort' : _epubBgTheme,
+      compact: true, // 글자 길이만큼만 (오른쪽 빈 공간 없이)
       items: [
         ('white', _tr('라이트', 'Light', '浅色', 'ライト'), Icons.light_mode_outlined, null),
         ('dark', _tr('다크', 'Dark', '深色', 'ダーク'), Icons.dark_mode_outlined, null),
@@ -4150,6 +4234,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     super.dispose();
   }
 
+  /// 도구 모음 [페이지 모드] 아이콘: 스크롤 / 탭·슬라이드 / 슬라이드 / 탭
+  String get _pageModeIconMode => _pageModeScroll ? 'scroll' : (_pageModeTap && _useSwipeTurn ? 'tap+slide' : (_useSwipeTurn ? 'slide' : 'tap'));
+
   // 도구 모음(화면 아래 가로 막대)에 들어가는 기능들
   List<QuickToolItem> _buildQuickMenuItems() {
     return [
@@ -4193,6 +4280,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         ),
         tooltip: _tr('페이지 표시', 'Page Display', '页面显示', 'ページ表示'),
         onTap: _pickPageDisplay,
+        closeAfterTap: true,
+      ),
+      // 페이지 모드 (탭 / 슬라이드 / 스크롤): 지금 모드 아이콘
+      QuickToolItem(
+        icon: PageModeIcon(mode: _pageModeIconMode, color: Colors.white, size: 19),
+        tooltip: _tr('페이지 모드', 'Page Mode', '翻页模式', 'ページモード'),
+        onTap: _pickPageMode,
         closeAfterTap: true,
       ),
       // TXT는 읽기 방향 전환을 쓰지 않음
@@ -4248,8 +4342,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
-          // 스크롤 모드는 쪽이 이어져 있어 메모를 쓰지 않음 (읽기 방향 전환과 같은 안내)
-          if (_pageModeScroll) {
+          // 스크롤 모드 메모는 한글·워드만 (그 밖의 파일은 쪽이 이어져 있어 메모를 쓰지 않음)
+          if (_pageModeScroll && !_docVertical) {
             ScaffoldMessenger.of(context)
               ..clearSnackBars()
               ..showSnackBar(SnackBar(
@@ -4851,6 +4945,22 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                         }
                         final bool useEraser =
                             _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
+                        // 한글·워드 스크롤 보기: 쪽 자리를 다시 받아 쪽에 붙여 씀
+                        if (_docVertical) {
+                          final pos = event.localPosition;
+                          _lastEraserPos = null;
+                          _scrollSlotsLoad = _refreshScrollSlots();
+                          if (useEraser) {
+                            _scrollSlotsLoad!.then((_) {
+                              if (mounted && _isStylusDown) _eraseScrollAt(pos);
+                            });
+                          } else {
+                            setState(() => _activeStrokePoints
+                              ..clear()
+                              ..add(pos));
+                          }
+                          return;
+                        }
                         if (useEraser) {
                           _eraseStartStrokes = _memoStrokes;
                           _eraseStrokeAt(event.localPosition, _memoMapInLayer(Size(drawWidth, drawHeight)));
@@ -4866,7 +4976,11 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                         final bool useEraser =
                             _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
                         if (useEraser) {
-                          _eraseStrokeAt(event.localPosition, _memoMapInLayer(Size(drawWidth, drawHeight)));
+                          if (_docVertical) {
+                            _eraseScrollAt(event.localPosition);
+                          } else {
+                            _eraseStrokeAt(event.localPosition, _memoMapInLayer(Size(drawWidth, drawHeight)));
+                          }
                         } else {
                           setState(() {
                             _activeStrokePoints.add(event.localPosition);
@@ -4880,6 +4994,14 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                         }
                         final bool useEraser =
                             _isEraserMode || event.kind == PointerDeviceKind.invertedStylus;
+                        if (_docVertical) {
+                          if (useEraser) {
+                            await _finishScrollErase();
+                          } else if (_activeStrokePoints.isNotEmpty) {
+                            await _finishScrollStroke();
+                          }
+                          return;
+                        }
                         if (useEraser) {
                           _finishEraseHistory();
                           final locKey = _currentPageLocationKey;
@@ -4911,6 +5033,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       },
                       onStylusCancel: (_) {
                         _lastEraserPos = null;
+                        if (_docVertical) unawaited(_finishScrollErase());
                         _finishEraseHistory();
                         setState(() {
                           _isStylusDown = false;
@@ -4922,7 +5045,8 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                           strokes: const [],
                           currentPoints: _activeStrokePoints,
                           currentColor: _penColor,
-                          currentWidth: _penWidth * _epubZoomController.value.getMaxScaleOnAxis(), // 확대한 만큼 굵게 (쪽 기준 굵기)
+                          // 확대한 만큼 굵게 (쪽 기준 굵기)
+                          currentWidth: _penWidth * (_docVertical ? _hwpController.scrollZoom : _epubZoomController.value.getMaxScaleOnAxis()),
                         ),
                       ),
                     );
@@ -4961,9 +5085,6 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                 ),
               ),
 
-            // S펜 필기 모드 하단 미니 툴바 (진행바 UI 위에 위치 + 색상과 선 굵기 사이에 지우개 배치 + 선 굵기 숫자 터치 입력)
-            if (_isMemoMode) _buildMemoToolbar(bottomPadding),
-
             // 파일 내 단어 검색 막대
             if (_findOpen)
               Positioned(
@@ -4997,17 +5118,8 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                           const btnConstraints = BoxConstraints(minWidth: 38, minHeight: 40);
                           const btnPadding = EdgeInsets.symmetric(horizontal: 6, vertical: 4);
 
+                          // 순서: 파일 내 단어 검색 · (PPT 슬라이드 쇼) · 배경 색상 · 목차 (뷰어 설정은 도구 모음 맨 오른쪽)
                           final actionButtons = <Widget>[
-                            // TXT·PPT는 목차 없음
-                            if (!_isTxt && !_isPresentation)
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.list, color: Colors.white, size: 17),
-                              tooltip: _tr('목차', 'Contents', '目录', '目次'),
-                              onPressed: _openToc,
-                            ),
                             // 파일 내 단어 검색 (한글·워드·PPT·TXT)
                             if (_snapEligible || _isPresentation || _isTxt)
                               IconButton(
@@ -5054,13 +5166,15 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                                   onPressed: () => _pickBgTheme(btnCtx),
                                 ),
                               ),
+                            // TXT·PPT는 목차 없음
+                            if (!_isTxt && !_isPresentation)
                             IconButton(
                               visualDensity: VisualDensity.compact,
                               padding: btnPadding,
                               constraints: btnConstraints,
-                              icon: const Icon(Icons.tune, color: Colors.white, size: 17),
-                              tooltip: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
-                              onPressed: _showViewerSettingsSheet,
+                              icon: const Icon(Icons.list, color: Colors.white, size: 17),
+                              tooltip: _tr('목차', 'Contents', '目录', '目次'),
+                              onPressed: _openToc,
                             ),
                           ];
 
@@ -5115,10 +5229,21 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                 left: 12.0 + _safeSides.left,
                 right: 12.0 + _safeSides.right,
                 bottom: math.max<double>(bottomPadding + 16.0, 20.0) + 8.0 +
-                    ((_progressBarPos == 'bottom' || _useQuickNavTurn) ? 44.0 : 0.0) +
-                    ((_isMemoMode && _memoToolbarPos == 'bottom') ? 56.0 : 0.0),
-                child: Center(child: QuickToolBar(items: _buildQuickMenuItems())),
+                    ((_progressBarPos == 'bottom' || _useQuickNavTurn) ? 44.0 : 0.0),
+                child: Center(
+                  child: QuickToolBar(
+                    items: _buildQuickMenuItems(),
+                    // 뷰어 설정: 맨 오른쪽에 고정
+                    pinned: QuickToolItem(
+                      icon: const Icon(Icons.tune, color: Colors.white, size: 18),
+                      tooltip: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
+                      onTap: _showViewerSettingsSheet,
+                    ),
+                  ),
+                ),
               ),
+            // 메모 도구 모음: 파일 도구 모음보다 위에 (아래에 둘 때는 도구 모음 바로 위)
+            if (_isMemoMode) _buildMemoToolbar(bottomPadding),
             // PPT 슬라이드 쇼: 맨 위에서 모든 터치를 받는다
             if (_slideShow) _buildSlideShowLayer(),
           ],

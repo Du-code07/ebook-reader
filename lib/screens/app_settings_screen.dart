@@ -168,7 +168,9 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     await showChoiceSheetWithToggle<String>(
       context: context,
       title: _t('파일 표시 방식', 'Bookshelf View Mode', '文件显示样式', 'ファイル表示形式'),
-      confirmLabel: _t('완료', 'Done', '完成', '完了'),
+      // 완료 대신 초기화: 목록형, 모든 스위치 끔
+      resetLabel: _t('초기화', 'Reset', '重置', 'リセット'),
+      resetTo: 'list',
       options: [
         ChoiceOption('list', _viewModeLabel('list'), icon: Icons.view_list_rounded),
         ChoiceOption('grid', _viewModeLabel('grid'), icon: Icons.grid_view_rounded),
@@ -432,37 +434,35 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: !widget.asSheet,
-        // 창으로 띄울 때: 위 손잡이 줄과 겹치지 않게 제목·화살표를 살짝 내림
-        toolbarHeight: widget.asSheet ? kToolbarHeight + 8 : null,
-        leading: widget.asSheet
-            ? Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: IconButton(
-                  icon: const Icon(Icons.keyboard_arrow_down),
-                  tooltip: _t('닫기', 'Close', '关闭', '閉じる'),
-                  onPressed: () => Navigator.maybePop(context),
+      appBar: widget.asSheet
+          // 창으로 띄울 때: 맨 위 회색 막대 + 제목까지 간격 (밑에서 올라오는 모든 창과 같게), 그 아래 [∨ 앱 설정]
+          ? PreferredSize(
+              preferredSize: const Size.fromHeight(10 + 4 + 22 + 48),
+              child: Material(
+                color: Theme.of(context).appBarTheme.backgroundColor ?? cs.surface,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SheetGrip(below: 22),
+                    SizedBox(
+                      height: 48,
+                      child: Row(children: [
+                        const SizedBox(width: 4),
+                        IconButton(
+                          icon: const Icon(Icons.keyboard_arrow_down),
+                          tooltip: _t('닫기', 'Close', '关闭', '閉じる'),
+                          onPressed: () => Navigator.maybePop(context),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(_t('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
+                            style: (Theme.of(context).textTheme.titleLarge ?? const TextStyle()).copyWith(fontWeight: FontWeight.w800)),
+                      ]),
+                    ),
+                  ],
                 ),
-              )
-            : null,
-        title: Padding(
-          padding: EdgeInsets.only(top: widget.asSheet ? 8 : 0),
-          child: Text(_t('앱 설정', 'App Settings', '应用设置', 'アプリ設定'), style: const TextStyle(fontWeight: FontWeight.w800)),
-        ),
-        // 위에서 아래로 끌어 닫을 수 있다는 손잡이 줄
-        flexibleSpace: widget.asSheet
-            ? Align(
-                alignment: Alignment.topCenter,
-                child: Container(
-                  margin: const EdgeInsets.only(top: 6),
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(color: cs.onSurfaceVariant.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(2)),
-                ),
-              )
-            : null,
-      ),
+              ),
+            )
+          : AppBar(title: Text(_t('앱 설정', 'App Settings', '应用设置', 'アプリ設定'), style: const TextStyle(fontWeight: FontWeight.w800))),
       body: SafeArea(
         top: !widget.asSheet,
         child: ListView(
@@ -471,18 +471,18 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
           padding: const EdgeInsets.only(bottom: 16),
           children: [
             _section(_t('일반', 'General', '通用', '一般')),
-            _item(
-              icon: Icons.dark_mode_outlined,
-              title: _t('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'),
-              subtitle: _themeLabel(_themeMode),
-              onTap: _pickTheme,
-            ),
             // 앱 스타일: 기본(아래 막대) / 심플(위 막대)
             _item(
               icon: Icons.dashboard_customize_outlined,
               title: _t('앱 스타일', 'App Style', '应用样式', 'アプリのスタイル'),
               subtitle: _styleLabel(StorageService.appStyle.value),
               onTap: _pickStyle,
+            ),
+            _item(
+              icon: Icons.dark_mode_outlined,
+              title: _t('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'),
+              subtitle: _themeLabel(_themeMode),
+              onTap: _pickTheme,
             ),
             _item(
               icon: Icons.language,

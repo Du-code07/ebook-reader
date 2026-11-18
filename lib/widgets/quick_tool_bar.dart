@@ -71,9 +71,12 @@ class _WiggleOnChangeState extends State<WiggleOnChange> with SingleTickerProvid
 /// 도구 모음: 화면 아래에 둥근 가로 막대로 아이콘을 한 줄로 늘어놓음
 /// (아이콘이 많으면 옆으로 밀어서 봄). 누르면 그 기능을 바로 실행
 class QuickToolBar extends StatelessWidget {
-  const QuickToolBar({super.key, required this.items, this.onClose});
+  const QuickToolBar({super.key, required this.items, this.onClose, this.pinned});
 
   final List<QuickToolItem> items;
+
+  /// 맨 오른쪽에 고정되는 항목 (옆으로 밀어도 움직이지 않음, 예: 뷰어 설정)
+  final QuickToolItem? pinned;
 
   /// 누른 항목이 메뉴를 닫는 항목일 때 부름 (상단바·진행바도 함께 숨김)
   final VoidCallback? onClose;
@@ -92,38 +95,40 @@ class QuickToolBar extends StatelessWidget {
         builder: (context, c) {
           // 아이콘 사이를 좁게 (한 칸 40), 화면보다 길면 옆으로 밀어서 봄
           const double slot = 40;
-          final row = Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final it in items)
-                SizedBox(
-                  width: slot,
-                  height: 52,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    icon: Opacity(
-                      opacity: it.enabled ? 1 : 0.3,
-                      child: IconTheme.merge(data: const IconThemeData(color: Colors.white, size: 20), child: it.icon),
-                    ),
-                    tooltip: it.tooltip,
-                    onPressed: it.enabled
-                        ? () {
-                            it.onTap();
-                            if (it.closeAfterTap) onClose?.call();
-                          }
-                        : null,
+          Widget button(QuickToolItem it) => SizedBox(
+                width: slot,
+                height: 52,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  icon: Opacity(
+                    opacity: it.enabled ? 1 : 0.3,
+                    child: IconTheme.merge(data: const IconThemeData(color: Colors.white, size: 20), child: it.icon),
                   ),
+                  tooltip: it.tooltip,
+                  onPressed: it.enabled
+                      ? () {
+                          it.onTap();
+                          if (it.closeAfterTap) onClose?.call();
+                        }
+                      : null,
                 ),
-            ],
-          );
-          return ClipRRect(
-            borderRadius: BorderRadius.circular(22),
+              );
+          final row = Row(mainAxisSize: MainAxisSize.min, children: [for (final it in items) button(it)]);
+          final scroller = ClipRRect(
+            borderRadius: BorderRadius.horizontal(left: const Radius.circular(22), right: Radius.circular(pinned == null ? 22 : 0)),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: EdgeInsets.only(left: 8, right: pinned == null ? 8 : 2),
               child: row,
             ),
           );
+          if (pinned == null) return scroller;
+          // 고정 항목: 밀리는 아이콘들과 가는 세로줄로 나눔
+          return Row(mainAxisSize: MainAxisSize.min, children: [
+            Flexible(child: scroller),
+            Container(width: 1, height: 24, color: Colors.white.withValues(alpha: 0.18)),
+            Padding(padding: const EdgeInsets.only(left: 2, right: 8), child: button(pinned!)),
+          ]);
         },
       ),
     );

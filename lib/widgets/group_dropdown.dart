@@ -15,7 +15,7 @@ const String kFavoritesGroupKey = '__favorites__';
 
 /// [☰ 그룹] 단추 바로 아래로 펼쳐지는 그룹 목록
 /// - 맨 위 [전체] · [즐겨찾기]는 고정 (옮기기·꾹 누르기 없음)
-/// - 나머지 그룹은 오른쪽 손잡이(≡)를 끌어 순서 바꾸기, 꾹 누르면 [이름 수정 / 그룹 삭제]
+/// - 나머지 그룹은 왼쪽 손잡이(≡)를 끌어 순서 바꾸기, 꾹 누르면 목록 안 오른쪽 끝에 [이름 수정 / 그룹 삭제]
 /// - 맨 아래 [+ 그룹 추가]
 /// 고른 그룹 이름(또는 [kFavoritesGroupKey])을 돌려줌. 그냥 닫으면 null
 class GroupDropdownRoute extends PopupRoute<String> {
@@ -84,7 +84,7 @@ class GroupDropdownRoute extends PopupRoute<String> {
 
   @override
   Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) {
-    if (fromBottom) return BottomRise(animation: animation, child: _GroupDropdownPanel(route: this));
+    if (fromBottom) return BottomRise(animation: animation, gripBelow: 10, child: _GroupDropdownPanel(route: this));
     final Size screen = MediaQuery.sizeOf(context);
     final EdgeInsets pad = MediaQuery.paddingOf(context);
     final double left = math.max(8.0, anchor.left);
@@ -130,7 +130,6 @@ class _GroupDropdownPanel extends StatefulWidget {
 class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
   late List<String> _groups = List.of(widget.route.groups);
   Offset _grab = Offset.zero;
-  final Map<String, GlobalKey> _nameKeys = {};
   final GlobalKey _panelKey = GlobalKey();
 
   GroupDropdownRoute get r => widget.route;
@@ -168,9 +167,7 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
               Expanded(
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  // 꾹 누르면 이 이름 바로 오른쪽에 편집 메뉴가 뜸
                   child: Text(label,
-                      key: _nameKeys.putIfAbsent(value, GlobalKey.new),
                       overflow: TextOverflow.ellipsis,
                       // 위 그룹 이름 칸(칩)과 같은 글꼴·크기, 둘 다 굵게
                       style: (Theme.of(context).textTheme.labelLarge ?? const TextStyle()).copyWith(color: fg, fontWeight: FontWeight.w700, shadows: sel ? AppColors.sigShadows(context) : null)),
@@ -187,22 +184,19 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
 
   Future<void> _groupMenu(BuildContext rowContext, String g) async {
     HapticFeedback.selectionClick();
-    final nameCtx = _nameKeys[g]?.currentContext ?? rowContext;
-    // 편집 버튼은 그룹 목록 위가 아니라 목록 오른쪽 바깥에 놓음
-    double? besideLeft;
-    final bool phone = MediaQuery.sizeOf(context).shortestSide < 600;
+    // 편집 창(단추)은 그룹 목록 안쪽 오른쪽 끝에, 누른 줄 높이로 (목록 밖으로 나가지 않게)
+    double? besideRight;
     final panelBox = _panelKey.currentContext?.findRenderObject() as RenderBox?;
     final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
     if (panelBox != null && panelBox.hasSize) {
-      final Offset panelTL = panelBox.localToGlobal(Offset.zero, ancestor: overlayBox);
-      // 휴대폰: 목록 안쪽으로 살짝 들어오게 (목록 너비의 56% 자리부터). 태블릿: 목록 오른쪽 바깥
-      besideLeft = phone ? panelTL.dx + panelBox.size.width * 0.56 : panelTL.dx + panelBox.size.width + 10;
+      besideRight = panelBox.localToGlobal(Offset.zero, ancestor: overlayBox).dx + panelBox.size.width;
     }
     if (!mounted) return;
-    final action = await showScaleMenu<String>(nameCtx, [
+    // 줄 높이에 맞추려고 이름 대신 줄 전체를 기준으로
+    final action = await showScaleMenu<String>(rowContext, [
       ('rename', r.renameLabel, Icons.edit_outlined, null),
       ('delete', r.deleteLabel, Icons.delete_outline, Colors.redAccent),
-    ], beside: true, besideLeft: besideLeft, overList: phone);
+    ], beside: true, besideRight: besideRight, overList: true);
     if (!mounted || action == null) return;
     if (action == 'rename') {
       final name = await r.onRename(g);
@@ -293,11 +287,11 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
       key: _panelKey,
       color: cs.surfaceContainerHigh,
       elevation: r.fromBottom ? 0 : 6,
-      // 밑에서 올라오는 창은 위쪽 모서리만 둥글게
-      borderRadius: r.fromBottom ? const BorderRadius.vertical(top: Radius.circular(24)) : BorderRadius.circular(14),
+      // 밑에서 올라오는 창은 바깥 창(BottomRise)이 모서리·막대를 그림
+      borderRadius: r.fromBottom ? BorderRadius.zero : BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: EdgeInsets.only(top: r.fromBottom ? 14 : 6, bottom: 6 + (r.fromBottom ? MediaQuery.paddingOf(context).bottom : 0)),
+        padding: EdgeInsets.only(top: r.fromBottom ? 0 : 6, bottom: 6 + (r.fromBottom ? MediaQuery.paddingOf(context).bottom : 0)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

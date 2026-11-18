@@ -720,6 +720,23 @@ class StorageService {
     );
   }
 
+  /// 쪽마다 저장한 메모 ('pg:쪽') 모두: 쪽 번호 → 획들 (스크롤 보기에서 한꺼번에 보여 줄 때)
+  static Future<Map<int, List<MemoStroke>>> getAllPageStrokes(String bookKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    final String prefix = 'page_strokes_${bookKey}_pg:';
+    final out = <int, List<MemoStroke>>{};
+    for (final k in prefs.getKeys()) {
+      if (!k.startsWith(prefix)) continue;
+      final int? page = int.tryParse(k.substring(prefix.length));
+      final raw = prefs.getString(k);
+      if (page == null || raw == null) continue;
+      final List decoded = jsonDecode(raw);
+      final strokes = decoded.map((e) => MemoStroke.fromJson(e)).toList();
+      if (strokes.isNotEmpty) out[page] = strokes;
+    }
+    return out;
+  }
+
   static Future<List<MemoStroke>> getLocationStrokes(
       String bookKey, String locationKey) async {
     final prefs = await SharedPreferences.getInstance();
