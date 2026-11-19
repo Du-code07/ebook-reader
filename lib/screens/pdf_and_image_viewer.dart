@@ -17,10 +17,10 @@ import '../widgets/outline_progress.dart';
 import '../widgets/text_copy_sheet.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_tool_bar.dart';
+import '../widgets/toolbar_settings.dart';
 import '../widgets/viewer_dialogs.dart';
 import '../widgets/app_colors.dart';
 import '../widgets/ui_scale.dart';
-import '../widgets/sheet_pull_to_close.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/direction_arrow_icon.dart';
 import '../widgets/find_in_file_bar.dart';
@@ -331,7 +331,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   String _progressBarPosSetting = 'bottom';
   /// 실제 진행바 위치: 1쪽짜리 문서는 설정과 상관없이 숨김 (다른 버튼 배치도 숨김 기준으로)
   String get _progressBarPos => (_totalPages <= 1 || _progressBarHidden) ? 'hidden' : _progressBarPosSetting;
-  bool _progressBarHidden = false; // 뷰어 설정의 '진행바 숨기기'
+  bool _progressBarHidden = false; // 도구 모음 설정의 진행바 숨기기
   String _memoToolbarPos = 'bottom'; // 메모 도구모음 위치
   int _rotateTapCount = 0; // 화면 회전 아이콘 흔들림 애니메이션용
   List<BookmarkItem> _bookmarks = [];
@@ -392,6 +392,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     super.initState();
     _tintHold.open(); // 파일을 보는 동안 편안한 모드 덮개를 걷음
     _zoomController.addListener(_onZoomMoved);
+    ToolbarLayout.current.addListener(_onToolbarLayout); // 도구 모음 설정에서 아이콘 배치를 바꾸면 바로 다시 그림
     SystemBars.enterViewer(); // 파일 열람 중에는 상태표시줄·내비게이션 바를 모두 숨김
     WidgetsBinding.instance.addObserver(this);
     _loadNeighborFiles();
@@ -451,9 +452,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     setState(() => _pageDisplay = mode);
   }
 
-  /// 뷰어 설정 초기화: 음량 버튼 / 진행도 하단 (길게 눌러 옮긴 도구 모음·메모 도구 모음·진행바·스크롤 막대도 처음 자리로)
-  /// (음량 버튼·탭·슬라이드·스크롤은 도구 모음의 [페이지 전환 버튼]에서 정함)
-  Future<void> _resetViewerSettings(StateSetter setModalState) async {
+  /// 도구 모음 설정 초기화: 아이콘 배치·숨김, 진행바 보이기, 음량 버튼 (길게 눌러 옮긴 도구 모음·메모 도구 모음·진행바·스크롤 막대도 처음 자리로)
+  Future<void> _resetViewerSettings() async {
     setState(() {
       _useVolumeTurn = true;
       _progressBarPosSetting = 'bottom';
@@ -462,7 +462,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _toolbarPos = 'bottom';
     });
     ScrollThumbBar.leftHanded.value = false;
-    setModalState(() {});
+    await ToolbarLayout.save(ToolbarLayout.defaults());
     await StorageService.setUseVolumeTurn(true);
     await StorageService.setProgressBarPosition('bottom');
     await StorageService.setProgressBarHidden(false);
@@ -1357,7 +1357,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final double topInset = MediaQuery.paddingOf(context).top;
     final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
     final double bottomBarSpace = (_showControls && _progressBarPos == 'bottom') ? 46.0 : 0.0;
-    final double topOffset = topInset + (_showControls ? 64.0 : 16.0);
+    final double topOffset = topInset + (_showControls ? 64.0 + _topBarsSpace : 16.0);
     switch (_memoToolbarPos) {
       case 'top':
         return Positioned(
@@ -1389,7 +1389,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         return Positioned(
           key: const ValueKey('memo_toolbar_bottom'),
           // 파일 도구 모음이 보이면 그 위에 (도구 모음 높이 52 + 사이 8)
-          bottom: baseBottom + bottomBarSpace + (_showControls ? 60.0 : 0.0),
+          bottom: baseBottom + bottomBarSpace + ((_showControls && _toolbarPos != 'top') ? 60.0 : 0.0),
           left: 12 + _safeSides.left,
           right: 12 + _safeSides.right,
           child: Center(child: MemoToolbarMover(onDrop: _moveMemoToolbar, child: MemoToolbar(children: items))),
@@ -1565,25 +1565,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
-  /// 뷰어 표시 설정 항목 제목: 관련 아이콘 + 문구 (줄바꿈돼도 아이콘이 문구 앞에 붙어 있음)
-  Widget _settingsHeader(IconData icon, String text, {bool isTitle = false}) {
-    if (isTitle) return Text(text, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800));
-    // 구역 이름: 아이콘 + 굵은 글씨를 옅은 띠 위에 두어, 아래 설정이 어느 기능의 것인지 한눈에 보이게
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(color: cs.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: cs.onSurface),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: cs.onSurface))),
-        ],
-      ),
-    );
-  }
-
   /// 탭 존 가이드라인 띄우기 (앞에 떠 있던 것은 지움)
   void _showTapGuide() {
     if (_tapGuide?.mounted ?? false) _tapGuide!.remove();
@@ -1598,59 +1579,23 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
 
+  void _onToolbarLayout() {
+    if (mounted) setState(() {});
+  }
+
+  /// 도구 모음 설정 (화면 가운데 창): 상단바·도구 모음 아이콘 배치, 진행바 숨기기
   Future<void> _showViewerSettingsSheet() async {
-    // 내용이 맨 위일 때 아래로 끌면 창이 따라 내려오고, 충분히 내리면 닫힘
-    final sheetCtrl = BottomSheet.createAnimationController(this);
-    await showModalBottomSheet(
-      sheetAnimationStyle: Anim.toolSheet,
-      context: context,
-      isScrollControlled: true,
-      // 화면의 2/3까지만 가림 (나머지는 스크롤)
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 2 / 3),
-      enableDrag: false,
-      transitionAnimationController: sheetCtrl,
-      builder: (ctx) => SheetPullToClose(
-        controller: sheetCtrl,
-        builder: (ctx, sheetScroll, sheetPhysics) => StatefulBuilder(
-        builder: (ctx, setModalState) => SafeArea(
-          child: SingleChildScrollView(
-            controller: sheetScroll,
-            physics: sheetPhysics,
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 위쪽 가운데 회색 막대 + 제목까지 간격 (밑에서 올라오는 모든 창과 같게)
-                const SheetGrip(),
-                _settingsHeader(Icons.tune, _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'), isTitle: true),
-                const SizedBox(height: 12),
-                // 진행바 자리는 진행바를 길게 눌러 끌어 옮김 (아래·왼쪽·오른쪽)
-                _settingsHeader(Icons.linear_scale, _tr('진행바', 'Progress Bar', '进度条', '進行度バー')),
-                const SizedBox(height: 8),
-                SettingGroup(
-                  children: [
-                    SettingToggle(
-                      label: Text(_tr('진행바 숨기기', 'Hide progress bar', '隐藏进度条', '進行度バーを隠す')),
-                      selected: _progressBarHidden,
-                      onSelected: (val) async {
-                        await StorageService.setProgressBarHidden(val);
-                        setState(() => _progressBarHidden = val);
-                        setModalState(() {});
-                      },
-                    ),
-                  ],
-                ),
-                // 초기화: 기본값으로 (진행바 숨기기, 옮긴 도구 모음·메모 도구 모음·진행바·스크롤 막대 자리)
-                SettingDoneButton(label: _tr('초기화', 'Reset', '重置', 'リセット'), onPressed: () => _resetViewerSettings(setModalState)),
-              ],
-            ),
-          ),
-        ),
-      ),
-      ),
+    await showToolbarSettingsDialog(
+      context,
+      tr: _tr,
+      items: _barItems(),
+      progressHidden: _progressBarHidden,
+      onProgressHidden: (val) {
+        StorageService.setProgressBarHidden(val);
+        setState(() => _progressBarHidden = val);
+      },
+      onReset: _resetViewerSettings,
     );
-    disposeSheetControllerWhenDone(sheetCtrl);
   }
 
   /// 한 화면(1쪽 또는 2쪽 펼침)에 들어갈 페이지 내용
@@ -2370,7 +2315,9 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         width: p.width,
         height: p.height,
         child: HoldToMove(
-          sides: const ['bottom', 'left', 'right'],
+          sides: const ['bottom', 'top', 'left', 'right'],
+          // 끄는 동안 손가락이 간 쪽의 자리·모양으로 바로 바뀜 (저장은 손을 뗄 때)
+          onHover: (side) => setState(() => _progressBarPosSetting = side),
           onDown: () => _pageAtBarDown = _currentPage,
           onHoldStart: () {
             _barMoving = true;
@@ -2380,7 +2327,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           // 손을 뗀 순간 진행바 안의 슬라이더가 받는 '끝' 처리보다 늦게 풂
           onEnd: () => Future.microtask(() => _barMoving = false),
           onDrop: (side) async {
-            if (side == _progressBarPosSetting) return;
             setState(() => _progressBarPosSetting = side);
             await StorageService.setProgressBarPosition(side);
           },
@@ -2409,12 +2355,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final double sliderVal = (displayedPageNum - 1).toDouble().clamp(0.0, sliderMax).toDouble();
     final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
 
-    if (_progressBarPos == 'bottom') {
+    // 아래·위: 가로 막대 (위면 상단바 바로 아래)
+    if (_progressBarPos == 'bottom' || _progressBarPos == 'top') {
       return _movableBar(Positioned(
-        key: const ValueKey('progress_bar_bottom'),
+        key: const ValueKey('progress_bar'),
         left: 14.0 + _safeSides.left + ((_memoBarBesideProgress && _memoToolbarPos == 'left') ? _memoBarSideInset : 0.0),
         right: 14.0 + _safeSides.right + ((_memoBarBesideProgress && _memoToolbarPos == 'right') ? _memoBarSideInset : 0.0),
-        bottom: baseBottom,
+        top: _progressBarPos == 'top' ? _topBarsTop : null,
+        bottom: _progressBarPos == 'top' ? null : baseBottom,
         height: 38.0,
         child: Material(
           color: Colors.black87,
@@ -2481,10 +2429,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final double topInset = MediaQuery.paddingOf(context).top;
     final bool memoBarVisible = _isMemoMode;
     // 메모 도구모음이 상단/하단에 있으면 세로 진행바가 그만큼 비켜 준다
-    final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
+    final double safeTopOffset = topInset + (_showControls ? 64.0 + _topBarsSpace : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
     final double safeBottomOffset = baseBottom + ((memoBarVisible && _memoToolbarPos == 'bottom') ? 96.0 : 8.0);
     return _movableBar(Positioned(
-      key: ValueKey('progress_bar_$_progressBarPos'),
+      key: const ValueKey('progress_bar'),
       top: safeTopOffset,
       bottom: safeBottomOffset,
       left: _progressBarPos == 'left' ? 8.0 + _safeSides.left : null,
@@ -2557,6 +2505,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   @override
   void dispose() {
+    ToolbarLayout.current.removeListener(_onToolbarLayout);
     _tintHold.dispose();
     _sharpTimer?.cancel();
     _zoomController.removeListener(_onZoomMoved);
@@ -2578,37 +2527,48 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   // 도구 모음(화면 아래 가로 막대)에 들어가는 기능들
-  /// 도구 모음 자리 ('bottom' / 'left' / 'right', 길게 눌러 끌어 옮김)
+  /// 도구 모음 자리 ('bottom' / 'top' / 'left' / 'right', 길게 눌러 끌어 옮김)
   String _toolbarPos = 'bottom';
 
+  /// 상단바 바로 아래 (위쪽에 둔 진행바·도구 모음이 놓이는 곳)
+  double get _topBarsTop => MediaQuery.paddingOf(context).top + 64.0;
+
+  /// 위쪽에 둔 진행바(38 + 간격)·도구 모음(52 + 간격)이 차지하는 높이 (그 밑의 것들이 비켜 줌)
+  double get _topBarsSpace => _showControls ? (_progressBarPos == 'top' ? 44.0 : 0.0) + (_toolbarPos == 'top' ? 60.0 : 0.0) : 0.0;
+
   Widget _buildQuickToolBar(double bottomInset) {
-    final bool vertical = _toolbarPos != 'bottom';
+    final bool vertical = _toolbarPos == 'left' || _toolbarPos == 'right';
     final Widget bar = HoldToMove(
-      sides: const ['bottom', 'left', 'right'],
+      sides: const ['bottom', 'top', 'left', 'right'],
+      // 끄는 동안 손가락이 간 쪽의 자리·모양으로 바로 바뀜 (저장은 손을 뗄 때)
+      onHover: (side) => setState(() => _toolbarPos = side),
       // 아이콘을 길게 누르면 뜨는 이름 풍선은 옮기기 시작할 때 닫음
       onHoldStart: () => Tooltip.dismissAllToolTips(),
       onDrop: (side) async {
-        if (side == _toolbarPos) return;
         setState(() => _toolbarPos = side);
         await StorageService.setToolbarPosition(side);
       },
       child: QuickToolBar(
         vertical: vertical,
-        items: _buildQuickMenuItems(),
-        // 뷰어 설정: 맨 끝에 고정
+        items: ToolbarLayout.current.value.barFor(_barItems()),
+        // 도구 모음 설정: 맨 끝에 고정
         pinned: QuickToolItem(
           icon: const Icon(Icons.tune, color: Colors.white, size: 18),
-          tooltip: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
+          tooltip: _tr('도구 모음 설정', 'Toolbar Settings', '工具栏设置', 'ツールバー設定'),
           onTap: _showViewerSettingsSheet,
         ),
       ),
     );
     final double bottom = math.max<double>(bottomInset + 16.0, 20.0) + 8.0 + (_progressBarPos == 'bottom' ? 44.0 : 0.0);
+    // 위·아래: 가로 (위면 상단바 아래, 위쪽 진행바가 있으면 그 밑)
     if (!vertical) {
+      final bool top = _toolbarPos == 'top';
       return Positioned(
+        key: const ValueKey('quick_tool_bar'),
         left: 12.0 + _safeSides.left,
         right: 12.0 + _safeSides.right,
-        bottom: bottom,
+        top: top ? _topBarsTop + (_progressBarPos == 'top' ? 44.0 : 0.0) : null,
+        bottom: top ? null : bottom,
         child: Center(child: bar),
       );
     }
@@ -2616,17 +2576,20 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final bool left = _toolbarPos == 'left';
     final double side = 10.0 + (left ? _safeSides.left : _safeSides.right) + (_progressBarPos == _toolbarPos ? 48.0 : 0.0);
     return Positioned(
+      key: const ValueKey('quick_tool_bar'),
       left: left ? side : null,
       right: left ? null : side,
-      top: MediaQuery.paddingOf(context).top + 64.0,
+      top: _topBarsTop + (_progressBarPos == 'top' ? 44.0 : 0.0),
       bottom: bottom - 8.0,
       child: Center(child: bar),
     );
   }
 
-  List<QuickToolItem> _buildQuickMenuItems() {
-    return [
+  /// 상단바·도구 모음에 둘 수 있는 모든 아이콘 (이 파일에서 쓸 수 있는 것만). 어디에 어떤 순서로 둘지는 [ToolbarLayout]
+  Map<String, QuickToolItem> _barItems() {
+    final list = <QuickToolItem>[
       QuickToolItem(
+        id: 'prev',
         icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 19),
         tooltip: _tr('이전 파일로 이동', 'Previous File', '上一个文件', '前のファイル'),
         onTap: () => _openAdjacentFileInSameGroup(-1),
@@ -2634,6 +2597,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         closeAfterTap: true,
       ),
       QuickToolItem(
+        id: 'next',
         icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 19),
         tooltip: _tr('다음 파일로 이동', 'Next File', '下一个文件', '次のファイル'),
         onTap: () => _openAdjacentFileInSameGroup(1),
@@ -2641,6 +2605,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         closeAfterTap: true,
       ),
       QuickToolItem(
+        id: 'rotate',
         // 누르면 살짝 흔들리고, 가로로 돌려 둔 상태면 노란색
         // 누르면 회전 설정 창 (자동 / 세로 고정 / 가로 고정). 아이콘은 고른 설정 모양, 고정이면 노란색
         icon: WiggleOnChange(
@@ -2657,6 +2622,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         closeAfterTap: true,
       ),
       QuickToolItem(
+        id: 'display',
         // 페이지 표시 (한 페이지 / 두 페이지 / 자동)
         // 설정 창에서 고른 것과 같은 아이콘
         icon: pageDisplayGlyph(
@@ -2670,12 +2636,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ),
       // 페이지 모드 (탭 / 슬라이드 / 스크롤): 지금 모드 아이콘
       QuickToolItem(
+        id: 'mode',
         icon: PageModeIcon(mode: _pageModeScroll ? 'scroll' : (_pageModeTap && _useSwipeTurn ? 'tap+slide' : (_useSwipeTurn ? 'slide' : 'tap')), color: Colors.white, size: 19),
         tooltip: _tr('페이지 전환 버튼', 'Page Turn Buttons', '翻页按钮', 'ページ切替ボタン'),
         onTap: _pickPageMode,
         closeAfterTap: true,
       ),
       QuickToolItem(
+        id: 'direction',
+        label: _tr('읽기 방향', 'Reading Direction', '阅读方向', '読む方向'),
         icon: _buildDualDirectionIcon(),
         tooltip: _isMangaRtlMode
             ? _tr('읽기 방향 전환 (우 → 좌)', 'Reading Direction (R → L)', '切换阅读方向 (右 → 左)', '読書方向切替 (右 → 左)')
@@ -2718,6 +2687,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         },
       ),
       QuickToolItem(
+        id: 'memo',
         icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
@@ -2732,12 +2702,14 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ),
       if (_isPdfFile)
         QuickToolItem(
+        id: 'copy',
           icon: const Icon(Icons.copy_all_outlined, color: Colors.white, size: 17),
           tooltip: _tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'),
           onTap: _openTextCopySheet,
           closeAfterTap: true,
         ),
       QuickToolItem(
+        id: 'bookmark',
         icon: Icon(
           _isCurrentPageBookmarked ? Icons.bookmarks : Icons.bookmarks_outlined,
           color: _isCurrentPageBookmarked ? Colors.amber : Colors.white,
@@ -2747,7 +2719,24 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         onTap: _showBookmarkSheet,
         closeAfterTap: true,
       ),
+      // 상단바에 있던 것들 (도구 모음 설정에서 어디에 둘지 고름)
+      if (_isPdfFile)
+        QuickToolItem(
+          id: 'find',
+          icon: const Icon(Icons.search, color: Colors.white, size: 18),
+          tooltip: _tr('파일 내 단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
+          label: _tr('단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
+          onTap: _openFind,
+        ),
+      if (_isPdfFile)
+        QuickToolItem(
+          id: 'toc',
+          icon: const Icon(Icons.list, color: Colors.white, size: 17),
+          tooltip: _tr('목차', 'Contents', '目录', '目次'),
+          onTap: () => _scaffoldKey.currentState?.openDrawer(),
+        ),
     ];
+    return {for (final it in list) it.id: it};
   }
 
   /// 지금 보고 있는 쪽(2페이지 보기면 두 쪽)의 글을 보여 주고 복사할 수 있게 함
@@ -3002,28 +2991,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         const btnConstraints = BoxConstraints(minWidth: 38, minHeight: 40);
                         const btnPadding = EdgeInsets.symmetric(horizontal: 6, vertical: 4);
 
-                        // 순서: 파일 내 단어 검색 · 목차 (뷰어 설정은 도구 모음 맨 오른쪽)
+                        // 기본 순서: 파일 내 단어 검색 · 목차 (도구 모음 설정은 도구 모음 맨 오른쪽)
                         final actionButtons = <Widget>[
-                          // 파일 내 단어 검색 (PDF만)
-                          if (_isPdfFile)
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.search, color: Colors.white, size: 18),
-                              tooltip: _tr('파일 내 단어 검색', 'Find in File', '在文件中查找', 'ファイル内検索'),
-                              onPressed: _openFind,
-                            ),
-                          // 목차 (PDF만)
-                          if (_isPdfFile)
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: btnPadding,
-                              constraints: btnConstraints,
-                              icon: const Icon(Icons.list, color: Colors.white, size: 17),
-                              tooltip: _tr('목차', 'Contents', '目录', '目次'),
-                              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                            ),
+                          // 도구 모음 설정에서 상단바에 둔 아이콘 (왼쪽부터)
+                          for (final it in ToolbarLayout.current.value.topFor(_barItems()))
+                            topBarButton(it, padding: btnPadding, constraints: btnConstraints),
                         ];
 
                         return Row(

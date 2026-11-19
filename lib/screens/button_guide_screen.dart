@@ -224,8 +224,11 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('memo', tr('메모', 'Memo', '笔记', 'メモ'), tr('쪽 위에 S펜이나 손가락으로 메모해요', 'Write on the page with the S Pen or your finger', '用 S Pen 或手指在页面上写笔记', 'Sペンや指でページにメモします')),
           _Step('copy', tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'), tr('쪽의 글자를 골라 복사해요', 'Select and copy text on the page', '选择并复制页面上的文字', 'ページの文字を選んでコピーします')),
           _Step('bookmark', tr('북마크', 'Bookmarks', '书签', 'ブックマーク'), tr('지금 쪽을 북마크하고 북마크 목록을 봐요', 'Bookmark this page and see your bookmarks', '为当前页添加书签并查看书签列表', '今のページをブックマークし、一覧を見ます')),
-          _Step('viewer', tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
-              tr('진행바를 숨기거나 다시 보이게 해요\n도구 모음과 진행바는 길게 눌러 끌면 아래·왼쪽·오른쪽으로 옮길 수 있어요', 'Hide or show the progress bar\nLong-press and drag the toolbar or progress bar to move it to the bottom, left or right', '隐藏或显示进度条\n长按并拖动工具栏或进度条可移到下·左·右', '進行度バーを隠したり表示したりします\nツールバーと進行度バーは長押しして引くと下・左・右に移せます')),
+          _Step('viewer', tr('도구 모음 설정', 'Toolbar Settings', '工具栏设置', 'ツールバー設定'),
+              tr('상단바·도구 모음의 아이콘 순서를 바꾸거나 숨기고, 진행바를 숨겨요\n도구 모음과 진행바는 길게 눌러 끌면 위·아래·왼쪽·오른쪽으로 옮길 수 있어요',
+                  'Reorder or hide icons on the top bar and toolbar, and hide the progress bar\nLong-press and drag the toolbar or progress bar to move it to the top, bottom, left or right',
+                  '调整或隐藏顶部栏·工具栏的图标顺序，并可隐藏进度条\n长按并拖动工具栏或进度条可移到上·下·左·右',
+                  '上部バー・ツールバーのアイコンの順番を変えたり隠したり、進行度バーを隠したりします\nツールバーと進行度バーは長押しして引くと上・下・左・右に移せます')),
         ];
       case _GuideKind.memo:
         return [

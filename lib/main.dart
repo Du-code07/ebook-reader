@@ -27,6 +27,7 @@ import 'widgets/group_jump_menu.dart';
 import 'widgets/group_dropdown.dart';
 import 'widgets/morph_icons.dart';
 import 'widgets/viewer_dialogs.dart';
+import 'widgets/toolbar_settings.dart';
 import 'widgets/ui_scale.dart';
 import 'widgets/app_colors.dart';
 import 'services/library_nav.dart';
@@ -71,6 +72,7 @@ void main() async {
   } catch (_) {}
   await StorageService.loadRememberPage();
   await AppLock.init(); // 사생활 보호: 앱 잠금이면 시작할 때부터 잠금 화면
+  await ToolbarLayout.load(); // 파일 보기 화면의 상단바·도구 모음 아이콘 배치
   await Pro.init(); // 이리ERI 프로: 구매 여부·무료 체험 (Play 스토어 확인은 뒤에서)
   ComfortTint.filePref = await StorageService.getDocComfort(); // 파일을 열자마자 편안한 모드인지 알게
   await StorageService.loadAppStyle(); // 앱 스타일(기본/심플): 첫 화면부터 그 모양으로

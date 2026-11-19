@@ -8,17 +8,38 @@ class QuickToolItem {
   const QuickToolItem({
     required this.icon,
     required this.tooltip,
-    required this.onTap,
+    this.onTap,
+    this.onTapWith,
     this.closeAfterTap = false,
     this.enabled = true,
+    this.id = '',
+    this.label,
   });
+
+  /// 도구 모음 설정에서 쓰는 이름표 ('find', 'memo' …)
+  final String id;
+
+  /// 도구 모음 설정 목록에 보일 이름 (없으면 [tooltip])
+  final String? label;
+
+  /// 누른 단추 자리가 필요한 기능 (그 단추 아래에 메뉴를 펼칠 때)
+  final void Function(BuildContext buttonContext)? onTapWith;
 
   /// 잠긴 기능(쓸 수 없을 때)은 투명하게 보이고 눌리지 않음
   final bool enabled;
 
   final Widget icon;
   final String tooltip;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+
+  /// 눌렀을 때 (단추 자리가 필요하면 [onTapWith])
+  void run(BuildContext buttonContext) {
+    if (onTapWith != null) {
+      onTapWith!(buttonContext);
+    } else {
+      onTap?.call();
+    }
+  }
 
   /// 누른 뒤 메뉴를 닫을지 여부 (파일 이동처럼 화면이 바뀌는 기능)
   final bool closeAfterTap;
@@ -78,7 +99,7 @@ class QuickToolBar extends StatelessWidget {
 
   final List<QuickToolItem> items;
 
-  /// 맨 오른쪽에 고정되는 항목 (옆으로 밀어도 움직이지 않음, 예: 뷰어 설정)
+  /// 맨 오른쪽에 고정되는 항목 (옆으로 밀어도 움직이지 않음, 예: 도구 모음 설정)
   final QuickToolItem? pinned;
 
   /// 누른 항목이 메뉴를 닫는 항목일 때 부름 (상단바·진행바도 함께 숨김)
@@ -102,7 +123,7 @@ class QuickToolBar extends StatelessWidget {
           Widget button(QuickToolItem it) => SizedBox(
                 width: vertical ? 52 : slot,
                 height: vertical ? slot : 52,
-                child: IconButton(
+                child: Builder(builder: (btnCtx) => IconButton(
                   padding: EdgeInsets.zero,
                   icon: Opacity(
                     opacity: it.enabled ? 1 : 0.3,
@@ -111,11 +132,11 @@ class QuickToolBar extends StatelessWidget {
                   tooltip: it.tooltip,
                   onPressed: it.enabled
                       ? () {
-                          it.onTap();
+                          it.run(btnCtx);
                           if (it.closeAfterTap) onClose?.call();
                         }
                       : null,
-                ),
+                )),
               );
           if (vertical) {
             // 세로: 위에서 아래로, 고정 항목은 맨 아래 (가는 가로줄로 나눔)
@@ -155,3 +176,18 @@ class QuickToolBar extends StatelessWidget {
     );
   }
 }
+
+/// 상단바 단추 (도구 모음 항목을 상단바에 둘 때)
+Widget topBarButton(QuickToolItem it, {EdgeInsetsGeometry? padding, BoxConstraints? constraints}) => Builder(
+      builder: (btnCtx) => IconButton(
+        visualDensity: VisualDensity.compact,
+        padding: padding,
+        constraints: constraints,
+        icon: Opacity(
+          opacity: it.enabled ? 1 : 0.3,
+          child: IconTheme.merge(data: const IconThemeData(color: Colors.white, size: 18), child: it.icon),
+        ),
+        tooltip: it.tooltip,
+        onPressed: it.enabled ? () => it.run(btnCtx) : null,
+      ),
+    );

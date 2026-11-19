@@ -818,7 +818,7 @@ class PageModeMemory {
 }
 
 /// 스크롤 보기 오른쪽의 회색 막대: 지금 위치를 보여 주고, 끌면 그 비율 위치로 바로 이동
-/// 길게 누른 채 화면 반대쪽 절반으로 끌어 놓으면 막대가 그쪽 가장자리로 옮겨 감 (기억해 둠)
+/// 길게 누른 채 화면 너비의 1/3 넘게 반대쪽으로 끌어 놓으면 막대가 그쪽 가장자리로 옮겨 감 (기억해 둠)
 /// [ratio]: 0(처음)~1(끝), [viewFraction]: 화면에 보이는 부분 / 전체 (막대 길이)
 class ScrollThumbBar extends StatefulWidget {
   const ScrollThumbBar({super.key, required this.ratio, required this.viewFraction, required this.onDragRatio, this.onDragStart, this.onDragEnd, this.left, this.color});
@@ -951,8 +951,9 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
                 _dragPointer = null;
                 _holdTimer?.cancel();
                 if (_moving) {
-                  // 화면 가운데를 넘겨 놓았으면 그쪽 가장자리로 옮기고 기억
-                  final bool toLeft = e.position.dx < MediaQuery.sizeOf(context).width / 2;
+                  // 지금 가장자리에서 화면 너비의 1/3 넘게 끌어 놓았으면 반대쪽 가장자리로 옮기고 기억
+                  final double w = MediaQuery.sizeOf(context).width;
+                  final bool toLeft = _left ? e.position.dx < w / 3 : e.position.dx < w * 2 / 3;
                   setState(() {
                     _moving = false;
                     _moveDx = 0;
@@ -1888,13 +1889,16 @@ Future<bool> restoreBookmarkView(
   return changed;
 }
 
-/// 길게 눌러(0.5초, 거의 움직이지 않고) 끌어 옮기기: 손가락을 따라 움직이다가 놓으면 [sides] 중 가장 가까운 화면 가장자리로.
+/// 길게 눌러(0.5초, 거의 움직이지 않고) 끌어 옮기기: [onHover]가 있으면 손가락이 가까이 간 가장자리 자리·모양으로 바로 바뀌어 보이고, 없으면 손가락을 따라 움직임. 놓으면 [sides] 중 가장 가까운 화면 가장자리로.
 /// 제스처 경쟁에 끼지 않는 Listener로 받으므로 안의 슬라이더·단추는 그대로 동작함
 /// (안의 슬라이더가 누른 순간 값을 바꿨다면 [onHoldStart]에서 되돌림)
 class HoldToMove extends StatefulWidget {
-  const HoldToMove({super.key, required this.sides, required this.onDrop, required this.child, this.onDown, this.onHoldStart, this.onEnd});
+  const HoldToMove({super.key, required this.sides, required this.onDrop, required this.child, this.onHover, this.onDown, this.onHoldStart, this.onEnd});
   final List<String> sides; // 'top' · 'bottom' · 'left' · 'right'
+  /// 손을 뗀 자리 (가장 가까운 가장자리)
   final ValueChanged<String> onDrop;
+  /// 끄는 동안 손가락이 다른 가장자리 쪽으로 가면 (손을 떼기 전에 그 자리·모양으로 미리 바꿔 보여 줌)
+  final ValueChanged<String>? onHover;
   final VoidCallback? onDown;
   final VoidCallback? onHoldStart;
   /// 옮기기가 끝났을 때 (놓았든 취소됐든)
@@ -1911,6 +1915,7 @@ class _HoldToMoveState extends State<HoldToMove> {
   double _moved = 0;
   bool _moving = false;
   Offset _drag = Offset.zero;
+  String? _hover;
 
   @override
   void dispose() {
@@ -1918,9 +1923,22 @@ class _HoldToMoveState extends State<HoldToMove> {
     super.dispose();
   }
 
+  /// 손가락에서 가장 가까운 가장자리 (옮길 수 있는 곳 가운데)
+  String _sideAt(Offset p) {
+    final Size size = MediaQuery.sizeOf(context);
+    final Map<String, double> dist = {
+      'left': p.dx,
+      'right': size.width - p.dx,
+      'top': p.dy,
+      'bottom': size.height - p.dy,
+    }..removeWhere((k, _) => !widget.sides.contains(k));
+    return dist.entries.reduce((a, b) => a.value <= b.value ? a : b).key;
+  }
+
   void _finish() {
     _timer?.cancel();
     _pointer = null;
+    _hover = null;
     if (_moving) {
       setState(() {
         _moving = false;
@@ -1946,12 +1964,23 @@ class _HoldToMoveState extends State<HoldToMove> {
           setState(() {
             _moving = true;
             _drag = Offset.zero;
+            _hover = widget.onHover == null ? null : _sideAt(e.position);
           });
         });
       },
       onPointerMove: (e) {
         if (e.pointer != _pointer) return;
         if (_moving) {
+          if (widget.onHover != null) {
+            // 미리 보기: 손가락이 다른 가장자리 쪽으로 가면 바로 그 자리·모양으로 바뀜
+            final String side = _sideAt(e.position);
+            if (side != _hover) {
+              _hover = side;
+              HapticFeedback.selectionClick();
+              widget.onHover!(side);
+            }
+            return;
+          }
           setState(() => _drag += e.delta);
           return;
         }
@@ -1961,15 +1990,7 @@ class _HoldToMoveState extends State<HoldToMove> {
       onPointerUp: (e) {
         if (e.pointer != _pointer) return;
         if (_moving) {
-          final Size size = MediaQuery.sizeOf(context);
-          final Offset p = e.position;
-          final Map<String, double> dist = {
-            'left': p.dx,
-            'right': size.width - p.dx,
-            'top': p.dy,
-            'bottom': size.height - p.dy,
-          }..removeWhere((k, _) => !widget.sides.contains(k));
-          final String side = dist.entries.reduce((a, b) => a.value <= b.value ? a : b).key;
+          final String side = _sideAt(e.position);
           _finish();
           widget.onDrop(side);
           return;
@@ -1977,7 +1998,10 @@ class _HoldToMoveState extends State<HoldToMove> {
         _finish();
       },
       onPointerCancel: (e) {
-        if (e.pointer == _pointer) _finish();
+        if (e.pointer != _pointer) return;
+        final String? side = _moving ? _hover : null;
+        _finish();
+        if (side != null) widget.onDrop(side);
       },
       child: Transform.translate(
         offset: _drag,

@@ -591,14 +591,14 @@ class StorageService {
   static Future<String> getProgressBarPosition() async {
     final prefs = await SharedPreferences.getInstance();
     final v = prefs.getString('progress_bar_pos_v26');
-    return (v == 'left' || v == 'right') ? v! : 'bottom';
+    return (v == 'left' || v == 'right' || v == 'top') ? v! : 'bottom';
   }
 
-  // 도구 모음 자리: 'bottom'(기본) / 'left' / 'right' (도구 모음을 길게 눌러 끌어 옮김)
+  // 도구 모음 자리: 'bottom'(기본) / 'top' / 'left' / 'right' (도구 모음을 길게 눌러 끌어 옮김)
   static Future<void> setToolbarPosition(String pos) async => (await SharedPreferences.getInstance()).setString('quick_toolbar_pos_v1', pos);
   static Future<String> getToolbarPosition() async {
     final v = (await SharedPreferences.getInstance()).getString('quick_toolbar_pos_v1');
-    return (v == 'left' || v == 'right') ? v! : 'bottom';
+    return (v == 'left' || v == 'right' || v == 'top') ? v! : 'bottom';
   }
 
   // 진행바 숨기기 (자리는 진행바를 길게 눌러 옮김)
