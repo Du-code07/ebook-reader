@@ -524,11 +524,6 @@ class StorageService {
     return prefs.getBool('use_volume_turn') ?? true;
   }
 
-  static Future<void> setUseSpenTurn(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('use_spen_turn', enabled);
-  }
-
   // 페이지 모드 (v88에서 새로 시작: 예전 페이지 전환 설정은 쓰지 않음)
   // 탭(기본값 켜짐) / 스크롤 / 슬라이드(옆으로 밀기). 스크롤과 슬라이드는 함께 켤 수 없음
   static Future<void> setUseSwipeTurn(bool enabled) async {
@@ -587,11 +582,6 @@ class StorageService {
     return (v == 'stroke' || v == 'area') ? v! : 'area';
   }
 
-  static Future<bool> getUseSpenTurn() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('use_spen_turn') ?? false;
-  }
-
   static Future<void> setFooterInfoMode(String mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('footer_info_mode', mode);
@@ -613,7 +603,7 @@ class StorageService {
     return prefs.getString('progress_bar_pos_v26') ?? 'bottom';
   }
 
-  // 메모 도구모음 위치: 'bottom'(기본) / 'top' / 'left' / 'right'
+  // 메모 도구모음 위치: 'bottom'(기본) / 'top' / 'left' / 'right' (도구 모음을 길게 눌러 끌어 옮김)
   static Future<void> setMemoToolbarPosition(String pos) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('memo_toolbar_pos', pos);
@@ -624,7 +614,7 @@ class StorageService {
     return prefs.getString('memo_toolbar_pos') ?? 'bottom';
   }
 
-  // 왼손잡이: 'left'면 스크롤 막대를 왼쪽에 (기본 'right')
+  // 스크롤 막대 자리: 'left'면 왼쪽 (기본 'right', 막대를 길게 눌러 옮김)
   static Future<void> setQuickMenuSide(String side) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('quick_menu_side', side);

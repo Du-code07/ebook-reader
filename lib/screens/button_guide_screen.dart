@@ -221,15 +221,15 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
               tr('자동·세로 고정·가로 고정을 골라요', 'Choose auto, portrait lock or landscape lock', '选择自动·锁定竖屏·锁定横屏', '自動・縦に固定・横に固定を選びます')),
           _Step('display', tr('페이지 표시', 'Page Display', '页面显示', 'ページ表示'),
               tr('한 페이지·두 페이지·자동(가로 화면에서 두 페이지)을 골라요', 'Choose one page, two pages or auto (two pages in landscape)', '选择单页·双页·自动（横屏时双页）', '1ページ・2ページ・自動(横画面で2ページ)を選びます')),
-          _Step('mode', tr('페이지 모드', 'Page Mode', '翻页模式', 'ページモード'),
-              tr('탭·슬라이드·스크롤 중 넘기는 방식을 골라요\n창을 닫을 때 적용돼요', 'Choose how pages turn: tap, slide or scroll\nApplies when the window closes', '选择翻页方式：点击·滑动·滚动\n关闭窗口时生效', 'タップ・スライド・スクロールからめくり方を選びます\nウィンドウを閉じると適用されます')),
+          _Step('mode', tr('페이지 전환 버튼', 'Page Turn Buttons', '翻页按钮', 'ページ切替ボタン'),
+              tr('음량 버튼·탭·슬라이드·스크롤 중 넘기는 방식을 골라요\n창을 닫을 때 적용돼요', 'Choose how pages turn: volume keys, tap, slide or scroll\nApplies when the window closes', '选择翻页方式：音量键·点击·滑动·滚动\n关闭窗口时生效', '音量ボタン・タップ・スライド・スクロールからめくり方を選びます\nウィンドウを閉じると適用されます')),
           _Step('direction', tr('읽기 방향', 'Reading Direction', '阅读方向', '読む方向'),
               tr('좌→우·우→좌를 바꿔요 (파일마다 기억)', 'Switch left-to-right or right-to-left (remembered per file)', '切换左→右·右→左（按文件记忆）', '左→右・右→左を切り替えます(ファイルごとに記憶)')),
           _Step('memo', tr('메모', 'Memo', '笔记', 'メモ'), tr('쪽 위에 S펜이나 손가락으로 메모해요', 'Write on the page with the S Pen or your finger', '用 S Pen 或手指在页面上写笔记', 'Sペンや指でページにメモします')),
           _Step('copy', tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'), tr('쪽의 글자를 골라 복사해요', 'Select and copy text on the page', '选择并复制页面上的文字', 'ページの文字を選んでコピーします')),
           _Step('bookmark', tr('북마크', 'Bookmarks', '书签', 'ブックマーク'), tr('지금 쪽을 북마크하고 북마크 목록을 봐요', 'Bookmark this page and see your bookmarks', '为当前页添加书签并查看书签列表', '今のページをブックマークし、一覧を見ます')),
           _Step('viewer', tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
-              tr('왼손잡이·페이지 전환 버튼·진행도 UI 위치·메모 도구 모음 위치·하단 정보 표시를 정해요', 'Set left-handed mode, page-turn buttons, progress bar position, memo toolbar position and footer info', '设置左手模式·翻页按键·进度条位置·笔记工具栏位置·底部信息', '左利き・ページめくりボタン・進行度バーの位置・メモツールバーの位置・下部情報表示を設定します')),
+              tr('진행도 UI 위치·하단 정보 표시를 정해요', 'Set the progress bar position and footer info', '设置进度条位置·底部信息', '進行度バーの位置・下部情報表示を設定します')),
         ];
       case _GuideKind.memo:
         return [
@@ -244,7 +244,8 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('undo', tr('되돌리기', 'Undo', '撤销', '元に戻す'), tr('방금 한 것을 되돌려요', 'Undo the last change', '撤销上一步', '直前の操作を元に戻します')),
           _Step('redo', tr('다시 실행', 'Redo', '重做', 'やり直し'), tr('되돌린 것을 다시 해요', 'Redo what you undid', '恢复已撤销的操作', '元に戻した操作をやり直します')),
           _Step('clear', tr('전체 지우기', 'Clear All', '全部清除', 'すべて消去'), tr('보고 있는 쪽의 메모를 모두 지워요', 'Clear all memos on the page you are viewing', '清除当前页的全部笔记', '見ているページのメモをすべて消します')),
-          _Step('done', tr('완료', 'Done', '完成', '完了'), tr('메모를 마치고 도구 모음을 닫아요', 'Finish and close the memo toolbar', '结束书写并关闭笔记工具栏', 'メモを終えてツールバーを閉じます')),
+          _Step('done', tr('완료', 'Done', '完成', '完了'),
+              tr('메모를 마치고 도구 모음을 닫아요\n도구 모음은 길게 눌러 끌면 위·아래·왼쪽·오른쪽으로 옮길 수 있어요', 'Finish and close the memo toolbar\nLong-press and drag the toolbar to move it to the top, bottom, left or right', '结束书写并关闭笔记工具栏\n长按并拖动工具栏可移到上·下·左·右', 'メモを終えてツールバーを閉じます\nツールバーは長押しして引くと上・下・左・右に移せます')),
         ];
       case _GuideKind.settings:
         return [
@@ -762,7 +763,7 @@ class _ViewerMock extends StatelessWidget {
         b('rotate', rotationGlyph('auto', size: 19, color: Colors.white)),
         b('display', pageDisplayGlyph('one', size: 19, color: Colors.white)),
         b('mode', const PageModeIcon(mode: 'tap+slide', color: Colors.white, size: 19)),
-        b('direction', const DirectionArrowIcon(rightToLeft: false, size: 22)),
+        b('direction', const DirectionArrowIcon(rightToLeft: false, size: 20)),
         b('memo', const QuillInkIcon(color: Colors.white, size: 22)),
         b('copy', const Icon(Icons.copy_all_outlined, size: 17)),
         b('bookmark', const Icon(Icons.bookmarks_outlined, size: 17)),
@@ -869,7 +870,7 @@ class _SettingsMock extends StatelessWidget {
         children: [
           section(tr('일반', 'General', '通用', '一般')),
           item('style', const Icon(Icons.dashboard_customize_outlined), tr('앱 스타일', 'App Style', '应用样式', 'アプリのスタイル'), sub: tr('기본', 'Default', '默认', '標準')),
-          item('theme', const Icon(Icons.dark_mode_outlined), tr('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'), sub: tr('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト')),
+          item('theme', const Icon(Icons.brightness_auto_outlined), tr('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'), sub: tr('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト')),
           item('lang', const LanguageGlyphIcon(size: 23), tr('언어', 'Language', '语言', '言語')),
           item('privacy', const Icon(Icons.lock_outline), tr('사생활 보호', 'Privacy', '隐私保护', 'プライバシー保護')),
           item('anim', const Icon(Icons.motion_photos_off_outlined), tr('애니메이션 끄기', 'Turn Off Animations', '关闭动画', 'アニメーションをオフ'), toggle: true),

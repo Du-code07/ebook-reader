@@ -126,15 +126,23 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         _ => _t('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト'),
       };
 
+  /// 테마마다 아이콘 (설정 목록과 고르기 창이 같은 아이콘)
+  IconData _themeIcon(String mode) => switch (mode) {
+        'dark' => Icons.dark_mode_outlined,
+        'comfort' => Icons.wb_incandescent_outlined,
+        'light' => Icons.light_mode_outlined,
+        _ => Icons.brightness_auto_outlined,
+      };
+
   Future<void> _pickTheme() async {
     final v = await showChoiceSheet<String>(
       context: context,
       title: _t('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'),
       options: [
-        ChoiceOption('system', _themeLabel('system'), icon: Icons.brightness_auto_outlined),
-        ChoiceOption('light', _themeLabel('light'), icon: Icons.light_mode_outlined),
-        ChoiceOption('dark', _themeLabel('dark'), icon: Icons.dark_mode_outlined),
-        ChoiceOption('comfort', _themeLabel('comfort'), icon: Icons.wb_incandescent_outlined),
+        ChoiceOption('system', _themeLabel('system'), icon: _themeIcon('system')),
+        ChoiceOption('light', _themeLabel('light'), icon: _themeIcon('light')),
+        ChoiceOption('dark', _themeLabel('dark'), icon: _themeIcon('dark')),
+        ChoiceOption('comfort', _themeLabel('comfort'), icon: _themeIcon('comfort')),
       ],
       current: _themeMode,
       centered: StorageService.simpleStyle, // 심플: 가운데 창
@@ -444,7 +452,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               onTap: _pickStyle,
             ),
             _item(
-              icon: Icons.dark_mode_outlined,
+              // 지금 고른 테마에 맞는 아이콘
+              icon: _themeIcon(_themeMode),
               title: _t('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'),
               subtitle: _themeLabel(_themeMode),
               onTap: _pickTheme,

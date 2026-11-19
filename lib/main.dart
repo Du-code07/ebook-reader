@@ -981,14 +981,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   }
 
   /// 목록형 카드를 밀 때 뒤에 보이는 색 (카드와 같은 자리·같은 둥근 모양)
-  Widget _listCardBack({required Color color, required Alignment alignment, required Widget child}) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Container(
-          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(14)),
-          alignment: alignment,
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: child,
-        ),
+  Widget _listCardBack({required Color color, required Alignment alignment, required Widget child}) => Container(
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(14)),
+        alignment: alignment,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: child,
       );
 
   String _localizeGroupName(String g) {
@@ -4152,7 +4149,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         final isFavorite = _favoritePaths.contains(file.path);
                         final lowerExt = rawFileName.split('.').last.toLowerCase();
 
-                        return _favPop(file.path, Dismissible(
+                        // 그림자(가장자리)는 제자리에 두고, 밀 때는 흰 카드만 움직임
+                        return _favPop(file.path, Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 5),
+                          child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [
+                              // 라이트: 카드와 바탕이 같은 흰색이라 그림자를 조금 더 진하게
+                              BoxShadow(color: Colors.black.withValues(alpha: widget.isDarkMode ? 0.28 : 0.13), blurRadius: 8, offset: const Offset(0, 2)),
+                            ],
+                          ),
+                          child: Dismissible(
                           // 즐겨찾기가 바뀌면 다른 열쇠가 되어, 밀려 나간 줄은 사라지고 새 자리에 새 줄이 들어옴
                           key: ValueKey('${file.path}|$isFavorite'),
                           // 오른쪽으로 밀기: 즐겨찾기 켜기/끄기 (그대로 오른쪽으로 사라졌다가 새 자리에서 오른쪽부터 들어옴)
@@ -4195,20 +4203,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                               _moveFileToTrash(file);
                             }
                           },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 5),
-                            child: Container(
+                          child: Container(
                             key: rowKey,
-                            // 둥근 카드 + 옅은 그림자 (바탕보다 한 단계 밝게)
+                            // 둥근 카드 (바탕보다 한 단계 밝게)
                             decoration: BoxDecoration(
                               color: widget.isDarkMode
                                   ? Theme.of(context).colorScheme.surfaceContainerHigh
                                   : Theme.of(context).colorScheme.surfaceContainerLowest,
                               borderRadius: BorderRadius.circular(14),
-                              boxShadow: [
-                                // 라이트: 카드와 바탕이 같은 흰색이라 그림자를 조금 더 진하게
-                                BoxShadow(color: Colors.black.withValues(alpha: widget.isDarkMode ? 0.28 : 0.13), blurRadius: 8, offset: const Offset(0, 2)),
-                              ],
                             ),
                             child: Stack(
                             clipBehavior: Clip.none,
@@ -4331,6 +4333,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                 ),
                               ),
                             ],
+                          ),
                           ),
                           ),
                           ),

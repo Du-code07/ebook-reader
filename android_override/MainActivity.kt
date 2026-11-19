@@ -21,11 +21,6 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioTrack
-import android.media.session.MediaSession
-import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -136,11 +131,10 @@ class MainActivity : FlutterActivity() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private var lastSpenSingleTime = 0L
-    private var wasStylusButtonPressed = false
-    private var mediaSession: MediaSession? = null
 
     private val thumbExecutor = Executors.newFixedThreadPool(4)
+    // 확대한 PDF 쪽 다시 그리기: 한 번에 하나씩 (PdfRenderer는 여럿이 동시에 쓰면 안 됨)
+    private val zoomExecutor = Executors.newSingleThreadExecutor()
     // 문서 스캔 (카메라 화면에서 돌아올 때 결과를 받을 자리)
     private val REQ_SCAN_CAMERA = 4821
     private var pendingCameraResult: MethodChannel.Result? = null
@@ -596,14 +590,12 @@ class MainActivity : FlutterActivity() {
         hideSystemStatusBar()
         mainHandler.postDelayed({ hideSystemStatusBar() }, 200L)
         mainHandler.postDelayed({ hideSystemStatusBar() }, 600L)
-        setupSpenMediaSession()
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method == "setIntercept") {
                     val enabled = call.argument<Boolean>("enabled") ?: false
                     isVolumeInterceptEnabled = enabled
-                    updateMediaSessionState(enabled)
                     result.success(null)
                 } else if (call.method == "statusBarHeight") {
                     // 상태표시줄 본래 높이(px) — 태블릿에서 상단바를 이만큼 항상 내려 둔다
@@ -930,6 +922,53 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Throwable) {
                         runOnUiThread { result.success(null) }
                     }
+                }
+            } else if (call.method == "renderPdfRegion") {
+                // 확대해서 볼 때: 쪽의 보이는 부분(l·t·r·b, 쪽 크기 대비 0~1)만 w×h 화소로 다시 그려 선명하게
+                val pdfPath = call.argument<String>("path")
+                val outPath = call.argument<String>("out")
+                val pageIndex = call.argument<Int>("page") ?: 0
+                val l = (call.argument<Number>("l") ?: 0).toFloat()
+                val t = (call.argument<Number>("t") ?: 0).toFloat()
+                val r = (call.argument<Number>("r") ?: 1).toFloat()
+                val b = (call.argument<Number>("b") ?: 1).toFloat()
+                val w = (call.argument<Number>("w") ?: 0).toInt()
+                val h = (call.argument<Number>("h") ?: 0).toInt()
+                if (pdfPath == null || outPath == null || w <= 0 || h <= 0 || r <= l || b <= t) {
+                    result.success(null)
+                    return@setMethodCallHandler
+                }
+                zoomExecutor.execute {
+                    var made: String? = null
+                    try {
+                        ParcelFileDescriptor.open(File(pdfPath), ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                            val renderer = PdfRenderer(pfd)
+                            try {
+                                if (pageIndex in 0 until renderer.pageCount) {
+                                    val page = renderer.openPage(pageIndex)
+                                    try {
+                                        val pw = page.width.toFloat()
+                                        val ph = page.height.toFloat()
+                                        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                                        bmp.eraseColor(Color.WHITE)
+                                        val m = android.graphics.Matrix()
+                                        m.setTranslate(-l * pw, -t * ph)
+                                        m.postScale(w / ((r - l) * pw), h / ((b - t) * ph))
+                                        page.render(bmp, null, m, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                        FileOutputStream(File(outPath)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 92, out) }
+                                        bmp.recycle()
+                                        made = outPath
+                                    } finally {
+                                        page.close()
+                                    }
+                                }
+                            } finally {
+                                renderer.close()
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                    val res = made
+                    runOnUiThread { result.success(res) }
                 }
             } else if (call.method == "renderPdfToImages") {
                 val pdfPath = call.argument<String>("pdfPath")
@@ -1402,134 +1441,10 @@ class MainActivity : FlutterActivity() {
         return ma.size.compareTo(mb.size)
     }
 
-    private fun handleInstantSpenClick() {
-        val now = SystemClock.uptimeMillis()
-        if (now - lastSpenSingleTime in 25L..420L) {
-            lastSpenSingleTime = 0L
-            eventSink?.success("SPEN_DOUBLE_REVERT")
-        } else {
-            lastSpenSingleTime = now
-            eventSink?.success("SPEN_SINGLE")
-        }
-    }
 
-    private fun handleDirectSpenDouble() {
-        lastSpenSingleTime = 0L
-        eventSink?.success("SPEN_DOUBLE")
-    }
 
-    private fun setupSpenMediaSession() {
-        try {
-            mediaSession = MediaSession(this, "FReaderSpenSession").apply {
-                setCallback(object : MediaSession.Callback() {
-                    override fun onMediaButtonEvent(mediaButtonIntent: android.content.Intent): Boolean {
-                        if (!isVolumeInterceptEnabled) return super.onMediaButtonEvent(mediaButtonIntent)
-                        @Suppress("DEPRECATION")
-                        val ke = mediaButtonIntent.getParcelableExtra<KeyEvent>(android.content.Intent.EXTRA_KEY_EVENT)
-                        if (ke != null && ke.action == KeyEvent.ACTION_DOWN && ke.repeatCount == 0) {
-                            when (ke.keyCode) {
-                                KeyEvent.KEYCODE_MEDIA_NEXT,
-                                KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                                    handleDirectSpenDouble()
-                                    return true
-                                }
-                                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-                                KeyEvent.KEYCODE_MEDIA_PLAY,
-                                KeyEvent.KEYCODE_MEDIA_PAUSE,
-                                KeyEvent.KEYCODE_HEADSETHOOK -> {
-                                    handleInstantSpenClick()
-                                    return true
-                                }
-                            }
-                        }
-                        return super.onMediaButtonEvent(mediaButtonIntent)
-                    }
 
-                    override fun onPlay() {
-                        if (isVolumeInterceptEnabled) handleInstantSpenClick()
-                    }
 
-                    override fun onPause() {
-                        if (isVolumeInterceptEnabled) handleInstantSpenClick()
-                    }
-
-                    override fun onSkipToNext() {
-                        if (isVolumeInterceptEnabled) handleDirectSpenDouble()
-                    }
-
-                    override fun onSkipToPrevious() {
-                        if (isVolumeInterceptEnabled) handleDirectSpenDouble()
-                    }
-                })
-
-                val attrs = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-                setPlaybackToLocal(attrs)
-            }
-        } catch (_: Exception) {}
-    }
-
-    private fun playSilentAudioPulseToClaimMediaSession() {
-        Thread {
-            try {
-                val sampleRate = 8000
-                val numSamples = sampleRate / 10
-                val silentBuf = ByteArray(numSamples * 2)
-                val track = AudioTrack.Builder()
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .build()
-                    )
-                    .setAudioFormat(
-                        AudioFormat.Builder()
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .setSampleRate(sampleRate)
-                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                            .build()
-                    )
-                    .setBufferSizeInBytes(silentBuf.size)
-                    .setTransferMode(AudioTrack.MODE_STATIC)
-                    .build()
-                track.write(silentBuf, 0, silentBuf.size)
-                track.play()
-                Thread.sleep(120)
-                track.stop()
-                track.release()
-            } catch (_: Exception) {}
-        }.start()
-    }
-
-    private fun updateMediaSessionState(active: Boolean) {
-        try {
-            mediaSession?.let { session ->
-                if (active) {
-                    val state = PlaybackState.Builder()
-                        .setActions(
-                            PlaybackState.ACTION_PLAY or
-                                PlaybackState.ACTION_PAUSE or
-                                PlaybackState.ACTION_PLAY_PAUSE or
-                                PlaybackState.ACTION_SKIP_TO_NEXT or
-                                PlaybackState.ACTION_SKIP_TO_PREVIOUS
-                        )
-                        .setState(PlaybackState.STATE_PLAYING, 1L, 1.0f, SystemClock.elapsedRealtime())
-                        .build()
-                    session.setPlaybackState(state)
-                    session.isActive = true
-                    playSilentAudioPulseToClaimMediaSession()
-                } else {
-                    val state = PlaybackState.Builder()
-                        .setState(PlaybackState.STATE_STOPPED, 0L, 0.0f, SystemClock.elapsedRealtime())
-                        .build()
-                    session.setPlaybackState(state)
-                    session.isActive = false
-                }
-            }
-        } catch (_: Exception) {}
-    }
 
     override fun onResume() {
         super.onResume()
@@ -1537,9 +1452,6 @@ class MainActivity : FlutterActivity() {
         hideSystemStatusBar(alsoHideNavBar = true)
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 250L)
         scheduleStatusBarReHide()
-        if (isVolumeInterceptEnabled) {
-            updateMediaSessionState(true)
-        }
     }
 
     override fun onPause() {
@@ -1551,51 +1463,16 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         isActivityResumed = false
         mainHandler.removeCallbacks(reHideStatusBarRunnable)
-        try {
-            mediaSession?.isActive = false
-            mediaSession?.release()
-        } catch (_: Exception) {}
         super.onDestroy()
     }
 
-    private fun checkStylusButtonEvent(ev: MotionEvent?): Boolean {
-        if (!isVolumeInterceptEnabled || ev == null) return false
-        val isStylus = ev.isFromSource(InputDevice.SOURCE_STYLUS) ||
-            (ev.pointerCount > 0 && (
-                ev.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS ||
-                    ev.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER
-                ))
-        if (!isStylus) return false
 
-        val btnState = ev.buttonState
-        val pressed = (btnState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0 ||
-            (btnState and MotionEvent.BUTTON_SECONDARY) != 0
-
-        if (pressed && !wasStylusButtonPressed) {
-            wasStylusButtonPressed = true
-            handleInstantSpenClick()
-            return true
-        } else if (!pressed && wasStylusButtonPressed) {
-            wasStylusButtonPressed = false
-        }
-        return false
-    }
-
-    override fun dispatchGenericMotionEvent(ev: MotionEvent?): Boolean {
-        if (isVolumeInterceptEnabled) {
-            checkStylusButtonEvent(ev)
-        }
-        return super.dispatchGenericMotionEvent(ev)
-    }
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         if (ev != null && (ev.actionMasked == MotionEvent.ACTION_DOWN || ev.actionMasked == MotionEvent.ACTION_UP)) {
             if (isStatusBarCurrentlyVisible()) {
                 hideSystemStatusBar()
             }
-        }
-        if (isVolumeInterceptEnabled) {
-            checkStylusButtonEvent(ev)
         }
         return super.dispatchTouchEvent(ev)
     }
@@ -1627,36 +1504,6 @@ class MainActivity : FlutterActivity() {
             if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
                 if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                     eventSink?.success(if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) "UP" else "DOWN")
-                }
-                return true
-            }
-
-            if (keyCode == KeyEvent.KEYCODE_PAGE_UP ||
-                keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
-                keyCode == KeyEvent.KEYCODE_DPAD_UP ||
-                keyCode == KeyEvent.KEYCODE_MEDIA_NEXT ||
-                keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS
-            ) {
-                if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                    handleDirectSpenDouble()
-                }
-                return true
-            }
-
-            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN ||
-                keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
-                keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
-                keyCode == KeyEvent.KEYCODE_SPACE ||
-                keyCode == KeyEvent.KEYCODE_ENTER ||
-                keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
-                keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
-                keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE ||
-                keyCode == KeyEvent.KEYCODE_CAMERA ||
-                keyCode == KeyEvent.KEYCODE_F1 ||
-                keyCode == KeyEvent.KEYCODE_F2
-            ) {
-                if (action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                    handleInstantSpenClick()
                 }
                 return true
             }

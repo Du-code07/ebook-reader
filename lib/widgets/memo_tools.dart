@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'app_colors.dart';
 
@@ -187,6 +188,67 @@ class MemoDoneButton extends StatelessWidget {
               heightFactor: 1,
               child: Text(label, style: const TextStyle(color: Colors.amber, fontSize: 14, fontWeight: FontWeight.w600)),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 메모 도구 모음을 길게 눌러 끌어 옮김: 손가락을 따라 움직이다가, 놓으면 가장 가까운 화면 가장자리
+/// ('top'·'bottom'·'left'·'right')에 붙음. 지우개처럼 길게 누르기를 따로 쓰는 단추는 그 단추가 먼저 받음
+class MemoToolbarMover extends StatefulWidget {
+  const MemoToolbarMover({super.key, required this.onDrop, required this.child});
+  final ValueChanged<String> onDrop;
+  final Widget child;
+
+  @override
+  State<MemoToolbarMover> createState() => _MemoToolbarMoverState();
+}
+
+class _MemoToolbarMoverState extends State<MemoToolbarMover> {
+  Offset _drag = Offset.zero;
+  bool _dragging = false;
+
+  void _reset() {
+    if (mounted) setState(() {
+      _dragging = false;
+      _drag = Offset.zero;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onLongPressStart: (_) {
+        HapticFeedback.mediumImpact();
+        setState(() => _dragging = true);
+      },
+      onLongPressMoveUpdate: (d) => setState(() => _drag = d.offsetFromOrigin),
+      onLongPressEnd: (d) {
+        final Size size = MediaQuery.sizeOf(context);
+        final Offset p = d.globalPosition;
+        // 손을 놓은 곳에서 가장 가까운 가장자리
+        final Map<String, double> dist = {
+          'left': p.dx,
+          'right': size.width - p.dx,
+          'top': p.dy,
+          'bottom': size.height - p.dy,
+        };
+        final String pos = dist.entries.reduce((a, b) => a.value <= b.value ? a : b).key;
+        _reset();
+        widget.onDrop(pos);
+      },
+      onLongPressCancel: _reset,
+      child: Transform.translate(
+        offset: _drag,
+        child: AnimatedScale(
+          scale: _dragging ? 1.06 : 1.0,
+          duration: Anim.ms(140),
+          child: AnimatedOpacity(
+            opacity: _dragging ? 0.88 : 1.0,
+            duration: Anim.ms(140),
+            child: widget.child,
           ),
         ),
       ),

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart' show DeviceGestureSettings, EagerGestureRecognizer;
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'app_colors.dart';
 import 'bookmark_ribbon.dart';
 import 'morph_icons.dart';
@@ -63,7 +64,7 @@ Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) 
   return result;
 }
 
-/// 가운데 둥근 창 (북마크 목록 등): 페이지 모드 창과 같은 모양·움직임. [builder]의 setState로 창 안을 다시 그림
+/// 가운데 둥근 창 (북마크 목록 등): 페이지 전환 버튼 창과 같은 모양·움직임. [builder]의 setState로 창 안을 다시 그림
 Future<T?> showCenterPanel<T>(BuildContext context, {required Widget Function(BuildContext ctx, StateSetter setState) builder}) {
   return _centerDialog<T>(context, (ctx) {
     final cs = Theme.of(ctx).colorScheme;
@@ -113,7 +114,7 @@ Widget _choiceDialogBody<T>(
   required List<(T, Widget, String, String)> options,
   required T selected,
   required ValueChanged<T> onTap,
-  /// 여러 개를 함께 고를 수 있을 때 (페이지 모드: 탭·슬라이드): 켜져 있는지
+  /// 여러 개를 함께 고를 수 있을 때 (페이지 전환 버튼: 음량 버튼·탭·슬라이드): 켜져 있는지
   bool Function(T value)? isOn,
   /// 고른 카드 바로 밑에 붙는 것 (예: 슬라이드 → 책처럼 넘기기)
   Widget? Function(T value)? below,
@@ -452,10 +453,10 @@ Future<void> showPageDisplayDialog(
   }
 }
 
-/// 페이지 모드 창에서 고른 것 (창을 닫을 때 바뀌었으면 돌려줌)
-typedef PageModeChoice = ({bool tap, bool slide, bool scroll, bool curl, bool barOff});
+/// 페이지 전환 버튼 창에서 고른 것 (창을 닫을 때 바뀌었으면 돌려줌)
+typedef PageModeChoice = ({bool volume, bool tap, bool slide, bool scroll, bool curl, bool barOff});
 
-/// 페이지 모드: 탭 / 슬라이드 / 스크롤 (탭과 슬라이드는 함께, 스크롤은 혼자)
+/// 페이지 전환 버튼: 음량 버튼(따로 켜고 끔) / 탭 / 슬라이드 / 스크롤 (탭과 슬라이드는 함께, 스크롤은 혼자)
 /// 슬라이드를 고르면 밑에 [책처럼 넘기기], 스크롤을 고르면 밑에 [스크롤바 끄기]가 나옴.
 /// 누를 때는 고르기만 하고, 창을 닫을 때 바뀐 것이 있으면 돌려줌
 Future<PageModeChoice?> showPageModeDialog(
@@ -488,39 +489,43 @@ Future<PageModeChoice?> showPageModeDialog(
           );
       return _choiceDialogBody<String>(
         ctx,
-        title: tr('페이지 모드', 'Page Mode', '翻页模式', 'ページモード'),
+        title: tr('페이지 전환 버튼', 'Page Turn Buttons', '翻页按钮', 'ページ切替ボタン'),
         subtitle: tr('스크롤은 탭·슬라이드와 함께 쓸 수 없어요\n탭과 슬라이드는 함께 쓸 수 있어요', 'Scroll cannot be combined with Tap or Slide\nTap and Slide can be used together', '滚动不能与点击、滑动同时使用\n点击和滑动可以同时使用', 'スクロールはタップ・スライドと併用できません\nタップとスライドは併用できます'),
         options: [
+          // 음량 버튼: 다른 방식과 상관없이 따로 켜고 끔
+          ('volume', const PageModeIcon(mode: 'volume'), tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン'), tr('음량 위·아래 버튼으로 이전·다음 쪽', 'Volume up and down turn to the previous and next page', '用音量上·下键翻到上一页·下一页', '音量の上・下ボタンで前・次のページへ')),
           ('tap', const PageModeIcon(mode: 'tap'), tr('탭', 'Tap', '点击', 'タップ'), tr('화면 양옆을 눌러 넘기기', 'Tap the sides of the screen to turn', '点击屏幕两侧翻页', '画面の左右をタップしてめくる')),
           ('slide', const PageModeIcon(mode: 'slide'), tr('슬라이드', 'Slide', '滑动', 'スライド'), tr('옆으로 밀어 넘기기', 'Swipe sideways to turn', '左右滑动翻页', '横にスワイプしてめくる')),
           if (allowScroll)
             ('scroll', const PageModeIcon(mode: 'scroll'), tr('스크롤', 'Scroll', '滚动', 'スクロール'), tr('쪽을 위아래로 이어 보기', 'Pages flow top to bottom', '页面上下连续显示', 'ページを上下に続けて表示')),
         ],
         selected: '',
-        isOn: (v) => switch (v) { 'tap' => c.tap, 'slide' => c.slide, _ => c.scroll },
+        isOn: (v) => switch (v) { 'volume' => c.volume, 'tap' => c.tap, 'slide' => c.slide, _ => c.scroll },
         below: (v) {
           if (v == 'slide' && c.slide && allowCurl) {
-            return sub(tr('책처럼 넘기기', 'Book page turn', '书本翻页', '本のようにめくる'), c.curl, (b) => setState(() => c = (tap: c.tap, slide: c.slide, scroll: c.scroll, curl: b, barOff: c.barOff)));
+            return sub(tr('책처럼 넘기기', 'Book page turn', '书本翻页', '本のようにめくる'), c.curl, (b) => setState(() => c = (volume: c.volume, tap: c.tap, slide: c.slide, scroll: c.scroll, curl: b, barOff: c.barOff)));
           }
           if (v == 'scroll' && c.scroll) {
-            return sub(tr('스크롤바 끄기', 'Hide scroll bar', '隐藏滚动条', 'スクロールバーを隠す'), c.barOff, (b) => setState(() => c = (tap: c.tap, slide: c.slide, scroll: c.scroll, curl: c.curl, barOff: b)));
+            return sub(tr('스크롤바 끄기', 'Hide scroll bar', '隐藏滚动条', 'スクロールバーを隠す'), c.barOff, (b) => setState(() => c = (volume: c.volume, tap: c.tap, slide: c.slide, scroll: c.scroll, curl: c.curl, barOff: b)));
           }
           return null;
         },
         onTap: (v) => setState(() {
           switch (v) {
+            case 'volume':
+              c = (volume: !c.volume, tap: c.tap, slide: c.slide, scroll: c.scroll, curl: c.curl, barOff: c.barOff);
             case 'scroll':
               // 스크롤을 켜면 탭·슬라이드는 꺼짐 (끄면 탭으로)
-              c = c.scroll ? (tap: true, slide: c.slide, scroll: false, curl: c.curl, barOff: c.barOff) : (tap: false, slide: false, scroll: true, curl: c.curl, barOff: c.barOff);
+              c = c.scroll ? (volume: c.volume, tap: true, slide: c.slide, scroll: false, curl: c.curl, barOff: c.barOff) : (volume: c.volume, tap: false, slide: false, scroll: true, curl: c.curl, barOff: c.barOff);
             case 'tap':
               final bool tap = !c.tap;
               // 하나는 남겨 둠 (모두 끄면 넘길 수 없음)
               if (!tap && !c.slide && !c.scroll) return;
-              c = (tap: tap, slide: c.slide, scroll: false, curl: c.curl, barOff: c.barOff);
+              c = (volume: c.volume, tap: tap, slide: c.slide, scroll: false, curl: c.curl, barOff: c.barOff);
             default:
               final bool slide = !c.slide;
               if (!slide && !c.tap && !c.scroll) return;
-              c = (tap: c.tap, slide: slide, scroll: false, curl: c.curl, barOff: c.barOff);
+              c = (volume: c.volume, tap: c.tap, slide: slide, scroll: false, curl: c.curl, barOff: c.barOff);
           }
         }),
       );
@@ -682,7 +687,8 @@ Widget pageDisplayGlyph(String mode, {double? size, Color? color}) => switch (mo
       _ => Icon(Icons.insert_drive_file_outlined, size: size, color: color),
     };
 
-/// 페이지 모드 아이콘: 탭(쪽 + 누른 자리) / 슬라이드(쪽 + 아래 양쪽 화살) / 스크롤(쪽 + 오른쪽 위아래 화살), 'tap+slide'는 슬라이드 귀퉁이에 누른 자리
+/// 페이지 전환 버튼 아이콘: 탭(쪽 + 누른 자리) / 슬라이드(쪽 + 아래 양쪽 화살) / 스크롤(쪽 + 오른쪽 위아래 화살), 'tap+slide'는 슬라이드 귀퉁이에 누른 자리,
+/// 음량 버튼(휴대폰 + 옆면 버튼 두 개와 위·아래 화살)
 class PageModeIcon extends StatelessWidget {
   const PageModeIcon({super.key, required this.mode, this.size, this.color});
   final String mode; // 'tap' / 'slide' / 'scroll' / 'tap+slide'(슬라이드 아이콘 귀퉁이에 탭 표시)
@@ -738,6 +744,19 @@ class _PageModePainter extends CustomPainter {
     }
 
     switch (mode) {
+      case 'volume':
+        // 휴대폰 + 오른쪽 옆면의 음량 버튼 두 개, 그 옆에 위(이전)·아래(다음) 화살
+        canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(3.5 * u, 2 * u, 14 * u, 22 * u), Radius.circular(2.6 * u)), stroke);
+        canvas.drawLine(Offset(7 * u, 19 * u), Offset(10.5 * u, 19 * u), stroke);
+        final Paint key = Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4 * u
+          ..strokeCap = StrokeCap.round;
+        canvas.drawLine(Offset(16.2 * u, 5.2 * u), Offset(16.2 * u, 8.8 * u), key);
+        canvas.drawLine(Offset(16.2 * u, 11.2 * u), Offset(16.2 * u, 14.8 * u), key);
+        chevron([18.8, 8, 20.8, 5.8, 22.8, 8]);
+        chevron([18.8, 12, 20.8, 14.2, 22.8, 12]);
       case 'slide':
         // 쪽 한 장 + 아래에 양쪽 화살 (옆으로 밀어 넘김)
         page(const Rect.fromLTRB(6, 2, 18, 16.5), [(6, 9, 15), (9.5, 9, 15), (13, 9, 12)]);
@@ -799,6 +818,7 @@ class PageModeMemory {
 }
 
 /// 스크롤 보기 오른쪽의 회색 막대: 지금 위치를 보여 주고, 끌면 그 비율 위치로 바로 이동
+/// 길게 누른 채 화면 반대쪽 절반으로 끌어 놓으면 막대가 그쪽 가장자리로 옮겨 감 (기억해 둠)
 /// [ratio]: 0(처음)~1(끝), [viewFraction]: 화면에 보이는 부분 / 전체 (막대 길이)
 class ScrollThumbBar extends StatefulWidget {
   const ScrollThumbBar({super.key, required this.ratio, required this.viewFraction, required this.onDragRatio, this.onDragStart, this.onDragEnd, this.left, this.color});
@@ -806,10 +826,10 @@ class ScrollThumbBar extends StatefulWidget {
   /// 막대 색 (세피아처럼 회색이 잘 안 보이는 바탕에서 바꿈)
   final Color? color;
 
-  /// 왼손잡이: 막대를 왼쪽에 (null이면 앱 설정 [leftHanded]를 따름)
+  /// 막대를 왼쪽에 (null이면 [leftHanded]를 따름)
   final bool? left;
 
-  /// 뷰어 설정의 '왼손잡이' (스크롤 막대·도구 모음을 왼쪽에)
+  /// 막대를 왼쪽에 둘지 (막대를 길게 눌러 옮긴 쪽, 저장해 둔 값)
   static final ValueNotifier<bool> leftHanded = ValueNotifier<bool>(false);
 
   /// 뷰어 설정의 '스크롤바 끄기'
@@ -829,6 +849,19 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
   double _dragRatio = 0;
   int? _dragPointer;
 
+  // 길게 눌러 옮기기: 누른 채 거의 움직이지 않고 0.5초가 지나면 막대를 옆으로 끌 수 있음
+  Timer? _holdTimer;
+  bool _moving = false;
+  double _moveDx = 0;
+  double _movedDist = 0;
+  bool _left = false;
+
+  @override
+  void dispose() {
+    _holdTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<bool>(
@@ -845,6 +878,7 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
   }
 
   Widget _build(BuildContext context, bool left) {
+    _left = left;
     return LayoutBuilder(builder: (context, c) {
       final double h = c.maxHeight;
       if (!h.isFinite || h <= 0) return const SizedBox.shrink();
@@ -881,39 +915,86 @@ class _ScrollThumbBarState extends State<ScrollThumbBar> {
               onPointerDown: (e) {
                 if (_dragPointer != null) return;
                 _dragPointer = e.pointer;
+                _movedDist = 0;
                 widget.onDragStart?.call();
                 setState(() {
                   _dragging = true;
                   _dragRatio = widget.ratio.clamp(0.0, 1.0).toDouble();
                 });
+                // 길게 누르면(그동안 거의 안 움직이면) 옮기기로 바뀜 (스크롤 끌기는 끝냄)
+                _holdTimer?.cancel();
+                if (widget.left == null) {
+                  _holdTimer = Timer(const Duration(milliseconds: 500), () {
+                    if (!mounted || _dragPointer != e.pointer || _movedDist > 10) return;
+                    HapticFeedback.mediumImpact();
+                    widget.onDragEnd?.call();
+                    setState(() {
+                      _moving = true;
+                      _moveDx = 0;
+                    });
+                  });
+                }
               },
               onPointerMove: (e) {
                 if (e.pointer != _dragPointer) return;
+                if (_moving) {
+                  setState(() => _moveDx += e.delta.dx);
+                  return;
+                }
+                _movedDist += e.delta.distance;
+                if (_movedDist > 10) _holdTimer?.cancel();
                 setState(() => _dragRatio = (_dragRatio + e.delta.dy / track).clamp(0.0, 1.0).toDouble());
                 widget.onDragRatio(_dragRatio);
               },
               onPointerUp: (e) {
                 if (e.pointer != _dragPointer) return;
                 _dragPointer = null;
+                _holdTimer?.cancel();
+                if (_moving) {
+                  // 화면 가운데를 넘겨 놓았으면 그쪽 가장자리로 옮기고 기억
+                  final bool toLeft = e.position.dx < MediaQuery.sizeOf(context).width / 2;
+                  setState(() {
+                    _moving = false;
+                    _moveDx = 0;
+                    _dragging = false;
+                  });
+                  if (toLeft != _left) {
+                    ScrollThumbBar.leftHanded.value = toLeft;
+                    StorageService.setQuickMenuSide(toLeft ? 'left' : 'right');
+                  }
+                  return;
+                }
                 end();
               },
               onPointerCancel: (e) {
                 if (e.pointer != _dragPointer) return;
                 _dragPointer = null;
+                _holdTimer?.cancel();
+                if (_moving) {
+                  setState(() {
+                    _moving = false;
+                    _moveDx = 0;
+                    _dragging = false;
+                  });
+                  return;
+                }
                 end();
               },
-              child: Align(
+              child: Transform.translate(
+                offset: Offset(_moveDx, 0),
+                child: Align(
                 alignment: left ? Alignment.centerLeft : Alignment.centerRight,
                 child: AnimatedContainer(
                   key: const ValueKey('thumb'),
                   duration: Anim.ms(120),
                   margin: EdgeInsets.only(left: left ? 3 : 0, right: left ? 0 : 3),
-                  width: _dragging ? 9 : 6,
+                  width: _moving ? 12 : (_dragging ? 9 : 6),
                   decoration: BoxDecoration(
                     color: (widget.color ?? Colors.grey).withValues(alpha: _dragging ? 0.95 : (widget.color == null ? 0.65 : 0.8)),
                     borderRadius: BorderRadius.circular(4),
                   ),
                 ),
+              ),
               ),
             ),
           ),

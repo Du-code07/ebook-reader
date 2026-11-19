@@ -12,9 +12,6 @@ class VolumeKeyService {
   Future<void> startListening({
     required VoidCallback onVolumeUp,
     required VoidCallback onVolumeDown,
-    VoidCallback? onSpenSinglePress,
-    VoidCallback? onSpenDoublePress,
-    VoidCallback? onSpenDoubleRevert,
   }) async {
     if (!_isRegistered) {
       _isRegistered = true;
@@ -30,16 +27,6 @@ class VolumeKeyService {
         onVolumeUp();
       } else if (event == 'DOWN') {
         onVolumeDown();
-      } else if (event == 'SPEN_SINGLE') {
-        onSpenSinglePress?.call();
-      } else if (event == 'SPEN_DOUBLE') {
-        onSpenDoublePress?.call();
-      } else if (event == 'SPEN_DOUBLE_REVERT') {
-        if (onSpenDoubleRevert != null) {
-          onSpenDoubleRevert();
-        } else {
-          onSpenDoublePress?.call();
-        }
       }
     });
   }
