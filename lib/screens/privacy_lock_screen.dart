@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/app_lock.dart';
 import '../widgets/app_colors.dart';
+import '../widgets/push_aside_route.dart';
 import 'lock_screen.dart';
 
 typedef PrivacyTr = String Function(String ko, String en, String zh, String ja);
@@ -34,7 +35,7 @@ class _PrivacyLockScreenState extends State<PrivacyLockScreen> {
       ..showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
   }
 
-  Route<bool> _route(Widget page) => MaterialPageRoute<bool>(builder: (_) => page);
+  Route<bool> _route(Widget page) => PushAsideRoute<bool>(builder: (_) => page);
 
   /// 지금 잠금을 한 번 확인 (끄거나 바꾸기 전에)
   Future<bool> _confirmCurrent() async {

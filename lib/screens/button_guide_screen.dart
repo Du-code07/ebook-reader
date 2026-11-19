@@ -10,6 +10,7 @@ import '../widgets/file_type_icon.dart';
 import '../widgets/group_stack_icon.dart';
 import '../widgets/memo_tools.dart';
 import '../widgets/morph_icons.dart';
+import '../widgets/push_aside_route.dart';
 import '../widgets/viewer_dialogs.dart';
 
 typedef _Tr = String Function(String ko, String en, String zh, String ja);
@@ -63,7 +64,7 @@ class ButtonGuideScreen extends StatelessWidget {
                     trailing: Icon(Icons.play_circle_outline, color: cs.onSurfaceVariant),
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => _GuideRunner(kind: kind, tr: _tr)),
+                      PushAsideRoute(builder: (_) => _GuideRunner(kind: kind, tr: _tr)),
                     ),
                   ),
                 ),
@@ -272,13 +273,21 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
               tr('메뉴·목록·설정 화면 글꼴을 바꿔요', 'Change the font for menus, lists and settings', '更改菜单、列表、设置的字体', 'メニュー・一覧・設定画面のフォントを変えます')),
           _Step('epubfont', tr('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント'),
               tr('EPUB 책 본문 글꼴을 바꿔요', 'Change the font for EPUB book text', '更改 EPUB 正文字体', 'EPUB本文のフォントを変えます')),
+          _Step('pro', tr('이리ERI 프로', '이리ERI Pro', '이리ERI 专业版', '이리ERI プロ'),
+              tr('유료 기능을 사거나 무료 체험을 시작해요', 'Buy the paid features or start the free trial', '购买付费功能或开始免费试用', '有料機能を購入するか無料体験を始めます')),
+          _Step('hidepaid', tr('유료 기능 숨기기', 'Hide Paid Features', '隐藏付费功能', '有料機能を隠す'),
+              tr('사지 않은 유료 기능을 메뉴에서 숨겨요', 'Hides paid features you have not bought from the menus', '在菜单中隐藏未购买的付费功能', '購入していない有料機能をメニューから隠します')),
           _Step('cache', tr('캐시 지우기', 'Clear Cache', '清除缓存', 'キャッシュを削除'),
               tr('다시 만들 수 있는 임시 파일만 지워요', 'Deletes only temporary files that can be rebuilt', '只删除可以重新生成的临时文件', '作り直せる一時ファイルだけを削除します')),
           _Step('data', tr('데이터 지우기', 'Clear Data', '清除数据', 'データを削除'),
               tr('파일·메모·설정·접근 권한을 모두 지우고 처음 상태로', 'Delete all files, notes, settings and permissions and start over', '删除所有文件·笔记·设置·访问权限，恢复初始状态', 'ファイル・メモ・設定・アクセス権限をすべて削除して初期状態に')),
           _Step('guide', tr('가이드', 'Guide', '指南', 'ガイド'), tr('지금 보고 있는 이 안내를 다시 열어요', 'Opens this guide again', '再次打开本指南', 'このガイドをもう一度開きます')),
+          _Step('faq', tr('자주 묻는 질문', 'FAQ', '常见问题', 'よくある質問'),
+              tr('지원 형식·요금·파일 추가 방식 등 자주 묻는 질문을 봐요', 'See common questions about formats, pricing, adding files and more', '查看支持格式·费用·文件添加方式等常见问题', '対応形式・料金・ファイルの追加方法などのよくある質問を見ます')),
+          _Step('contact', tr('문의하기', 'Contact Us', '联系我们', 'お問い合わせ'),
+              tr('이메일·제목·내용을 적어 개발자에게 문의해요', 'Write your email, subject and message to contact the developer', '填写邮箱·标题·内容联系开发者', 'メール・件名・内容を書いて開発者に問い合わせます')),
           _Step('terms', tr('이용 약관', 'Terms of Service', '使用条款', '利用規約'), tr('앱 이용 약관을 봐요', 'Read the terms of service', '查看使用条款', '利用規約を見ます')),
-          _Step('privacy', tr('개인정보 처리방침', 'Privacy Policy', '隐私政策', 'プライバシーポリシー'),
+          _Step('policy', tr('개인정보 처리방침', 'Privacy Policy', '隐私政策', 'プライバシーポリシー'),
               tr('앱이 정보를 어떻게 다루는지 봐요', 'See how the app handles information', '查看应用如何处理信息', 'アプリが情報をどう扱うかを見ます')),
           _Step('licenses', tr('오픈소스 라이선스', 'Open Source Licenses', '开源许可', 'オープンソースライセンス'),
               tr('앱에 들어 있는 오픈소스 소프트웨어·글꼴의 라이선스를 봐요', 'See the licenses of open source software and fonts in the app', '查看应用中开源软件·字体的许可', 'アプリに含まれるオープンソースソフトウェア・フォントのライセンスを見ます')),
@@ -872,13 +881,18 @@ class _SettingsMock extends StatelessWidget {
           item('docfont', const DocPairIcon(size: 25), tr('한글·워드 글꼴', 'HWP·Word Fonts', 'HWP·Word 字体', 'HWP・Wordフォント')),
           item('appfont', const Icon(Icons.font_download_outlined), tr('앱 글꼴', 'App Font', '应用字体', 'アプリのフォント')),
           item('epubfont', FileTypeIcon(ext: 'epub', size: 24, color: cs.onSurface), tr('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント')),
+          section(tr('프로', 'Pro', '专业版', 'プロ')),
+          item('pro', const Icon(Icons.workspace_premium_outlined), tr('이리ERI 프로', '이리ERI Pro', '이리ERI 专业版', '이리ERI プロ')),
+          item('hidepaid', const Icon(Icons.visibility_off_outlined), tr('유료 기능 숨기기', 'Hide Paid Features', '隐藏付费功能', '有料機能を隠す'), toggle: true),
           section(tr('데이터', 'Data', '数据', 'データ')),
           item('cache', const Icon(Icons.cleaning_services_outlined), tr('캐시 지우기', 'Clear Cache', '清除缓存', 'キャッシュを削除')),
           item('data', const Icon(Icons.delete_forever_outlined), tr('데이터 지우기', 'Clear Data', '清除数据', 'データを削除')),
           section(tr('도움말', 'Help', '帮助', 'ヘルプ')),
           item('guide', const Icon(Icons.lightbulb_outline), tr('가이드', 'Guide', '指南', 'ガイド')),
+          item('faq', const Icon(Icons.help_outline), tr('자주 묻는 질문', 'FAQ', '常见问题', 'よくある質問')),
+          item('contact', const Icon(Icons.mail_outline), tr('문의하기', 'Contact Us', '联系我们', 'お問い合わせ')),
           item('terms', const Icon(Icons.gavel_outlined), tr('이용 약관', 'Terms of Service', '使用条款', '利用規約')),
-          item('privacy', const Icon(Icons.privacy_tip_outlined), tr('개인정보 처리방침', 'Privacy Policy', '隐私政策', 'プライバシーポリシー')),
+          item('policy', const Icon(Icons.privacy_tip_outlined), tr('개인정보 처리방침', 'Privacy Policy', '隐私政策', 'プライバシーポリシー')),
           item('licenses', const Icon(Icons.article_outlined), tr('오픈소스 라이선스', 'Open Source Licenses', '开源许可', 'オープンソースライセンス')),
         ],
       ),

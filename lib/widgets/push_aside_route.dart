@@ -20,9 +20,10 @@ class PushAsideShift extends StatelessWidget {
       valueListenable: PushAside.shift,
       child: child,
       builder: (context, t, child) {
-        if (t <= 0) return child!;
+        // 밀려나지 않을 때도 같은 모양으로 감싸 둠: 감싸는 위젯이 바뀌면 그 안 화면이 새로 만들어져
+        // 설정 창의 스크롤 위치 같은 상태가 사라짐
         final double w = MediaQuery.sizeOf(context).width;
-        return Transform.translate(offset: Offset(-w * t, 0), child: child);
+        return Transform.translate(offset: Offset(-w * t.clamp(0.0, 1.0), 0), child: child);
       },
     );
   }

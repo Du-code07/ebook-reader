@@ -289,7 +289,7 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
               ListTile(
                 dense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                leading: Icon(Icons.check_circle_outline, color: Theme.of(context).brightness == Brightness.dark ? cs.onSurface : Colors.black, size: 20),
+                leading: Icon(Icons.check_circle_outline, color: AppColors.mark(context), size: 20),
                 title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
                 subtitle: Text(note),
               ),

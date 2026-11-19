@@ -148,8 +148,8 @@ class _ContactScreenState extends State<ContactScreen> {
               child: TextButton(
                 style: TextButton.styleFrom(padding: EdgeInsets.zero),
                 onPressed: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => LegalScreen(doc: LegalDoc.privacy, lang: widget.lang))),
-                child: Text(_t('개인정보 처리방침 보기', 'View Privacy Policy', '查看隐私政策', 'プライバシーポリシーを見る'),
-                    style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface, decoration: TextDecoration.underline)),
+                child: Text(_t('개인정보 처리방침', 'Privacy Policy', '隐私政策', 'プライバシーポリシー'),
+                    style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface)),
               ),
             ),
             const SizedBox(height: 12),

@@ -2382,41 +2382,46 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Future<String?> _createNewGroupDialog() async {
     final controller = TextEditingController();
     String? created;
+    String? error; // 같은 이름이 있을 때 입력칸 아래에 띄우는 알림 (자판에 가리지 않게)
     await showPopDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(_tr('새 그룹 만들기', 'Create New Group', '新建分组', '新規グループ作成')),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 16, // 그룹 이름은 16글자까지
-          decoration: InputDecoration(
-            hintText: _tr('그룹 이름 입력', 'Enter group name', '输入分组名称', 'グループ名を入力'),
-            border: const OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
-          ElevatedButton(
-            onPressed: () async {
-              final text = controller.text.trim();
-              // 이미 있는 그룹 이름(내 서재·미분류 포함)이면 만들지 않고 알림
-              if (text == '전체' || text == '미분류' || text == _localizeGroupName('전체') || text == _localizeGroupName('미분류') || _groups.contains(text)) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(_tr('같은 이름의 그룹이 있어요', 'A group with that name already exists', '已有同名分组', '同じ名前のグループがあります'))),
-                );
-                return;
-              }
-              if (text.isNotEmpty) {
-                await StorageService.addGroup(text);
-                created = text;
-                if (ctx.mounted) Navigator.pop(ctx);
-                await _loadLibrary();
-              }
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text(_tr('새 그룹 만들기', 'Create New Group', '新建分组', '新規グループ作成')),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 16, // 그룹 이름은 16글자까지
+            onChanged: (_) {
+              if (error != null) setDlg(() => error = null);
             },
-            child: Text(_tr('추가', 'Add', '添加', '追加')),
+            decoration: InputDecoration(
+              hintText: _tr('그룹 이름 입력', 'Enter group name', '输入分组名称', 'グループ名を入力'),
+              border: const OutlineInputBorder(),
+              errorText: error,
+            ),
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル'))),
+            ElevatedButton(
+              onPressed: () async {
+                final text = controller.text.trim();
+                // 이미 있는 그룹 이름(내 서재·미분류 포함)이면 만들지 않고 입력칸에 알림
+                if (text == '전체' || text == '미분류' || text == _localizeGroupName('전체') || text == _localizeGroupName('미분류') || _groups.contains(text)) {
+                  setDlg(() => error = _tr('같은 이름의 그룹이 있어요', 'A group with that name already exists', '已有同名分组', '同じ名前のグループがあります'));
+                  return;
+                }
+                if (text.isNotEmpty) {
+                  await StorageService.addGroup(text);
+                  created = text;
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  await _loadLibrary();
+                }
+              },
+              child: Text(_tr('추가', 'Add', '添加', '追加')),
+            ),
+          ],
+        ),
       ),
     );
     return created;
