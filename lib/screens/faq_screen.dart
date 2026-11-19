@@ -31,10 +31,10 @@ class FaqScreen extends StatelessWidget {
       ),
       (
         t('유료는 어떤 기능이 있나요?', 'What are the paid features?', '有哪些付费功能？', '有料機能には何がありますか？'),
-        t('현재는 문서 스캔, 이미지 합치기, PDF 합치기가 있어요. 추후 업데이트를 통해 기능이 추가될 수 있어요. 그리고 개발자에게 밥 사 주기 기능도 있어요!',
-            'Currently there are Scan Document, Merge Images and Merge PDFs. More features may be added in future updates. There is also a feature to buy the developer a meal!',
-            '目前有扫描文档、合并图片和合并 PDF。今后可能会通过更新增加功能。另外还有请开发者吃饭的功能！',
-            '現在は文書スキャン、画像結合、PDF結合があります。今後のアップデートで機能が追加されることがあります。それから、開発者にごはんをおごる機能もあります！'),
+        t('현재는 문서 스캔, 이미지 합치기, PDF 합치기가 있어요. 추후 업데이트를 통해 기능이 추가될 수 있어요. 그리고 이리ERI 프로를 사면 개발자에게 밥 한 끼 사 주는 셈이에요!',
+            'Currently there are Scan Document, Merge Images and Merge PDFs. More features may be added in future updates. And buying 이리ERI Pro is like treating the developer to a meal!',
+            '目前有扫描文档、合并图片和合并 PDF。今后可能会通过更新增加功能。另外，购买 이리ERI 专业版就相当于请开发者吃一顿饭！',
+            '現在は文書スキャン、画像結合、PDF結合があります。今後のアップデートで機能が追加されることがあります。それに、이리ERI プロを買うと開発者にごはんを一食おごることにもなります！'),
       ),
       (
         t('파일은 어떻게 추가되나요?', 'How are files added?', '文件是如何添加的？', 'ファイルはどのように追加されますか？'),
