@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../services/pro.dart';
 import '../services/storage_service.dart';
 import '../widgets/push_aside_route.dart';
 import 'contact_screen.dart';
@@ -14,22 +13,28 @@ class FaqScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     String t(String ko, String en, String zh, String ja) => AppI18n.t(lang, ko: ko, en: en, zh: zh, ja: ja);
-    final String trial = Pro.durationText(lang, Pro.trialLength);
 
     final List<(String, String)> items = [
       (
         t('어떤 파일을 열 수 있나요?', 'Which files can I open?', '可以打开哪些文件？', 'どんなファイルを開けますか？'),
-        t('PDF, EPUB, TXT, CBZ(만화), 워드(DOCX·DOC), 한글(HWP·HWPX), 파워포인트(PPTX·PPT), 엑셀(XLSX·XLSM·XLS)을 열 수 있어요. 사진은 이미지 합치기로 PDF로 만들어 볼 수 있어요',
-            'PDF, EPUB, TXT, CBZ (comics), Word (DOCX, DOC), Hangul (HWP, HWPX), PowerPoint (PPTX, PPT) and Excel (XLSX, XLSM, XLS). Photos can be viewed by turning them into a PDF with Merge Images',
-            '可以打开 PDF、EPUB、TXT、CBZ（漫画）、Word（DOCX、DOC）、韩文（HWP、HWPX）、PowerPoint（PPTX、PPT）和 Excel（XLSX、XLSM、XLS）。照片可以用"合并图片"做成 PDF 后查看',
-            'PDF、EPUB、TXT、CBZ（漫画）、Word（DOCX・DOC）、ハングル（HWP・HWPX）、PowerPoint（PPTX・PPT）、Excel（XLSX・XLSM・XLS）を開けます。写真は「画像結合」でPDFにして見られます'),
+        t('PDF, EPUB, TXT, CBZ(만화), 워드(DOCX·DOC), 한글(HWP·HWPX), 파워포인트(PPTX·PPT), 엑셀(XLSX·XLSM·XLS)을 열 수 있어요. 사진은 이미지 합치기로 CBZ 파일로 만들어 볼 수 있어요',
+            'PDF, EPUB, TXT, CBZ (comics), Word (DOCX, DOC), Hangul (HWP, HWPX), PowerPoint (PPTX, PPT) and Excel (XLSX, XLSM, XLS). Photos can be viewed by turning them into a CBZ file with Merge Images',
+            '可以打开 PDF、EPUB、TXT、CBZ（漫画）、Word（DOCX、DOC）、韩文（HWP、HWPX）、PowerPoint（PPTX、PPT）和 Excel（XLSX、XLSM、XLS）。照片可以用"合并图片"做成 CBZ 文件后查看',
+            'PDF、EPUB、TXT、CBZ（漫画）、Word（DOCX・DOC）、ハングル（HWP・HWPX）、PowerPoint（PPTX・PPT）、Excel（XLSX・XLSM・XLS）を開けます。写真は「画像結合」でCBZファイルにして見られます'),
       ),
       (
         t('무료 앱인가요?', 'Is the app free?', '这是免费应用吗？', '無料アプリですか？'),
-        t('파일 보기, 메모, 북마크 같은 기본 기능은 무료예요. 문서 스캔, 이미지 합치기, PDF 합치기는 이리ERI 프로(1회 구매)로 쓸 수 있고, 구매 전에 무료 체험을 한 번 해 볼 수 있어요',
-            'Basic features such as viewing files, notes and bookmarks are free. Scan Document, Merge Images and Merge PDFs come with 이리ERI Pro (a one-time purchase), and you can try them once for free before buying',
-            '查看文件、笔记、书签等基本功能免费。扫描文档、合并图片和合并 PDF 需要 이리ERI 专业版（一次性购买），购买前可以免费试用一次',
-            'ファイルの閲覧、メモ、ブックマークなどの基本機能は無料です。文書スキャン、画像結合、PDF結合は 이리ERI プロ（買い切り）で使え、購入前に一度無料で試せます'),
+        t('광고 없는 무료 앱이에요. 파일 보기, 메모, 북마크 같은 기본 기능은 모두 무료로 쓸 수 있어요',
+            'Yes, it is a free app with no ads. Basic features such as viewing files, notes and bookmarks are all free',
+            '这是没有广告的免费应用。查看文件、笔记、书签等基本功能都可以免费使用',
+            '広告のない無料アプリです。ファイルの閲覧、メモ、ブックマークなどの基本機能はすべて無料で使えます'),
+      ),
+      (
+        t('유료는 어떤 기능이 있나요?', 'What are the paid features?', '有哪些付费功能？', '有料機能には何がありますか？'),
+        t('현재는 문서 스캔, 이미지 합치기, PDF 합치기가 있어요. 추후 업데이트를 통해 기능이 추가될 수 있어요. 그리고 개발자에게 밥 사 주기 기능도 있어요!',
+            'Currently there are Scan Document, Merge Images and Merge PDFs. More features may be added in future updates. There is also a feature to buy the developer a meal!',
+            '目前有扫描文档、合并图片和合并 PDF。今后可能会通过更新增加功能。另外还有请开发者吃饭的功能！',
+            '現在は文書スキャン、画像結合、PDF結合があります。今後のアップデートで機能が追加されることがあります。それから、開発者にごはんをおごる機能もあります！'),
       ),
       (
         t('파일은 어떻게 추가되나요?', 'How are files added?', '文件是如何添加的？', 'ファイルはどのように追加されますか？'),
@@ -60,13 +65,6 @@ class FaqScreen extends StatelessWidget {
             '文書を端末内で変換して表示するため、フォント・書式・レイアウトが少し異なる場合があります。アプリ設定 > フォント で文書に使われたフォントファイルを追加すると、より近く表示できます'),
       ),
       (
-        t('스캔본 PDF에서도 글자를 찾을 수 있나요?', 'Can I search text in scanned PDFs?', '扫描版 PDF 也能查找文字吗？', 'スキャンしたPDFでも文字を検索できますか？'),
-        t('네. 그림으로 된 쪽은 기기 안에서 글자를 인식해서 찾고 복사할 수 있어요. 사진 상태에 따라 인식이 틀릴 수 있어요',
-            'Yes. Text on image-based pages is recognized on your device so you can search and copy it. Recognition may contain errors depending on the image quality',
-            '可以。图片页面会在设备上识别文字，可以查找和复制。根据图片质量，识别可能会有误差',
-            'はい。画像のページは端末内で文字を認識して検索・コピーできます。画像の状態によって認識に誤りが出ることがあります'),
-      ),
-      (
         t('인터넷이 필요한가요?', 'Do I need an internet connection?', '需要联网吗？', 'インターネットは必要ですか？'),
         t('파일을 보는 데는 인터넷이 필요 없어요. 구매·구매 복원과 일부 Google 기능에만 인터넷이 쓰여요',
             'No internet is needed to view files. The internet is used only for purchases, restoring purchases and some Google features',
@@ -93,13 +91,6 @@ class FaqScreen extends StatelessWidget {
             'It is restored when you install from the Play Store with the same Google account. If it is not restored right away, tap App Settings > 이리ERI Pro > Restore Purchase',
             '用同一 Google 账号从 Play 商店安装即可恢复。如果没有立即恢复，请点 应用设置 > 이리ERI 专业版 > 恢复购买',
             '同じ Google アカウントで Play ストアからインストールすると復元されます。すぐに復元されない場合は アプリ設定 > 이리ERI プロ > 購入を復元 を押してください'),
-      ),
-      (
-        t('무료 체험은 몇 번 할 수 있나요?', 'How many times can I use the free trial?', '免费试用可以用几次？', '無料体験は何回できますか？'),
-        t('기기마다 한 번, $trial 동안 쓸 수 있어요. 앱을 다시 설치하거나 데이터를 지워도 다시 시작되지 않아요',
-            'Once per device, for $trial. It does not restart even if you reinstall the app or clear its data',
-            '每台设备一次，可使用 $trial。即使重新安装应用或清除数据也不会重新开始',
-            '端末ごとに1回、$trialの間使えます。アプリを再インストールしたりデータを消したりしても、やり直しにはなりません'),
       ),
       (
         t('잠금 비밀번호를 잊었어요', 'I forgot my lock password', '忘记了锁定密码', 'ロックのパスワードを忘れました'),
@@ -133,7 +124,8 @@ class FaqScreen extends StatelessWidget {
                   expandedCrossAxisAlignment: CrossAxisAlignment.start,
                   title: Text(q, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
                   children: [
-                    Text(a, style: TextStyle(fontSize: 14.5, height: 1.55, color: cs.onSurface.withValues(alpha: 0.86))),
+                    // 대답은 앞에 한 칸 띄우고 시작
+                    Text(' $a', style: TextStyle(fontSize: 14.5, height: 1.55, color: cs.onSurface.withValues(alpha: 0.86))),
                   ],
                 ),
               ),

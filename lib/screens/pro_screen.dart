@@ -248,18 +248,19 @@ class _ProScreenState extends State<ProScreen> {
                           child: SizedBox(
                             height: 54,
                             child: FilledButton(
-                              // 가격을 못 불러와 눌리지 않을 때도 문구는 또렷하게
+                              // 가격을 확인하는 중이라 눌리지 않을 때도 문구는 또렷하게
                               style: FilledButton.styleFrom(
                                 disabledBackgroundColor: cs.surfaceContainerHighest,
                                 disabledForegroundColor: cs.onSurface,
                               ),
-                              onPressed: (_busy || price == null) ? null : _buy,
+                              // 가격을 못 불러왔으면 이 단추가 [가격 다시 불러오기]가 됨
+                              onPressed: _busy || (price == null && _priceLoading) ? null : (price == null ? _loadPrice : _buy),
                               child: _busy
                                   ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
                                   : FittedBox(
                                       fit: BoxFit.scaleDown,
                                       child: Text(price == null
-                                          ? (_priceLoading ? _t('가격 확인 중', 'Checking price', '正在确认价格', '価格を確認中') : _t('가격을 불러오지 못했어요', 'Price unavailable', '无法加载价格', '価格を読み込めません'))
+                                          ? (_priceLoading ? _t('가격 확인 중', 'Checking price', '正在确认价格', '価格を確認中') : _t('가격 다시 불러오기', 'Reload Price', '重新加载价格', '価格を再読み込み'))
                                           : _t('$price에 구매하기', 'Buy for $price', '以 $price 购买', '$priceで購入する'),
                                           style: TextStyle(fontSize: 16.5, fontWeight: price == null ? FontWeight.w700 : null)),
                                     ),
@@ -267,14 +268,6 @@ class _ProScreenState extends State<ProScreen> {
                           ),
                         ),
                       ]),
-                    ),
-                  if (!owned && price == null && !_priceLoading)
-                    Center(
-                      child: TextButton(
-                        onPressed: _busy ? null : _loadPrice,
-                        child: Text(_t('가격 다시 불러오기', 'Reload Price', '重新加载价格', '価格を再読み込み'),
-                            style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface)),
-                      ),
                     ),
                   const SizedBox(height: 6),
                   Center(

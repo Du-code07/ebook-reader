@@ -25,7 +25,6 @@ class I18nExtra {
     'Price: checking': ['Prix : vérification en cours', 'Цена: проверяется', 'Precio: comprobando'],
     'Price: could not be loaded. You can buy once the price is shown': ['Prix : impossible à charger. Vous pourrez acheter une fois le prix affiché', 'Цену не удалось загрузить. Купить можно, когда появится цена', 'Precio: no se pudo cargar. Podrás comprar cuando se muestre el precio'],
     'Checking price': ['Vérification du prix', 'Проверка цены', 'Comprobando precio'],
-    'Price unavailable': ['Prix indisponible', 'Цена недоступна', 'Precio no disponible'],
     'Reload Price': ['Recharger le prix', 'Загрузить цену снова', 'Volver a cargar precio'],
     'This English translation is provided for convenience. The Korean version is the official text and prevails if there is any difference': ['Cette traduction anglaise est fournie à titre indicatif. La version coréenne fait foi et prévaut en cas de divergence', 'Этот перевод на английский предоставлен для удобства. Официальным текстом является корейская версия, и при расхождениях она имеет приоритет', 'Esta traducción al inglés se ofrece como referencia. La versión coreana es el texto oficial y prevalece en caso de diferencia'],
     'Start': ['Commencer', 'Начать', 'Empezar'],
