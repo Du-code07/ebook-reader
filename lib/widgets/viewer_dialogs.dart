@@ -1887,3 +1887,106 @@ Future<bool> restoreBookmarkView(
   }
   return changed;
 }
+
+/// 길게 눌러(0.5초, 거의 움직이지 않고) 끌어 옮기기: 손가락을 따라 움직이다가 놓으면 [sides] 중 가장 가까운 화면 가장자리로.
+/// 제스처 경쟁에 끼지 않는 Listener로 받으므로 안의 슬라이더·단추는 그대로 동작함
+/// (안의 슬라이더가 누른 순간 값을 바꿨다면 [onHoldStart]에서 되돌림)
+class HoldToMove extends StatefulWidget {
+  const HoldToMove({super.key, required this.sides, required this.onDrop, required this.child, this.onDown, this.onHoldStart, this.onEnd});
+  final List<String> sides; // 'top' · 'bottom' · 'left' · 'right'
+  final ValueChanged<String> onDrop;
+  final VoidCallback? onDown;
+  final VoidCallback? onHoldStart;
+  /// 옮기기가 끝났을 때 (놓았든 취소됐든)
+  final VoidCallback? onEnd;
+  final Widget child;
+
+  @override
+  State<HoldToMove> createState() => _HoldToMoveState();
+}
+
+class _HoldToMoveState extends State<HoldToMove> {
+  int? _pointer;
+  Timer? _timer;
+  double _moved = 0;
+  bool _moving = false;
+  Offset _drag = Offset.zero;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _finish() {
+    _timer?.cancel();
+    _pointer = null;
+    if (_moving) {
+      setState(() {
+        _moving = false;
+        _drag = Offset.zero;
+      });
+      widget.onEnd?.call();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (e) {
+        if (_pointer != null) return;
+        _pointer = e.pointer;
+        _moved = 0;
+        widget.onDown?.call();
+        _timer?.cancel();
+        _timer = Timer(const Duration(milliseconds: 500), () {
+          if (!mounted || _pointer != e.pointer || _moved > 10) return;
+          HapticFeedback.mediumImpact();
+          widget.onHoldStart?.call();
+          setState(() {
+            _moving = true;
+            _drag = Offset.zero;
+          });
+        });
+      },
+      onPointerMove: (e) {
+        if (e.pointer != _pointer) return;
+        if (_moving) {
+          setState(() => _drag += e.delta);
+          return;
+        }
+        _moved += e.delta.distance;
+        if (_moved > 10) _timer?.cancel();
+      },
+      onPointerUp: (e) {
+        if (e.pointer != _pointer) return;
+        if (_moving) {
+          final Size size = MediaQuery.sizeOf(context);
+          final Offset p = e.position;
+          final Map<String, double> dist = {
+            'left': p.dx,
+            'right': size.width - p.dx,
+            'top': p.dy,
+            'bottom': size.height - p.dy,
+          }..removeWhere((k, _) => !widget.sides.contains(k));
+          final String side = dist.entries.reduce((a, b) => a.value <= b.value ? a : b).key;
+          _finish();
+          widget.onDrop(side);
+          return;
+        }
+        _finish();
+      },
+      onPointerCancel: (e) {
+        if (e.pointer == _pointer) _finish();
+      },
+      child: Transform.translate(
+        offset: _drag,
+        child: AnimatedScale(
+          scale: _moving ? 1.04 : 1.0,
+          duration: Anim.ms(140),
+          child: AnimatedOpacity(opacity: _moving ? 0.85 : 1.0, duration: Anim.ms(140), child: widget.child),
+        ),
+      ),
+    );
+  }
+}

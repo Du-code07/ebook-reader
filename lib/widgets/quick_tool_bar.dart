@@ -68,10 +68,13 @@ class _WiggleOnChangeState extends State<WiggleOnChange> with SingleTickerProvid
   }
 }
 
-/// 도구 모음: 화면 아래에 둥근 가로 막대로 아이콘을 한 줄로 늘어놓음
-/// (아이콘이 많으면 옆으로 밀어서 봄). 누르면 그 기능을 바로 실행
+/// 도구 모음: 둥근 막대에 아이콘을 한 줄로 늘어놓음 (아래: 가로 / 왼쪽·오른쪽: 세로 [vertical])
+/// (아이콘이 많으면 밀어서 봄). 누르면 그 기능을 바로 실행
 class QuickToolBar extends StatelessWidget {
-  const QuickToolBar({super.key, required this.items, this.onClose, this.pinned});
+  const QuickToolBar({super.key, required this.items, this.onClose, this.pinned, this.vertical = false});
+
+  /// 세로 막대 (화면 왼쪽·오른쪽에 둘 때)
+  final bool vertical;
 
   final List<QuickToolItem> items;
 
@@ -84,7 +87,8 @@ class QuickToolBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 52,
+      height: vertical ? null : 52,
+      width: vertical ? 52 : null,
       decoration: BoxDecoration(
         color: const Color(0xEE1C1C1E),
         borderRadius: BorderRadius.circular(22),
@@ -96,8 +100,8 @@ class QuickToolBar extends StatelessWidget {
           // 아이콘 사이를 좁게 (한 칸 40), 화면보다 길면 옆으로 밀어서 봄
           const double slot = 40;
           Widget button(QuickToolItem it) => SizedBox(
-                width: slot,
-                height: 52,
+                width: vertical ? 52 : slot,
+                height: vertical ? slot : 52,
                 child: IconButton(
                   padding: EdgeInsets.zero,
                   icon: Opacity(
@@ -113,6 +117,23 @@ class QuickToolBar extends StatelessWidget {
                       : null,
                 ),
               );
+          if (vertical) {
+            // 세로: 위에서 아래로, 고정 항목은 맨 아래 (가는 가로줄로 나눔)
+            final col = Column(mainAxisSize: MainAxisSize.min, children: [for (final it in items) button(it)]);
+            final scroller = ClipRRect(
+              borderRadius: BorderRadius.vertical(top: const Radius.circular(22), bottom: Radius.circular(pinned == null ? 22 : 0)),
+              child: SingleChildScrollView(
+                padding: EdgeInsets.only(top: 8, bottom: pinned == null ? 8 : 2),
+                child: col,
+              ),
+            );
+            if (pinned == null) return scroller;
+            return Column(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(child: scroller),
+              Container(width: 24, height: 1, color: Colors.white.withValues(alpha: 0.18)),
+              Padding(padding: const EdgeInsets.only(top: 2, bottom: 8), child: button(pinned!)),
+            ]);
+          }
           final row = Row(mainAxisSize: MainAxisSize.min, children: [for (final it in items) button(it)]);
           final scroller = ClipRRect(
             borderRadius: BorderRadius.horizontal(left: const Radius.circular(22), right: Radius.circular(pinned == null ? 22 : 0)),

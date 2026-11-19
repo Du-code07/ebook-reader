@@ -582,16 +582,6 @@ class StorageService {
     return (v == 'stroke' || v == 'area') ? v! : 'area';
   }
 
-  static Future<void> setFooterInfoMode(String mode) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('footer_info_mode', mode);
-  }
-
-  static Future<String> getFooterInfoMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('footer_info_mode') ?? 'none';
-  }
-
   // 진행바 UI 하단('bottom')을 기본값으로 설정
   static Future<void> setProgressBarPosition(String pos) async {
     final prefs = await SharedPreferences.getInstance();
@@ -600,8 +590,20 @@ class StorageService {
 
   static Future<String> getProgressBarPosition() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('progress_bar_pos_v26') ?? 'bottom';
+    final v = prefs.getString('progress_bar_pos_v26');
+    return (v == 'left' || v == 'right') ? v! : 'bottom';
   }
+
+  // 도구 모음 자리: 'bottom'(기본) / 'left' / 'right' (도구 모음을 길게 눌러 끌어 옮김)
+  static Future<void> setToolbarPosition(String pos) async => (await SharedPreferences.getInstance()).setString('quick_toolbar_pos_v1', pos);
+  static Future<String> getToolbarPosition() async {
+    final v = (await SharedPreferences.getInstance()).getString('quick_toolbar_pos_v1');
+    return (v == 'left' || v == 'right') ? v! : 'bottom';
+  }
+
+  // 진행바 숨기기 (자리는 진행바를 길게 눌러 옮김)
+  static Future<void> setProgressBarHidden(bool v) async => (await SharedPreferences.getInstance()).setBool('progress_bar_hidden_v1', v);
+  static Future<bool> getProgressBarHidden() async => (await SharedPreferences.getInstance()).getBool('progress_bar_hidden_v1') ?? false;
 
   // 메모 도구모음 위치: 'bottom'(기본) / 'top' / 'left' / 'right' (도구 모음을 길게 눌러 끌어 옮김)
   static Future<void> setMemoToolbarPosition(String pos) async {

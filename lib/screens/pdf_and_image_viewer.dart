@@ -328,10 +328,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   String _eraserType = 'area';
   List<MemoStroke>? _eraseStartStrokes;
 
-  String _footerInfoMode = 'none';
   String _progressBarPosSetting = 'bottom';
   /// 실제 진행바 위치: 1쪽짜리 문서는 설정과 상관없이 숨김 (다른 버튼 배치도 숨김 기준으로)
-  String get _progressBarPos => (_totalPages <= 1) ? 'hidden' : _progressBarPosSetting;
+  String get _progressBarPos => (_totalPages <= 1 || _progressBarHidden) ? 'hidden' : _progressBarPosSetting;
+  bool _progressBarHidden = false; // 뷰어 설정의 '진행바 숨기기'
   String _memoToolbarPos = 'bottom'; // 메모 도구모음 위치
   int _rotateTapCount = 0; // 화면 회전 아이콘 흔들림 애니메이션용
   List<BookmarkItem> _bookmarks = [];
@@ -451,21 +451,23 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     setState(() => _pageDisplay = mode);
   }
 
-  /// 뷰어 설정 초기화: 음량 버튼 / 진행도 하단 / 정보 표시 없음 (길게 눌러 옮긴 메모 도구 모음·스크롤 막대도 처음 자리로)
+  /// 뷰어 설정 초기화: 음량 버튼 / 진행도 하단 (길게 눌러 옮긴 도구 모음·메모 도구 모음·진행바·스크롤 막대도 처음 자리로)
   /// (음량 버튼·탭·슬라이드·스크롤은 도구 모음의 [페이지 전환 버튼]에서 정함)
   Future<void> _resetViewerSettings(StateSetter setModalState) async {
     setState(() {
       _useVolumeTurn = true;
       _progressBarPosSetting = 'bottom';
+      _progressBarHidden = false;
       _memoToolbarPos = 'bottom';
-      _footerInfoMode = 'none';
+      _toolbarPos = 'bottom';
     });
     ScrollThumbBar.leftHanded.value = false;
     setModalState(() {});
     await StorageService.setUseVolumeTurn(true);
     await StorageService.setProgressBarPosition('bottom');
+    await StorageService.setProgressBarHidden(false);
     await StorageService.setMemoToolbarPosition('bottom');
-    await StorageService.setFooterInfoMode('none');
+    await StorageService.setToolbarPosition('bottom');
     await StorageService.setQuickMenuSide('right');
   }
 
@@ -650,9 +652,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _useVolumeTurn = await StorageService.getUseVolumeTurn();
       _useSwipeTurn = await StorageService.getUseSwipeTurn() && !_pageModeScroll;
       _eraserType = await StorageService.getMemoEraserType();
-      _footerInfoMode = await StorageService.getFooterInfoMode();
       _progressBarPosSetting = await StorageService.getProgressBarPosition();
+      _progressBarHidden = await StorageService.getProgressBarHidden();
       _memoToolbarPos = await StorageService.getMemoToolbarPosition();
+      _toolbarPos = await StorageService.getToolbarPosition();
       ScrollThumbBar.leftHanded.value = (await StorageService.getQuickMenuSide()) == 'left';
       ScrollThumbBar.off.value = await StorageService.getScrollBarOff();
       _bookmarks = await StorageService.getBookmarks(_bookKey);
@@ -1622,74 +1625,23 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 const SheetGrip(),
                 _settingsHeader(Icons.tune, _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'), isTitle: true),
                 const SizedBox(height: 12),
-                _settingsHeader(Icons.linear_scale, _tr('진행도 UI 위치', 'Progress Bar Position', '进度条位置', '進行度バーの位置')),
+                // 진행바 자리는 진행바를 길게 눌러 끌어 옮김 (아래·왼쪽·오른쪽)
+                _settingsHeader(Icons.linear_scale, _tr('진행바', 'Progress Bar', '进度条', '進行度バー')),
                 const SizedBox(height: 8),
                 SettingGroup(
                   children: [
-                    SettingOption(
-                      label: Text(_tr('하단', 'Bottom', '底部', '下部')),
-                      selected: _progressBarPosSetting == 'bottom',
-                      onSelected: (_) async {
-                        await StorageService.setProgressBarPosition('bottom');
-                        setState(() => _progressBarPosSetting = 'bottom');
-                        setModalState(() {});
-                      },
-                    ),
-                    SettingOption(
-                      label: Text(_tr('오른쪽', 'Right', '右侧', '右')),
-                      selected: _progressBarPosSetting == 'right',
-                      onSelected: (_) async {
-                        await StorageService.setProgressBarPosition('right');
-                        setState(() => _progressBarPosSetting = 'right');
-                        setModalState(() {});
-                      },
-                    ),
-                    SettingOption(
-                      label: Text(_tr('왼쪽', 'Left', '左侧', '左')),
-                      selected: _progressBarPosSetting == 'left',
-                      onSelected: (_) async {
-                        await StorageService.setProgressBarPosition('left');
-                        setState(() => _progressBarPosSetting = 'left');
-                        setModalState(() {});
-                      },
-                    ),
-                    SettingOption(
-                      label: Text(_tr('숨김', 'Hidden', '隐藏', '非表示')),
-                      selected: _progressBarPosSetting == 'hidden',
-                      onSelected: (_) async {
-                        await StorageService.setProgressBarPosition('hidden');
-                        setState(() => _progressBarPosSetting = 'hidden');
+                    SettingToggle(
+                      label: Text(_tr('진행바 숨기기', 'Hide progress bar', '隐藏进度条', '進行度バーを隠す')),
+                      selected: _progressBarHidden,
+                      onSelected: (val) async {
+                        await StorageService.setProgressBarHidden(val);
+                        setState(() => _progressBarHidden = val);
                         setModalState(() {});
                       },
                     ),
                   ],
                 ),
-                const SizedBox(height: 26),
-                _settingsHeader(Icons.info_outline, _tr('하단 정보 표시', 'Footer Info Display', '底部信息显示', '下部情報表示')),
-                const SizedBox(height: 8),
-                SettingGroup(
-                  children: [
-                    SettingOption(
-                      label: Text(_tr('정보 표시 없음', 'None', '不显示', '表示なし')),
-                      selected: _footerInfoMode == 'none',
-                      onSelected: (_) async {
-                        await StorageService.setFooterInfoMode('none');
-                        setState(() => _footerInfoMode = 'none');
-                        setModalState(() {});
-                      },
-                    ),
-                    SettingOption(
-                      label: Text(_tr('페이지 번호', 'Page Number', '页码', 'ページ番号')),
-                      selected: _footerInfoMode == 'page',
-                      onSelected: (_) async {
-                        await StorageService.setFooterInfoMode('page');
-                        setState(() => _footerInfoMode = 'page');
-                        setModalState(() {});
-                      },
-                    ),
-                  ],
-                ),
-                // 초기화: 기본값으로 (페이지 전환 버튼·진행도 UI·하단 정보, 옮긴 메모 도구 모음·스크롤 막대 자리)
+                // 초기화: 기본값으로 (진행바 숨기기, 옮긴 도구 모음·메모 도구 모음·진행바·스크롤 막대 자리)
                 SettingDoneButton(label: _tr('초기화', 'Reset', '重置', 'リセット'), onPressed: () => _resetViewerSettings(setModalState)),
               ],
             ),
@@ -2355,9 +2307,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   /// 뷰어 표시에서 페이지 번호를 누르고 숫자를 입력하면 해당 페이지로 이동 (설정에서 페이지 번호가 활성화된 경우만 작동)
-  Future<void> _showJumpToPageDialog({bool fromProgressBar = false}) async {
-    // 진행바에서 누르면 늘 열림, 쪽 번호 표시에서 누르면 쪽 번호를 보일 때만
-    if (!fromProgressBar && _footerInfoMode != 'page') return;
+  Future<void> _showJumpToPageDialog() async {
     final ctrl = TextEditingController(text: '${_currentPage + 1}');
     ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
 
@@ -2408,12 +2358,35 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
-  String _formatFooterText(bool isSpread) {
-    if (_footerInfoMode == 'none') return '';
-    return isSpread && (_currentPage + 1 < _totalPages)
-        ? '${_currentPage + 1}-${_currentPage + 2} / $_totalPages'
-        : '${_currentPage + 1} / $_totalPages';
-  }
+  /// 진행바를 길게 눌러 끌어 옮기기 (놓으면 아래·왼쪽·오른쪽 중 가까운 가장자리로, 기억해 둠)
+  bool _barMoving = false;
+  int _pageAtBarDown = 0;
+  Widget _movableBar(Positioned p) => Positioned(
+        key: p.key,
+        left: p.left,
+        top: p.top,
+        right: p.right,
+        bottom: p.bottom,
+        width: p.width,
+        height: p.height,
+        child: HoldToMove(
+          sides: const ['bottom', 'left', 'right'],
+          onDown: () => _pageAtBarDown = _currentPage,
+          onHoldStart: () {
+            _barMoving = true;
+            // 누른 순간 진행바가 쪽을 옮겼으면 되돌림
+            if (_currentPage != _pageAtBarDown) _goToPage(_pageAtBarDown, smoothAnimation: false);
+          },
+          // 손을 뗀 순간 진행바 안의 슬라이더가 받는 '끝' 처리보다 늦게 풂
+          onEnd: () => Future.microtask(() => _barMoving = false),
+          onDrop: (side) async {
+            if (side == _progressBarPosSetting) return;
+            setState(() => _progressBarPosSetting = side);
+            await StorageService.setProgressBarPosition(side);
+          },
+          child: p.child,
+        ),
+      );
 
   /// 진행도 UI의 화살표를 맨 처음(0페이지)과 맨 마지막(_totalPages - 1 페이지)으로 즉시 이동하는 용도로 변경!
   Widget _buildProgressControlBar(double bottomInset) {
@@ -2437,7 +2410,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
 
     if (_progressBarPos == 'bottom') {
-      return Positioned(
+      return _movableBar(Positioned(
         key: const ValueKey('progress_bar_bottom'),
         left: 14.0 + _safeSides.left + ((_memoBarBesideProgress && _memoToolbarPos == 'left') ? _memoBarSideInset : 0.0),
         right: 14.0 + _safeSides.right + ((_memoBarBesideProgress && _memoToolbarPos == 'right') ? _memoBarSideInset : 0.0),
@@ -2473,13 +2446,15 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       value: sliderVal,
                       min: 0.0,
                       max: sliderMax,
-                      onChanged: (v) => _goToPage(v.round(), smoothAnimation: false),
+                      onChanged: (v) {
+                        if (!_barMoving) _goToPage(v.round(), smoothAnimation: false);
+                      },
                     ),
                   ),
                 ),
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: () => _showJumpToPageDialog(fromProgressBar: true),
+                  onTap: () => _showJumpToPageDialog(),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                     child: Text(
@@ -2500,7 +2475,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             ),
           ),
         ),
-      );
+      ));
     }
 
     final double topInset = MediaQuery.paddingOf(context).top;
@@ -2508,7 +2483,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     // 메모 도구모음이 상단/하단에 있으면 세로 진행바가 그만큼 비켜 준다
     final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
     final double safeBottomOffset = baseBottom + ((memoBarVisible && _memoToolbarPos == 'bottom') ? 96.0 : 8.0);
-    return Positioned(
+    return _movableBar(Positioned(
       key: ValueKey('progress_bar_$_progressBarPos'),
       top: safeTopOffset,
       bottom: safeBottomOffset,
@@ -2547,14 +2522,16 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                       value: sliderVal,
                       min: 0.0,
                       max: sliderMax,
-                      onChanged: (v) => _goToPage(v.round(), smoothAnimation: false),
+                      onChanged: (v) {
+                        if (!_barMoving) _goToPage(v.round(), smoothAnimation: false);
+                      },
                     ),
                   ),
                 ),
               ),
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () => _showJumpToPageDialog(fromProgressBar: true),
+                onTap: () => _showJumpToPageDialog(),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
                   child: Text(
@@ -2575,7 +2552,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           ),
         ),
       ),
-    );
+    ));
   }
 
   @override
@@ -2601,6 +2578,52 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   }
 
   // 도구 모음(화면 아래 가로 막대)에 들어가는 기능들
+  /// 도구 모음 자리 ('bottom' / 'left' / 'right', 길게 눌러 끌어 옮김)
+  String _toolbarPos = 'bottom';
+
+  Widget _buildQuickToolBar(double bottomInset) {
+    final bool vertical = _toolbarPos != 'bottom';
+    final Widget bar = HoldToMove(
+      sides: const ['bottom', 'left', 'right'],
+      // 아이콘을 길게 누르면 뜨는 이름 풍선은 옮기기 시작할 때 닫음
+      onHoldStart: () => Tooltip.dismissAllToolTips(),
+      onDrop: (side) async {
+        if (side == _toolbarPos) return;
+        setState(() => _toolbarPos = side);
+        await StorageService.setToolbarPosition(side);
+      },
+      child: QuickToolBar(
+        vertical: vertical,
+        items: _buildQuickMenuItems(),
+        // 뷰어 설정: 맨 끝에 고정
+        pinned: QuickToolItem(
+          icon: const Icon(Icons.tune, color: Colors.white, size: 18),
+          tooltip: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
+          onTap: _showViewerSettingsSheet,
+        ),
+      ),
+    );
+    final double bottom = math.max<double>(bottomInset + 16.0, 20.0) + 8.0 + (_progressBarPos == 'bottom' ? 44.0 : 0.0);
+    if (!vertical) {
+      return Positioned(
+        left: 12.0 + _safeSides.left,
+        right: 12.0 + _safeSides.right,
+        bottom: bottom,
+        child: Center(child: bar),
+      );
+    }
+    // 세로: 상단바 아래부터 진행바 위까지, 같은 쪽에 세로 진행바가 있으면 그 안쪽으로
+    final bool left = _toolbarPos == 'left';
+    final double side = 10.0 + (left ? _safeSides.left : _safeSides.right) + (_progressBarPos == _toolbarPos ? 48.0 : 0.0);
+    return Positioned(
+      left: left ? side : null,
+      right: left ? null : side,
+      top: MediaQuery.paddingOf(context).top + 64.0,
+      bottom: bottom - 8.0,
+      child: Center(child: bar),
+    );
+  }
+
   List<QuickToolItem> _buildQuickMenuItems() {
     return [
       QuickToolItem(
@@ -2798,7 +2821,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
 
     final int viewItemCount = isSpread ? ((_totalPages + 1) ~/ 2) : _totalPages;
-    final String footerText = _formatFooterText(isSpread);
 
     return PopScope(
       canPop: !_findOpen,
@@ -2954,34 +2976,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
           ),
 
-          if (footerText.isNotEmpty)
-            Positioned(
-              left: 20 + _safeSides.left,
-              right: 20 + _safeSides.right,
-              bottom: math.max<double>(bottomInset + 4.0, 8.0),
-              child: IgnorePointer(
-                ignoring: _footerInfoMode != 'page',
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: _footerInfoMode == 'page' ? _showJumpToPageDialog : null,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                      child: Text(
-                        footerText,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                          shadows: [Shadow(color: Colors.black, blurRadius: 4)],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
           if (_findOpen)
             Positioned(
               top: 0,
@@ -3065,25 +3059,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
           _buildProgressControlBar(bottomInset),
 
-          // 도구 모음: 화면 아래 가로 막대 (상단바·진행바와 함께 보였다 사라짐)
-          if (_showControls)
-            Positioned(
-              left: 12.0 + _safeSides.left,
-              right: 12.0 + _safeSides.right,
-              bottom: math.max<double>(bottomInset + 16.0, 20.0) + 8.0 +
-                  (_progressBarPos == 'bottom' ? 44.0 : 0.0),
-              child: Center(
-                child: QuickToolBar(
-                  items: _buildQuickMenuItems(),
-                  // 뷰어 설정: 맨 오른쪽에 고정
-                  pinned: QuickToolItem(
-                    icon: const Icon(Icons.tune, color: Colors.white, size: 18),
-                    tooltip: _tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
-                    onTap: _showViewerSettingsSheet,
-                  ),
-                ),
-              ),
-            ),
+          // 도구 모음: 아래(가로) 또는 왼쪽·오른쪽(세로). 길게 눌러 끌어 옮김 (상단바·진행바와 함께 보였다 사라짐)
+          if (_showControls) _buildQuickToolBar(bottomInset),
           // 메모 도구 모음: 파일 도구 모음보다 위에 (아래에 둘 때는 도구 모음 바로 위)
           if (_isMemoMode) _buildMemoToolbar(bottomInset),
         ],

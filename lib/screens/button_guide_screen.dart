@@ -182,9 +182,6 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('trash', tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
               tr('지운 파일을 모아 둬요\n되살리거나 완전히 지울 수 있어요', 'Keeps deleted files\nRestore them or delete them for good', '存放删除的文件\n可以恢复或彻底删除', '削除したファイルを保管します\n元に戻すか完全に削除できます')),
           if (!simple) _settingsStep(),
-          if (!simple)
-            _Step('refresh', tr('새로 고침', 'Refresh', '刷新', '更新'),
-                tr('서재를 다시 읽어 와요', 'Reload your library', '重新读取书架', '書斎を読み込み直します')),
           _Step('sort', tr('정렬', 'Sort', '排序', '並べ替え'),
               tr('이름이나 파일 추가 날짜 순으로 정렬하고, 정렬을 기억할 수 있어요', 'Sort by name or date added, and keep the order if you like', '按名称或添加日期排序，也可以记住排序', '名前か追加日で並べ替え、並べ替えを記憶できます')),
           if (simple) ...[
@@ -192,8 +189,7 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
             _Step('add', tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
                 tr('파일 탐색·파일 추가·PDF 합치기·이미지 합치기·문서 스캔 아이콘이 위로 나와요\n아이콘을 꾹 누르면 이름이 보여요', 'Icons for find files, add files, merge PDFs, merge images and scan documents appear above it\nLong-press an icon to see its name', '上方会出现查找文件·添加文件·合并 PDF·合并图片·扫描文档图标\n长按图标可查看名称', 'ファイル検索・ファイル追加・PDF結合・画像結合・文書スキャンのアイコンが上に出ます\nアイコンを長押しすると名前が表示されます')),
           ],
-          if (simple)
-            _Step('list', tr('새로 고침', 'Refresh', '刷新', '更新'),
+          _Step('list', tr('새로 고침', 'Refresh', '刷新', '更新'),
                 tr('목록을 맨 위에서 아래로 당기면 새로 고침 아이콘이 나오며 서재를 다시 읽어 와요', 'Pull the list down from the top to show the refresh icon and reload your library', '从顶部向下拉列表，会出现刷新图标并重新读取书架', '一覧を一番上から下に引くと更新アイコンが出て、書斎を読み込み直します')),
           _Step('ribbon', tr('즐겨찾기 책갈피', 'Favorite Ribbon', '收藏书签', 'お気に入りのしおり'),
               tr('누르거나 아래로 당기면 즐겨찾기가 켜지고 꺼져요', 'Tap or pull it down to add or remove a favorite', '点击或向下拉即可收藏或取消收藏', 'タップするか下に引くとお気に入りのオン・オフが切り替わります')),
@@ -229,7 +225,7 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('copy', tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'), tr('쪽의 글자를 골라 복사해요', 'Select and copy text on the page', '选择并复制页面上的文字', 'ページの文字を選んでコピーします')),
           _Step('bookmark', tr('북마크', 'Bookmarks', '书签', 'ブックマーク'), tr('지금 쪽을 북마크하고 북마크 목록을 봐요', 'Bookmark this page and see your bookmarks', '为当前页添加书签并查看书签列表', '今のページをブックマークし、一覧を見ます')),
           _Step('viewer', tr('뷰어 설정', 'Viewer Settings', '阅读器设置', 'ビューア設定'),
-              tr('진행도 UI 위치·하단 정보 표시를 정해요', 'Set the progress bar position and footer info', '设置进度条位置·底部信息', '進行度バーの位置・下部情報表示を設定します')),
+              tr('진행바를 숨기거나 다시 보이게 해요\n도구 모음과 진행바는 길게 눌러 끌면 아래·왼쪽·오른쪽으로 옮길 수 있어요', 'Hide or show the progress bar\nLong-press and drag the toolbar or progress bar to move it to the bottom, left or right', '隐藏或显示进度条\n长按并拖动工具栏或进度条可移到下·左·右', '進行度バーを隠したり表示したりします\nツールバーと進行度バーは長押しして引くと下・左・右に移せます')),
         ];
       case _GuideKind.memo:
         return [
@@ -608,12 +604,11 @@ class _MainMock extends StatelessWidget {
                 const SizedBox(width: 16),
                 title,
                 const Spacer(),
-                iconBtn('refresh', const Icon(Icons.refresh)),
                 iconBtn('sort', const SortBarsIcon(flipped: false)),
                 const SizedBox(width: 4),
               ]),
             ),
-            Expanded(child: list),
+            Expanded(child: KeyedSubtree(key: k('list'), child: list)),
             Container(
               height: 66,
               decoration: BoxDecoration(color: cs.surfaceContainerLow, border: Border(top: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.6)))),

@@ -952,16 +952,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   String _tr(String ko, String en, String zh, String ja) =>
       AppI18n.t(widget.appLang, ko: ko, en: en, zh: zh, ja: ja);
 
-  // ── 새로 고침: 서재를 다시 읽음 (기본: 정렬 왼쪽 단추 / 심플: 목록을 위에서 아래로 당기면 숨어 있던 새로 고침 아이콘이 나오며) ──
-  double _refreshTurns = 0;
+  // ── 새로 고침: 목록·표지를 맨 위에서 아래로 당기면 서재를 다시 읽음 (기본·심플 스타일 모두) ──
   bool _refreshing = false;
 
   Future<void> _refreshLibrary() async {
     if (_refreshing) return;
-    setState(() {
-      _refreshing = true;
-      _refreshTurns += 1; // 단추 아이콘이 한 바퀴 돎
-    });
+    setState(() => _refreshing = true);
     try {
       await _loadLibrary();
     } finally {
@@ -969,9 +965,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }
   }
 
-  /// 심플 스타일: 목록·표지를 맨 위에서 아래로 당기면 새로 고침
+  /// 목록·표지를 맨 위에서 아래로 당기면 새로 고침 (고르는 중에는 끔)
   Widget _withPullRefresh(Widget child) {
-    if (!StorageService.simpleStyle || _isSelectionMode) return child;
+    if (_isSelectionMode) return child;
     return RefreshIndicator(
       color: AppColors.onSig(context),
       backgroundColor: AppColors.of(context),
@@ -1671,44 +1667,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     setState(() => _groupScanBusy = true);
     try {
       final groupLabel = _localizeGroupName(group);
-      // 찾는 중 알림: 다른 알림이 앞에 쌓여 있으면 늦게 떠서 끝난 뒤에도 남았었음 → 앞 알림을 모두 치우고 띄운 뒤, 끝나면 이 알림만 닫음
       final messenger = ScaffoldMessenger.of(context);
-      messenger.clearSnackBars();
-      // 찾기가 금방 끝나면 '찾는 중' 알림이 잠깐 떴다 사라지며 깜빡이므로, 0.8초 넘게 걸릴 때만 띄움
-      ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? searching;
-      final searchingTimer = Timer(const Duration(milliseconds: 800), () {
-        if (!mounted) return;
-        searching = messenger.showSnackBar(SnackBar(
-        duration: const Duration(seconds: 10),
-        content: Row(children: [
-          // 어두운 알림 바탕에서도 보이게 밝은 색
-          SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4, color: Theme.of(context).colorScheme.onInverseSurface)),
-          const SizedBox(width: 14),
-          Expanded(child: Text(_tr('기기에서 파일을 찾는 중이에요…', 'Searching for files…', '正在查找文件…', 'ファイルを探しています…'))),
-        ]),
-      ));
-      });
-      void closeSearching() {
-        searchingTimer.cancel();
-        if (searching != null) {
-          // 다음 알림·창이 겹쳐 보이지 않게 움직임 없이 바로 치움
-          messenger.removeCurrentSnackBar();
-          searching = null;
-        }
-      }
+      // 찾는 동안은 [파일 탐색] 단추가 도는 표시로 바뀜 (따로 알림은 띄우지 않음)
       // 너무 오래 걸리면 (폴더에 파일이 아주 많을 때) 20초에서 멈춤
       List<FoundFile> found;
       try {
         found = await ScanFolders.scan(folders, exts).timeout(const Duration(seconds: 20));
       } catch (e) {
-        closeSearching();
         if (e is! TimeoutException) rethrow;
         if (mounted) {
           messenger.showSnackBar(SnackBar(content: Text(_tr('찾는 데 너무 오래 걸려 멈췄어요', 'Search took too long and was stopped', '查找时间过长，已停止', '時間がかかりすぎたため中止しました'))));
         }
         return;
       }
-      closeSearching();
       final appDir = await getApplicationDocumentsDirectory();
       // 서재에 이미 있는 같은 형식 파일 (이름 기준) → 복사하지 않고 이 그룹으로만 옮김
       final library = <String, File>{for (final f in _allBooks) f.path.split('/').last: f};
@@ -3983,18 +3954,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   },
                 ),
                 ],
-                // 기본 스타일: 정렬 왼쪽에 새로 고침 (누르면 아이콘이 한 바퀴 돌며 서재를 다시 읽음)
-                if (!StorageService.simpleStyle)
-                  IconButton(
-                    icon: AnimatedRotation(
-                      turns: _refreshTurns,
-                      duration: Anim.ms(600),
-                      curve: Curves.easeInOutCubic,
-                      child: const Icon(Icons.refresh),
-                    ),
-                    tooltip: _tr('새로 고침', 'Refresh', '刷新', '更新'),
-                    onPressed: _refreshLibrary,
-                  ),
                 IconButton(
                   key: _sortBtnKey,
                   // 정렬 창을 열고 닫을 때 막대가 위아래로 자리를 바꿈
