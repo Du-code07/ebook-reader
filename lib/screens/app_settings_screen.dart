@@ -606,12 +606,12 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             _item(
               icon: Icons.gavel_outlined,
               title: _t('이용 약관', 'Terms of Service', '使用条款', '利用規約'),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalScreen(doc: LegalDoc.terms))),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => LegalScreen(doc: LegalDoc.terms, lang: _lang))),
             ),
             _item(
               icon: Icons.privacy_tip_outlined,
               title: _t('개인정보 처리방침', 'Privacy Policy', '隐私政策', 'プライバシーポリシー'),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalScreen(doc: LegalDoc.privacy))),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => LegalScreen(doc: LegalDoc.privacy, lang: _lang))),
             ),
             _item(
               icon: Icons.article_outlined,

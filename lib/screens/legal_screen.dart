@@ -1,33 +1,71 @@
 import 'package:flutter/material.dart';
 
-/// 도움말: 이용 약관 · 개인정보 처리방침 (지금은 한국어 — 출시 전에 영어로 바꿀 예정)
-/// 이용 약관·개인정보 처리방침: 영어 원문(이용자가 확정한 글)을 한국어 '~다' 체로 옮김
-/// 운영자 이름·문의 이메일·시행일은 아직 비워 둠
+import '../services/storage_service.dart';
+import 'legal_text_en.dart';
+
+/// 도움말: 이용 약관 · 개인정보 처리방침
+/// - 기준은 한국어판(약관 제12조: 번역본과 차이가 있으면 한국어판이 우선)
+/// - 앱 언어가 한국어가 아니면 영어 번역본을 먼저 보여 주고, 위에 "참고용 번역·한국어판 우선" 안내와 한국어 원문 보기 버튼을 둠
+/// 운영자 정보·시행일 등은 아직 비워 둠
 enum LegalDoc { terms, privacy }
 
-/// 아직 정하지 않은 칸 (운영자·이메일·시행일)
+/// 아직 정하지 않은 칸 (운영자·시행일 등)
 const String _blank = '(비어 있음)';
 const String _email = 'dudu.dev.pr@gmail.com';
 
-class LegalScreen extends StatelessWidget {
-  const LegalScreen({super.key, required this.doc});
+class LegalScreen extends StatefulWidget {
+  const LegalScreen({super.key, required this.doc, this.lang = 'ko'});
   final LegalDoc doc;
+  final String lang;
+
+  @override
+  State<LegalScreen> createState() => _LegalScreenState();
+}
+
+class _LegalScreenState extends State<LegalScreen> {
+  /// 한국어 원문을 보는지 (한국어 앱은 항상 원문)
+  late bool _korean = widget.lang == 'ko';
+
+  String _t(String ko, String en, String zh, String ja) => AppI18n.t(widget.lang, ko: ko, en: en, zh: zh, ja: ja);
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final (String title, List<(String, List<String>)> sections) = switch (doc) {
-      LegalDoc.terms => ('이용 약관', _terms),
-      LegalDoc.privacy => ('개인정보 처리방침', _privacy),
+    final bool ko = _korean;
+    final (String title, List<(String, List<String>)> sections) = switch (widget.doc) {
+      LegalDoc.terms => ko ? ('이용 약관', _terms) : ('Terms of Service', termsEn),
+      LegalDoc.privacy => ko ? ('개인정보 처리방침', _privacy) : ('Privacy Policy', privacyEn),
     };
     return Scaffold(
-      appBar: AppBar(title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800))),
+      appBar: AppBar(
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+        actions: [
+          if (widget.lang != 'ko')
+            TextButton(
+              onPressed: () => setState(() => _korean = !_korean),
+              child: Text(ko ? 'English' : '한국어', style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface)),
+            ),
+        ],
+      ),
       body: SafeArea(
         child: SelectionArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(22, 8, 22, 32),
             children: [
-              Text('시행일: $_blank', style: TextStyle(fontSize: 13.5, color: cs.onSurfaceVariant)),
+              if (widget.lang != 'ko') ...[
+                // 번역본 안내: 한국어판이 우선
+                Container(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(color: cs.surfaceContainerHigh, borderRadius: BorderRadius.circular(14)),
+                  child: Text(
+                    _t('이 문서의 기준은 한국어판이에요', 'This English translation is provided for convenience. The Korean version is the official text and prevails if there is any difference',
+                        '英文译本仅供参考。韩文版为正式文本，如有不一致，以韩文版为准', '英語訳は参考用です。韓国語版が正式な文章であり、相違がある場合は韓国語版が優先します'),
+                    style: TextStyle(fontSize: 13.5, height: 1.5, color: cs.onSurface),
+                  ),
+                ),
+              ],
+              Text(ko ? '시행일: $_blank' : 'Effective date: $legalBlankEn', style: TextStyle(fontSize: 13.5, color: cs.onSurfaceVariant)),
               const SizedBox(height: 6),
               for (final (head, paras) in sections) ...[
                 const SizedBox(height: 18),
@@ -86,9 +124,9 @@ const List<(String, List<String>)> _terms = [
     '앱은 핵심 기능을 제공하기 위해 이용자가 고른 파일·폴더 접근(시스템 파일 선택 창 및 탐색할 폴더)과 일부 선택적 기기 권한(문서 스캔을 위한 카메라 접근, 잠금 해제를 위한 생체 인증 등)을 사용한다. 이용자가 선택 권한을 허용하지 않거나 Android 운영체제의 정책 변경으로 접근이 제한되면 해당 기능이 작동하지 않을 수 있다.',
   ]),
   ('제5조 (유료 기능의 결제·복원·청약철회)', [
-    '앱의 기본 기능은 무료이며, 유료 기능은 "FReader 프로" 1회 구매로 제공한다. 유료 기능에는 문서 스캔, 이미지 합치기, PDF 합치기가 포함되며, 운영자가 앞으로 앱에 유료 기능을 추가하는 경우 그 기능도 FReader 프로를 구매한 이용자에게 추가 비용 없이 제공한다.',
+    '앱의 기본 기능은 무료이며, 유료 기능은 "FReader 프로" 1회 구매로 제공한다. 유료 기능에는 문서 스캔, 이미지 합치기, PDF 합치기가 포함되며, 운영자가 앞으로 FReader 프로에 포함하는 유료 기능도 FReader 프로를 구매한 이용자에게 추가 비용 없이 제공한다. 운영자는 FReader 프로와 별도인 상품을 따로 판매할 수 있으며, 이 경우 구매 화면에 구분하여 표시한다.',
     'FReader 프로의 가격과 내용(운영자가 앱을 제공하는 동안 계속 이용할 수 있는 1회 구매)은 결제 전에 구매 화면(앱 설정 > FReader 프로)에 명확히 표시한다.',
-    '무료 체험: 이용자는 구매 화면(앱 설정 > FReader 프로)에서 무료 체험을 시작한 때부터 3일 동안 유료 기능을 무료로 이용할 수 있다. 무료 체험은 기기마다 한 번 제공되며, 같은 기기에서 앱을 다시 설치하거나 앱 데이터를 지워도 체험 기간은 처음 시작한 날을 기준으로 계산한다.',
+    '무료 체험: 이용자는 구매 화면(앱 설정 > FReader 프로)에서 무료 체험을 시작한 때부터 3일 동안 유료 기능을 무료로 이용할 수 있다. 무료 체험은 기기마다 한 번 제공되며(기기 이전·복원으로 체험 기록이 새 기기로 옮겨진 경우 새 기기에서도 이미 사용한 것으로 본다), 같은 기기에서 앱을 다시 설치하거나 앱 데이터를 지워도 체험 기간은 처음 시작한 날을 기준으로 계산한다.',
     '모든 결제는 Google Play 결제 시스템을 통해 처리되며, 결제 수단·영수증·결제 취소는 Google Play 정책을 따른다.',
     '구매 복원: 이용자가 앱을 다시 설치하거나 호환되는 다른 Android 기기로 옮긴 경우, 처음 구매할 때 사용한 Google 계정으로 Google Play 스토어에서 앱을 설치하면 구매한 유료 기능을 복원할 수 있다.',
     '거주 지역 법령상 미성년자인 이용자는 부모 또는 법정대리인의 동의를 받아 유료 기능을 구매해야 하며, 법정대리인의 동의 없이 결제한 경우 미성년자 본인 또는 법정대리인은 관련 법령에 따라 결제를 취소할 수 있다(단, 미성년자가 속임수로써 성년자로 믿게 하거나 법정대리인의 동의가 있는 것으로 믿게 한 경우는 제외한다).',
@@ -185,9 +223,9 @@ const List<(String, List<String>)> _privacy = [
   ]),
   ('5. 인앱 구매', [
     'FReader 프로(유료 기능) 구매는 Google Play 결제 시스템으로만 처리된다.',
-    '결제 정보(신용카드 번호 등)는 Google이 직접 처리하며 운영자는 이를 받거나 저장하지 않는다. 앱은 유료 기능을 열기 위해 Google Play로부터 구매 여부와 상품 가격만 받아 확인한다.',
+    '결제 정보(신용카드 번호 등)는 Google이 직접 처리하며 운영자는 이를 받거나 저장하지 않는다. 앱은 유료 기능 제공과 구매 확인을 위해 상품 ID, 가격, 구매 상태 및 구매 토큰을 처리한다(구매 토큰은 Google Play에 구매 확인을 요청하는 데에만 쓰고 운영자에게 보내지 않는다).',
     '- 기기에 저장하는 것: 구매 여부(인터넷이 없을 때도 유료 기능을 쓰기 위한 표시)와 무료 체험 시작일. 데이터 지우기·앱 삭제 시 함께 지워지며, 구매는 같은 Google 계정으로 다시 복원할 수 있다.',
-    '- 무료 체험 시작일은 같은 기기에서 체험이 반복되지 않도록 Google Play 서비스의 Block Store에도 기록한다. 이 값은 시작 날짜와 시각만 담고, 이용자의 기기 안에만 보관되며(클라우드 백업으로 올리지 않음) 운영자에게 전송되지 않는다. 앱을 지우거나 데이터를 지워도 같은 기기에서는 남을 수 있고, 기기를 초기화하면 지워진다.',
+    '- 무료 체험 시작일은 같은 기기에서 체험이 반복되지 않도록 Google Play 서비스의 Block Store에도 기록한다. 이 값은 시작 날짜와 시각만 담고 운영자에게 전송되지 않는다. 앱은 이 값의 클라우드 백업을 요청하지 않지만, 이용자가 Google 계정이나 제조사 도구(예: 삼성 Smart Switch)로 기기 이전·복원을 실행하면 새 기기로 함께 옮겨질 수 있다. 앱을 지우거나 데이터를 지워도 같은 기기에서는 남을 수 있고, 기기를 초기화하면 지워진다.',
   ]),
   ('6. 제3자 제공·광고·쿠키', [
     '- 운영자는 이용자의 개인정보를 판매하지 않으며, 법령에 근거가 있거나 이용자가 동의한 경우 외에는 제3자에게 제공하지 않는다.',

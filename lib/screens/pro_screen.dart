@@ -19,6 +19,9 @@ class ProScreen extends StatefulWidget {
 class _ProScreenState extends State<ProScreen> {
   bool _busy = false;
 
+  /// Play 스토어에서 가격을 불러오는 중인지 (가격을 모르면 구매 버튼을 잠금 — 약관 제5조: 결제 전 가격 표시)
+  bool _priceLoading = true;
+
   String _t(String ko, String en, String zh, String ja) => AppI18n.t(widget.lang, ko: ko, en: en, zh: zh, ja: ja);
 
   void _onTrial() {
@@ -36,9 +39,13 @@ class _ProScreenState extends State<ProScreen> {
     super.initState();
     Pro.trialChanged.addListener(_onTrial);
     // 가격·구매 여부를 다시 확인 (화면에 맞는 값으로)
-    Pro.refresh().then((_) {
-      if (mounted) setState(() {});
-    });
+    _loadPrice();
+  }
+
+  Future<void> _loadPrice() async {
+    if (mounted) setState(() => _priceLoading = true);
+    await Pro.refresh();
+    if (mounted) setState(() => _priceLoading = false);
   }
 
   void _snack(String msg) {
@@ -190,9 +197,13 @@ class _ProScreenState extends State<ProScreen> {
                       Text(_t('구매 전에 확인해 주세요', 'Please check before buying', '购买前请确认', '購入前にご確認ください'),
                           style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: cs.onSurface)),
                       const SizedBox(height: 10),
-                      if (price != null)
-                        note(_t('가격: $price (1회 구매, 운영자가 앱을 제공하는 동안 계속 이용)', 'Price: $price (one-time purchase, usable for as long as the app is provided)',
-                            '价格：$price（一次性购买，在应用提供期间可持续使用）', '価格：$price（買い切り。アプリの提供期間中ずっと利用できます）')),
+                      note(price != null
+                          ? _t('가격: $price (1회 구매, 운영자가 앱을 제공하는 동안 계속 이용)', 'Price: $price (one-time purchase, usable for as long as the app is provided)',
+                              '价格：$price（一次性购买，在应用提供期间可持续使用）', '価格：$price（買い切り。アプリの提供期間中ずっと利用できます）')
+                          : _priceLoading
+                              ? _t('가격: 확인하는 중이에요', 'Price: checking', '价格：正在确认', '価格：確認中です')
+                              : _t('가격: 불러오지 못했어요. 가격을 확인해야 구매할 수 있어요', 'Price: could not be loaded. You can buy once the price is shown',
+                                  '价格：无法加载。显示价格后才能购买', '価格：読み込めませんでした。価格が表示されると購入できます')),
                       note(_t('[무료 체험]을 누르면 $trialLen 동안 유료 기능을 무료로 써 볼 수 있어요 (기기마다 한 번)', 'Tap [Free Trial] to try the paid features free for $trialLen (once per device)',
                           '点击 [免费试用] 可免费试用付费功能 $trialLen（每台设备一次）', '[無料体験]を押すと$trialLenの間、有料機能を無料で試せます（端末ごとに1回）')),
                       note(_t('구매 후 7일 이내에 청약철회를 요청할 수 있어요. 다만 무료 체험을 제공하므로, 구매와 함께 유료 기능이 열리면 디지털 콘텐츠의 제공이 시작된 것으로 보아 청약철회가 제한될 수 있어요',
@@ -237,13 +248,13 @@ class _ProScreenState extends State<ProScreen> {
                           child: SizedBox(
                             height: 54,
                             child: FilledButton(
-                              onPressed: _busy ? null : _buy,
+                              onPressed: (_busy || price == null) ? null : _buy,
                               child: _busy
                                   ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
                                   : FittedBox(
                                       fit: BoxFit.scaleDown,
                                       child: Text(price == null
-                                          ? _t('구매하기', 'Buy', '购买', '購入する')
+                                          ? (_priceLoading ? _t('가격 확인 중', 'Checking price', '正在确认价格', '価格を確認中') : _t('가격을 불러오지 못했어요', 'Price unavailable', '无法加载价格', '価格を読み込めません'))
                                           : _t('$price에 구매하기', 'Buy for $price', '以 $price 购买', '$priceで購入する'),
                                           style: const TextStyle(fontSize: 16.5)),
                                     ),
@@ -251,6 +262,14 @@ class _ProScreenState extends State<ProScreen> {
                           ),
                         ),
                       ]),
+                    ),
+                  if (!owned && price == null && !_priceLoading)
+                    Center(
+                      child: TextButton(
+                        onPressed: _busy ? null : _loadPrice,
+                        child: Text(_t('가격 다시 불러오기', 'Reload Price', '重新加载价格', '価格を再読み込み'),
+                            style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSurface)),
+                      ),
                     ),
                   const SizedBox(height: 6),
                   Center(
