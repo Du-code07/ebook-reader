@@ -1,9 +1,0 @@
-Google ML Kit Text Recognition (com.google.mlkit:text-recognition-korean:16.0.1)
-https://developers.google.com/ml-kit
-
-ML Kit is not open source software. It is provided by Google under the ML Kit
-Terms of Service (https://developers.google.com/ml-kit/terms) and the Google APIs
-Terms of Service. FReader uses it on the device to recognize text in scanned
-documents. Scanned images and recognized text are processed on the device; the
-SDK may send diagnostic and usage information to Google, as described in
-Google's ML Kit documentation.
