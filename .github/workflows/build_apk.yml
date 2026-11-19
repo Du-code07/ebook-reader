@@ -50,6 +50,8 @@ jobs:
           mkdir -p /tmp/v7_backup
           cp -rf lib /tmp/v7_backup/
           cp -f pubspec.yaml /tmp/v7_backup/
+          # 라이브러리 버전 고정 파일도 보관 (flutter create가 다시 받아 버전이 바뀌지 않게)
+          if [ -f pubspec.lock ]; then cp -f pubspec.lock /tmp/v7_backup/; fi
           cp -rf android_override /tmp/v7_backup/
 
           rm -rf android
@@ -58,6 +60,7 @@ jobs:
           rm -rf lib test
           cp -rf /tmp/v7_backup/lib .
           cp -f /tmp/v7_backup/pubspec.yaml .
+          if [ -f /tmp/v7_backup/pubspec.lock ]; then cp -f /tmp/v7_backup/pubspec.lock .; fi
 
           mkdir -p android/app/src/main/kotlin/com/freader/my_ebook_reader
           cp -f /tmp/v7_backup/android_override/MainActivity.kt android/app/src/main/kotlin/com/freader/my_ebook_reader/MainActivity.kt
