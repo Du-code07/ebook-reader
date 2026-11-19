@@ -222,7 +222,6 @@ class StorageService {
   }
 
   // 앱 테마: 'system'(기본 시스템, 휴대폰 설정 따라감) / 'light' / 'dark'
-  // (예전 버전의 다크 모드 켜기/끄기 값이 있으면 그대로 이어서 쓴다)
   static Future<void> setAppThemeMode(String mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('app_theme_mode', mode);
@@ -230,11 +229,7 @@ class StorageService {
 
   static Future<String> getAppThemeMode() async {
     final prefs = await SharedPreferences.getInstance();
-    final mode = prefs.getString('app_theme_mode');
-    if (mode != null) return mode;
-    final oldDark = prefs.getBool('dark_mode');
-    if (oldDark != null) return oldDark ? 'dark' : 'light';
-    return 'system';
+    return prefs.getString('app_theme_mode') ?? 'system';
   }
 
   /// 앱 테마 설정값 → 지금 실제로 어두운 화면인지
@@ -242,7 +237,7 @@ class StorageService {
       (mode == 'system' && WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark);
 
 
-  // 6. 앱 언어 설정 ('system': 기본 시스템, 'ko': 한국어, 'en': 영어, 'zh': 중국어, 'ja': 일본어)
+  // 앱 언어 설정 ('system': 기본 시스템, 'ko': 한국어, 'en': 영어, 'zh': 중국어, 'ja': 일본어)
   // 저장값은 'system'일 수 있고, 실제 화면 문구에 쓰는 언어(appLangNotifier)는 항상 ko/en/zh/ja 중 하나다.
   static const List<String> supportedAppLanguages = ['ko', 'en', 'zh', 'ja', 'fr', 'ru', 'es'];
 
@@ -302,8 +297,8 @@ class StorageService {
     return code;
   }
 
-  // 15. 파일 이름 뒤에 형식(.pdf, .epub 등) 숨기기 설정
-  // 3. 파일 표시 방식 기본값을 목록형('list')으로 변경
+  // 파일 이름 뒤에 형식(.pdf, .epub 등) 숨기기 설정
+  // 파일 표시 방식 기본값을 목록형('list')으로 변경
   static Future<void> setBookshelfViewMode(String mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('bookshelf_view_mode_v27', mode);
@@ -394,9 +389,7 @@ class StorageService {
   }
 
   /// 파일 목록에서 [그룹 이름] 숨기기
-  // 파일 목록: 추가 날짜 숨기기 / 페이지 수 숨기기
-  static Future<bool> getHideAddedDate() async => (await SharedPreferences.getInstance()).getBool('hide_added_date_v90') ?? false;
-  static Future<void> setHideAddedDate(bool v) async => (await SharedPreferences.getInstance()).setBool('hide_added_date_v90', v);
+  // 파일 목록: 페이지 수 숨기기
   static Future<bool> getHidePageCount() async => (await SharedPreferences.getInstance()).getBool('hide_page_count_v90') ?? false;
   static Future<void> setHidePageCount(bool v) async => (await SharedPreferences.getInstance()).setBool('hide_page_count_v90', v);
 
@@ -439,7 +432,7 @@ class StorageService {
     return prefs.getBool('hide_group_name') ?? false;
   }
 
-  // 2. 즐겨찾기(별표) 도서 관리
+  // 즐겨찾기(별표) 도서 관리
   static Future<Set<String>> getFavoriteBooks() async {
     final prefs = await SharedPreferences.getInstance();
     final list = prefs.getStringList('favorite_book_paths') ?? [];
@@ -494,17 +487,6 @@ class StorageService {
     return prefs.getBool('doc_comfort_theme') ?? false;
   }
 
-  // 2. 가로 모드 2페이지 보기는 꺼짐(false)을 기본값으로 설정
-  static Future<void> setTwoPageLandscape(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('two_page_landscape_v30', enabled);
-  }
-
-  static Future<bool> getTwoPageLandscape() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('two_page_landscape_v30') ?? false;
-  }
-
   static String _normalizeBookKey(String bookPath) {
     return bookPath.replaceAll(
       RegExp(r'(_v25_converted|\.v2\.converted|\.converted)\.epub$', caseSensitive: false),
@@ -512,7 +494,7 @@ class StorageService {
     );
   }
 
-  // 12. 파일마다 읽기 방향 기억하기 (처음 여는 파일은 좌->우(false)가 기본값)
+  // 파일마다 읽기 방향 기억하기 (처음 여는 파일은 좌->우(false)가 기본값)
   static Future<void> setBookReadingDirectionRtl(String bookPath, bool isRtl) async {
     final prefs = await SharedPreferences.getInstance();
     final key = _normalizeBookKey(bookPath);
@@ -540,16 +522,6 @@ class StorageService {
   static Future<bool> getUseVolumeTurn() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool('use_volume_turn') ?? true;
-  }
-
-  static Future<void> setUseQuickNavTurn(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('use_quick_nav_turn', enabled);
-  }
-
-  static Future<bool> getUseQuickNavTurn() async {
-    // '페이지 이동 버튼'은 없앰 (v90)
-    return false;
   }
 
   static Future<void> setUseSpenTurn(bool enabled) async {
@@ -592,12 +564,10 @@ class StorageService {
   }
 
   /// 페이지 표시: 'one'(한 페이지) / 'two'(두 페이지) / 'auto'(화면이 넓으면 두 페이지)
-  /// 처음에는 예전 '가로 모드 2페이지 보기' 설정을 이어받음 (켜져 있었으면 자동)
   static Future<String> getPageDisplay() async {
     final prefs = await SharedPreferences.getInstance();
     final v = prefs.getString('page_display_v88');
-    if (v == 'one' || v == 'two' || v == 'auto') return v!;
-    return (prefs.getBool('two_page_landscape_v30') ?? false) ? 'auto' : 'one';
+    return (v == 'two' || v == 'auto') ? v! : 'one';
   }
 
   static Future<void> setPageDisplay(String mode) async {
@@ -629,14 +599,10 @@ class StorageService {
 
   static Future<String> getFooterInfoMode() async {
     final prefs = await SharedPreferences.getInstance();
-    // '진행률'·'진행률 및 페이지 번호'는 없앰 (v90): 예전 값은 가까운 것으로
-    final v = prefs.getString('footer_info_mode') ?? 'none';
-    if (v == 'both') return 'page';
-    if (v == 'progress') return 'none';
-    return v;
+    return prefs.getString('footer_info_mode') ?? 'none';
   }
 
-  // 9. 진행바 UI 하단('bottom')을 기본값으로 설정
+  // 진행바 UI 하단('bottom')을 기본값으로 설정
   static Future<void> setProgressBarPosition(String pos) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('progress_bar_pos_v26', pos);
@@ -686,16 +652,6 @@ class StorageService {
     if (raw == null) return [];
     final List decoded = jsonDecode(raw);
     return decoded.map((e) => MemoStroke.fromJson(e)).toList();
-  }
-
-  static Future<void> savePageMemoNote(String bookKey, int pageIndex, String note) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('memo_note_${bookKey}_$pageIndex', note);
-  }
-
-  static Future<String> getPageMemoNote(String bookKey, int pageIndex) async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('memo_note_${bookKey}_$pageIndex') ?? '';
   }
 
   static Future<void> saveLocationStrokes(
@@ -771,15 +727,7 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     // 처음 켤 때: 파일 형식별 그룹을 미리 만들어 둠
     final saved = prefs.getStringList('book_groups_v2');
-    if (saved == null) return List<String>.of(defaultGroups);
-    // 사진(jpg·png) 파일은 더 이상 열지 않으므로 그 그룹도 없앰 (그 그룹에 있던 파일은 미분류로)
-    if (saved.remove('png')) {
-      await prefs.setStringList('book_groups_v2', saved);
-      for (final key in prefs.getKeys().toList()) {
-        if (key.startsWith('grp_') && prefs.getString(key) == 'png') await prefs.setString(key, '미분류');
-      }
-    }
-    return saved;
+    return saved ?? List<String>.of(defaultGroups);
   }
 
   static Future<void> addGroup(String groupName) async {

@@ -97,7 +97,10 @@ class _SplashOverlayState extends State<SplashOverlay> with SingleTickerProvider
     final Color bg = Theme.of(context).scaffoldBackgroundColor;
     final Color fg = Theme.of(context).colorScheme.onSurface;
     const double size = 200;
-    return AbsorbPointer(
+    // Material로 감싸야 글자 밑에 노란 밑줄(글자 모양이 정해지지 않았다는 표시)이 생기지 않음
+    return Material(
+      type: MaterialType.transparency,
+      child: AbsorbPointer(
       child: AnimatedBuilder(
         animation: _c,
         builder: (context, _) {
@@ -144,20 +147,6 @@ class _SplashOverlayState extends State<SplashOverlay> with SingleTickerProvider
                           child: Stack(
                             clipBehavior: Clip.none,
                             children: [
-                              // 아이콘 아래 은은한 그림자
-                              Positioned.fill(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(size * 0.035),
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(size * 0.2),
-                                      boxShadow: const [
-                                        BoxShadow(color: Color(0x2E3F5A4A), blurRadius: size * 0.09, offset: Offset(0, size * 0.035)),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
                               _layer(_layers[0]),
                               Positioned.fill(
                                 child: Transform.translate(
@@ -202,6 +191,7 @@ class _SplashOverlayState extends State<SplashOverlay> with SingleTickerProvider
             ),
           );
         },
+      ),
       ),
     );
   }

@@ -733,8 +733,6 @@ class MainActivity : FlutterActivity() {
                     val am = getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
                     result.success(am.clearApplicationUserData())
                 } catch (e: Throwable) { result.success(false) }
-            } else if (call.method == "pdfSearchSupported") {
-                result.success(pdfSearchSupported())
             } else if (call.method == "pdfSearch") {
                 // 파일 내 단어 검색: 쪽마다 찾은 곳의 사각형(쪽 크기 대비 0~1)을 돌려 준다
                 val path = call.argument<String>("path") ?: ""
@@ -973,63 +971,6 @@ class MainActivity : FlutterActivity() {
                         runOnUiThread { result.error("PDF_ERR", e.message, null) }
                     }
                 }.start()
-            } else if (call.method == "cropTrimImage") {
-                // 스크롤 보기용 쪽 그림: 그림 파일을 쪽 자리만 잘라 위아래 빈 종이를 걷어 냄
-                val inPath = call.argument<String>("input")
-                val outPath = call.argument<String>("output")
-                if (inPath == null || outPath == null) {
-                    result.error("ARG", "path", null)
-                    return@setMethodCallHandler
-                }
-                val crop = call.argument<List<Number>>("crop")
-                val trim = call.argument<Boolean>("trim") ?: true
-                val paper = (call.argument<Number>("paper") ?: 0xFFFFFFFFL).toLong().toInt()
-                val pad = ((call.argument<Number>("pad") ?: 0.035).toFloat()).coerceIn(0f, 0.3f)
-                val trimTop = call.argument<Boolean>("trimTop") ?: true
-                Thread {
-                    try {
-                        val src = BitmapFactory.decodeFile(inPath) ?: throw IllegalStateException("decode")
-                        val size = cropTrimSave(src, crop, trim, paper, pad, outPath, trimTop)
-                        runOnUiThread { result.success(listOf(size[0], size[1])) }
-                    } catch (e: Throwable) {
-                        runOnUiThread { result.error("CROP_ERR", e.message, null) }
-                    }
-                }.start()
-            } else if (call.method == "captureScrollPage") {
-                // 스크롤 보기 준비용 숨은 문서 화면(주소에 freaderScroll=1)을 바로 그림으로:
-                // 화면(UI) 스레드에서는 그리기만 하고, 자르기·여백 걷기·저장은 다른 스레드에서 (화면이 버벅이지 않게)
-                val outPath = call.argument<String>("output")
-                if (outPath == null) {
-                    result.error("ARG", "path", null)
-                    return@setMethodCallHandler
-                }
-                val crop = call.argument<List<Number>>("crop")
-                val paper = (call.argument<Number>("paper") ?: 0xFFFFFFFFL).toLong().toInt()
-                val pad = ((call.argument<Number>("pad") ?: 0.035).toFloat()).coerceIn(0f, 0.3f)
-                val trimTop = call.argument<Boolean>("trimTop") ?: true
-                val trim = call.argument<Boolean>("trim") ?: true
-                val tag = call.argument<String>("tag")
-                val webView = findScrollWebView(window.decorView, tag)
-                if (webView == null || webView.width <= 0 || webView.height <= 0) {
-                    result.error("NO_WEBVIEW", "scroll webview not found", null)
-                    return@setMethodCallHandler
-                }
-                try {
-                    val bitmap = Bitmap.createBitmap(webView.width, webView.height, Bitmap.Config.ARGB_8888)
-                    val canvas = Canvas(bitmap)
-                    canvas.drawColor(paper)
-                    webView.draw(canvas)
-                    Thread {
-                        try {
-                            val size = cropTrimSave(bitmap, crop, trim, paper, pad, outPath, trimTop)
-                            runOnUiThread { result.success(listOf(size[0], size[1])) }
-                        } catch (e: Throwable) {
-                            runOnUiThread { result.error("CROP_ERR", e.message, null) }
-                        }
-                    }.start()
-                } catch (e: Throwable) {
-                    result.error("CAPTURE_ERR", e.message, null)
-                }
             } else if (call.method == "wakeHiddenWebViews") {
                 // 서재 표지(첫 페이지) 만들기용 화면 밖 WebView: 숨김 상태면 그리기를 멈추므로
                 // 완전히 투명하게 + 화면 밖으로 옮긴 뒤 '보이는' 상태로 둔다 (사용자에게는 안 보임)
@@ -1189,31 +1130,6 @@ class MainActivity : FlutterActivity() {
                 } catch (e: Throwable) {
                     result.error("CAPTURE_ERR", e.message, null)
                 }
-            } else if (call.method == "captureWebView") {
-                // EPUB 본문(WebView) 화면을 그림 파일로 저장 (PDF 내보내기용)
-                val outPath = call.argument<String>("path")
-                val webView = findLargestWebView(window.decorView)
-                if (outPath == null || webView == null || webView.width <= 0 || webView.height <= 0) {
-                    result.error("NO_WEBVIEW", "WebView not found", null)
-                    return@setMethodCallHandler
-                }
-                try {
-                    val bmp = Bitmap.createBitmap(webView.width, webView.height, Bitmap.Config.ARGB_8888)
-                    val canvas = Canvas(bmp)
-                    canvas.translate(-webView.scrollX.toFloat(), -webView.scrollY.toFloat())
-                    webView.draw(canvas)
-                    Thread {
-                        try {
-                            FileOutputStream(File(outPath)).use { out -> bmp.compress(Bitmap.CompressFormat.PNG, 100, out) }
-                            bmp.recycle()
-                            runOnUiThread { result.success(outPath) }
-                        } catch (e: Throwable) {
-                            runOnUiThread { result.error("CAPTURE_ERR", e.message, null) }
-                        }
-                    }.start()
-                } catch (e: Throwable) {
-                    result.error("CAPTURE_ERR", e.message, null)
-                }
             } else if (call.method == "sendEmail") {
                 // 문의하기: 받는 사람·제목·내용을 채운 채 메일 앱 열기 (메일 앱이 없으면 false)
                 val to = call.argument<String>("to") ?: ""
@@ -1297,21 +1213,6 @@ class MainActivity : FlutterActivity() {
                     try {
                         val lines = ocrLines(path)
                         runOnUiThread { result.success(lines) }
-                    } catch (e: Throwable) {
-                        runOnUiThread { result.success(emptyList<Any>()) }
-                    }
-                }
-            } else if (call.method == "pdfTextBoxes") {
-                // 내보내기용: 쪽마다 글과 위치(쪽 크기 대비 0~1). 지원하지 않는 기기에서는 빈 목록
-                val path = call.argument<String>("path") ?: ""
-                if (!pdfSearchSupported()) {
-                    result.success(emptyList<Any>())
-                    return@setMethodCallHandler
-                }
-                thumbExecutor.execute {
-                    try {
-                        val boxes = pdfTextBoxes(path)
-                        runOnUiThread { result.success(boxes) }
                     } catch (e: Throwable) {
                         runOnUiThread { result.success(emptyList<Any>()) }
                     }
@@ -1810,89 +1711,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun findScrollWebView(root: View, tag: String? = null): WebView? {
-        if (root is WebView) {
-            val url = try { root.url } catch (_: Throwable) { null }
-            // 숨은 화면이 여러 개(동시에 2개 준비)일 수 있어 작업 표시(tag)까지 맞는 것만
-            if (url != null && url.contains("freaderScroll=1") && (tag == null || url.contains("freaderTag=$tag"))) return root
-            return null
-        }
-        if (root is ViewGroup) {
-            for (i in 0 until root.childCount) {
-                val found = findScrollWebView(root.getChildAt(i), tag)
-                if (found != null) return found
-            }
-        }
-        return null
-    }
-
-    /// 쪽 자리만 잘라(crop = [x, y, w, h], 0~1, 가장자리 몇 픽셀은 안쪽으로) 위아래 빈 종이를 걷고 JPEG로 저장
-    private fun cropTrimSave(src: Bitmap, crop: List<Number>?, trim: Boolean, paper: Int, pad: Float, outPath: String, trimTop: Boolean = true): IntArray {
-        val bw = src.width
-        val bh = src.height
-        var shot = src
-        if (crop != null && crop.size == 4) {
-            // 쪽 테두리에 걸친 줄(바깥 바탕색)이 끼지 않게 가장자리를 조금 안쪽으로
-            val inset = maxOf(2, (bw / 400f).toInt())
-            val cx = ((crop[0].toFloat() * bw).toInt() + inset).coerceIn(0, bw - 1)
-            val cy = ((crop[1].toFloat() * bh).toInt() + inset).coerceIn(0, bh - 1)
-            val cw = ((crop[2].toFloat() * bw).toInt() - inset * 2).coerceIn(1, bw - cx)
-            val ch = ((crop[3].toFloat() * bh).toInt() - inset * 2).coerceIn(1, bh - cy)
-            shot = Bitmap.createBitmap(src, cx, cy, cw, ch)
-            if (shot !== src) src.recycle()
-        }
-        if (trim) {
-            val w = shot.width
-            val h = shot.height
-            val pr = (paper shr 16) and 0xFF
-            val pg = (paper shr 8) and 0xFF
-            val pb = paper and 0xFF
-            val row = IntArray(w)
-            val edge = maxOf(2, w / 100)
-            val span = maxOf(1, w - edge * 2)
-            // 글·그림이 있는 줄인가: 종이색과 다른 점이 있고, 줄 전체를 가로지르는 선(쪽 테두리 등)만 있는 줄은 아님
-            fun content(y: Int): Boolean {
-                shot.getPixels(row, 0, w, 0, y, w, 1)
-                var n = 0
-                var x = edge
-                while (x < w - edge) {
-                    val c = row[x]
-                    if (Math.abs(((c shr 16) and 0xFF) - pr) > 24 ||
-                        Math.abs(((c shr 8) and 0xFF) - pg) > 24 ||
-                        Math.abs((c and 0xFF) - pb) > 24) n++
-                    x += 1
-                }
-                return n > 0 && n < span * 0.92f
-            }
-            var top = 0
-            while (top < h && !content(top)) top++
-            var bottom = h - 1
-            while (bottom > top && !content(bottom)) bottom--
-            val keep = (w * pad).toInt()
-            // 위쪽 여백은 그대로 두는 경우(쪽 넘김 보기와 같은 자리에서 글이 시작되게): 아래 빈 종이만 걷음
-            if (!trimTop && top < h) top = keep
-            if (top >= h) {
-                val strip = maxOf(1, minOf(h, (w * 0.12f).toInt()))
-                val t = Bitmap.createBitmap(shot, 0, 0, w, strip)
-                if (t !== shot) shot.recycle()
-                shot = t
-            } else {
-                val y0 = maxOf(0, top - keep)
-                val y1 = minOf(h, bottom + 1 + keep)
-                if (y0 > 0 || y1 < h) {
-                    val t = Bitmap.createBitmap(shot, 0, y0, w, y1 - y0)
-                    if (t !== shot) shot.recycle()
-                    shot = t
-                }
-            }
-        }
-        val outW = shot.width
-        val outH = shot.height
-        FileOutputStream(File(outPath)).use { out -> shot.compress(Bitmap.CompressFormat.JPEG, 90, out) }
-        shot.recycle()
-        return intArrayOf(outW, outH)
-    }
-
     private fun findLargestWebView(root: View): WebView? {
         var best: WebView? = null
         fun walk(v: View) {
@@ -2011,53 +1829,6 @@ class MainActivity : FlutterActivity() {
         } catch (_: Throwable) {
             null
         }
-    }
-
-    @android.annotation.SuppressLint("NewApi")
-    private fun pdfTextBoxes(path: String): List<List<Map<String, Any>>> {
-        val out = ArrayList<List<Map<String, Any>>>()
-        val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
-        fun collect(pw: Float, ph: Float, contents: List<android.graphics.pdf.content.PdfPageTextContent>) {
-            val boxes = ArrayList<Map<String, Any>>()
-            if (pw > 0f && ph > 0f) {
-                for (c in contents) {
-                    val text = c.text ?: continue
-                    val rects = c.bounds
-                    if (rects.isEmpty() || text.isBlank()) continue
-                    val lines = text.split('\n')
-                    if (lines.size == rects.size) {
-                        for (k in rects.indices) {
-                            val r = rects[k]
-                            if (lines[k].isBlank()) continue
-                            boxes.add(mapOf("t" to lines[k], "x" to r.left / pw, "y" to r.top / ph, "w" to r.width() / pw, "h" to r.height() / ph))
-                        }
-                    } else {
-                        val u = android.graphics.RectF(rects[0])
-                        for (r in rects) u.union(r)
-                        boxes.add(mapOf("t" to text.replace('\n', ' '), "x" to u.left / pw, "y" to u.top / ph, "w" to u.width() / pw, "h" to (u.height() / rects.size) / ph))
-                    }
-                }
-            }
-            out.add(boxes)
-        }
-        try {
-            if (Build.VERSION.SDK_INT >= 35) {
-                PdfRenderer(pfd).use { renderer ->
-                    for (i in 0 until renderer.pageCount) {
-                        renderer.openPage(i).use { page -> collect(page.width.toFloat(), page.height.toFloat(), page.textContents) }
-                    }
-                }
-            } else {
-                android.graphics.pdf.PdfRendererPreV(pfd).use { renderer ->
-                    for (i in 0 until renderer.pageCount) {
-                        renderer.openPage(i).use { page -> collect(page.width.toFloat(), page.height.toFloat(), page.textContents) }
-                    }
-                }
-            }
-        } finally {
-            try { pfd.close() } catch (_: Exception) {}
-        }
-        return out
     }
 
     /** 줄 상자 안 글자의 획 굵기 ÷ 줄 높이: 글자 부분을 가려낸 뒤(오츠 방법) 넓이 × 2 ÷ 테두리 길이 = 획 굵기 */

@@ -4,6 +4,7 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'package:archive/archive_io.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'services/app_messenger.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -1388,7 +1389,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   bool _wantsSharpDocThumb(String bookPath) =>
       _bookshelfViewMode == 'grid' && _docThumbLowRes.contains(bookPath) && !_docThumbFailed.contains(bookPath);
 
-  /// 13. 각 파일의 가장 첫 페이지를 초고속 네이티브 스레드 풀에서 썸네일 이미지로 생성 및 MemoryImage로 영구 고정
+  /// 각 파일의 가장 첫 페이지를 초고속 네이티브 스레드 풀에서 썸네일 이미지로 생성 및 MemoryImage로 영구 고정
   Future<void> _ensureBookThumbnail(File file, [String? cachedThumbDirPath]) async {
     final path = file.path;
     if (_globalThumbMemoryCache.containsKey(path) && !_wantsSharpDocThumb(path)) return;
@@ -1408,11 +1409,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       final safeKey = path.hashCode.toUnsigned(32).toString();
       final bool isDocType = DocThumbnailService.supportedExts.contains(ext);
       final bool isSlideType = ext == 'pptx' || ext == 'ppt';
-      // 슬라이드 표지는 예전에 흰 화면으로 찍힌 것이 남아 있을 수 있어 새 이름(s3)으로 다시 만든다
       final thumbPath = isSlideType
           ? '$thumbDirPath/thumb_s3_$safeKey.jpg'
           : isDocType
-              // 한글(HWP) 표지는 v115부터 첫 쪽을 직접 그려 새로 만듦(d3) — 옛 표지는 글자가 깨져 보였음
               ? (ext == 'hwp' ? '$thumbDirPath/thumb_d3_$safeKey.jpg' : '$thumbDirPath/thumb_d2_$safeKey.jpg')
               : ext == 'epub'
                   ? '$thumbDirPath/thumb_e1_$safeKey.jpg'
@@ -1425,23 +1424,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         if (isDocType) _noteDocThumbQuality(path, thumbPath);
         if (!isDocType || !_wantsSharpDocThumb(path)) return;
       }
-      if (isDocType) {
-        // 예전 버전이 만든 (흐릴 수 있는) 표지는 지운다
-        for (final old in [
-          File('$thumbDirPath/thumb_v36_$safeKey.jpg'),
-          if (ext == 'hwp') File('$thumbDirPath/thumb_d2_$safeKey.jpg'),
-          if (ext == 'hwp') File('$thumbDirPath/thumb_d2_$safeKey.jpg.low'),
-          if (isSlideType) File('$thumbDirPath/thumb_d2_$safeKey.jpg'),
-          if (isSlideType) File('$thumbDirPath/thumb_d2_$safeKey.jpg.low'),
-        ]) {
-          if (old.existsSync()) {
-            try {
-              old.deleteSync();
-            } catch (_) {}
-          }
-        }
-      }
-
       if (ext == 'pdf') {
         final rendered = await _pdfChannel.invokeMethod<String>(
           'renderPdfFirstPageThumbnail',
@@ -1469,15 +1451,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         if (allowRender) _docThumbFailed.add(path);
       } else if (ext == 'cbz' || ext == 'epub') {
         if (_noCoverPaths.contains(path)) return;
-        if (ext == 'epub') {
-          // 예전에 '첫 그림'으로 만든 표지는 지움 (표지가 아닐 수 있음)
-          final old = File('$thumbDirPath/thumb_v36_$safeKey.jpg');
-          if (old.existsSync()) {
-            try {
-              old.deleteSync();
-            } catch (_) {}
-          }
-        }
         final rendered = await _pdfChannel.invokeMethod<String>(
           'extractArchiveFirstImageThumbnail',
           {
@@ -1839,21 +1812,27 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   _tr('합치는 순서 선택', 'Merge Order', '合并顺序', '結合順序の選択'),
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                 ),
-                RadioListTile<bool>(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(_tr('파일 이름 순서대로 합치기', 'Sort by Filename', '按文件名顺序合并', 'ファイル名順に結合'), style: const TextStyle(fontSize: 13)),
-                  value: true,
+                // 합치는 순서: 둘 중 하나 고르기
+                RadioGroup<bool>(
                   groupValue: sortByName,
                   onChanged: (v) => setModalState(() => sortByName = v ?? true),
-                ),
-                RadioListTile<bool>(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(_tr('파일을 선택한 순서대로 합치기', 'Keep Selected Order', '按选择顺序合并', '選択した順番通りに結合'), style: const TextStyle(fontSize: 13)),
-                  value: false,
-                  groupValue: sortByName,
-                  onChanged: (v) => setModalState(() => sortByName = v ?? false),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      RadioListTile<bool>(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(_tr('파일 이름 순서대로 합치기', 'Sort by Filename', '按文件名顺序合并', 'ファイル名順に結合'), style: const TextStyle(fontSize: 13)),
+                        value: true,
+                      ),
+                      RadioListTile<bool>(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(_tr('파일을 선택한 순서대로 합치기', 'Keep Selected Order', '按选择顺序合并', '選択した順番通りに結合'), style: const TextStyle(fontSize: 13)),
+                        value: false,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -2008,21 +1987,27 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   _tr('합치는 순서 선택', 'Merge Order', '合并顺序', '結合順序の選択'),
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                 ),
-                RadioListTile<bool>(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(_tr('파일 이름 순서대로 합치기', 'Sort by Filename', '按文件名顺序合并', 'ファイル名順に結合'), style: const TextStyle(fontSize: 13)),
-                  value: true,
+                // 합치는 순서: 둘 중 하나 고르기
+                RadioGroup<bool>(
                   groupValue: sortByName,
                   onChanged: (v) => setModalState(() => sortByName = v ?? true),
-                ),
-                RadioListTile<bool>(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(_tr('파일을 선택한 순서대로 합치기', 'Keep Selected Order', '按选择顺序合并', '選択した順番通りに結合'), style: const TextStyle(fontSize: 13)),
-                  value: false,
-                  groupValue: sortByName,
-                  onChanged: (v) => setModalState(() => sortByName = v ?? false),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      RadioListTile<bool>(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(_tr('파일 이름 순서대로 합치기', 'Sort by Filename', '按文件名顺序合并', 'ファイル名順に結合'), style: const TextStyle(fontSize: 13)),
+                        value: true,
+                      ),
+                      RadioListTile<bool>(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(_tr('파일을 선택한 순서대로 합치기', 'Keep Selected Order', '按选择顺序合并', '選択した順番通りに結合'), style: const TextStyle(fontSize: 13)),
+                        value: false,
+                      ),
+                    ],
+                  ),
                 ),
                 if (deleteSourceAfter) ...[
                   const Divider(height: 12),
@@ -2226,30 +2211,48 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final ext = dotIdx > 0 ? fullName.substring(dotIdx + 1) : '';
 
     final ctrl = TextEditingController(text: baseName);
+    String? error; // 같은 이름의 파일이 있을 때 입력칸 아래에 띄우는 알림 (자판에 가리지 않게)
+    String targetName(String raw) {
+      final safe = raw.trim().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      return ext.isNotEmpty ? '$safe.$ext' : safe;
+    }
 
     final confirmed = await showPopDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(_tr('이름 수정', 'Rename File', '重命名文件', 'ファイル名変更')),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: InputDecoration(
-            labelText: _tr('새 파일 이름', 'New Filename', '新文件名', '新しいファイル名'),
-            suffixText: ext.isNotEmpty ? '.$ext' : null,
-            border: const OutlineInputBorder(),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text(_tr('이름 수정', 'Rename File', '重命名文件', 'ファイル名変更')),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            onChanged: (_) {
+              if (error != null) setDlg(() => error = null);
+            },
+            decoration: InputDecoration(
+              labelText: _tr('새 파일 이름', 'New Filename', '新文件名', '新しいファイル名'),
+              suffixText: ext.isNotEmpty ? '.$ext' : null,
+              border: const OutlineInputBorder(),
+              errorText: error,
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final String name = targetName(ctrl.text);
+                if (ctrl.text.trim().isNotEmpty && name != fullName && await File('${file.parent.path}/$name').exists()) {
+                  setDlg(() => error = _tr('같은 이름의 파일이 이미 있어요', 'A file with that name already exists', '同名文件已存在', '同じ名前のファイルが既に存在します'));
+                  return;
+                }
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              },
+              child: Text(_tr('변경', 'Rename', '确定', '変更')),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(_tr('취소', 'Cancel', '取消', 'キャンセル')),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(_tr('변경', 'Rename', '确定', '変更')),
-          ),
-        ],
       ),
     );
 
@@ -2258,8 +2261,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final rawNewBase = ctrl.text.trim();
     if (rawNewBase.isEmpty) return;
 
-    final safeNewBase = rawNewBase.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-    final newFileName = ext.isNotEmpty ? '$safeNewBase.$ext' : safeNewBase;
+    final newFileName = targetName(rawNewBase);
     if (newFileName == fullName) return;
 
     final newPath = '${file.parent.path}/$newFileName';
@@ -3615,7 +3617,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     return lbl == null ? '' : '($lbl)';
   }
 
-  /// 1, 3, 10, 11, 13. 표지형(썸네일) 그리드 카드:
+  /// 표지형(썸네일) 그리드 카드:
   /// - 고화질 첫 페이지 썸네일 (FilterQuality.high)
   /// - 휴대폰 한 화면에 9개(3×3) 들어가는 크기
   /// - 왼쪽 위 즐겨찾기 책갈피, 하단 점 3개(이름 변경 / 그룹 이동 / 휴지통 이동)
@@ -3922,7 +3924,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   '${_selectedFilePaths.length}個選択中',
                 ),
               ),
-              // 5. 파일 여러 개 선택 창 상단에서 전체 선택 옆의 '그룹이동', '쓰레기통' 아이콘 삭제! (하단 버튼만 유지)
+              // 파일 여러 개 선택 창 상단에서 전체 선택 옆의 '그룹이동', '쓰레기통' 아이콘 삭제! (하단 버튼만 유지)
               actions: [
                 TextButton(
                   onPressed: () {
@@ -4100,7 +4102,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                       child: _bookshelfViewMode == 'grid'
                           ? LayoutBuilder(
                               builder: (context, constraints) {
-                                // 3. 휴대폰 기준 한 페이지에 9개(가로 3개 × 세로 3개)가 들어갈 정도로 크기 자동 조절
+                                // 휴대폰 기준 한 페이지에 9개(가로 3개 × 세로 3개)가 들어갈 정도로 크기 자동 조절
                                 const int crossCount = 3;
                                 const double hPad = 10.0;
                                 const double vPad = 8.0;
@@ -4112,7 +4114,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
                                 return GridView.builder(
                                   controller: _bookshelfScrollController,
-                                  cacheExtent: 3000.0,
+                                  scrollCacheExtent: const ScrollCacheExtent.pixels(3000.0),
                                   physics: const AlwaysScrollableScrollPhysics(),
                                   padding: EdgeInsets.fromLTRB(hPad, vPad, hPad, StorageService.simpleStyle ? 88 : 16), // 심플: 오른쪽 아래 [+] 자리
                                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -4135,7 +4137,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           // 목록형: 파일 사이 구분선 없이
                           : ListView.builder(
                         controller: _bookshelfScrollController,
-                        cacheExtent: 3000.0,
+                        scrollCacheExtent: const ScrollCacheExtent.pixels(3000.0),
                         physics: const AlwaysScrollableScrollPhysics(),
                         // 파일마다 둥근 카드 (카드 사이 간격은 카드 위아래 여백으로)
                         padding: EdgeInsets.fromLTRB(12, 6, 12, StorageService.simpleStyle ? 88 : 16), // 심플: 오른쪽 아래 [+] 자리
@@ -4241,7 +4243,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             ),
                             // 그룹 이름·쪽 표시가 없으면 이름만 줄 가운데에 (생기면 다시 위로)
                             subtitle: () {
-                              // 10. [전체]에서만 그룹 이름 표시, 특정 그룹 선택 시 그룹 이름 표시 제거
+                              // [전체]에서만 그룹 이름 표시, 특정 그룹 선택 시 그룹 이름 표시 제거
                               // 그룹 이름 오른쪽: 마지막으로 읽은 쪽 (예: (6/983))
                               final subText = _fileMetaText(file.path, _localizeGroupName(grp), _selectedGroup == '전체' && !_hideGroupName);
                               if (subText.isEmpty) return null;

@@ -38,14 +38,6 @@ class PdfOutlineService {
     }
   }
 
-  /// 테스트용: 같은 일을 지금 스레드에서
-  static List<Map<String, Object>> readBytes(Uint8List bytes) {
-    try {
-      return _PdfOutlineReader(bytes).outline();
-    } catch (_) {
-      return const [];
-    }
-  }
 }
 
 class _Ref {

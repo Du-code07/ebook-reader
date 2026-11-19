@@ -343,7 +343,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool _showControls = false;
   bool _useSwipeTurn = true;
   bool _useVolumeTurn = true;
-  bool _useQuickNavTurn = false;
   bool _useSpenTurn = false;
   Offset? _lastEraserPos;
   final TransformationController _epubZoomController = TransformationController();
@@ -359,7 +358,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   double _epubZoomScale = 1.0;
   double _uiScale = 1.0; // 앱 화면 배율 (태블릿 16/14, 휴대폰 1): 확대 이동 값을 문서 단위로 바꿀 때
 
-  // 1 & 3. S펜 전용 페이지별 필기 및 지우개 상태 (필기 모드에서 S펜이 닿으면 화면 이동 100% 차단 + 해당 페이지에서만 필기 표시)
+  // S펜 전용 페이지별 필기 및 지우개 상태 (필기 모드에서 S펜이 닿으면 화면 이동 100% 차단 + 해당 페이지에서만 필기 표시)
   bool _isMemoMode = false;
   bool _isEraserMode = false;
   bool _allowFingerDrawing = false;
@@ -673,7 +672,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
 
-  /// 8. 같은 그룹 내의 이전(step: -1) 또는 다음(step: 1) 파일로 즉시 이동
+  /// 같은 그룹 내의 이전(step: -1) 또는 다음(step: 1) 파일로 즉시 이동
   // 이전·다음 파일: 서재 목록을 한 줄로 세워(정렬 설정 그대로) 앞뒤 파일이 있을 때만 이동. 없으면 단추가 잠김
   String? _prevFilePath, _nextFilePath;
 
@@ -769,7 +768,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final memoBarPos = await StorageService.getMemoToolbarPosition();
     final quickSide = await StorageService.getQuickMenuSide();
     final volTurn = await StorageService.getUseVolumeTurn();
-    final quickTurn = await StorageService.getUseQuickNavTurn();
     final swipeTurn = await StorageService.getUseSwipeTurn();
     final eraserType = await StorageService.getMemoEraserType();
     final spenTurn = await StorageService.getUseSpenTurn();
@@ -810,7 +808,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _quickMenuSide = quickSide;
       ScrollThumbBar.leftHanded.value = quickSide == 'left';
       _useVolumeTurn = volTurn;
-      _useQuickNavTurn = quickTurn;
       // PPT는 스크롤이 없으므로, 스크롤로 설정돼 있으면 이 파일만 슬라이드로 (다른 파일은 그대로 스크롤)
       _useSwipeTurn = (swipeTurn || (_isPresentation && pageModeScroll)) && !_pageModeScroll;
       _eraserType = eraserType;
@@ -1762,7 +1759,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final List<Widget> items = _memoToolItems();
     final double topInset = MediaQuery.paddingOf(context).top;
     final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
-    final double bottomBarSpace = (((_showControls && _progressBarPos == 'bottom') || _useQuickNavTurn) ? 46.0 : 0.0);
+    final double bottomBarSpace = (_showControls && _progressBarPos == 'bottom') ? 46.0 : 0.0;
     final double topOffset = topInset + (_showControls ? 64.0 : 16.0);
     switch (_memoToolbarPos) {
       case 'top':
@@ -1780,8 +1777,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         final double edge = ((_showControls && _progressBarPos == _memoToolbarPos) ? 56.0 : 12.0) + (isLeft ? _safeSides.left : _safeSides.right);
         // 아래쪽 진행바·도구 모음과 겹치지 않도록
         final double bottomLimit = _memoBarToFloorLandscape
-            // 5. 가로 모드: 바닥까지 (오른쪽 아래 페이지 이동 버튼이 있으면 그 위까지)
-            ? baseBottom + ((_useQuickNavTurn && _memoToolbarPos == 'right') ? 46.0 : 0.0)
+            // 가로 모드: 바닥까지
+            ? baseBottom
             : baseBottom + bottomBarSpace + (_showControls ? 52.0 : 8.0);
         return Positioned(
           key: ValueKey('memo_toolbar_$_memoToolbarPos'),
@@ -1814,7 +1811,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     return SystemBars.stableTop(context);
   }
 
-  /// 6. 카메라(디스플레이 컷아웃)·시스템 영역 여백. 떠 있는 UI가 카메라를 가리지 않도록 좌우에 더한다.
+  /// 카메라(디스플레이 컷아웃)·시스템 영역 여백. 떠 있는 UI가 카메라를 가리지 않도록 좌우에 더한다.
   EdgeInsets get _safeSides => MediaQuery.viewPaddingOf(context);
 
   bool get _isLandscapeNow {
@@ -1830,12 +1827,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _isLandscapeNow &&
       (_memoToolbarPos == 'left' || _memoToolbarPos == 'right');
 
-  /// 5. 가로 모드 + 하단 진행바: 진행바를 메모 도구모음 쪽에서 줄인다
-  /// (오른쪽 아래 페이지 이동 버튼이 있으면 그쪽은 이미 비어 있으므로 제외)
+  /// 가로 모드 + 하단 진행바: 진행바를 메모 도구모음 쪽에서 줄인다
   bool get _memoBarBesideProgress =>
-      _memoBarToFloorLandscape && _progressBarPos == 'bottom' && !(_useQuickNavTurn && _memoToolbarPos == 'right');
+      _memoBarToFloorLandscape && _progressBarPos == 'bottom';
 
-  /// 5. 위 상황에서 진행바가 메모 도구모음 쪽에서 비켜 주는 폭 (메모 도구모음 폭 48 + 간격 8)
+  /// 위 상황에서 진행바가 메모 도구모음 쪽에서 비켜 주는 폭 (메모 도구모음 폭 48 + 간격 8)
   static const double _memoBarSideInset = 54.0;
 
   Future<void> _openPenSettings() {
@@ -1862,7 +1858,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     await StorageService.setMemoEraserType(v);
   }
 
-  /// 2 & 5. 삼성 노트 스타일 초고속 캡슐 지우개 (드래그 중 디스크 I/O 제거)
+  /// 삼성 노트 스타일 초고속 캡슐 지우개 (드래그 중 디스크 I/O 제거)
   void _eraseStrokeAt(Offset localPos, _MemoMap map) {
     if (_memoStrokes.isEmpty || !map.valid) {
       _lastEraserPos = localPos;
@@ -2194,7 +2190,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 장 이동 버튼 높이: 아래 진행바·도구 모음 바·필기 도구 막대가 있으면 그 위에
   double _chapterButtonsBottom(double bottomPadding) {
     double b = math.max<double>(bottomPadding + 16.0, 20.0) + 8.0;
-    if ((_showControls && _progressBarPos == 'bottom') || _useQuickNavTurn) b += 44.0;
+    if (_showControls && _progressBarPos == 'bottom') b += 44.0;
     if (_isMemoMode && _memoToolbarPos == 'bottom') b += 60.0;
     if (_showControls) b += 62.0; // 도구 모음
     return b;
@@ -3899,12 +3895,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     if (!_isOfflineDocument) _epubController.setFontSize(fontSize: _fontSize.toDouble());
   }
 
-  /// 1. 뷰어 표시에서 페이지 번호를 누르고 숫자를 입력하면 해당 페이지로 이동 (설정에서 페이지 번호가 활성화된 경우만 작동)
+  /// 뷰어 표시에서 페이지 번호를 누르고 숫자를 입력하면 해당 페이지로 이동 (설정에서 페이지 번호가 활성화된 경우만 작동)
   Future<void> _showJumpToPageDialog({bool fromProgressBar = false}) async {
-    final bool allowed = fromProgressBar
-        ? (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
-        : (_footerInfoMode == 'page' || _footerInfoMode == 'both');
-    if (!allowed) return;
+    // 진행바에서 누르면 늘 열림, 쪽 번호 표시에서 누르면 쪽 번호를 보일 때만
+    if (!fromProgressBar && _footerInfoMode != 'page') return;
     final int totalEstPages = _isOfflineDocument ? math.max(1, _docPageCount) : (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
     final int curEstPage = _isOfflineDocument
         ? (_docPage + 1).clamp(1, totalEstPages).toInt()
@@ -3979,24 +3973,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   String _formatEpubFooterText() {
     if (_footerInfoMode == 'none') return '';
-    final int totalEstPages = _isOfflineDocument ? math.max(1, _docPageCount) : (_chapters.isNotEmpty ? _chapters.length * 10 : 100);
-    final int curEstPage = _isOfflineDocument
-        ? (_docPage + 1).clamp(1, totalEstPages).toInt()
-        : ((_progress * totalEstPages).round()).clamp(1, totalEstPages).toInt();
-    final String progStr = '${(_progress * 100).toStringAsFixed(1)}%';
-    final String pageStr = '$curEstPage / $totalEstPages';
-
-    if (_footerInfoMode == 'progress') {
-      return progStr;
-    } else if (_footerInfoMode == 'page') {
-      return pageStr;
-    } else {
-      return '$progStr  |  $pageStr';
-    }
+    // 진행바의 '지금 쪽/전체 쪽'과 같은 계산 (사이만 띄어 씀)
+    return _progressPageLabel().replaceFirst('/', ' / ');
   }
 
-  /// 6. 진행도 UI의 화살표를 맨 처음(0.0)과 맨 마지막(1.0)으로 즉시 이동하는 용도로 변경!
-  /// + 하단 배치 시 우측 하단 페이지 이동 버튼과 절대 겹치지 않도록 슬림/컴팩트 사이즈로 축소 및 여백 확보!
+  /// 진행도 UI의 화살표를 맨 처음(0.0)과 맨 마지막(1.0)으로 즉시 이동하는 용도로 변경!
   Widget _buildEpubProgressBar(double bottomInset) {
     if (!_showControls || _progressBarPos == 'hidden' || (!_isOfflineDocument && _chapters.length <= 1 && _progress <= 0.0)) {
       return const Positioned(
@@ -4016,8 +3997,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       return Positioned(
         key: const ValueKey('epub_progress_bar_bottom'),
         left: 14.0 + _safeSides.left + ((_memoBarBesideProgress && _memoToolbarPos == 'left') ? _memoBarSideInset : 0.0),
-        // 페이지 이동 버튼(우측 12.0, 너비 약 88px -> 우측 100px 차지)과 겹치지 않도록 118px 여유 간격 확보
-        right: (_useQuickNavTurn ? 118.0 : 14.0) + _safeSides.right + ((_memoBarBesideProgress && _memoToolbarPos == 'right') ? _memoBarSideInset : 0.0),
+        right: 14.0 + _safeSides.right + ((_memoBarBesideProgress && _memoToolbarPos == 'right') ? _memoBarSideInset : 0.0),
         bottom: baseBottom,
         height: 38.0,
         child: Material(
@@ -4059,9 +4039,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 ),
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
-                      ? () => _showJumpToPageDialog(fromProgressBar: true)
-                      : null,
+                  onTap: () => _showJumpToPageDialog(fromProgressBar: true),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                     child: Text(
@@ -4089,7 +4067,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final bool memoBarVisible = _isMemoMode;
     // 메모 도구모음이 상단/하단에 있으면 세로 진행바가 그만큼 비켜 준다
     final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
-    final double safeBottomOffset = baseBottom + ((memoBarVisible && _memoToolbarPos == 'bottom') ? 96.0 : (_useQuickNavTurn && _progressBarPos == 'right' ? 48.0 : 8.0));
+    final double safeBottomOffset = baseBottom + ((memoBarVisible && _memoToolbarPos == 'bottom') ? 96.0 : 8.0);
     return Positioned(
       key: ValueKey('epub_progress_bar_$_progressBarPos'),
       top: safeTopOffset,
@@ -4139,9 +4117,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               ),
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
-                    ? () => _showJumpToPageDialog(fromProgressBar: true)
-                    : null,
+                onTap: () => _showJumpToPageDialog(fromProgressBar: true),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
                   // 세로 진행바는 폭이 좁아 긴 쪽 번호는 글자를 줄여서 표시
@@ -4161,44 +4137,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
                 onPressed: _jumpToLastPage,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickNavButtons(double bottomInset) {
-    return Positioned(
-      right: 12.0 + _safeSides.right,
-      bottom: math.max<double>(bottomInset + 24.0, 28.0),
-      height: 38.0,
-      child: Material(
-        color: Colors.black87,
-        borderRadius: BorderRadius.circular(19),
-        elevation: 5,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.amber, size: 17),
-                tooltip: '이전 페이지',
-                visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
-                padding: EdgeInsets.zero,
-                onPressed: _turnPrev,
-              ),
-              Container(width: 1, height: 18, color: Colors.white24),
-              IconButton(
-                icon: const Icon(Icons.arrow_forward, color: Colors.amber, size: 17),
-                tooltip: '다음 페이지',
-                visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
-                padding: EdgeInsets.zero,
-                onPressed: _turnNext,
               ),
             ],
           ),
@@ -4643,7 +4581,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   child: Image(image: AssetImage('assets/textures/paper.jpg'), fit: BoxFit.cover, gaplessPlayback: true),
                 ),
               ),
-            // 1. EPUB 뷰어 본문 (Listener를 EpubViewer에만 감싸서 우측 하단 페이지 이동 버튼 클릭 시 상단/하단 UI가 뜨지 않도록 완벽 분리!)
+            // EPUB 뷰어 본문 (Listener는 EpubViewer에만)
             Positioned.fill(
               child: Padding(
                 padding: _slideShow
@@ -4855,7 +4793,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                       StorageService.saveProgress(widget.filePath, clampedProg);
                       StorageService.savePageLabel(widget.filePath, _progressPageLabel(clampedProg));
 
-                      // 3. 페이지 이동 시 해당 페이지(CFI)에 저장된 필기만 불러와서 표시 (보기 방식·화면 방향별)
+                      // 페이지 이동 시 해당 페이지(CFI)에 저장된 필기만 불러와서 표시 (보기 방식·화면 방향별)
                       final String memoKey = _memoKeyFor(newLocKey);
                       final int memoSeq = ++_memoLoadSeq;
                       final Future<List<MemoStroke>> load = _getMemo(memoKey);
@@ -4917,7 +4855,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
               ),
             ),
 
-            // 2. S펜 전용 페이지별 필기/지우개 오버레이 (EagerStylusPanGestureRecognizer로 S펜 이동 시 화면 움직임 100% 차단 + 손가락은 페이지 스와이프)
+            // S펜 전용 페이지별 필기/지우개 오버레이 (EagerStylusPanGestureRecognizer로 S펜 이동 시 화면 움직임 100% 차단 + 손가락은 페이지 스와이프)
             // (저장된 메모는 책 화면 안(넘기는 종이 밑)에 그림: 쪽을 넘길 때 새 쪽 메모가 미리 보이지 않게)
             if (_isMemoMode)
               Positioned.fill(
@@ -5053,14 +4991,12 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                 right: 20 + _safeSides.right,
                 bottom: math.max<double>(bottomPadding + 4.0, 8.0),
                 child: IgnorePointer(
-                  ignoring: !(_footerInfoMode == 'page' || _footerInfoMode == 'both'),
+                  ignoring: _footerInfoMode != 'page',
                   child: Align(
                     alignment: Alignment.centerRight,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both')
-                          ? _showJumpToPageDialog
-                          : null,
+                      onTap: _footerInfoMode == 'page' ? _showJumpToPageDialog : null,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                         child: Text(
@@ -5203,9 +5139,6 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
 
             _buildEpubProgressBar(bottomPadding),
 
-            if (_useQuickNavTurn && !_slideShow)
-              _buildQuickNavButtons(bottomPadding),
-
             // EPUB (스크롤·탭·슬라이드·책처럼 넘기기): 메뉴(도구 모음)를 연 동안만 '이전 챕터 / 다음 챕터' (읽는 동안 글자를 가리지 않게)
             if (_isEpub && _showControls && !_slideShow)
               Positioned(
@@ -5221,7 +5154,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                 left: 12.0 + _safeSides.left,
                 right: 12.0 + _safeSides.right,
                 bottom: math.max<double>(bottomPadding + 16.0, 20.0) + 8.0 +
-                    ((_progressBarPos == 'bottom' || _useQuickNavTurn) ? 44.0 : 0.0),
+                    (_progressBarPos == 'bottom' ? 44.0 : 0.0),
                 child: Center(
                   child: QuickToolBar(
                     items: _buildQuickMenuItems(),

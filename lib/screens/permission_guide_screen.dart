@@ -64,14 +64,9 @@ class PermissionGuideScreen extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(28, 48, 28, 16),
                 children: [
-                  // 앱 표시: 대표 색 동그라미 안에 펼친 책
+                  // 앱 아이콘 (책 읽는 늑대)
                   Center(
-                    child: Container(
-                      width: 96,
-                      height: 96,
-                      decoration: BoxDecoration(color: sig, shape: BoxShape.circle),
-                      child: Icon(Icons.auto_stories_rounded, size: 48, color: Colors.white, shadows: AppColors.sigShadows(context)),
-                    ),
+                    child: Image.asset('assets/splash/app_icon.png', width: 96, height: 96, filterQuality: FilterQuality.medium),
                   ),
                   const SizedBox(height: 18),
                   Center(

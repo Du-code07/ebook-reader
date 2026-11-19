@@ -344,10 +344,10 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_t('데이터 지우기', 'Clear Data', '清除数据', 'データを削除')),
-        content: Text(_t('앱에 넣은 파일·메모·북마크·설정이 모두 지워지고 되돌릴 수 없어요\n허용해 둔 접근 권한도 해제되고, 지운 뒤 앱이 닫혀요\n합치기·스캔으로 만든 PDF도 앱 안에 저장돼 있어 함께 지워져요\nDownload 폴더 등에 있는 원본 파일과 공유로 다른 앱에 보낸 파일은 지워지지 않아요',
-            'All files, notes, bookmarks and settings in the app will be deleted and cannot be restored\nGranted permissions are revoked and the app will close afterwards\nPDFs made by merging or scanning are stored in the app and will be deleted too\nOriginal files in folders such as Download and files sent to other apps by sharing are not deleted',
-            '应用中的所有文件、笔记、书签和设置都将被删除且无法恢复\n已授予的权限也将被撤销，删除后应用将关闭\n合并·扫描生成的 PDF 也保存在应用中，将一并删除\nDownload 等文件夹中的原文件以及通过分享发送到其他应用的文件不会被删除',
-            'アプリ内のファイル・メモ・ブックマーク・設定がすべて削除され、元に戻せません\n許可した権限も解除され、削除後アプリが閉じます\n結合・スキャンで作ったPDFもアプリ内に保存されているため一緒に削除されます\nDownloadなどのフォルダにある元のファイルや、共有で他のアプリに送ったファイルは削除されません')),
+        content: Text(_t('앱 안의 파일·메모·설정이 모두 지워지고 되돌릴 수 없어요\n원래 폴더에 있는 원본 파일은 그대로 남아요\n지운 뒤 앱이 닫혀요',
+            'All files, notes and settings in the app will be deleted and cannot be restored\nOriginal files in their folders stay as they are\nThe app will close afterwards',
+            '应用内的文件·笔记·设置将全部删除且无法恢复\n原文件夹中的原文件会保留\n删除后应用将关闭',
+            'アプリ内のファイル・メモ・設定がすべて削除され、元に戻せません\n元のフォルダにある元のファイルはそのまま残ります\n削除後アプリが閉じます')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('취소', 'Cancel', '取消', 'キャンセル'))),
           ElevatedButton(
@@ -599,7 +599,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             _item(
               icon: Icons.delete_forever_outlined,
               title: _t('데이터 지우기', 'Clear Data', '清除数据', 'データを削除'),
-              subtitle: _t('파일·메모·설정·접근 권한을 모두 지우고 처음 상태로', 'Delete all files, notes, settings and permissions and start over', '删除所有文件、笔记、设置和权限，恢复初始状态', 'ファイル・メモ・設定・権限をすべて削除して初期状態に'),
+              subtitle: _t('앱을 처음 설치한 상태로 되돌려요', 'Resets the app to how it was when first installed', '将应用恢复到刚安装时的状态', 'アプリをインストール直後の状態に戻します'),
               onTap: _clearData,
             ),
             _section(_t('도움말', 'Help', '帮助', 'ヘルプ')),
@@ -620,6 +620,13 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               title: _t('문의하기', 'Contact Us', '联系我们', 'お問い合わせ'),
               subtitle: ContactScreen.supportEmail,
               onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => ContactScreen(lang: _lang))),
+            ),
+            _item(
+              icon: Icons.rate_review_outlined,
+              title: _t('리뷰 남기기', 'Write a Review', '撰写评价', 'レビューを書く'),
+              subtitle: _t('Google Play 스토어에 리뷰를 남겨요', 'Leave a review on the Google Play Store', '在 Google Play 商店留下评价', 'Google Play ストアにレビューを書きます'),
+              // 보류: 스토어에 앱이 올라가면 이리ERI의 Google Play 페이지를 열도록 연결
+              onTap: () {},
             ),
             _item(
               icon: Icons.gavel_outlined,

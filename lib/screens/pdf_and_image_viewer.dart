@@ -30,7 +30,7 @@ import '../widgets/page_curl.dart';
 import '../widgets/bookmark_ribbon.dart';
 import '../widgets/text_select.dart';
 
-/// 1. S펜 전용 즉시 승리 제스처 인식기 (Eager Stylus Gesture Recognizer):
+/// S펜 전용 즉시 승리 제스처 인식기 (Eager Stylus Gesture Recognizer):
 /// S펜(stylus / invertedStylus)이 화면에 닿는 순간(PointerDown) 즉시 GestureArena에서 승리(accepted)를 선언하여
 /// 하위 PageView나 InteractiveViewer, WebView가 S펜 움직임으로 화면을 흔들거나 페이지를 넘기는 것을 100% 원천 차단합니다!
 /// 반면 일반 손가락 터치(PointerDeviceKind.touch)는 아예 거부(isPointerAllowed = false)하므로 손가락 스와이프로는 평소처럼 페이지가 부드럽게 넘어갑니다!
@@ -299,7 +299,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     await WidgetsBinding.instance.endOfFrame;
   }
   bool _useVolumeTurn = true;
-  bool _useQuickNavTurn = false;
   bool _useSpenTurn = false;
   Offset? _lastEraserPos;
   final Set<int> _activeTouchPointerIds = {};
@@ -312,7 +311,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
   bool _isStylusDown = false;
   int _activeDrawingPageIndex = 0;
   final Map<int, List<MemoStroke>> _memoStrokesByPage = {};
-  final Map<int, String> _memoNotesByPage = {};
   final List<Offset> _activeStrokePoints = [];
   Color _penColor = kMemoPenColors.first; // 기본: 빨강
   double _penWidth = 2.0;
@@ -598,7 +596,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     return matchesA.length.compareTo(matchesB.length);
   }
 
-  /// 8. 같은 그룹 내의 이전(step: -1) 또는 다음(step: 1) 파일로 즉시 이동
+  /// 같은 그룹 내의 이전(step: -1) 또는 다음(step: 1) 파일로 즉시 이동
   // 이전·다음 파일: 서재 목록을 한 줄로 세워(정렬 설정 그대로) 앞뒤 파일이 있을 때만 이동. 없으면 단추가 잠김
   String? _prevFilePath, _nextFilePath;
 
@@ -670,7 +668,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       if (_pageModeScroll) _pageModeTap = false; // 스크롤은 탭과 함께 쓰지 않음
       _isMangaRtlMode = await StorageService.getBookReadingDirectionRtl(_bookKey);
       _useVolumeTurn = await StorageService.getUseVolumeTurn();
-      _useQuickNavTurn = await StorageService.getUseQuickNavTurn();
       _useSwipeTurn = await StorageService.getUseSwipeTurn() && !_pageModeScroll;
       _eraserType = await StorageService.getMemoEraserType();
       _useSpenTurn = await StorageService.getUseSpenTurn();
@@ -771,18 +768,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
     // 필기 및 메모 데이터 비동기 로드
     if (mounted) await _loadMemoStrokes();
-    for (int i = 0; i < _imagePages.length; i++) {
-      final note = await StorageService.getPageMemoNote(_bookKey, i);
-      if (note.isNotEmpty) {
-        _memoNotesByPage[i] = note;
-      }
-    }
-    if (mounted && (_memoStrokesByPage.isNotEmpty || _memoNotesByPage.isNotEmpty)) {
+    if (mounted && _memoStrokesByPage.isNotEmpty) {
       setState(() {});
     }
   }
 
-  /// 2 & 5. S펜 버튼 1번 클릭(다음 페이지) / 2번 클릭(이전 페이지) 딜레이 0초 초고속 전환!
+  /// S펜 버튼 1번 클릭(다음 페이지) / 2번 클릭(이전 페이지) 딜레이 0초 초고속 전환!
   void _bindHardwareButtons() {
     _volumeKeyService.startListening(
       onVolumeUp: () {
@@ -1394,7 +1385,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final List<Widget> items = _memoToolItems();
     final double topInset = MediaQuery.paddingOf(context).top;
     final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
-    final double bottomBarSpace = (((_showControls && _progressBarPos == 'bottom') || _useQuickNavTurn) ? 46.0 : 0.0);
+    final double bottomBarSpace = (_showControls && _progressBarPos == 'bottom') ? 46.0 : 0.0;
     final double topOffset = topInset + (_showControls ? 64.0 : 16.0);
     switch (_memoToolbarPos) {
       case 'top':
@@ -1412,8 +1403,8 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         final double edge = ((_showControls && _progressBarPos == _memoToolbarPos) ? 56.0 : 12.0) + (isLeft ? _safeSides.left : _safeSides.right);
         // 아래쪽 진행바·도구 모음과 겹치지 않도록
         final double bottomLimit = _memoBarToFloorLandscape
-            // 5. 가로 모드: 바닥까지 (오른쪽 아래 페이지 이동 버튼이 있으면 그 위까지)
-            ? baseBottom + ((_useQuickNavTurn && _memoToolbarPos == 'right') ? 46.0 : 0.0)
+            // 가로 모드: 바닥까지
+            ? baseBottom
             : baseBottom + bottomBarSpace + (_showControls ? 52.0 : 8.0);
         return Positioned(
           key: ValueKey('memo_toolbar_$_memoToolbarPos'),
@@ -1435,7 +1426,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     }
   }
 
-  /// 6. 카메라(디스플레이 컷아웃)·시스템 영역 여백. 떠 있는 UI가 카메라를 가리지 않도록 좌우에 더한다.
+  /// 카메라(디스플레이 컷아웃)·시스템 영역 여백. 떠 있는 UI가 카메라를 가리지 않도록 좌우에 더한다.
   EdgeInsets get _safeSides => MediaQuery.viewPaddingOf(context);
 
   bool get _isLandscapeNow {
@@ -1451,12 +1442,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       _isLandscapeNow &&
       (_memoToolbarPos == 'left' || _memoToolbarPos == 'right');
 
-  /// 5. 가로 모드 + 하단 진행바: 진행바를 메모 도구모음 쪽에서 줄인다
-  /// (오른쪽 아래 페이지 이동 버튼이 있으면 그쪽은 이미 비어 있으므로 제외)
+  /// 가로 모드 + 하단 진행바: 진행바를 메모 도구모음 쪽에서 줄인다
   bool get _memoBarBesideProgress =>
-      _memoBarToFloorLandscape && _progressBarPos == 'bottom' && !(_useQuickNavTurn && _memoToolbarPos == 'right');
+      _memoBarToFloorLandscape && _progressBarPos == 'bottom';
 
-  /// 5. 위 상황에서 진행바가 메모 도구모음 쪽에서 비켜 주는 폭 (메모 도구모음 폭 48 + 간격 8)
+  /// 위 상황에서 진행바가 메모 도구모음 쪽에서 비켜 주는 폭 (메모 도구모음 폭 48 + 간격 8)
   static const double _memoBarSideInset = 54.0;
 
   Future<void> _openPenSettings() {
@@ -1483,7 +1473,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     await StorageService.setMemoEraserType(v);
   }
 
-  /// 2 & 5. 삼성 노트 스타일 초고속 캡슐 지우개 (드래그 중 디스크 I/O 제거 + 이전 좌표~현재 좌표 연속 캡슐 판정으로 끊김 0%)
+  /// 삼성 노트 스타일 초고속 캡슐 지우개 (드래그 중 디스크 I/O 제거 + 이전 좌표~현재 좌표 연속 캡슐 판정으로 끊김 0%)
   void _eraseStrokeAt(int pageIndex, Offset localPos, double drawWidth, double drawHeight) {
     final strokes = _memoStrokesByPage[pageIndex];
     if (strokes == null || strokes.isEmpty || drawWidth <= 0 || drawHeight <= 0) {
@@ -2117,7 +2107,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
           final fitted = applyBoxFit(BoxFit.contain, imgSize, constraints.biggest);
           drawWidth = fitted.destination.width;
           drawHeight = fitted.destination.height;
-          // 9. 2페이지 보기 모드에서 왼쪽 페이지는 중앙 쪽(우측)으로, 오른쪽 페이지는 중앙 쪽(좌측)으로 붙여 가운데 여백 최소화!
+          // 2페이지 보기 모드에서 왼쪽 페이지는 중앙 쪽(우측)으로, 오른쪽 페이지는 중앙 쪽(좌측)으로 붙여 가운데 여백 최소화!
           if (spreadSide == -1) {
             drawLeft = (constraints.maxWidth - drawWidth - 2.0).clamp(0.0, constraints.maxWidth);
           } else if (spreadSide == 1) {
@@ -2168,7 +2158,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             // (쪽 테두리 안쪽에 두고, 확대하면 잠시 숨김)
             if (spreadSide != 1 && _currentZoomScale <= 1.03 && _isBookmarkedAt(spreadSide == 0 ? pageIndex : (pageIndex ~/ 2) * 2, spreadSide != 0))
               Positioned(left: drawLeft + math.min(18.0, drawWidth * 0.05), top: drawTop, child: const BookmarkRibbon()),
-            // 1. S펜 필기 레이어: EagerStylusPanGestureRecognizer를 통해 S펜이 닿는 즉시 제스처 아레나를 독점하여
+            // S펜 필기 레이어: EagerStylusPanGestureRecognizer를 통해 S펜이 닿는 즉시 제스처 아레나를 독점하여
             // S펜으로 필기할 때 화면이 같이 움직이거나 페이지가 넘어가는 현상을 100% 차단! (손가락 스와이프로는 페이지 이동 가능)
             if (_isMemoMode)
               Positioned.fill(
@@ -2325,12 +2315,10 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     );
   }
 
-  /// 1. 뷰어 표시에서 페이지 번호를 누르고 숫자를 입력하면 해당 페이지로 이동 (설정에서 페이지 번호가 활성화된 경우만 작동)
+  /// 뷰어 표시에서 페이지 번호를 누르고 숫자를 입력하면 해당 페이지로 이동 (설정에서 페이지 번호가 활성화된 경우만 작동)
   Future<void> _showJumpToPageDialog({bool fromProgressBar = false}) async {
-    final bool allowed = fromProgressBar
-        ? (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
-        : (_footerInfoMode == 'page' || _footerInfoMode == 'both');
-    if (!allowed) return;
+    // 진행바에서 누르면 늘 열림, 쪽 번호 표시에서 누르면 쪽 번호를 보일 때만
+    if (!fromProgressBar && _footerInfoMode != 'page') return;
     final ctrl = TextEditingController(text: '${_currentPage + 1}');
     ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
 
@@ -2383,24 +2371,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
   String _formatFooterText(bool isSpread) {
     if (_footerInfoMode == 'none') return '';
-    final int effectivePage = (isSpread && (_currentPage + 2 >= _totalPages)) ? _totalPages : (_currentPage + 1);
-    final double progPercent = _totalPages > 0 ? (effectivePage / _totalPages * 100.0).clamp(0.0, 100.0).toDouble() : 0.0;
-    final String progStr = '${progPercent.toStringAsFixed(1)}%';
-    final String pageStr = isSpread && (_currentPage + 1 < _totalPages)
+    return isSpread && (_currentPage + 1 < _totalPages)
         ? '${_currentPage + 1}-${_currentPage + 2} / $_totalPages'
         : '${_currentPage + 1} / $_totalPages';
-
-    if (_footerInfoMode == 'progress') {
-      return progStr;
-    } else if (_footerInfoMode == 'page') {
-      return pageStr;
-    } else {
-      return '$progStr  |  $pageStr';
-    }
   }
 
-  /// 6. 진행도 UI의 화살표를 맨 처음(0페이지)과 맨 마지막(_totalPages - 1 페이지)으로 즉시 이동하는 용도로 변경!
-  /// + 하단 배치 시 우측 하단 페이지 이동 버튼과 절대 겹치지 않도록 슬림/컴팩트 사이즈로 축소 및 여백 확보!
+  /// 진행도 UI의 화살표를 맨 처음(0페이지)과 맨 마지막(_totalPages - 1 페이지)으로 즉시 이동하는 용도로 변경!
   Widget _buildProgressControlBar(double bottomInset) {
     if (!_showControls || _totalPages <= 1 || _progressBarPos == 'hidden') {
       return const Positioned(
@@ -2425,8 +2401,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       return Positioned(
         key: const ValueKey('progress_bar_bottom'),
         left: 14.0 + _safeSides.left + ((_memoBarBesideProgress && _memoToolbarPos == 'left') ? _memoBarSideInset : 0.0),
-        // 페이지 이동 버튼(우측 12.0, 너비 약 88px -> 우측 100px 차지)과 겹치지 않도록 118px 여유 간격 확보
-        right: (_useQuickNavTurn ? 118.0 : 14.0) + _safeSides.right + ((_memoBarBesideProgress && _memoToolbarPos == 'right') ? _memoBarSideInset : 0.0),
+        right: 14.0 + _safeSides.right + ((_memoBarBesideProgress && _memoToolbarPos == 'right') ? _memoBarSideInset : 0.0),
         bottom: baseBottom,
         height: 38.0,
         child: Material(
@@ -2465,9 +2440,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 ),
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
-                      ? () => _showJumpToPageDialog(fromProgressBar: true)
-                      : null,
+                  onTap: () => _showJumpToPageDialog(fromProgressBar: true),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                     child: Text(
@@ -2495,7 +2468,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final bool memoBarVisible = _isMemoMode;
     // 메모 도구모음이 상단/하단에 있으면 세로 진행바가 그만큼 비켜 준다
     final double safeTopOffset = topInset + (_showControls ? 64.0 : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
-    final double safeBottomOffset = baseBottom + ((memoBarVisible && _memoToolbarPos == 'bottom') ? 96.0 : (_useQuickNavTurn && _progressBarPos == 'right' ? 48.0 : 8.0));
+    final double safeBottomOffset = baseBottom + ((memoBarVisible && _memoToolbarPos == 'bottom') ? 96.0 : 8.0);
     return Positioned(
       key: ValueKey('progress_bar_$_progressBarPos'),
       top: safeTopOffset,
@@ -2542,9 +2515,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               ),
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both' || _footerInfoMode == 'none')
-                    ? () => _showJumpToPageDialog(fromProgressBar: true)
-                    : null,
+                onTap: () => _showJumpToPageDialog(fromProgressBar: true),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
                   child: Text(
@@ -2560,44 +2531,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
                 onPressed: () => _goToPage(_totalPages - 1, smoothAnimation: false),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickNavButtons(double bottomInset) {
-    return Positioned(
-      right: 12.0 + _safeSides.right,
-      bottom: math.max<double>(bottomInset + 24.0, 28.0),
-      height: 38.0,
-      child: Material(
-        color: Colors.black87,
-        borderRadius: BorderRadius.circular(19),
-        elevation: 5,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.amber, size: 17),
-                tooltip: '이전 페이지',
-                visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
-                padding: EdgeInsets.zero,
-                onPressed: () => _stepPage(-1),
-              ),
-              Container(width: 1, height: 18, color: Colors.white24),
-              IconButton(
-                icon: const Icon(Icons.arrow_forward, color: Colors.amber, size: 17),
-                tooltip: '다음 페이지',
-                visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
-                padding: EdgeInsets.zero,
-                onPressed: () => _stepPage(1),
               ),
             ],
           ),
@@ -2981,14 +2914,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               right: 20 + _safeSides.right,
               bottom: math.max<double>(bottomInset + 4.0, 8.0),
               child: IgnorePointer(
-                ignoring: !(_footerInfoMode == 'page' || _footerInfoMode == 'both'),
+                ignoring: _footerInfoMode != 'page',
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: (_footerInfoMode == 'page' || _footerInfoMode == 'both')
-                        ? _showJumpToPageDialog
-                        : null,
+                    onTap: _footerInfoMode == 'page' ? _showJumpToPageDialog : null,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                       child: Text(
@@ -3088,16 +3019,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
 
           _buildProgressControlBar(bottomInset),
 
-          if (_useQuickNavTurn && _totalPages > 1)
-            _buildQuickNavButtons(bottomInset),
-
           // 도구 모음: 화면 아래 가로 막대 (상단바·진행바와 함께 보였다 사라짐)
           if (_showControls)
             Positioned(
               left: 12.0 + _safeSides.left,
               right: 12.0 + _safeSides.right,
               bottom: math.max<double>(bottomInset + 16.0, 20.0) + 8.0 +
-                  ((_progressBarPos == 'bottom' || _useQuickNavTurn) ? 44.0 : 0.0),
+                  (_progressBarPos == 'bottom' ? 44.0 : 0.0),
               child: Center(
                 child: QuickToolBar(
                   items: _buildQuickMenuItems(),

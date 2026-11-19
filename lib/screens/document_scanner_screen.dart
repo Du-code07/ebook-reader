@@ -30,17 +30,6 @@ class _ScanPageItem {
   bool isProcessing = false;
   final Map<String, String> filterThumbPaths = {};
 
-  bool get hasCustomQuad {
-    if (quad.length != 8) return false;
-    return (quad[0] - 0.0).abs() > 0.01 ||
-        (quad[1] - 0.0).abs() > 0.01 ||
-        (quad[2] - 1.0).abs() > 0.01 ||
-        (quad[3] - 0.0).abs() > 0.01 ||
-        (quad[4] - 1.0).abs() > 0.01 ||
-        (quad[5] - 1.0).abs() > 0.01 ||
-        (quad[6] - 0.0).abs() > 0.01 ||
-        (quad[7] - 1.0).abs() > 0.01;
-  }
 }
 
 class DocumentScannerScreen extends StatefulWidget {
