@@ -976,6 +976,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     );
   }
 
+  /// 목록형 카드를 미는 중인 방향 (파일마다, 밀지 않을 때는 null)
+  final Map<String, ValueNotifier<DismissDirection?>> _swipeDirs = {};
+  ValueNotifier<DismissDirection?> _swipeDirOf(String path) => _swipeDirs.putIfAbsent(path, () => ValueNotifier<DismissDirection?>(null));
+
   /// 목록형 카드를 밀 때 뒤에 보이는 색 (카드와 같은 자리·같은 둥근 모양)
   Widget _listCardBack({required Color color, required Alignment alignment, required Widget child}) => Container(
         decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(14)),
@@ -4119,15 +4123,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                               BoxShadow(color: Colors.black.withValues(alpha: widget.isDarkMode ? 0.28 : 0.13), blurRadius: 8, offset: const Offset(0, 2)),
                             ],
                           ),
-                          child: Dismissible(
-                          // 즐겨찾기가 바뀌면 다른 열쇠가 되어, 밀려 나간 줄은 사라지고 새 자리에 새 줄이 들어옴
-                          key: ValueKey('${file.path}|$isFavorite'),
-                          // 오른쪽으로 밀기: 즐겨찾기 켜기/끄기 (그대로 오른쪽으로 사라졌다가 새 자리에서 오른쪽부터 들어옴)
-                          // 왼쪽으로 밀기: 휴지통
-                          // (앱 설정 → 파일 표시 방식 → 목록형 '밀어서 즐겨찾기·휴지통 끄기')
-                          direction: _isSelectionMode || StorageService.listSwipeOff.value ? DismissDirection.none : DismissDirection.horizontal,
-                          resizeDuration: Anim.ms(220),
-                          background: _listCardBack(
+                          // 밀 때 뒤에 보이는 색은 카드 뒤에 통째로 깔아 둠 (카드의 둥근 귀퉁이 옆까지 빈틈없이)
+                          child: Stack(
+                          children: [
+                          Positioned.fill(
+                            child: ValueListenableBuilder<DismissDirection?>(
+                              valueListenable: _swipeDirOf('${file.path}|$isFavorite'),
+                              builder: (context, dir, _) => dir == null
+                                  ? const SizedBox.shrink()
+                                  : dir == DismissDirection.startToEnd
+                                      ? _listCardBack(
                             color: Colors.amber.shade600,
                             alignment: Alignment.centerLeft,
                             child: Row(
@@ -4142,8 +4147,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                 ),
                               ],
                             ),
-                          ),
-                          secondaryBackground: _listCardBack(
+                          )
+                                      : _listCardBack(
                             color: Colors.redAccent,
                             alignment: Alignment.centerRight,
                             child: Row(
@@ -4155,6 +4160,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                               ],
                             ),
                           ),
+                            ),
+                          ),
+                          Dismissible(
+                          // 즐겨찾기가 바뀌면 다른 열쇠가 되어, 밀려 나간 줄은 사라지고 새 자리에 새 줄이 들어옴
+                          key: ValueKey('${file.path}|$isFavorite'),
+                          // 오른쪽으로 밀기: 즐겨찾기 켜기/끄기 (그대로 오른쪽으로 사라졌다가 새 자리에서 오른쪽부터 들어옴)
+                          // 왼쪽으로 밀기: 휴지통
+                          // (앱 설정 → 파일 표시 방식 → 목록형 '밀어서 즐겨찾기·휴지통 끄기')
+                          direction: _isSelectionMode || StorageService.listSwipeOff.value ? DismissDirection.none : DismissDirection.horizontal,
+                          resizeDuration: Anim.ms(220),
+                          onUpdate: (d) => _swipeDirOf('${file.path}|$isFavorite').value = d.progress > 0 ? d.direction : null,
                           onDismissed: (direction) {
                             if (direction == DismissDirection.startToEnd) {
                               _favoriteBySwipe(file);
@@ -4294,6 +4310,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                             ],
                           ),
                           ),
+                          ),
+                          ],
                           ),
                           ),
                         ), slide: true);
