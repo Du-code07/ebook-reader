@@ -521,7 +521,7 @@ class StorageService {
 
   static Future<bool> getUseVolumeTurn() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('use_volume_turn') ?? true;
+    return prefs.getBool('use_volume_turn') ?? false; // 기본은 꺼짐
   }
 
   // 페이지 모드 (v88에서 새로 시작: 예전 페이지 전환 설정은 쓰지 않음)

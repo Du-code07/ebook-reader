@@ -15,10 +15,13 @@ class TapOrigin {
       );
 }
 
+/// 창이 커져 나올 때: 살짝 넘쳤다가 제자리 (easeOutBack보다 덜 튐)
+const Curve popOpenCurve = Cubic(0.18, 0.89, 0.32, 1.12);
+
 /// 꾹 눌러 뜨는 메뉴와 같은 움직임: 누른 자리에서 커져 나오고, 닫힐 때는 그 자리로 작아지며 들어감
 /// [from]: 창을 연 자리 (열 때 붙잡아 둔 값). 창 안의 단추를 눌러 닫아도 처음 연 아이콘 자리로 돌아감
 Widget popTransition(BuildContext context, Animation<double> animation, Widget child, {Offset? from}) {
-  final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutBack, reverseCurve: Curves.easeInCubic);
+  final curved = CurvedAnimation(parent: animation, curve: popOpenCurve, reverseCurve: Curves.easeInCubic);
   final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.5), reverseCurve: const Interval(0.4, 1));
   final Size screen = MediaQuery.sizeOf(context);
   final Offset center = screen.center(Offset.zero);
@@ -41,6 +44,7 @@ Future<T?> showPopDialog<T>({
   bool barrierDismissible = true,
   Color? barrierColor,
   bool useRootNavigator = true,
+  Duration? duration,
 }) {
   final captured = InheritedTheme.capture(from: context, to: Navigator.of(context, rootNavigator: useRootNavigator).context);
   final Offset? from = TapOrigin.last; // 연 자리를 붙잡아 둠 (닫을 때 창 안에서 누른 자리로 들어가지 않게)
@@ -50,7 +54,7 @@ Future<T?> showPopDialog<T>({
     barrierDismissible: barrierDismissible,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
     barrierColor: barrierColor ?? Colors.black54,
-    transitionDuration: Anim.ms(300),
+    transitionDuration: duration ?? Anim.ms(300),
     pageBuilder: (ctx, _, __) => captured.wrap(SafeArea(child: Builder(builder: builder))),
     transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child, from: from),
   );
@@ -99,7 +103,7 @@ class PopPanelRoute<T> extends PopupRoute<T> {
     final double left = alignRight ? (anchor.right - w).clamp(8.0, screen.width - 8 - w).toDouble() : anchor.left.clamp(8.0, screen.width - 8 - w).toDouble();
     final double top = anchor.bottom + 4;
     final double maxH = (screen.height - pad.bottom - 12 - top).clamp(160.0, double.infinity).toDouble();
-    final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutBack, reverseCurve: Curves.easeInCubic);
+    final curved = CurvedAnimation(parent: animation, curve: popOpenCurve, reverseCurve: Curves.easeInCubic);
     final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.5), reverseCurve: const Interval(0.4, 1));
     // 단추 가운데에서 커져 나옴 (창 왼쪽 위 모서리 기준)
     final Offset origin = Offset(anchor.center.dx - left, anchor.center.dy - top);

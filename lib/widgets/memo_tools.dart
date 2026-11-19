@@ -1,12 +1,12 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'app_colors.dart';
 
 import '../services/storage_service.dart';
 import 'pop_dialog.dart';
+import 'bar_drag.dart';
 
 typedef MemoTr = String Function(String ko, String en, String zh, String ja);
 
@@ -198,7 +198,11 @@ class MemoDoneButton extends StatelessWidget {
 /// 메모 도구 모음을 길게 눌러 끌어 옮김: 손가락을 따라 움직이다가, 놓으면 가장 가까운 화면 가장자리
 /// ('top'·'bottom'·'left'·'right')에 붙음. 지우개처럼 길게 누르기를 따로 쓰는 단추는 그 단추가 먼저 받음
 class MemoToolbarMover extends StatefulWidget {
-  const MemoToolbarMover({super.key, required this.onDrop, required this.child});
+  const MemoToolbarMover({super.key, required this.current, required this.feedback, required this.onDrop, required this.child});
+  /// 지금 놓인 가장자리
+  final String current;
+  /// [side]에 놓였을 때의 모양 (끄는 동안 손가락을 따라 그려짐)
+  final Widget Function(String side) feedback;
   final ValueChanged<String> onDrop;
   final Widget child;
 
@@ -206,52 +210,31 @@ class MemoToolbarMover extends StatefulWidget {
   State<MemoToolbarMover> createState() => _MemoToolbarMoverState();
 }
 
-class _MemoToolbarMoverState extends State<MemoToolbarMover> {
-  Offset _drag = Offset.zero;
-  bool _dragging = false;
+/// 길게 눌러 끌면 손가락을 따라 움직이고, 가장자리 근처에서는 그 자리 모양으로만 바뀜. 근처에서 놓으면 자석처럼 붙음
+class _MemoToolbarMoverState extends State<MemoToolbarMover> with SingleTickerProviderStateMixin, BarDragMixin<MemoToolbarMover> {
+  @override
+  List<String> get dragSides => const ['top', 'bottom', 'left', 'right'];
+  @override
+  String get dragCurrent => widget.current;
+  @override
+  Widget dragFeedback(String side) => widget.feedback(side);
+  @override
+  void dragDrop(String side) => widget.onDrop(side);
 
-  void _reset() {
-    if (mounted) setState(() {
-      _dragging = false;
-      _drag = Offset.zero;
-    });
+  @override
+  void dispose() {
+    disposeBarDrag();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onLongPressStart: (_) {
-        HapticFeedback.mediumImpact();
-        setState(() => _dragging = true);
-      },
-      onLongPressMoveUpdate: (d) => setState(() => _drag = d.offsetFromOrigin),
-      onLongPressEnd: (d) {
-        final Size size = MediaQuery.sizeOf(context);
-        final Offset p = d.globalPosition;
-        // 손을 놓은 곳에서 가장 가까운 가장자리
-        final Map<String, double> dist = {
-          'left': p.dx,
-          'right': size.width - p.dx,
-          'top': p.dy,
-          'bottom': size.height - p.dy,
-        };
-        final String pos = dist.entries.reduce((a, b) => a.value <= b.value ? a : b).key;
-        _reset();
-        widget.onDrop(pos);
-      },
-      onLongPressCancel: _reset,
-      child: Transform.translate(
-        offset: _drag,
-        child: AnimatedScale(
-          scale: _dragging ? 1.06 : 1.0,
-          duration: Anim.ms(140),
-          child: AnimatedOpacity(
-            opacity: _dragging ? 0.88 : 1.0,
-            duration: Anim.ms(140),
-            child: widget.child,
-          ),
-        ),
-      ),
+      onLongPressStart: (d) => dragStart(d.globalPosition),
+      onLongPressMoveUpdate: (d) => dragMove(d.globalPosition),
+      onLongPressEnd: (_) => dragEnd(),
+      onLongPressCancel: () => dragEnd(cancel: true),
+      child: Opacity(opacity: barDragging ? 0.0 : 1.0, child: widget.child),
     );
   }
 }

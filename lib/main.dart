@@ -584,6 +584,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     setState(() => _fabOpen = false);
   }
 
+  /// 검색 쪽을 다 펼친 뒤에만 검색 결과를 보여 줌 (펼치는 동안과 닫는 동안은 파일 목록 쪽이 옆으로 밀림)
+  bool get _searchBody => _searchOpen && _searchAnim.isCompleted;
+
+  /// 파일 목록 쪽: 검색을 열면 왼쪽으로 밀려 나가고, 닫으면 왼쪽에서 다시 밀려 들어옴 (오른쪽에서는 빈 검색 쪽이 따라옴)
+  Widget _searchSlide({required Widget child}) => ClipRect(
+        child: AnimatedBuilder(
+          animation: _searchCurve,
+          child: child,
+          builder: (context, child) => FractionalTranslation(translation: Offset(_searchBody ? 0 : -_searchCurve.value, 0), child: child),
+        ),
+      );
+
   void _openSearch() {
     if (_searchOpen) return;
     setState(() {
@@ -594,7 +606,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     _searchAnim
       ..duration = Anim.ms(300)
       ..reverseDuration = Anim.ms(210);
-    _searchAnim.forward();
+    // 다 펼쳐지면 검색 결과 쪽으로 바꿔 그림
+    _searchAnim.forward().whenComplete(() {
+      if (mounted) setState(() {});
+    });
     // 줄이 다 그어질 즈음 자판을 올림
     Future<void>.delayed(const Duration(milliseconds: 180), () {
       if (mounted && _searchOpen) _searchFocus.requestFocus();
@@ -3846,7 +3861,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     SystemBars.stableTop(context); // 서재는 상태표시줄이 보이므로 그 높이를 기억 (파일 화면 본문 자리용)
     final String query = _searchQuery.trim().toLowerCase();
     String nameOf(File f) => f.path.split(Platform.pathSeparator).last;
-    final List<File> filteredBooks = _searchOpen
+    final List<File> filteredBooks = _searchBody
         // 검색 중: 검색어가 없으면 파일을 보여 주지 않고, 있으면 이름에 들어간 파일을 이름 순서대로 (모든 그룹에서)
         ? (query.isEmpty
             ? <File>[]
@@ -3994,11 +4009,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               const Divider(height: 1),
             ],
             Expanded(
+              // 검색을 열면 오른쪽에서 빈 쪽이 밀고 들어오며 파일 목록 쪽을 왼쪽으로 밀어냄 (닫으면 반대로)
+              child: _searchSlide(
               // 검색 중 빈 곳(파일이 아닌 곳)을 누르면 검색을 닫음 (파일을 누르면 파일이 먼저 받음)
               child: GestureDetector(
                 behavior: (_searchOpen || _fabOpen) ? HitTestBehavior.opaque : HitTestBehavior.deferToChild,
                 onTap: _searchOpen ? _closeSearch : (_fabOpen ? () => setState(() => _fabOpen = false) : null),
-                child: filteredBooks.isEmpty && _searchOpen
+                child: filteredBooks.isEmpty && _searchBody
                   // 검색 중: 검색어가 없으면 아무것도, 찾은 파일이 없으면 짧게 알림
                   ? (query.isEmpty
                       // 가로 폭 전체를 차지해야 빈 곳을 눌렀을 때 검색이 닫힘 (크기 0이면 눌림을 못 받음)
@@ -4323,7 +4340,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         ),
                       ],
                     ),
-              ),
+              )),
             ),
           ],
         ),

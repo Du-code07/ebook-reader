@@ -29,6 +29,7 @@ import '../widgets/txt_paged_viewer.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/quick_tool_bar.dart';
 import '../widgets/toolbar_settings.dart';
+import '../widgets/bar_drag.dart';
 import '../widgets/viewer_dialogs.dart';
 import '../widgets/app_colors.dart';
 import '../widgets/morph_icons.dart';
@@ -342,7 +343,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   bool _showControls = false;
   bool _useSwipeTurn = true;
-  bool _useVolumeTurn = true;
+  bool _useVolumeTurn = false;
   Offset? _lastEraserPos;
   final TransformationController _epubZoomController = TransformationController();
 
@@ -504,7 +505,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _tintHold.watch(context);
   }
 
-  /// 페이지 전환 버튼 고르기 (도구 모음): 음량 버튼 / 탭 / 슬라이드(책처럼 넘기기) / 스크롤(스크롤바 끄기). 창을 닫을 때 적용
+  /// 페이지 이동 고르기 (도구 모음): 음량 버튼 / 탭 / 슬라이드(책처럼 넘기기) / 스크롤(스크롤바 끄기). 창을 닫을 때 적용
   Future<void> _pickPageMode() async {
     final r = await showPageModeDialog(
       context,
@@ -557,10 +558,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     });
   }
 
-  /// 도구 모음 설정 초기화: 아이콘 배치·숨김, 진행바 보이기, 음량 버튼 (길게 눌러 옮긴 도구 모음·메모 도구 모음·진행바·스크롤 막대도 처음 자리로)
+  /// 도구 모음 설정 초기화: 아이콘 배치·숨김, 진행바 보이기, 음량 버튼 끄기 (길게 눌러 옮긴 도구 모음·메모 도구 모음·진행바·스크롤 막대도 처음 자리로)
   Future<void> _resetViewerSettings() async {
     setState(() {
-      _useVolumeTurn = true;
+      _useVolumeTurn = false;
       _progressBarPosSetting = 'bottom';
       _progressBarHidden = false;
       _memoToolbarPos = 'bottom';
@@ -568,7 +569,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     });
     ScrollThumbBar.leftHanded.value = false;
     await ToolbarLayout.save(ToolbarLayout.defaults());
-    await StorageService.setUseVolumeTurn(true);
+    await StorageService.setUseVolumeTurn(false);
     await StorageService.setProgressBarPosition('bottom');
     await StorageService.setProgressBarHidden(false);
     await StorageService.setMemoToolbarPosition('bottom');
@@ -1710,6 +1711,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 메모 도구모음 배치: 하단(기본) / 상단 / 왼쪽 / 오른쪽
   Widget _buildMemoToolbar(double bottomInset) {
     final List<Widget> items = _memoToolItems();
+    // 끄는 동안 손가락을 따라가는 모양 (가장자리 근처에서는 그 자리의 가로·세로 모양)
+    Widget mover(Widget bar) => MemoToolbarMover(
+          current: _memoToolbarPos,
+          onDrop: _moveMemoToolbar,
+          feedback: (side) {
+            final bool v = side == 'left' || side == 'right';
+            return ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: v ? 60 : barDragMaxLength(context, vertical: false), maxHeight: v ? barDragMaxLength(context, vertical: true) : 60),
+              child: MemoToolbar(vertical: v, children: items),
+            );
+          },
+          child: bar,
+        );
     final double topInset = MediaQuery.paddingOf(context).top;
     final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
     final double bottomBarSpace = (_showControls && _progressBarPos == 'bottom') ? 46.0 : 0.0;
@@ -1717,11 +1731,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     switch (_memoToolbarPos) {
       case 'top':
         return Positioned(
-          key: const ValueKey('memo_toolbar_top'),
+          key: const ValueKey('memo_toolbar'),
           top: topOffset,
           left: 12 + _safeSides.left,
           right: 12 + _safeSides.right,
-          child: Center(child: MemoToolbarMover(onDrop: _moveMemoToolbar, child: MemoToolbar(children: items))),
+          child: Center(child: mover(MemoToolbar(children: items))),
         );
       case 'left':
       case 'right':
@@ -1734,21 +1748,21 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ? baseBottom
             : baseBottom + bottomBarSpace + (_showControls ? 52.0 : 8.0);
         return Positioned(
-          key: ValueKey('memo_toolbar_$_memoToolbarPos'),
+          key: const ValueKey('memo_toolbar'),
           top: topOffset,
           bottom: bottomLimit,
           left: isLeft ? edge : null,
           right: isLeft ? null : edge,
-          child: Center(widthFactor: 1, child: MemoToolbarMover(onDrop: _moveMemoToolbar, child: MemoToolbar(vertical: true, children: items))),
+          child: Center(widthFactor: 1, child: mover(MemoToolbar(vertical: true, children: items))),
         );
       default:
         return Positioned(
-          key: const ValueKey('memo_toolbar_bottom'),
+          key: const ValueKey('memo_toolbar'),
           // 파일 도구 모음이 보이면 그 위에 (도구 모음 높이 52 + 사이 8)
           bottom: baseBottom + bottomBarSpace + ((_showControls && _toolbarPos != 'top') ? 60.0 : 0.0),
           left: 12 + _safeSides.left,
           right: 12 + _safeSides.right,
-          child: Center(child: MemoToolbarMover(onDrop: _moveMemoToolbar, child: MemoToolbar(children: items))),
+          child: Center(child: mover(MemoToolbar(children: items))),
         );
     }
   }
@@ -1963,36 +1977,33 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       // EPUB: 글자 크기
       extra: _isOfflineDocument
           ? null
-          : (setDlg) => Container(
-                height: 56,
-                padding: const EdgeInsets.only(left: 44, right: 4),
-                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0x1FFFFFFF)))),
-                child: Row(
-                  children: [
-                    const SizedBox(width: 30, child: Icon(Icons.format_size, color: Colors.white, size: 20)),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(_tr('글자 크기', 'Font Size', '字体大小', '文字サイズ'),
-                          style: const TextStyle(color: Colors.white, fontSize: 15.5, fontWeight: FontWeight.w600)),
-                    ),
+          : (setDlg) => Builder(builder: (ctx) {
+                final cs = Theme.of(ctx).colorScheme;
+                return toolbarSettingsRow(
+                  ctx,
+                  icon: Icon(Icons.format_size, color: cs.onSurface, size: 20),
+                  label: _tr('글자 크기', 'Font Size', '字体大小', '文字サイズ'),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     IconButton(
-                      icon: const Icon(Icons.text_decrease, color: Colors.white70),
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.text_decrease, color: cs.onSurfaceVariant, size: 20),
                       onPressed: () {
                         _changeFontSize(-2);
                         setDlg(() {});
                       },
                     ),
-                    Text('${_fontSize}pt', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    Text('${_fontSize}pt', style: TextStyle(color: cs.onSurface, fontWeight: FontWeight.bold)),
                     IconButton(
-                      icon: const Icon(Icons.text_increase, color: Colors.white70),
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.text_increase, color: cs.onSurfaceVariant, size: 20),
                       onPressed: () {
                         _changeFontSize(2);
                         setDlg(() {});
                       },
                     ),
-                  ],
-                ),
-              ),
+                  ]),
+                );
+              }),
     );
   }
 
@@ -3784,7 +3795,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 진행바를 길게 눌러 끌어 옮기기 (놓으면 아래·왼쪽·오른쪽 중 가까운 가장자리로, 기억해 둠)
   bool _barMoving = false;
   double _progressAtBarDown = 0;
-  Widget _movableBar(Positioned p) => Positioned(
+  Widget _movableBar(Widget Function() horizontalBody, Widget Function() verticalBody, Positioned p) => Positioned(
         key: p.key,
         left: p.left,
         top: p.top,
@@ -3794,8 +3805,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         height: p.height,
         child: HoldToMove(
           sides: const ['bottom', 'top', 'left', 'right'],
-          // 끄는 동안 손가락이 간 쪽의 자리·모양으로 바로 바뀜 (저장은 손을 뗄 때)
-          onHover: (side) => setState(() => _progressBarPosSetting = side),
+          current: _progressBarPosSetting,
+          // 끄는 동안 손가락을 따라가는 진행바 (가장자리 근처에서는 그 자리 모양)
+          feedback: (side) {
+            final bool v = side == 'left' || side == 'right';
+            return SizedBox(
+              width: v ? 40.0 : barDragMaxLength(context, vertical: false),
+              height: v ? barDragMaxLength(context, vertical: true) : 38.0,
+              child: v ? verticalBody() : horizontalBody(),
+            );
+          },
           onDown: () => _progressAtBarDown = _progress,
           onHoldStart: () {
             _barMoving = true;
@@ -3828,16 +3847,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final double val = _progress.clamp(0.0, 1.0).toDouble();
     final double baseBottom = math.max<double>(bottomInset + 24.0, 28.0);
 
-    // 아래·위: 가로 막대 (위면 상단바 바로 아래)
-    if (_progressBarPos == 'bottom' || _progressBarPos == 'top') {
-      return _movableBar(Positioned(
-        key: const ValueKey('epub_progress_bar'),
-        left: 14.0 + _safeSides.left + ((_memoBarBesideProgress && _memoToolbarPos == 'left') ? _memoBarSideInset : 0.0),
-        right: 14.0 + _safeSides.right + ((_memoBarBesideProgress && _memoToolbarPos == 'right') ? _memoBarSideInset : 0.0),
-        top: _progressBarPos == 'top' ? _topBarsTop : null,
-        bottom: _progressBarPos == 'top' ? null : baseBottom,
-        height: 38.0,
-        child: Material(
+    // 진행바 몸통: 가로(아래·위) / 세로(왼쪽·오른쪽). 끄는 동안 손가락을 따라가는 모양에도 씀
+    Widget horizontalBody() => Material(
           elevation: 5,
           color: Colors.black87,
           borderRadius: BorderRadius.circular(19),
@@ -3902,23 +3913,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               ],
             ),
           ),
-        ),
-      ));
-    }
-
-    final double topInset = MediaQuery.paddingOf(context).top;
-    final bool memoBarVisible = _isMemoMode;
-    // 메모 도구모음이 상단/하단에 있으면 세로 진행바가 그만큼 비켜 준다
-    final double safeTopOffset = topInset + (_showControls ? 64.0 + _topBarsSpace : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
-    final double safeBottomOffset = baseBottom + ((memoBarVisible && _memoToolbarPos == 'bottom') ? 96.0 : 8.0);
-    return _movableBar(Positioned(
-      key: const ValueKey('epub_progress_bar'),
-      top: safeTopOffset,
-      bottom: safeBottomOffset,
-      left: _progressBarPos == 'left' ? 8.0 + _safeSides.left : null,
-      right: _progressBarPos == 'right' ? 8.0 + _safeSides.right : null,
-      width: 40.0,
-      child: Material(
+        );
+    Widget verticalBody() => Material(
         elevation: 5,
         color: Colors.black87,
         borderRadius: BorderRadius.circular(20),
@@ -3990,7 +3986,34 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ],
           ),
         ),
-      ),
+      );
+
+    // 아래·위: 가로 막대 (위면 상단바 바로 아래)
+    if (_progressBarPos == 'bottom' || _progressBarPos == 'top') {
+      return _movableBar(horizontalBody, verticalBody, Positioned(
+        key: const ValueKey('epub_progress_bar'),
+        left: 14.0 + _safeSides.left + ((_memoBarBesideProgress && _memoToolbarPos == 'left') ? _memoBarSideInset : 0.0),
+        right: 14.0 + _safeSides.right + ((_memoBarBesideProgress && _memoToolbarPos == 'right') ? _memoBarSideInset : 0.0),
+        top: _progressBarPos == 'top' ? _topBarsTop : null,
+        bottom: _progressBarPos == 'top' ? null : baseBottom,
+        height: 38.0,
+        child: horizontalBody(),
+      ));
+    }
+
+    final double topInset = MediaQuery.paddingOf(context).top;
+    final bool memoBarVisible = _isMemoMode;
+    // 메모 도구모음이 상단/하단에 있으면 세로 진행바가 그만큼 비켜 준다
+    final double safeTopOffset = topInset + (_showControls ? 64.0 + _topBarsSpace : 16.0) + ((memoBarVisible && _memoToolbarPos == 'top') ? 52.0 : 0.0);
+    final double safeBottomOffset = baseBottom + ((memoBarVisible && _memoToolbarPos == 'bottom') ? 96.0 : 8.0);
+    return _movableBar(horizontalBody, verticalBody, Positioned(
+      key: const ValueKey('epub_progress_bar'),
+      top: safeTopOffset,
+      bottom: safeBottomOffset,
+      left: _progressBarPos == 'left' ? 8.0 + _safeSides.left : null,
+      right: _progressBarPos == 'right' ? 8.0 + _safeSides.right : null,
+      width: 40.0,
+      child: verticalBody(),
     ));
   }
 
@@ -4040,26 +4063,31 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   Widget _buildQuickToolBar(double bottomInset) {
     final bool vertical = _toolbarPos == 'left' || _toolbarPos == 'right';
+    final List<QuickToolItem> barItems = ToolbarLayout.current.value.barFor(_barItems());
+    // 도구 모음 설정: 맨 끝에 고정
+    final QuickToolItem pinned = QuickToolItem(
+      icon: const Icon(Icons.tune, color: Colors.white, size: 18),
+      tooltip: _tr('도구 모음 설정', 'Toolbar Settings', '工具栏设置', 'ツールバー設定'),
+      onTap: _showViewerSettingsSheet,
+    );
     final Widget bar = HoldToMove(
       sides: const ['bottom', 'top', 'left', 'right'],
-      // 끄는 동안 손가락이 간 쪽의 자리·모양으로 바로 바뀜 (저장은 손을 뗄 때)
-      onHover: (side) => setState(() => _toolbarPos = side),
+      current: _toolbarPos,
+      // 끄는 동안 손가락을 따라가는 도구 모음 (가장자리 근처에서는 그 자리 모양)
+      feedback: (side) {
+        final bool v = side == 'left' || side == 'right';
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: v ? 64 : barDragMaxLength(context, vertical: false), maxHeight: v ? barDragMaxLength(context, vertical: true) : 64),
+          child: QuickToolBar(vertical: v, items: barItems, pinned: pinned),
+        );
+      },
       // 아이콘을 길게 누르면 뜨는 이름 풍선은 옮기기 시작할 때 닫음
       onHoldStart: () => Tooltip.dismissAllToolTips(),
       onDrop: (side) async {
         setState(() => _toolbarPos = side);
         await StorageService.setToolbarPosition(side);
       },
-      child: QuickToolBar(
-        vertical: vertical,
-        items: ToolbarLayout.current.value.barFor(_barItems()),
-        // 도구 모음 설정: 맨 끝에 고정
-        pinned: QuickToolItem(
-          icon: const Icon(Icons.tune, color: Colors.white, size: 18),
-          tooltip: _tr('도구 모음 설정', 'Toolbar Settings', '工具栏设置', 'ツールバー設定'),
-          onTap: _showViewerSettingsSheet,
-        ),
-      ),
+      child: QuickToolBar(vertical: vertical, items: barItems, pinned: pinned),
     );
     final double bottom = math.max<double>(bottomInset + 16.0, 20.0) + 8.0 + (_progressBarPos == 'bottom' ? 44.0 : 0.0);
     // 위·아래: 가로 (위면 상단바 아래, 위쪽 진행바가 있으면 그 밑)
@@ -4140,7 +4168,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       QuickToolItem(
         id: 'mode',
         icon: PageModeIcon(mode: _pageModeIconMode, color: Colors.white, size: 19),
-        tooltip: _tr('페이지 전환 버튼', 'Page Turn Buttons', '翻页按钮', 'ページ切替ボタン'),
+        tooltip: _tr('페이지 이동', 'Page Turning', '翻页', 'ページ移動'),
         onTap: _pickPageMode,
         closeAfterTap: true,
       ),

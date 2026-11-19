@@ -11,6 +11,7 @@ import 'app_colors.dart';
 import 'bookmark_ribbon.dart';
 import 'morph_icons.dart';
 import 'pop_dialog.dart';
+import 'bar_drag.dart';
 import '../services/storage_service.dart';
 
 typedef ViewerTr = String Function(String ko, String en, String zh, String ja);
@@ -37,8 +38,9 @@ TapZone tapZoneAt(Offset local, Size size) {
 }
 
 /// 가운데에 뜨는 둥근 창 (페이지 표시·화면 회전 등 짧은 고르기)
-/// 고르기 창이 열리고 닫히는 시간 (도구 모음 단추로 여는 창: 빠르게)
-Duration get _dialogDur => Anim.ms(80);
+/// 고르기 창이 열리고 닫히는 시간 (도구 모음 단추로 여는 창: 빠르게. 도구 모음 설정 창도 같음)
+Duration get viewerDialogDuration => Anim.ms(80);
+Duration get _dialogDur => viewerDialogDuration;
 
 /// 바꾼 것이 있을 때만: 닫히는 움직임이 끝난 뒤에 적용 (화면 회전·쪽 다시 배치가 닫히는 움직임과 겹쳐 끊기지 않게)
 Future<void> _afterDialogClosed() async {
@@ -47,7 +49,7 @@ Future<void> _afterDialogClosed() async {
 }
 
 Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) async {
-  final Offset? popFrom = TapOrigin.last; // 연 자리 (그쪽에서 살짝 다가오듯 열리고, 그쪽으로 살짝 물러나듯 닫힘)
+  final Offset? popFrom = TapOrigin.last; // 연 자리 (그 자리에서 커져 나오고, 닫힐 때 그 자리로 들어감)
   // 도구 모음이 닫히며 화면을 다시 그리는 프레임과 겹치지 않게, 그 프레임이 끝난 뒤 창을 띄움 (뜰 때 덜 버벅임)
   await WidgetsBinding.instance.endOfFrame;
   if (!context.mounted) return null;
@@ -59,12 +61,13 @@ Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) 
     barrierColor: Colors.black54,
     transitionDuration: dur,
     pageBuilder: (ctx, _, __) => SafeArea(child: Center(child: builder(ctx))),
-    transitionBuilder: (ctx, anim, _, child) => _softDialogTransition(ctx, anim, child, popFrom),
+    // 도구 모음 설정 창과 같은 움직임: 누른 자리에서 커져 나오고, 닫힐 때 그 자리로 들어감
+    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child, from: popFrom),
   );
   return result;
 }
 
-/// 가운데 둥근 창 (북마크 목록 등): 페이지 전환 버튼 창과 같은 모양·움직임. [builder]의 setState로 창 안을 다시 그림
+/// 가운데 둥근 창 (북마크 목록 등): 페이지 이동 창과 같은 모양·움직임. [builder]의 setState로 창 안을 다시 그림
 Future<T?> showCenterPanel<T>(BuildContext context, {required Widget Function(BuildContext ctx, StateSetter setState) builder}) {
   return _centerDialog<T>(context, (ctx) {
     final cs = Theme.of(ctx).colorScheme;
@@ -87,25 +90,6 @@ Future<T?> showCenterPanel<T>(BuildContext context, {required Widget Function(Bu
   });
 }
 
-/// 고르기 창이 열리고 닫히는 움직임: 크게 튀지 않고, 연 자리 쪽에서 살짝 다가오며 커지고 서서히 또렷해짐.
-/// 닫힐 때는 같은 길을 되돌아가며 뒤 배경 어두움과 같은 빠르기로 함께 사라짐 (창만 먼저 없어지지 않게)
-Widget _softDialogTransition(BuildContext context, Animation<double> animation, Widget child, Offset? from) {
-  final scale = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
-  final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.7, curve: Curves.easeOut), reverseCurve: Curves.easeIn);
-  final Size screen = MediaQuery.sizeOf(context);
-  final Offset center = screen.center(Offset.zero);
-  // 연 자리 쪽으로 1/4만 치우쳐 (멀리서 날아오지 않게)
-  final Offset origin = ((from ?? center) - center) * 0.25;
-  return FadeTransition(
-    opacity: fade,
-    child: AnimatedBuilder(
-      animation: scale,
-      child: RepaintBoundary(child: child),
-      builder: (context, child) => Transform.scale(scale: 0.86 + 0.14 * scale.value, origin: origin, child: child),
-    ),
-  );
-}
-
 /// 고르기 창 (페이지 표시·화면 회전): 제목 + 설명 + 아이콘 카드 목록. 누르면 고르고, 창이 닫힐 때 적용
 Widget _choiceDialogBody<T>(
   BuildContext context, {
@@ -114,7 +98,7 @@ Widget _choiceDialogBody<T>(
   required List<(T, Widget, String, String)> options,
   required T selected,
   required ValueChanged<T> onTap,
-  /// 여러 개를 함께 고를 수 있을 때 (페이지 전환 버튼: 음량 버튼·탭·슬라이드): 켜져 있는지
+  /// 여러 개를 함께 고를 수 있을 때 (페이지 이동: 음량 버튼·탭·슬라이드): 켜져 있는지
   bool Function(T value)? isOn,
   /// 고른 카드 바로 밑에 붙는 것 (예: 슬라이드 → 책처럼 넘기기)
   Widget? Function(T value)? below,
@@ -453,10 +437,10 @@ Future<void> showPageDisplayDialog(
   }
 }
 
-/// 페이지 전환 버튼 창에서 고른 것 (창을 닫을 때 바뀌었으면 돌려줌)
+/// 페이지 이동 창에서 고른 것 (창을 닫을 때 바뀌었으면 돌려줌)
 typedef PageModeChoice = ({bool volume, bool tap, bool slide, bool scroll, bool curl, bool barOff});
 
-/// 페이지 전환 버튼: 음량 버튼(따로 켜고 끔) / 탭 / 슬라이드 / 스크롤 (탭과 슬라이드는 함께, 스크롤은 혼자)
+/// 페이지 이동: 음량 버튼(따로 켜고 끔) / 탭 / 슬라이드 / 스크롤 (탭과 슬라이드는 함께, 스크롤은 혼자)
 /// 슬라이드를 고르면 밑에 [책처럼 넘기기], 스크롤을 고르면 밑에 [스크롤바 끄기]가 나옴.
 /// 누를 때는 고르기만 하고, 창을 닫을 때 바뀐 것이 있으면 돌려줌
 Future<PageModeChoice?> showPageModeDialog(
@@ -489,15 +473,15 @@ Future<PageModeChoice?> showPageModeDialog(
           );
       return _choiceDialogBody<String>(
         ctx,
-        title: tr('페이지 전환 버튼', 'Page Turn Buttons', '翻页按钮', 'ページ切替ボタン'),
+        title: tr('페이지 이동', 'Page Turning', '翻页', 'ページ移動'),
         subtitle: tr('스크롤은 탭·슬라이드와 함께 쓸 수 없어요\n탭과 슬라이드는 함께 쓸 수 있어요', 'Scroll cannot be combined with Tap or Slide\nTap and Slide can be used together', '滚动不能与点击、滑动同时使用\n点击和滑动可以同时使用', 'スクロールはタップ・スライドと併用できません\nタップとスライドは併用できます'),
         options: [
-          // 음량 버튼: 다른 방식과 상관없이 따로 켜고 끔
-          ('volume', const PageModeIcon(mode: 'volume'), tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン'), tr('음량 위·아래 버튼으로 이전·다음 쪽', 'Volume up and down turn to the previous and next page', '用音量上·下键翻到上一页·下一页', '音量の上・下ボタンで前・次のページへ')),
           ('tap', const PageModeIcon(mode: 'tap'), tr('탭', 'Tap', '点击', 'タップ'), tr('화면 양옆을 눌러 넘기기', 'Tap the sides of the screen to turn', '点击屏幕两侧翻页', '画面の左右をタップしてめくる')),
           ('slide', const PageModeIcon(mode: 'slide'), tr('슬라이드', 'Slide', '滑动', 'スライド'), tr('옆으로 밀어 넘기기', 'Swipe sideways to turn', '左右滑动翻页', '横にスワイプしてめくる')),
           if (allowScroll)
             ('scroll', const PageModeIcon(mode: 'scroll'), tr('스크롤', 'Scroll', '滚动', 'スクロール'), tr('쪽을 위아래로 이어 보기', 'Pages flow top to bottom', '页面上下连续显示', 'ページを上下に続けて表示')),
+          // 음량 버튼: 다른 방식과 상관없이 따로 켜고 끔 (맨 아래, 기본은 꺼짐)
+          ('volume', const PageModeIcon(mode: 'volume'), tr('음량 버튼', 'Volume Keys', '音量键', '音量ボタン'), tr('음량 버튼을 눌러 넘기기', 'Press the volume keys to turn', '按音量键翻页', '音量ボタンを押してめくる')),
         ],
         selected: '',
         isOn: (v) => switch (v) { 'volume' => c.volume, 'tap' => c.tap, 'slide' => c.slide, _ => c.scroll },
@@ -687,7 +671,7 @@ Widget pageDisplayGlyph(String mode, {double? size, Color? color}) => switch (mo
       _ => Icon(Icons.insert_drive_file_outlined, size: size, color: color),
     };
 
-/// 페이지 전환 버튼 아이콘: 탭(쪽 + 누른 자리) / 슬라이드(쪽 + 아래 양쪽 화살) / 스크롤(쪽 + 오른쪽 위아래 화살), 'tap+slide'는 슬라이드 귀퉁이에 누른 자리,
+/// 페이지 이동 아이콘: 탭(쪽 + 누른 자리) / 슬라이드(쪽 + 아래 양쪽 화살) / 스크롤(쪽 + 오른쪽 위아래 화살), 'tap+slide'는 슬라이드 귀퉁이에 누른 자리,
 /// 음량 버튼(휴대폰 + 옆면 버튼 두 개와 위·아래 화살)
 class PageModeIcon extends StatelessWidget {
   const PageModeIcon({super.key, required this.mode, this.size, this.color});
@@ -1889,16 +1873,29 @@ Future<bool> restoreBookmarkView(
   return changed;
 }
 
-/// 길게 눌러(0.5초, 거의 움직이지 않고) 끌어 옮기기: [onHover]가 있으면 손가락이 가까이 간 가장자리 자리·모양으로 바로 바뀌어 보이고, 없으면 손가락을 따라 움직임. 놓으면 [sides] 중 가장 가까운 화면 가장자리로.
+/// 길게 눌러(0.5초, 거의 움직이지 않고) 끌어 옮기기: 막대가 손가락을 따라 움직이고, [sides] 가장자리 근처에서는 그 자리 모양(가로·세로)으로만 바뀜.
+/// 근처에서 놓으면 그 자리로 자석처럼 붙고([onDrop]), 아니면 원래 자리로 돌아감 ([BarDragMixin])
 /// 제스처 경쟁에 끼지 않는 Listener로 받으므로 안의 슬라이더·단추는 그대로 동작함
 /// (안의 슬라이더가 누른 순간 값을 바꿨다면 [onHoldStart]에서 되돌림)
 class HoldToMove extends StatefulWidget {
-  const HoldToMove({super.key, required this.sides, required this.onDrop, required this.child, this.onHover, this.onDown, this.onHoldStart, this.onEnd});
+  const HoldToMove({
+    super.key,
+    required this.sides,
+    required this.current,
+    required this.feedback,
+    required this.onDrop,
+    required this.child,
+    this.onDown,
+    this.onHoldStart,
+    this.onEnd,
+  });
   final List<String> sides; // 'top' · 'bottom' · 'left' · 'right'
-  /// 손을 뗀 자리 (가장 가까운 가장자리)
+  /// 지금 놓인 가장자리
+  final String current;
+  /// [side]에 놓였을 때의 막대 모양 (끄는 동안 손가락을 따라 그려짐, 누를 수 없음)
+  final Widget Function(String side) feedback;
+  /// 가장자리 근처에서 놓았을 때 그 가장자리
   final ValueChanged<String> onDrop;
-  /// 끄는 동안 손가락이 다른 가장자리 쪽으로 가면 (손을 떼기 전에 그 자리·모양으로 미리 바꿔 보여 줌)
-  final ValueChanged<String>? onHover;
   final VoidCallback? onDown;
   final VoidCallback? onHoldStart;
   /// 옮기기가 끝났을 때 (놓았든 취소됐든)
@@ -1909,41 +1906,34 @@ class HoldToMove extends StatefulWidget {
   State<HoldToMove> createState() => _HoldToMoveState();
 }
 
-class _HoldToMoveState extends State<HoldToMove> {
+class _HoldToMoveState extends State<HoldToMove> with SingleTickerProviderStateMixin, BarDragMixin<HoldToMove> {
   int? _pointer;
   Timer? _timer;
   double _moved = 0;
   bool _moving = false;
-  Offset _drag = Offset.zero;
-  String? _hover;
+
+  @override
+  List<String> get dragSides => widget.sides;
+  @override
+  String get dragCurrent => widget.current;
+  @override
+  Widget dragFeedback(String side) => widget.feedback(side);
+  @override
+  void dragDrop(String side) => widget.onDrop(side);
 
   @override
   void dispose() {
     _timer?.cancel();
+    disposeBarDrag();
     super.dispose();
   }
 
-  /// 손가락에서 가장 가까운 가장자리 (옮길 수 있는 곳 가운데)
-  String _sideAt(Offset p) {
-    final Size size = MediaQuery.sizeOf(context);
-    final Map<String, double> dist = {
-      'left': p.dx,
-      'right': size.width - p.dx,
-      'top': p.dy,
-      'bottom': size.height - p.dy,
-    }..removeWhere((k, _) => !widget.sides.contains(k));
-    return dist.entries.reduce((a, b) => a.value <= b.value ? a : b).key;
-  }
-
-  void _finish() {
+  void _finish({bool cancel = false}) {
     _timer?.cancel();
     _pointer = null;
-    _hover = null;
     if (_moving) {
-      setState(() {
-        _moving = false;
-        _drag = Offset.zero;
-      });
+      _moving = false;
+      dragEnd(cancel: cancel);
       widget.onEnd?.call();
     }
   }
@@ -1959,58 +1949,28 @@ class _HoldToMoveState extends State<HoldToMove> {
         _timer?.cancel();
         _timer = Timer(const Duration(milliseconds: 500), () {
           if (!mounted || _pointer != e.pointer || _moved > 10) return;
-          HapticFeedback.mediumImpact();
           widget.onHoldStart?.call();
-          setState(() {
-            _moving = true;
-            _drag = Offset.zero;
-            _hover = widget.onHover == null ? null : _sideAt(e.position);
-          });
+          _moving = true;
+          dragStart(e.position);
         });
       },
       onPointerMove: (e) {
         if (e.pointer != _pointer) return;
         if (_moving) {
-          if (widget.onHover != null) {
-            // 미리 보기: 손가락이 다른 가장자리 쪽으로 가면 바로 그 자리·모양으로 바뀜
-            final String side = _sideAt(e.position);
-            if (side != _hover) {
-              _hover = side;
-              HapticFeedback.selectionClick();
-              widget.onHover!(side);
-            }
-            return;
-          }
-          setState(() => _drag += e.delta);
+          dragMove(e.position);
           return;
         }
         _moved += e.delta.distance;
         if (_moved > 10) _timer?.cancel();
       },
       onPointerUp: (e) {
-        if (e.pointer != _pointer) return;
-        if (_moving) {
-          final String side = _sideAt(e.position);
-          _finish();
-          widget.onDrop(side);
-          return;
-        }
-        _finish();
+        if (e.pointer == _pointer) _finish();
       },
       onPointerCancel: (e) {
-        if (e.pointer != _pointer) return;
-        final String? side = _moving ? _hover : null;
-        _finish();
-        if (side != null) widget.onDrop(side);
+        if (e.pointer == _pointer) _finish(cancel: true);
       },
-      child: Transform.translate(
-        offset: _drag,
-        child: AnimatedScale(
-          scale: _moving ? 1.04 : 1.0,
-          duration: Anim.ms(140),
-          child: AnimatedOpacity(opacity: _moving ? 0.85 : 1.0, duration: Anim.ms(140), child: widget.child),
-        ),
-      ),
+      // 끄는 동안 원래 자리는 비워 둠 (손가락을 따라가는 막대가 대신 보임)
+      child: Opacity(opacity: barDragging ? 0.0 : 1.0, child: widget.child),
     );
   }
 }
