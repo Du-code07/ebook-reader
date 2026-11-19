@@ -286,8 +286,8 @@
   "integrationRevision": 89,
   "integrationArtifacts": {
     "index.html": {
-      "bytes": 666,
-      "sha256": "553bd9f6128b2f1215fbe7d14d2bff17a4837a1067722fbb7dd5d334576a1c08"
+      "bytes": 668,
+      "sha256": "451213fa11879b7fc382b3d336a079b37ef1b37f68fb7751acd9c2267cb0c16f"
     },
     "reader.js": {
       "bytes": 23074,
@@ -302,8 +302,8 @@
       "sha256": "b702847e49fada691203a4efececb111d22403d0b4eec46c9aa9dc266110bde6"
     },
     "THIRD_PARTY_NOTICES.txt": {
-      "bytes": 2167,
-      "sha256": "65d6927a5f2e89b988972b73cf9470cab9998943d69120a8497f16ad80934e54"
+      "bytes": 2173,
+      "sha256": "e4c855cd22ea7fed246aba84e54d35bd2a8efc55b0204ba513c9eeee23554e0f"
     }
   },
   "integrationNotes": "v89 keeps other document viewers unchanged. Excel uses fixed, horizontally scrollable top sheet tabs, direct WebView touch ownership without document-page gesture/annotation layers, and zoom buttons. Android disableHorizontalScroll/disableVerticalScroll are false for spreadsheets so ACTION_MOVE reaches the canvas. Per-sheet viewport/zoom is remembered during the session. Viewport-only rendering, whole-column merge interval index, offline image rendering and cross-sheet Find remain enabled."

@@ -288,20 +288,20 @@
       "sha256": "15f913ee8c74091b39ac3d2adf10046dab1e64142f22c2c31859b045893d7925"
     },
     "index.html": {
-      "bytes": 679,
-      "sha256": "c0fb4bc2438d1e75f5414311d579f4fa19e51578ec22e756ec6969a32c88cebe"
+      "bytes": 681,
+      "sha256": "967c0a842e8e0c6997d881b5de33ef46bfb629ed02e68907e2df9d7483178922"
     },
     "reader.css": {
       "bytes": 935,
       "sha256": "c999c9e9a24606c5a283944f06150cc0b63e92e9b3a1790b3267932a98925fbd"
     },
     "THIRD_PARTY_NOTICES.txt": {
-      "bytes": 2125,
-      "sha256": "26a5c7bde40a3ae683dd92db8bcd093a36a037adcafa3207a5326662e8711648"
+      "bytes": 2131,
+      "sha256": "bee57b4d0044cbf5091031b538435a81f3b3e6e0cef7e9cca4a04b7e9ecfd179"
     },
     "engine/FREADER_MODIFICATIONS.txt": {
-      "bytes": 995,
-      "sha256": "4bbf27ac1cb1203d18cbc9ae60c371e476b99335d926d86f43164e90f2b9545c"
+      "bytes": 999,
+      "sha256": "0bd99d131d96d675ee6a4aeda11e04e854ffeca7aa74e95cebe677a8bc2b0566"
     },
     "slide_motion.js": {
       "bytes": 13414,
