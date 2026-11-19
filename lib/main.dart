@@ -2509,9 +2509,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   scanExt == null || _groupScanBusy ? null : () => _scanFilesIntoGroup(_selectedGroup, scanExt)),
               // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
               action('fab_add_plain', Icon(Icons.create_new_folder_outlined, size: 22, shadows: actShadows), _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
-              action('fab_merge_pdf', Icon(Icons.picture_as_pdf_outlined, size: 22, shadows: actShadows), _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
-              action('fab_merge_img', Icon(Icons.photo_library_outlined, size: 22, shadows: actShadows), _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
-              action('fab_scan_doc', Icon(Icons.document_scanner_outlined, size: 22, shadows: actShadows), _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner),
+              // 유료 기능 (앱 설정 > 유료 기능 숨기기를 켜면 감춤)
+              if (!Pro.hidePaid.value) ...[
+                action('fab_merge_pdf', Icon(Icons.picture_as_pdf_outlined, size: 22, shadows: actShadows), _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
+                action('fab_merge_img', Icon(Icons.photo_library_outlined, size: 22, shadows: actShadows), _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
+                action('fab_scan_doc', Icon(Icons.document_scanner_outlined, size: 22, shadows: actShadows), _tr('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン'), _openDocumentScanner),
+              ],
             ];
             const double rowH = 50; // 버튼 높이 40 + 사이 10
             final int n = items.length;
@@ -2748,15 +2751,20 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   tile(FolderSearchIcon(size: 28, color: ic), _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'), scan),
                   const SizedBox(width: 10),
                   tile(Icon(Icons.create_new_folder_outlined, size: 28, color: ic), _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
-                  const SizedBox(width: 10),
-                  tile(Icon(Icons.document_scanner_outlined, size: 28, color: ic), _tr('스캔', 'Scan', '扫描', 'スキャン'), _openDocumentScanner),
+                  // 유료 기능 (앱 설정 > 유료 기능 숨기기를 켜면 감춤)
+                  if (!Pro.hidePaid.value) ...[
+                    const SizedBox(width: 10),
+                    tile(Icon(Icons.document_scanner_outlined, size: 28, color: ic), _tr('스캔', 'Scan', '扫描', 'スキャン'), _openDocumentScanner),
+                  ],
                 ]),
-                const SizedBox(height: 10),
-                Row(children: [
-                  tile(Icon(Icons.picture_as_pdf_outlined, size: 28, color: ic), _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
-                  const SizedBox(width: 10),
-                  tile(Icon(Icons.photo_library_outlined, size: 28, color: ic), _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
-                ]),
+                if (!Pro.hidePaid.value) ...[
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    tile(Icon(Icons.picture_as_pdf_outlined, size: 28, color: ic), _tr('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合'), _showMergeExistingPdfsDialog),
+                    const SizedBox(width: 10),
+                    tile(Icon(Icons.photo_library_outlined, size: 28, color: ic), _tr('이미지 합치기', 'Merge Images', '合并图片', '画像結合'), _showMergeExistingImagesDialog),
+                  ]),
+                ],
               ],
             ),
           ),

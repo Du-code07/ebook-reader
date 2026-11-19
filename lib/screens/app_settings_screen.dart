@@ -434,12 +434,12 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
           children: [
             _section(_t('일반', 'General', '通用', '一般')),
             // FReader 프로: 유료 기능 구매·복원과 무료 체험 상태
-            ValueListenableBuilder<bool>(
-              valueListenable: Pro.owned,
-              builder: (context, owned, _) => _item(
+            ListenableBuilder(
+              listenable: Listenable.merge([Pro.owned, Pro.trialChanged]),
+              builder: (context, _) => _item(
                 icon: Icons.workspace_premium_outlined,
                 title: _t('FReader 프로', 'FReader Pro', 'FReader 专业版', 'FReader プロ'),
-                subtitle: owned
+                subtitle: Pro.owned.value
                     ? _t('구매했어요', 'Purchased', '已购买', '購入済み')
                     : Pro.trialDaysLeft > 0
                         ? _t('무료 체험 ${Pro.trialDaysLeft}일 남음', '${Pro.trialDaysLeft} day(s) of free trial left', '免费试用剩 ${Pro.trialDaysLeft} 天', '無料体験 残り${Pro.trialDaysLeft}日')
@@ -448,6 +448,18 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                   await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProScreen(lang: _lang)));
                   if (mounted) setState(() {});
                 },
+              ),
+            ),
+            // 유료 기능 숨기기: 파일 추가 메뉴에서 스캔·합치기를 감춤
+            ValueListenableBuilder<bool>(
+              valueListenable: Pro.hidePaid,
+              builder: (context, hide, _) => _item(
+                icon: Icons.visibility_off_outlined,
+                title: _t('유료 기능 숨기기', 'Hide Paid Features', '隐藏付费功能', '有料機能を隠す'),
+                subtitle: _t('파일 추가 메뉴에서 스캔·PDF 합치기·이미지 합치기를 숨겨요', 'Hides Scan, Merge PDFs and Merge Images in the Add Files menu',
+                    '在添加文件菜单中隐藏扫描、合并 PDF 和合并图片', 'ファイル追加メニューでスキャン・PDF結合・画像結合を隠します'),
+                onTap: () => Pro.setHidePaid(!hide),
+                trailing: Switch(value: hide, onChanged: Pro.setHidePaid),
               ),
             ),
             // 앱 스타일: 기본(아래 막대) / 심플(위 막대)

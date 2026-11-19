@@ -378,6 +378,37 @@ class MainActivity : FlutterActivity() {
         return out.absolutePath
     }
 
+    // ── FReader 프로 무료 체험 시작일: Google Play 서비스 Block Store (앱을 지웠다 다시 깔아도 같은 기기면 남음) ──
+    private val TRIAL_KEY = "com.freader.my_ebook_reader.trial_start"
+
+    private fun trialStartGet(result: MethodChannel.Result) {
+        try {
+            val client = com.google.android.gms.auth.blockstore.Blockstore.getClient(this)
+            val req = com.google.android.gms.auth.blockstore.RetrieveBytesRequest.Builder().setKeys(listOf(TRIAL_KEY)).build()
+            client.retrieveBytes(req)
+                .addOnSuccessListener { res ->
+                    val bytes = res.blockstoreDataMap[TRIAL_KEY]?.bytes
+                    val ms = bytes?.let { String(it, Charsets.UTF_8).toLongOrNull() }
+                    result.success(ms)
+                }
+                .addOnFailureListener { result.success(null) }
+        } catch (_: Throwable) { result.success(null) }
+    }
+
+    private fun trialStartSet(ms: Long, result: MethodChannel.Result) {
+        try {
+            val client = com.google.android.gms.auth.blockstore.Blockstore.getClient(this)
+            val data = com.google.android.gms.auth.blockstore.StoreBytesData.Builder()
+                .setKey(TRIAL_KEY)
+                .setBytes(ms.toString().toByteArray(Charsets.UTF_8))
+                .setShouldBackupToCloud(false) // 기기 안에만 (Google 계정 클라우드로 올리지 않음)
+                .build()
+            client.storeBytes(data)
+                .addOnSuccessListener { result.success(true) }
+                .addOnFailureListener { result.success(false) }
+        } catch (_: Throwable) { result.success(false) }
+    }
+
     // ── FReader 프로: Google Play 결제 (1회 구매, 비소모성) ──────────────────────
     private var billingClient: com.android.billingclient.api.BillingClient? = null
     private var pendingBuyResult: MethodChannel.Result? = null
@@ -1197,6 +1228,10 @@ class MainActivity : FlutterActivity() {
             } else if (call.method == "billingQuery") {
                 // FReader 프로: 구매 여부와 가격 (Play 스토어와 연결이 안 되면 owned=null)
                 billingQuery(call.argument<String>("product") ?: "", result)
+            } else if (call.method == "trialStartGet") {
+                trialStartGet(result)
+            } else if (call.method == "trialStartSet") {
+                trialStartSet((call.argument<Number>("ms") ?: 0).toLong(), result)
             } else if (call.method == "billingBuy") {
                 // FReader 프로 구매 창 (결과: purchased·pending·canceled·owned·unavailable·error)
                 billingBuy(call.argument<String>("product") ?: "", result)

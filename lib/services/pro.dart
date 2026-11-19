@@ -8,14 +8,26 @@ import '../screens/pro_screen.dart';
 
 /// FReader 프로: 유료 기능(문서 스캔·이미지 합치기·PDF 합치기, 앞으로 추가되는 유료 기능)을 여는 1회 구매
 /// - Google Play 결제 (Play Console의 1회성 상품 ID: [productId])
-/// - 설치 후 처음 실행한 때부터 [trialDays]일 동안 무료 체험
+/// - 설치 후 처음 실행한 때부터 [trialDays]일 동안 무료 체험 (시작일은 Block Store에도 기록)
 class Pro {
   static const String productId = 'freader_pro';
-  static const int trialDays = 7;
+  static const int trialDays = 3;
 
   static const _ch = MethodChannel('ebook_reader/pdf_renderer');
   static const _kOwned = 'pro_owned_v1';
   static const _kTrialStart = 'pro_trial_start_v1';
+  static const _kHidePaid = 'pro_hide_paid_v1';
+
+  /// 앱 설정 > 유료 기능 숨기기: 파일 추가 메뉴에서 스캔·PDF 합치기·이미지 합치기를 숨김
+  static final ValueNotifier<bool> hidePaid = ValueNotifier(false);
+
+  static Future<void> setHidePaid(bool v) async {
+    hidePaid.value = v;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kHidePaid, v);
+    } catch (_) {}
+  }
 
   /// 샀는지 (Play 스토어에서 확인한 값을 기기에 기억해 두어 인터넷이 없어도 바로 앎)
   static final ValueNotifier<bool> owned = ValueNotifier(false);
@@ -30,6 +42,7 @@ class Pro {
     try {
       final prefs = await SharedPreferences.getInstance();
       owned.value = prefs.getBool(_kOwned) ?? false;
+      hidePaid.value = prefs.getBool(_kHidePaid) ?? false;
       final ms = prefs.getInt(_kTrialStart);
       if (ms == null) {
         final now = DateTime.now();
@@ -39,8 +52,31 @@ class Pro {
         _trialStart = DateTime.fromMillisecondsSinceEpoch(ms);
       }
     } catch (_) {}
+    unawaited(_syncTrialStart());
     unawaited(refresh());
   }
+
+  /// 체험 시작일을 Google Play 서비스(Block Store)와 맞춤: 둘 중 더 이른 날을 씀
+  /// (앱을 지웠다 다시 깔거나 데이터를 지워도 같은 기기에서는 체험이 처음부터 다시 시작되지 않게)
+  static Future<void> _syncTrialStart() async {
+    try {
+      final local = _trialStart?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch;
+      final remote = await _ch.invokeMethod<int>('trialStartGet');
+      final start = (remote != null && remote > 0 && remote < local) ? remote : local;
+      if (start != local) {
+        _trialStart = DateTime.fromMillisecondsSinceEpoch(start);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt(_kTrialStart, start);
+        trialChanged.value++;
+      }
+      if (remote == null || remote != start) {
+        await _ch.invokeMethod('trialStartSet', {'ms': start});
+      }
+    } catch (_) {}
+  }
+
+  /// 체험 시작일이 Block Store 값으로 바뀌면 화면이 다시 그리도록
+  static final ValueNotifier<int> trialChanged = ValueNotifier(0);
 
   /// Play 스토어에서 구매 여부·가격을 다시 확인 (구매 복원도 이것). 연결이 안 되면 null
   static Future<bool?> refresh() async {

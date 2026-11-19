@@ -5,6 +5,8 @@ class I18nExtra {
   static const List<String> langs = ['fr', 'ru', 'es'];
 
   static const Map<String, List<String>> _exact = {
+    'Hide Paid Features': ['Masquer les fonctions payantes', 'Скрыть платные функции', 'Ocultar funciones de pago'],
+    'Hides Scan, Merge PDFs and Merge Images in the Add Files menu': ['Masque Numériser, Fusionner des PDF et Fusionner des images dans le menu Ajouter des fichiers', 'Скрывает «Сканировать», «Объединить PDF» и «Объединить изображения» в меню добавления файлов', 'Oculta Escanear, Combinar PDF y Combinar imágenes en el menú Añadir archivos'],
     'FReader Pro': ['FReader Pro', 'FReader Pro', 'FReader Pro'],
     'Purchased': ['Acheté', 'Куплено', 'Comprado'],
     'Your free trial has ended': ['Votre essai gratuit est terminé', 'Бесплатный пробный период закончился', 'Tu prueba gratuita ha terminado'],

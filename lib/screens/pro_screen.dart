@@ -18,9 +18,20 @@ class _ProScreenState extends State<ProScreen> {
 
   String _t(String ko, String en, String zh, String ja) => AppI18n.t(widget.lang, ko: ko, en: en, zh: zh, ja: ja);
 
+  void _onTrial() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    Pro.trialChanged.removeListener(_onTrial);
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+    Pro.trialChanged.addListener(_onTrial);
     // 가격·구매 여부를 다시 확인 (화면에 맞는 값으로)
     Pro.refresh().then((_) {
       if (mounted) setState(() {});
