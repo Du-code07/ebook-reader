@@ -5,13 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'app_colors.dart';
 import 'memo_tools.dart' show QuillInkIcon;
 import 'morph_icons.dart' show MoonMorphIcon;
-import 'pop_dialog.dart';
 import 'quick_tool_bar.dart';
 import 'ui_scale.dart';
-import 'viewer_dialogs.dart' show PageModeIcon, pageDisplayGlyph, rotationGlyph, viewerDialogDuration;
+import 'viewer_dialogs.dart' show PageModeIcon, pageDisplayGlyph, rotationGlyph, showViewerDialog;
 
 /// 파일 보기 화면의 상단바·도구 모음에 어떤 아이콘을 어떤 순서로 둘지 (모든 뷰어가 함께 씀)
 /// - [top]: 상단바 (왼쪽부터, 숨기지 않은 것 최대 [maxTop]개)
@@ -148,15 +146,11 @@ Future<void> showToolbarSettingsDialog(
   required Future<void> Function() onReset,
   Widget Function(StateSetter setDlg)? extra,
 }) async {
-  // 도구 모음을 누른 프레임이 끝난 뒤 띄움 (뜰 때 덜 버벅임)
-  await WidgetsBinding.instance.endOfFrame;
-  if (!context.mounted) return;
   ToolbarLayout? result;
-  await showPopDialog(
-    context: context,
-    // 다른 설정 창(화면 회전 등)과 같은 빠르기
-    duration: viewerDialogDuration,
-    builder: (ctx) => _ToolbarSettings(
+  // 다른 설정 창(화면 회전 등)과 같은 움직임·빠르기
+  await showViewerDialog<void>(
+    context,
+    (ctx) => _ToolbarSettings(
       tr: tr,
       items: items,
       progressHidden: progressHidden,
@@ -205,9 +199,6 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
   /// 상단바에서 숨기지 않은 아이콘 수 (이 파일에서 안 쓰는 아이콘도 셈)
   int _visibleTop(ToolbarLayout l) => l.top.where((id) => !l.hidden.contains(id)).length;
 
-  /// 대표 색(다크 모드는 밝은 회색) 바탕 위 글씨: 라이트는 흰 굵은 글씨 + 옅은 그림자
-  Color get _onMark => Theme.of(context).brightness == Brightness.dark ? Colors.black87 : Colors.white;
-
   void _apply(ToolbarLayout l) {
     setState(() {
       _l = l;
@@ -245,20 +236,19 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
     _apply(next);
   }
 
+  /// 보이는 아이콘은 ✓, 숨긴 아이콘은 X. 누르면 바뀜
   Widget _hideButton({required bool hidden, required VoidCallback onTap}) {
     final cs = Theme.of(context).colorScheme;
     return Semantics(
       button: true,
-      label: hidden ? widget.tr('다시 보이기', 'Show', '显示', '表示する') : widget.tr('숨기기', 'Hide', '隐藏', '隠す'),
+      label: hidden ? widget.tr('숨김 (누르면 보이기)', 'Hidden (tap to show)', '已隐藏（点按显示）', '非表示(タップで表示)') : widget.tr('보임 (누르면 숨기기)', 'Shown (tap to hide)', '已显示（点按隐藏）', '表示中(タップで非表示)'),
       child: InkResponse(
         onTap: onTap,
         radius: 22,
-        child: Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: hidden ? AppColors.mark(context) : Colors.transparent),
-          child: Icon(hidden ? Icons.check_rounded : Icons.close_rounded,
-              size: 20, color: hidden ? _onMark : cs.onSurfaceVariant, shadows: hidden ? AppColors.sigShadows(context) : null),
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: Icon(hidden ? Icons.close_rounded : Icons.check_rounded, size: hidden ? 20 : 22, color: hidden ? cs.onSurfaceVariant : cs.primary),
         ),
       ),
     );
@@ -316,13 +306,23 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
 
   /// 미리보기: 지금 배치대로 이 파일의 상단바와 도구 모음 (파일 화면처럼 검은 바탕)
   Widget _preview() {
-    final topItems = _l.topFor(widget.items);
-    final barItems = _l.barFor(widget.items);
-    Widget icons(List<QuickToolItem> list) => Row(
+    // 이 파일에서 안 쓰는 아이콘도 미리보기에는 보임 (실제 파일 화면에서는 안 보임)
+    final List<String> shownTop = [for (final id in _l.top) if (!_l.hidden.contains(id)) id];
+    final List<String> topIds = shownTop.take(ToolbarLayout.maxTop).toList();
+    final List<String> barIds = [...shownTop.skip(ToolbarLayout.maxTop), for (final id in _l.bar) if (!_l.hidden.contains(id)) id];
+    Widget icons(List<String> ids) => Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (final it in list)
-              SizedBox(width: 30, height: 36, child: Center(child: IconTheme.merge(data: const IconThemeData(color: Colors.white, size: 18), child: it.icon))),
+            for (final id in ids)
+              SizedBox(
+                width: 30,
+                height: 36,
+                child: Center(
+                  child: widget.items[id] != null
+                      ? IconTheme.merge(data: const IconThemeData(color: Colors.white, size: 18), child: widget.items[id]!.icon)
+                      : toolbarCatalogIcon(id, Colors.white, size: 18),
+                ),
+              ),
           ],
         );
     return Column(
@@ -338,7 +338,7 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
               Expanded(
                 child: Container(height: 7, margin: const EdgeInsets.only(right: 24), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4))),
               ),
-              icons(topItems),
+              icons(topIds),
             ],
           ),
         ),
@@ -350,7 +350,7 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
           child: Row(
             children: [
               // 도구 모음은 왼쪽부터 보임
-              Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: icons(barItems))),
+              Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: icons(barIds))),
               Container(width: 1, height: 20, color: Colors.white.withValues(alpha: 0.18)),
               const SizedBox(width: 30, child: Center(child: Icon(Icons.tune, color: Colors.white, size: 17))),
             ],
@@ -378,10 +378,10 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
       rows.add(_row(i++, id));
     }
 
-    // 다른 설정 창보다 1/4 작게, 화면 가운데
+    // 화면 회전 창과 같은 너비, 화면 가운데
     return Center(
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: math.min(345.0, screen.width - 32.0), maxHeight: screen.height * 0.66),
+        constraints: BoxConstraints(maxWidth: math.min(460.0, screen.width - 40.0), maxHeight: screen.height * 0.72),
         child: Material(
           color: cs.surfaceContainerHigh,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
@@ -403,12 +403,13 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
                             style: TextStyle(color: cs.onSurface, fontSize: 19, fontWeight: FontWeight.w800)),
                       ),
                       // 초기화: 아이콘 배치·숨김, 진행바 보이기, 옮긴 도구 모음·메모 도구 모음·진행바·스크롤 막대 자리
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.mark(context),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          foregroundColor: cs.onSurface,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                           minimumSize: const Size(0, 36),
                         ),
+                        icon: const Icon(Icons.restart_alt_rounded, size: 20),
                         onPressed: () async {
                           await widget.onReset();
                           if (!mounted) return;
@@ -419,8 +420,7 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
                           });
                           widget.onChanged(_l);
                         },
-                        child: Text(tr('초기화', 'Reset', '重置', 'リセット'),
-                            style: TextStyle(color: _onMark, fontWeight: FontWeight.bold, shadows: AppColors.sigShadows(context))),
+                        label: Text(tr('초기화', 'Reset', '重置', 'リセット'), style: const TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
@@ -429,10 +429,10 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 18),
                   child: Text(
-                    tr('줄을 길게 누르거나 손잡이를 끌어 순서를 바꿔요\nX를 누르면 아이콘을 숨기고, ✓를 누르면 다시 보여요',
-                        'Long-press a row or drag its handle to reorder\nTap X to hide an icon and ✓ to show it again',
-                        '长按一行或拖动手柄可调整顺序\n点 X 隐藏图标，点 ✓ 重新显示',
-                        '行を長押しするかハンドルを引いて並べ替えます\nXで隠し、✓でまた表示します'),
+                    tr('줄을 길게 누르거나 손잡이를 끌어 순서를 바꿔요\n✓는 보이는 아이콘, X는 숨긴 아이콘이에요 (눌러서 바꿔요)',
+                        'Long-press a row or drag its handle to reorder\n✓ means shown and X means hidden (tap to switch)',
+                        '长按一行或拖动手柄可调整顺序\n✓ 表示显示，X 表示隐藏（点按切换）',
+                        '行を長押しするかハンドルを引いて並べ替えます\n✓は表示、Xは非表示です(タップで切り替え)'),
                     style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12.5, height: 1.4),
                   ),
                 ),

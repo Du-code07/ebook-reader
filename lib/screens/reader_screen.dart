@@ -887,12 +887,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// 목차를 만드는 중이면 진행률(0~1), 아니면 null — 목차 칸에 '목차 만드는 중… n%'로 보임
-  double? _outlineProgress;
+  /// (목차 칸만 다시 그림: 파일 화면 전체를 다시 그리지 않아 쪽이 많은 문서를 여는 동안에도 버벅이지 않게)
+  final ValueNotifier<double?> _outlineProgress = ValueNotifier<double?>(null);
 
   void _setOutlineProgress(double? p) {
     if (!mounted) return;
-    if (p != null && _outlineProgress != null && (p - _outlineProgress!).abs() < 0.01 && p < 1) return;
-    setState(() => _outlineProgress = p);
+    final double? cur = _outlineProgress.value;
+    if (p != null && cur != null && (p - cur).abs() < 0.01 && p < 1) return;
+    _outlineProgress.value = p;
   }
 
   Future<void> _loadDocumentOutline(int pageCount) async {
@@ -913,7 +915,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _setOutlineProgress(null);
       _applyDocumentOutline(cleaned, pageCount);
     } finally {
-      if (mounted && _outlineProgress != null) _setOutlineProgress(null);
+      if (mounted && _outlineProgress.value != null) _setOutlineProgress(null);
     }
   }
 
@@ -924,6 +926,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     await Future<void>.delayed(const Duration(milliseconds: 500));
     if (!alive()) return null;
     final int scan = math.min(pageCount, 400); // 아주 긴 문서는 앞 400쪽까지만
+    await waitViewerDialogsClosed();
+    if (!alive()) return null;
     final head = await _hwpController.pageText(0, math.min(pageCount, TocPageParser.searchPages));
     if (!alive()) return null;
     _setOutlineProgress(0.05);
@@ -931,6 +935,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     Future<List<T>> chunked<T>(Future<List<T>> Function(int from, int to) read, int total, double p0, double p1, {int step = 20}) async {
       final out = <T>[];
       for (int from = 0; from < total; from += step) {
+        // 설정 창이 열려 있으면 닫힐 때까지 잠깐 멈춤 (창이 버벅이지 않게)
+        await waitViewerDialogsClosed();
+        if (!alive()) return out;
         out.addAll(await read(from, math.min(total, from + step)));
         if (!alive()) return out;
         _setOutlineProgress(p0 + (p1 - p0) * math.min(1, (from + step) / total));
@@ -954,6 +961,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
     // 번호·굵은 글씨 줄은 문서 끝까지 찾음 (약전처럼 아주 긴 문서도 뒤쪽 항목까지)
     final int all = math.min(pageCount, 5000);
+    await waitViewerDialogsClosed();
+    if (!alive()) return null;
     final cands = _isHwpFile
         ? await chunked<Map<String, Object?>>((f, t) => _hwpController.headingCandidates(f, t), all, 0.05, 0.95)
         : await _hwpController.headingCandidates(0, all);
@@ -994,6 +1003,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
     for (int page = 0; page < pageCount; page++) {
       if (slides.containsKey(page)) continue;
+      await waitViewerDialogsClosed();
       if (!mounted || _docPageCount != pageCount) {
         if (fresh > 0) await OutlineCache.writeOcr(path, slides);
         return null;
@@ -4020,6 +4030,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   void dispose() {
     ToolbarLayout.current.removeListener(_onToolbarLayout);
+    _outlineProgress.dispose();
     _framesTimer?.cancel();
     _tintHold.dispose();
     ComfortTint.releaseFile(this);
@@ -4512,9 +4523,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               ),
               const Divider(height: 1),
               Expanded(
-                child: _outlineProgress != null
+                child: ValueListenableBuilder<double?>(
+                  valueListenable: _outlineProgress,
+                  builder: (context, outlineProgress, _) => outlineProgress != null
                     ? OutlineProgressView(
-                        progress: _outlineProgress!,
+                        progress: outlineProgress,
                         label: _tr('목차 만드는 중', 'Building contents', '正在生成目录', '目次を作成中'),
                         hint: _tr('처음 한 번만 만들고, 다음부터는 바로 보여요', 'Only the first time — next time it opens instantly', '仅首次生成，下次直接显示', '初回のみ作成し、次回からはすぐ表示されます'),
                       )
@@ -4551,7 +4564,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       },
                     );
                   },
-                ),
+                )),
               ),
             ],
           ),

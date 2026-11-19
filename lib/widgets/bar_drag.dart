@@ -32,6 +32,21 @@ mixin BarDragMixin<T extends StatefulWidget> on State<T>, TickerProvider {
   String _shape = 'bottom'; // 지금 그리는 모양의 가장자리
   bool _settling = false;
   AnimationController? _settle;
+  // 모양이 바뀔 때 손가락과 막대 가운데 사이 간격도 서서히 바뀜 (막대가 툭 튀지 않게)
+  AnimationController? _morph;
+  Offset _finger = Offset.zero;
+  Offset _offFrom = Offset.zero, _offTo = Offset.zero;
+
+  Offset get _offset {
+    final m = _morph;
+    if (m == null || !m.isAnimating) return _offTo;
+    return Offset.lerp(_offFrom, _offTo, Curves.easeOutCubic.transform(m.value))!;
+  }
+
+  void _placeAtFinger() {
+    _pos = _finger + _offset;
+    _entry?.markNeedsBuild();
+  }
 
   static bool _vertical(String side) => side == 'left' || side == 'right';
 
@@ -66,6 +81,9 @@ mixin BarDragMixin<T extends StatefulWidget> on State<T>, TickerProvider {
     _entry?.remove();
     _grab = r.center - finger;
     _pos = r.center;
+    _finger = finger;
+    _offFrom = _offTo = _grab;
+    _morph?.stop();
     _hover = null;
     _shape = dragCurrent;
     _settling = false;
@@ -78,15 +96,23 @@ mixin BarDragMixin<T extends StatefulWidget> on State<T>, TickerProvider {
   void dragMove(Offset finger) {
     if (_entry == null || _settling) return;
     final String? near = _nearSide(finger);
+    _finger = finger;
     if (near != _hover) {
       _hover = near;
       final String shape = near ?? dragCurrent;
-      if (_vertical(shape) != _vertical(_shape)) HapticFeedback.selectionClick();
+      if (_vertical(shape) != _vertical(_shape)) {
+        HapticFeedback.selectionClick();
+        // 모양이 처음과 같으면 잡은 자리 그대로, 바뀌었으면 손가락이 막대 가운데에 오게 (서서히 옮겨 감)
+        _offFrom = _offset;
+        _offTo = _vertical(shape) == _vertical(dragCurrent) ? _grab : Offset.zero;
+        _morph ??= AnimationController(vsync: this)..addListener(_placeAtFinger);
+        _morph!
+          ..duration = Anim.ms(260)
+          ..forward(from: 0);
+      }
       _shape = shape;
     }
-    // 모양이 처음과 같으면 잡은 자리 그대로, 바뀌었으면 손가락이 막대 가운데에 오게
-    _pos = finger + (_vertical(_shape) == _vertical(dragCurrent) ? _grab : Offset.zero);
-    _entry!.markNeedsBuild();
+    _placeAtFinger();
   }
 
   /// 손을 뗐을 때 (취소면 [cancel]): 근처면 그 자리로, 아니면 원래 자리로 빨려 들어감
@@ -98,6 +124,7 @@ mixin BarDragMixin<T extends StatefulWidget> on State<T>, TickerProvider {
     // 새 자리가 그려진 뒤 그 자리를 알아내 빨려 들어감
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _entry == null) return;
+      _morph?.stop();
       final Rect? target = _ownRect();
       _shape = dragCurrent;
       if (target == null) {
@@ -134,6 +161,8 @@ mixin BarDragMixin<T extends StatefulWidget> on State<T>, TickerProvider {
     _entry = null;
     _settle?.dispose();
     _settle = null;
+    _morph?.dispose();
+    _morph = null;
   }
 
   Widget _buildFeedback(BuildContext ctx) {
@@ -152,10 +181,30 @@ mixin BarDragMixin<T extends StatefulWidget> on State<T>, TickerProvider {
               child: AnimatedOpacity(
                 opacity: _settling ? 1.0 : 0.9,
                 duration: Anim.ms(140),
-                // 가로↔세로가 바뀔 때 살짝 겹쳐 바뀜
+                // 가로↔세로가 바뀔 때: 나가는 모양은 길이 쪽으로 줄어들며 흐려지고, 들어오는 모양은 늘어나며 또렷해짐
                 child: AnimatedSwitcher(
-                  duration: Anim.ms(120),
+                  duration: Anim.ms(260),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
                   layoutBuilder: (current, previous) => Stack(alignment: Alignment.center, children: [...previous, if (current != null) current]),
+                  transitionBuilder: (child, anim) {
+                    final bool v = (child.key as ValueKey<bool>?)?.value ?? false;
+                    return FadeTransition(
+                      opacity: anim,
+                      child: AnimatedBuilder(
+                        animation: anim,
+                        child: child,
+                        builder: (context, c) {
+                          final double long = 0.35 + 0.65 * anim.value, short = 0.8 + 0.2 * anim.value;
+                          return Transform(
+                            alignment: Alignment.center,
+                            transform: Matrix4.diagonal3Values(v ? short : long, v ? long : short, 1),
+                            child: c,
+                          );
+                        },
+                      ),
+                    );
+                  },
                   child: KeyedSubtree(key: ValueKey(vertical), child: dragFeedback(_shape)),
                 ),
               ),

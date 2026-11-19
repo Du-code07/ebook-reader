@@ -44,7 +44,6 @@ Future<T?> showPopDialog<T>({
   bool barrierDismissible = true,
   Color? barrierColor,
   bool useRootNavigator = true,
-  Duration? duration,
 }) {
   final captured = InheritedTheme.capture(from: context, to: Navigator.of(context, rootNavigator: useRootNavigator).context);
   final Offset? from = TapOrigin.last; // 연 자리를 붙잡아 둠 (닫을 때 창 안에서 누른 자리로 들어가지 않게)
@@ -54,7 +53,7 @@ Future<T?> showPopDialog<T>({
     barrierDismissible: barrierDismissible,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
     barrierColor: barrierColor ?? Colors.black54,
-    transitionDuration: duration ?? Anim.ms(300),
+    transitionDuration: Anim.ms(300),
     pageBuilder: (ctx, _, __) => captured.wrap(SafeArea(child: Builder(builder: builder))),
     transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child, from: from),
   );

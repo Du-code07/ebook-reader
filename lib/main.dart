@@ -576,6 +576,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       AnimationController(vsync: this, duration: Anim.ms(300), reverseDuration: Anim.ms(210));
   // 펼칠 때는 빠르게 나가다 천천히 멈추고, 돌아올 때도 빠르게 출발해 제자리에 부드럽게 내려앉음
   late final CurvedAnimation _searchCurve = CurvedAnimation(parent: _searchAnim, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+  // 파일 목록 쪽이 옆으로 밀리는 움직임 (검색을 닫을 때 자판이 올라와 있으면 자판이 다 내려간 뒤에 들어옴)
+  late final AnimationController _listAnim = AnimationController(vsync: this, duration: Anim.ms(300), reverseDuration: Anim.ms(210));
+  late final CurvedAnimation _listCurve = CurvedAnimation(parent: _listAnim, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
 
   /// 앱 스타일(기본/심플)을 바꾸면 메인 화면 모양을 바로 바꿈
   void _onAppStyle() {
@@ -585,14 +588,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   }
 
   /// 검색 쪽을 다 펼친 뒤에만 검색 결과를 보여 줌 (펼치는 동안과 닫는 동안은 파일 목록 쪽이 옆으로 밀림)
-  bool get _searchBody => _searchOpen && _searchAnim.isCompleted;
+  bool get _searchBody => _searchOpen && _listAnim.isCompleted;
 
   /// 파일 목록 쪽: 검색을 열면 왼쪽으로 밀려 나가고, 닫으면 왼쪽에서 다시 밀려 들어옴 (오른쪽에서는 빈 검색 쪽이 따라옴)
   Widget _searchSlide({required Widget child}) => ClipRect(
         child: AnimatedBuilder(
-          animation: _searchCurve,
+          animation: _listCurve,
           child: child,
-          builder: (context, child) => FractionalTranslation(translation: Offset(_searchBody ? 0 : -_searchCurve.value, 0), child: child),
+          builder: (context, child) => FractionalTranslation(translation: Offset(_searchBody ? 0 : -_listCurve.value, 0), child: child),
         ),
       );
 
@@ -606,8 +609,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     _searchAnim
       ..duration = Anim.ms(300)
       ..reverseDuration = Anim.ms(210);
+    _searchAnim.forward();
     // 다 펼쳐지면 검색 결과 쪽으로 바꿔 그림
-    _searchAnim.forward().whenComplete(() {
+    _listAnim.forward().whenComplete(() {
       if (mounted) setState(() {});
     });
     // 줄이 다 그어질 즈음 자판을 올림
@@ -619,6 +623,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   /// 처음 상태로: 검색어도 지움 (뒤로 가기, 파일 열기, 다른 아이콘을 누를 때)
   void _closeSearch() {
     if (!_searchOpen) return;
+    final bool keyboardUp = MediaQuery.viewInsetsOf(context).bottom > 0;
     _searchFocus.unfocus();
     _searchCtrl.clear();
     setState(() {
@@ -629,6 +634,23 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       ..duration = Anim.ms(300)
       ..reverseDuration = Anim.ms(210);
     _searchAnim.reverse();
+    // 자판이 올라와 있었으면 다 내려간 뒤에 파일 목록 전체가 한 번에 옆에서 들어옴 (자판이 내려가며 목록이 위에서부터 드러나지 않게)
+    if (keyboardUp) {
+      unawaited(_afterKeyboardDown().then((_) {
+        if (mounted && !_searchOpen) _listAnim.reverse();
+      }));
+    } else {
+      _listAnim.reverse();
+    }
+  }
+
+  /// 자판이 다 내려갈 때까지 (길어도 0.6초)
+  Future<void> _afterKeyboardDown() async {
+    final sw = Stopwatch()..start();
+    while (mounted && sw.elapsedMilliseconds < 600) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || View.of(context).viewInsets.bottom <= 0) break;
+    }
   }
 
   static const TextStyle _searchTextStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.w600);
@@ -1166,6 +1188,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     StorageService.appStyle.removeListener(_onAppStyle);
     _searchCurve.dispose();
     _searchAnim.dispose();
+    _listAnim.dispose();
     _searchCtrl.dispose();
     _searchFocus.dispose();
     _dragEdgeScrollTimer?.cancel();

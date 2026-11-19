@@ -211,7 +211,7 @@ class MemoToolbarMover extends StatefulWidget {
 }
 
 /// 길게 눌러 끌면 손가락을 따라 움직이고, 가장자리 근처에서는 그 자리 모양으로만 바뀜. 근처에서 놓으면 자석처럼 붙음
-class _MemoToolbarMoverState extends State<MemoToolbarMover> with SingleTickerProviderStateMixin, BarDragMixin<MemoToolbarMover> {
+class _MemoToolbarMoverState extends State<MemoToolbarMover> with TickerProviderStateMixin, BarDragMixin<MemoToolbarMover> {
   @override
   List<String> get dragSides => const ['top', 'bottom', 'left', 'right'];
   @override

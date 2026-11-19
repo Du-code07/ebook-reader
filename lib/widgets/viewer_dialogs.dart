@@ -38,9 +38,8 @@ TapZone tapZoneAt(Offset local, Size size) {
 }
 
 /// 가운데에 뜨는 둥근 창 (페이지 표시·화면 회전 등 짧은 고르기)
-/// 고르기 창이 열리고 닫히는 시간 (도구 모음 단추로 여는 창: 빠르게. 도구 모음 설정 창도 같음)
-Duration get viewerDialogDuration => Anim.ms(80);
-Duration get _dialogDur => viewerDialogDuration;
+/// 파일 안 설정 창이 열리고 닫히는 시간 (모든 설정 창이 같음: 갑자기 나타나지 않게 서서히)
+Duration get _dialogDur => Anim.ms(240);
 
 /// 바꾼 것이 있을 때만: 닫히는 움직임이 끝난 뒤에 적용 (화면 회전·쪽 다시 배치가 닫히는 움직임과 겹쳐 끊기지 않게)
 Future<void> _afterDialogClosed() async {
@@ -48,23 +47,57 @@ Future<void> _afterDialogClosed() async {
   if (d > Duration.zero) await Future<void>.delayed(d);
 }
 
-Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) async {
-  final Offset? popFrom = TapOrigin.last; // 연 자리 (그 자리에서 커져 나오고, 닫힐 때 그 자리로 들어감)
-  // 도구 모음이 닫히며 화면을 다시 그리는 프레임과 겹치지 않게, 그 프레임이 끝난 뒤 창을 띄움 (뜰 때 덜 버벅임)
+/// 파일 안 설정 창이 열려 있는 수. 열려 있는 동안은 목차 만들기 같은 뒤 작업을 잠깐 멈춤 (쪽이 많은 문서에서 창이 버벅이지 않게)
+final ValueNotifier<int> viewerDialogsOpen = ValueNotifier<int>(0);
+
+/// 설정 창이 모두 닫힐 때까지 기다림 (뒤 작업을 조각마다 나눠 할 때 조각 사이에서)
+Future<void> waitViewerDialogsClosed() async {
+  while (viewerDialogsOpen.value > 0) {
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  }
+}
+
+Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) =>
+    showViewerDialog<T>(context, (ctx) => Center(child: builder(ctx)));
+
+/// 파일 안 설정 창 (화면 회전·페이지 표시·페이지 이동·북마크·도구 모음 설정)을 띄움.
+/// 눈이 편하게: 누른 자리 쪽에서 살짝 커지며 서서히 나타나고, 뒤 배경은 옅게 천천히 어두워짐
+Future<T?> showViewerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) async {
+  final Offset? popFrom = TapOrigin.last; // 연 자리 (그쪽에서 나오고, 닫힐 때 그쪽으로 들어감)
+  // 도구 모음을 누른 프레임과 겹치지 않게, 그 프레임이 끝난 뒤 창을 띄움 (뜰 때 덜 버벅임)
   await WidgetsBinding.instance.endOfFrame;
   if (!context.mounted) return null;
-  final Duration dur = _dialogDur;
-  final T? result = await showGeneralDialog<T>(
-    context: context,
-    barrierDismissible: true,
-    barrierLabel: 'close',
-    barrierColor: Colors.black54,
-    transitionDuration: dur,
-    pageBuilder: (ctx, _, __) => SafeArea(child: Center(child: builder(ctx))),
-    // 도구 모음 설정 창과 같은 움직임: 누른 자리에서 커져 나오고, 닫힐 때 그 자리로 들어감
-    transitionBuilder: (ctx, anim, _, child) => popTransition(ctx, anim, child, from: popFrom),
+  viewerDialogsOpen.value++;
+  try {
+    return await showGeneralDialog<T>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'close',
+      barrierColor: const Color(0x47000000), // 옅게 (예전 54% → 28%)
+      transitionDuration: _dialogDur,
+      pageBuilder: (ctx, _, __) => SafeArea(child: builder(ctx)),
+      transitionBuilder: (ctx, anim, _, child) => _softPopTransition(ctx, anim, child, popFrom),
+    );
+  } finally {
+    viewerDialogsOpen.value--;
+  }
+}
+
+/// 설정 창이 열리고 닫히는 움직임: 튀지 않고 서서히. 누른 자리 쪽에서 조금 작게 시작해 제자리로
+Widget _softPopTransition(BuildContext context, Animation<double> animation, Widget child, Offset? from) {
+  final grow = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+  final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.8, curve: Curves.easeOut), reverseCurve: Curves.easeIn);
+  final Size screen = MediaQuery.sizeOf(context);
+  final Offset center = screen.center(Offset.zero);
+  final Offset origin = ((from ?? center) - center) * 0.5;
+  return FadeTransition(
+    opacity: fade,
+    child: AnimatedBuilder(
+      animation: grow,
+      child: RepaintBoundary(child: child),
+      builder: (context, child) => Transform.scale(scale: 0.88 + 0.12 * grow.value, origin: origin, child: child),
+    ),
   );
-  return result;
 }
 
 /// 가운데 둥근 창 (북마크 목록 등): 페이지 이동 창과 같은 모양·움직임. [builder]의 setState로 창 안을 다시 그림
@@ -729,18 +762,15 @@ class _PageModePainter extends CustomPainter {
 
     switch (mode) {
       case 'volume':
-        // 휴대폰 + 오른쪽 옆면의 음량 버튼 두 개, 그 옆에 위(이전)·아래(다음) 화살
-        canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(3.5 * u, 2 * u, 14 * u, 22 * u), Radius.circular(2.6 * u)), stroke);
-        canvas.drawLine(Offset(7 * u, 19 * u), Offset(10.5 * u, 19 * u), stroke);
+        // 글이 적힌 쪽 + 오른쪽 옆에 음량 버튼 두 개 (휴대폰 옆면의 버튼처럼)
+        page(const Rect.fromLTRB(4.5, 2.5, 15.5, 21.5), [(7, 7.5, 12.5), (10.5, 7.5, 12.5), (14, 7.5, 12.5), (17.5, 7.5, 10.5)]);
         final Paint key = Paint()
           ..color = color
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.4 * u
+          ..strokeWidth = 2.2 * u
           ..strokeCap = StrokeCap.round;
-        canvas.drawLine(Offset(16.2 * u, 5.2 * u), Offset(16.2 * u, 8.8 * u), key);
-        canvas.drawLine(Offset(16.2 * u, 11.2 * u), Offset(16.2 * u, 14.8 * u), key);
-        chevron([18.8, 8, 20.8, 5.8, 22.8, 8]);
-        chevron([18.8, 12, 20.8, 14.2, 22.8, 12]);
+        canvas.drawLine(Offset(19.4 * u, 5.2 * u), Offset(19.4 * u, 9.6 * u), key);
+        canvas.drawLine(Offset(19.4 * u, 12.4 * u), Offset(19.4 * u, 15.4 * u), key);
       case 'slide':
         // 쪽 한 장 + 아래에 양쪽 화살 (옆으로 밀어 넘김)
         page(const Rect.fromLTRB(6, 2, 18, 16.5), [(6, 9, 15), (9.5, 9, 15), (13, 9, 12)]);
@@ -1906,7 +1936,7 @@ class HoldToMove extends StatefulWidget {
   State<HoldToMove> createState() => _HoldToMoveState();
 }
 
-class _HoldToMoveState extends State<HoldToMove> with SingleTickerProviderStateMixin, BarDragMixin<HoldToMove> {
+class _HoldToMoveState extends State<HoldToMove> with TickerProviderStateMixin, BarDragMixin<HoldToMove> {
   int? _pointer;
   Timer? _timer;
   double _moved = 0;
