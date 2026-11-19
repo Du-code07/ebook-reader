@@ -31,7 +31,7 @@ jobs:
           channel: 'stable'
           flutter-version: '3.47.9'
 
-      - name: 4. Generate Android Platform Files & Configure FReader Store Release (com.freader.my_ebook_reader)
+      - name: 4. Generate Android Platform Files & Configure 이리ERI Store Release (com.dudu.eri)
         run: |
           if [ ! -f "lib/screens/pdf_and_image_viewer.dart" ]; then
             FOUND_PUBSPEC=$(find . -maxdepth 3 -name "pubspec.yaml" | grep -v "^\./pubspec\.yaml$" | head -n 1)
@@ -62,11 +62,12 @@ jobs:
           cp -f /tmp/v7_backup/pubspec.yaml .
           if [ -f /tmp/v7_backup/pubspec.lock ]; then cp -f /tmp/v7_backup/pubspec.lock .; fi
 
-          mkdir -p android/app/src/main/kotlin/com/freader/my_ebook_reader
-          cp -f /tmp/v7_backup/android_override/MainActivity.kt android/app/src/main/kotlin/com/freader/my_ebook_reader/MainActivity.kt
-          sed -i 's/^package com\.example\.my_ebook_reader/package com.freader.my_ebook_reader/' android/app/src/main/kotlin/com/freader/my_ebook_reader/MainActivity.kt
-          rm -rf android/app/src/main/kotlin/com/example
-          rm -rf android/app/src/main/java/com/example
+          # 앱 패키지 이름(플레이 스토어 앱 ID): com.dudu.eri
+          rm -rf android/app/src/main/kotlin/com android/app/src/main/java/com
+          mkdir -p android/app/src/main/kotlin/com/dudu/eri
+          cp -f /tmp/v7_backup/android_override/MainActivity.kt android/app/src/main/kotlin/com/dudu/eri/MainActivity.kt
+          sed -i 's/namespace = "[^"]*"/namespace = "com.dudu.eri"/; s/applicationId = "[^"]*"/applicationId = "com.dudu.eri"/' android/app/build.gradle.kts
+          grep -q 'applicationId = "com.dudu.eri"' android/app/build.gradle.kts || { echo "applicationId 바꾸기 실패"; exit 1; }
 
           # 정식 릴리스 서명 키: GitHub Secrets의 FREADER_KEYSTORE_BASE64를 풀어서 둠 (없으면 디버그 키로 서명 — 시험용 APK만)
           if [ -n "$FREADER_KEYSTORE_BASE64" ]; then
@@ -125,9 +126,9 @@ jobs:
             echo '    implementation("com.google.mlkit:text-recognition-korean:16.0.1")' >> android/app/build.gradle.kts
             # 문서 스캔: 원근 보정·화질 처리 (OpenCV, Apache 2.0)
             echo '    implementation("org.opencv:opencv:4.10.0")' >> android/app/build.gradle.kts
-            # FReader 프로: Google Play 결제 (1회 구매)
+            # 이리ERI 프로: Google Play 결제 (1회 구매)
             echo '    implementation("com.android.billingclient:billing:9.1.0")' >> android/app/build.gradle.kts
-            # FReader 프로 무료 체험 시작일 (앱을 지웠다 다시 깔아도 같은 기기면 이어서 계산)
+            # 이리ERI 프로 무료 체험 시작일 (앱을 지웠다 다시 깔아도 같은 기기면 이어서 계산)
             echo '    implementation("com.google.android.gms:play-services-auth-blockstore:16.4.0")' >> android/app/build.gradle.kts
             echo '}' >> android/app/build.gradle.kts
           fi
@@ -163,7 +164,7 @@ jobs:
             fi
             # 설치한 앱 이름: 이리ERI
             sed -i 's/android:label="[^"]*"/android:label="이리ERI"/g' "$MANIFEST"
-            # 카메라 권한(선택) + 다른 앱의 '연결 앱' 목록에 FReader가 보이게 (문서·만화·이미지 열기)
+            # 카메라 권한(선택) + 다른 앱의 '연결 앱' 목록에 이리ERI가 보이게 (문서·만화·이미지 열기)
             python3 /tmp/v7_backup/android_override/manifest_patch.py "$MANIFEST"
           fi
 
@@ -406,11 +407,11 @@ jobs:
       - name: 6. Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FReader-release-apk
+          name: ERI-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
 
       - name: 7. Upload Google Play Store AAB Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FReader-google-play-aab
+          name: ERI-google-play-aab
           path: build/app/outputs/bundle/release/app-release.aab
