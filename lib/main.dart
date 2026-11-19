@@ -38,6 +38,7 @@ import 'services/page_count_service.dart';
 import 'services/app_lock.dart';
 import 'services/file_share.dart';
 import 'services/pro.dart';
+import 'widgets/push_aside_route.dart';
 import 'screens/lock_screen.dart';
 import 'widgets/pop_dialog.dart';
 
@@ -365,7 +366,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
     return MaterialApp(
       scaffoldMessengerKey: appMessengerKey,
       debugShowCheckedModeBanner: false,
-      title: 'FReader',
+      title: '이리ERI',
       // 테마를 바꿀 때 색을 서서히 섞는 동안 화면 전체를 매번 다시 그려 느려짐 → 바로 바꿈
       themeAnimationDuration: Duration.zero,
       themeMode: _themeMode == 'dark'
@@ -439,11 +440,13 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
         ]));
       },
       // 시작 화면: 앱을 켤 때마다 맨 위에 잠깐 (첫 실행이면 언어 선택보다 먼저). 그 아래 화면은 미리 준비됨
-      home: Stack(
+      // 앱 설정에서 전체 화면을 열면 서재 화면도 왼쪽으로 함께 밀려남
+      home: PushAsideShift(child: Stack(
         fit: StackFit.expand,
         children: [
+          // 시작 화면·언어 선택·테마 선택·권한 안내까지는 고른 테마와 상관없이 밝은 화면으로 고정
           _needsLanguage
-              ? LanguageSelectScreen(
+              ? _firstRunLight(LanguageSelectScreen(
                   onConfirmed: (setting) {
                     _changeAppLanguage(setting);
                     setState(() {
@@ -451,9 +454,9 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
                       _needsTheme = true;
                     });
                   },
-                )
+                ))
               : _needsTheme
-              ? ThemeSelectScreen(
+              ? _firstRunLight(ThemeSelectScreen(
                   lang: _appLang,
                   initial: _themeMode,
                   onChanged: _changeThemeMode,
@@ -464,12 +467,12 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
                       _needsPermGuide = true;
                     });
                   },
-                )
+                ))
               : _needsPermGuide
-              ? PermissionGuideScreen(
+              ? _firstRunLight(PermissionGuideScreen(
                   lang: _appLang,
                   onDone: () => setState(() => _needsPermGuide = false),
-                )
+                ))
               : BookshelfScreen(
                   isDarkMode: _isDarkMode,
                   appLang: _appLang,
@@ -477,11 +480,17 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
                   onChangeThemeMode: _changeThemeMode,
                   onChangeLanguage: _changeAppLanguage,
                 ),
-          if (_showSplash) SplashOverlay(onDone: () => setState(() => _showSplash = false)),
+          if (_showSplash) _firstRunLight(SplashOverlay(onDone: () => setState(() => _showSplash = false))),
         ],
-      ),
+      )),
     );
   }
+
+  /// 앱 시작 화면·언어 선택·테마 선택·권한 안내: 다크 모드여도 밝은 테마로 보여 줌
+  Widget _firstRunLight(Widget child) => AnnotatedRegion<SystemUiOverlayStyle>(
+        value: const SystemUiOverlayStyle(statusBarIconBrightness: Brightness.dark, statusBarBrightness: Brightness.light),
+        child: Theme(data: _appTheme(Brightness.light, variant: 'light'), child: child),
+      );
 }
 
 /// 오른쪽 아래 단추가 바뀔 때: 회전·이동 없이 그 자리에서 커지며 나타나고 작아지며 사라짐
@@ -3477,7 +3486,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       // 화면 위쪽 1/5 정도만 남기고 크게 엶
       constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.81),
       transitionAnimationController: sheetCtrl,
-      builder: (sheetCtx) => SheetPullToClose(
+      // 앱 설정에서 전체 화면을 열면 설정 창도 왼쪽으로 함께 밀려남
+      builder: (sheetCtx) => PushAsideShift(child: SheetPullToClose(
         controller: sheetCtrl,
         builder: (ctx, scroll, physics) => AppSettingsScreen(
           asSheet: true,
@@ -3520,10 +3530,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           },
           onOpenGuide: (lang) => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => ButtonGuideScreen(appLang: lang)),
+            PushAsideRoute(builder: (_) => ButtonGuideScreen(appLang: lang)),
           ),
         ),
-      ),
+      )),
     );
     disposeSheetControllerWhenDone(sheetCtrl);
   }
