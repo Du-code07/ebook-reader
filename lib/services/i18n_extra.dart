@@ -5,6 +5,7 @@ class I18nExtra {
   static const List<String> langs = ['fr', 'ru', 'es'];
 
   static const Map<String, List<String>> _exact = {
+    'Pro': ['Pro', 'Pro', 'Pro'],
     'Hide Paid Features': ['Masquer les fonctions payantes', 'Скрыть платные функции', 'Ocultar funciones de pago'],
     'Hides Scan, Merge PDFs and Merge Images in the Add Files menu': ['Masque Numériser, Fusionner des PDF et Fusionner des images dans le menu Ajouter des fichiers', 'Скрывает «Сканировать», «Объединить PDF» и «Объединить изображения» в меню добавления файлов', 'Oculta Escanear, Combinar PDF y Combinar imágenes en el menú Añadir archivos'],
     'FReader Pro': ['FReader Pro', 'FReader Pro', 'FReader Pro'],
@@ -474,10 +475,13 @@ class I18nExtra {
 
   /// 바뀌는 값(\$n 등)이 들어 있는 문구: [영어, 프랑스어, 러시아어, 스페인어]
   static const List<List<String>> _templates = [
-    ['\$left day(s) left in your free trial', 'Il reste \$left jour(s) d\'essai gratuit', 'До конца пробного периода (дней): \$left', 'Quedan \$left día(s) de prueba gratuita'],
-    ['\${Pro.trialDaysLeft} day(s) of free trial left', 'Essai gratuit : \${Pro.trialDaysLeft} jour(s) restant(s)', 'Пробный период: осталось дней \${Pro.trialDaysLeft}', 'Prueba gratuita: quedan \${Pro.trialDaysLeft} día(s)'],
+    ['\$left left in your free trial', 'Essai gratuit : encore \$left', 'До конца пробного периода: \$left', 'Prueba gratuita: queda(n) \$left'],
+    ['\${Pro.durationText(_lang, Pro.trialLeft)} of free trial left', 'Essai gratuit : encore \${Pro.durationText(_lang, Pro.trialLeft)}', 'Пробный период: осталось \${Pro.durationText(_lang, Pro.trialLeft)}', 'Prueba gratuita: queda(n) \${Pro.durationText(_lang, Pro.trialLeft)}'],
+    ['You can try the paid features free for \$trialLen after installing (once per device)', 'Vous pouvez essayer gratuitement les fonctions payantes pendant \$trialLen après l\'installation (une fois par appareil)', 'После установки платными функциями можно бесплатно пользоваться \$trialLen (один раз на устройство)', 'Puedes probar gratis las funciones de pago durante \$trialLen tras instalar (una vez por dispositivo)'],
+    ['\$n day(s)', '\$n jour(s)', 'дней: \$n', '\$n día(s)'],
+    ['\$n hour(s)', '\$n heure(s)', 'часов: \$n', '\$n hora(s)'],
+    ['\$n min', '\$n min', '\$n мин', '\$n min'],
     ['Price: \$price (one-time purchase, usable for as long as the app is provided)', 'Prix : \$price (achat unique, utilisable tant que l\'app est proposée)', 'Цена: \$price (разовая покупка, действует, пока приложение предоставляется)', 'Precio: \$price (compra única, válida mientras se ofrezca la app)'],
-    ['You can try the paid features free for \${Pro.trialDays} days after installing', 'Vous pouvez essayer gratuitement les fonctions payantes pendant \${Pro.trialDays} jours après l\'installation', 'После установки платными функциями можно пользоваться бесплатно \${Pro.trialDays} дней', 'Puedes probar gratis las funciones de pago durante \${Pro.trialDays} días tras instalar'],
     ['Buy for \$price', 'Acheter pour \$price', 'Купить за \$price', 'Comprar por \$price'],
     ['Import \${pdfPicked.length} PDFs', 'Importer \${pdfPicked.length} PDF', 'Импорт PDF: \${pdfPicked.length}', 'Importar \${pdfPicked.length} PDF'],
     ['The \$alreadyIn selected files are already in your library', 'Les \$alreadyIn fichiers choisis sont déjà dans votre bibliothèque', 'Выбранные файлы (\$alreadyIn) уже есть в библиотеке', 'Los \$alreadyIn archivos elegidos ya están en tu biblioteca'],

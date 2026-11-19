@@ -379,7 +379,7 @@ class MainActivity : FlutterActivity() {
     }
 
     // ── FReader 프로 무료 체험 시작일: Google Play 서비스 Block Store (앱을 지웠다 다시 깔아도 같은 기기면 남음) ──
-    private val TRIAL_KEY = "com.freader.my_ebook_reader.trial_start"
+    private val TRIAL_KEY = "com.freader.my_ebook_reader.trial_start_v2"
 
     private fun trialStartGet(result: MethodChannel.Result) {
         try {

@@ -126,11 +126,13 @@ class _ProScreenState extends State<ProScreen> {
           builder: (context, owned, _) => ValueListenableBuilder<String?>(
             valueListenable: Pro.price,
             builder: (context, price, _) {
-              final int left = Pro.trialDaysLeft;
+              final bool trial = Pro.trialActive;
+              final String left = Pro.durationText(widget.lang, Pro.trialLeft);
+              final String trialLen = Pro.durationText(widget.lang, Pro.trialLength);
               final String status = owned
                   ? _t('구매했어요. 모든 유료 기능을 쓸 수 있어요', 'Purchased. All paid features are unlocked', '已购买，所有付费功能均可使用', '購入済みです。すべての有料機能を使えます')
-                  : left > 0
-                      ? _t('무료 체험이 $left일 남았어요', '$left day(s) left in your free trial', '免费试用还剩 $left 天', '無料体験の残りは$left日です')
+                  : trial
+                      ? _t('무료 체험이 $left 남았어요', '$left left in your free trial', '免费试用还剩 $left', '無料体験の残りは$leftです')
                       : _t('무료 체험이 끝났어요', 'Your free trial has ended', '免费试用已结束', '無料体験は終了しました');
               return ListView(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
@@ -158,8 +160,8 @@ class _ProScreenState extends State<ProScreen> {
                       if (price != null)
                         note(_t('가격: $price (1회 구매, 운영자가 앱을 제공하는 동안 계속 이용)', 'Price: $price (one-time purchase, usable for as long as the app is provided)',
                             '价格：$price（一次性购买，在应用提供期间可持续使用）', '価格：$price（買い切り。アプリの提供期間中ずっと利用できます）')),
-                      note(_t('설치 후 ${Pro.trialDays}일 동안 유료 기능을 무료로 써 볼 수 있어요', 'You can try the paid features free for ${Pro.trialDays} days after installing',
-                          '安装后 ${Pro.trialDays} 天内可免费试用付费功能', 'インストール後${Pro.trialDays}日間、有料機能を無料で試せます')),
+                      note(_t('설치 후 $trialLen 동안 유료 기능을 무료로 써 볼 수 있어요 (기기마다 한 번)', 'You can try the paid features free for $trialLen after installing (once per device)',
+                          '安装后 $trialLen 内可免费试用付费功能（每台设备一次）', 'インストール後$trialLenの間、有料機能を無料で試せます（端末ごとに1回）')),
                       note(_t('구매 후 7일 이내에 청약철회를 요청할 수 있어요. 다만 무료 체험을 제공하므로, 구매와 함께 유료 기능이 열리면 디지털 콘텐츠의 제공이 시작된 것으로 보아 청약철회가 제한될 수 있어요',
                           'You may request withdrawal within 7 days of purchase. However, as a free trial is provided, withdrawal may be limited once the paid features are unlocked, because supply of the digital content has begun',
                           '购买后 7 天内可申请撤销。但由于提供了免费试用，购买后付费功能一经开放即视为数字内容已开始提供，撤销可能受到限制',
