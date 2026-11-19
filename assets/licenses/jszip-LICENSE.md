@@ -1,6 +1,6 @@
 JSZip 3.10.1 (vendor/flutter_epub_viewer, jszip.min.js)
 https://stuk.github.io/jszip/
-FReader uses JSZip under the MIT license (one of its two license options). The MIT license text applies.
+이리ERI uses JSZip under the MIT license (one of its two license options). The MIT license text applies.
 
 JSZip is dual licensed. At your choice you may use it under the MIT license *or* the GPLv3
 license.

@@ -75,15 +75,15 @@ class PermissionGuideScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 18),
                   Center(
-                    child: Text('FReader', style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: -0.5, color: cs.onSurface)),
+                    child: Text('이리ERI', style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: -0.5, color: cs.onSurface)),
                   ),
                   const SizedBox(height: 44),
                   Text(t('앱 접근 권한 안내', 'App Permissions', '应用访问权限说明', 'アプリのアクセス権限について'),
                       style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: cs.onSurface)),
                   const SizedBox(height: 8),
                   Text(
-                    t('FReader 서비스 제공을 위해 다음 권한을 사용해요', 'FReader uses the following permissions to provide its features',
-                        'FReader 为提供服务会使用以下权限', 'FReaderはサービス提供のため次の権限を使います'),
+                    t('이리ERI 서비스 제공을 위해 다음 권한을 사용해요', '이리ERI uses the following permissions to provide its features',
+                        '이리ERI 为提供服务会使用以下权限', '이리ERIはサービス提供のため次の権限を使います'),
                     style: TextStyle(fontSize: 15, color: cs.onSurfaceVariant),
                   ),
                   const SizedBox(height: 36),

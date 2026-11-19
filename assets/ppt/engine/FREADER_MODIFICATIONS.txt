@@ -1,10 +1,10 @@
-FReader v54 integration changes to @silurus/ooxml 0.89.8
+이리ERI v54 integration changes to @silurus/ooxml 0.89.8
 
 Upstream: https://github.com/yukiyokotani/office-open-xml-viewer
 License: MIT. Original LICENSE and THIRD_PARTY_NOTICES.md are retained.
 
 Changed file: pptx-Ci1Y9SS_.js
-- Added getFReaderSlideMetadata(index), returning a read-only snapshot of the
+- Added get이리ERISlideMetadata(index), returning a read-only snapshot of the
   slide part name and element IDs/types/origins through the existing slide cache.
 - Added an optional freaderHiddenShapeIds Set to main-mode renderSlide options.
   Before drawing, a temporary slide model omits matching slide-origin elements.

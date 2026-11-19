@@ -5,7 +5,7 @@
     "license": "MIT",
     "npmIntegrity": "sha512-t5dJ+pLGUTmjDjGNV9wE1cdRqFg5vDSVZN7I7okMSiMNnCR9tdk0P7O9yZ8EtXgtV2rToF7E4L6Lbca7yt+4+w==",
     "npmTarball": "https://registry.npmjs.org/@silurus/ooxml/-/ooxml-0.89.8.tgz",
-    "modifications": "ES module .mjs filenames/references renamed to .js for Android asset MIME handling. v54 adds getFReaderSlideMetadata and per-render slide-origin visibility filtering to pptx-Ci1Y9SS_.js; source models and WASM parsers are unchanged. See engine/FREADER_MODIFICATIONS.txt.",
+    "modifications": "ES module .mjs filenames/references renamed to .js for Android asset MIME handling. v54 adds get이리ERISlideMetadata and per-render slide-origin visibility filtering to pptx-Ci1Y9SS_.js; source models and WASM parsers are unchanged. See engine/FREADER_MODIFICATIONS.txt.",
     "artifacts": {
       "abort-JztSoyw2.js": {
         "upstreamName": "abort-JztSoyw2.js",

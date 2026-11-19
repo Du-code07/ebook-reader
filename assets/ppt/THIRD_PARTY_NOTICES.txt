@@ -1,4 +1,4 @@
-FReader PowerPoint viewer (v54)
+이리ERI PowerPoint viewer (v54)
 
 Office Open XML Viewer: @silurus/ooxml 0.89.8
 Legacy PowerPoint parser: @silurus/ooxml-legacy-office 0.89.8
@@ -22,7 +22,7 @@ No proprietary Microsoft fonts are bundled. Device fonts are preferred when
 available; otherwise these free fonts are substituted. Layout can consequently
 differ from Microsoft PowerPoint.
 
-FReader integration changes:
+이리ERI integration changes:
 - ES module .mjs extensions and references changed to .js for Android assets.
 - Legacy companion import resolved to the bundled engine instead of npm.
 - Offline Flutter bridge and fixed-slide display supplied in reader.js.
@@ -34,7 +34,7 @@ PROVENANCE.json records package versions, npm integrity and file checksums.
 
 The packaged reader runs locally, with Google Fonts disabled and a restrictive
 Content-Security-Policy. It does not upload the opened presentation.
-Slides are shown in the existing FReader viewer UI. v54 supports manual
+Slides are shown in the existing 이리ERI viewer UI. v54 supports manual
 PPTX whole-object entrance/exit build snapshots. Motion, timing, transitions,
 shape-click triggers and partial text/chart builds are not played. Legacy PPT support is experimental and reports
 unsupported structures; it does not promise complete PowerPoint fidelity.

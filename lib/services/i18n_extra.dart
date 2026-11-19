@@ -1,10 +1,28 @@
-// FReader: 프랑스어·러시아어·스페인어 문구 (영어 문구를 열쇠로 찾음). 자동 생성 — 직접 고치지 말 것
+// 이리ERI: 프랑스어·러시아어·스페인어 문구 (영어 문구를 열쇠로 찾음). 자동 생성 — 직접 고치지 말 것
 // ignore_for_file: lines_longer_than_80_chars
 
 class I18nExtra {
   static const List<String> langs = ['fr', 'ru', 'es'];
 
   static const Map<String, List<String>> _exact = {
+    'FAQ': ['FAQ', 'Частые вопросы', 'Preguntas frecuentes'],
+    'Contact Us': ['Nous contacter', 'Связаться с нами', 'Contacto'],
+    'Supported formats, pricing, how files are added and more': ['Formats pris en charge, tarifs, ajout de fichiers, etc.', 'Поддерживаемые форматы, цены, добавление файлов и другое', 'Formatos compatibles, precios, cómo se añaden archivos y más'],
+    'Reply-to email': ['E-mail de réponse', 'Email для ответа', 'Correo de respuesta'],
+    'Subject': ['Objet', 'Тема', 'Asunto'],
+    'Message': ['Message', 'Сообщение', 'Mensaje'],
+    'Send': ['Envoyer', 'Отправить', 'Enviar'],
+    'Required': ['Obligatoire', 'Обязательно', 'Obligatorio'],
+    'Please check the email address': ['Vérifiez l\'adresse e-mail', 'Проверьте адрес электронной почты', 'Comprueba la dirección de correo'],
+    'Tap Send in your email app': ['Appuyez sur Envoyer dans votre application de messagerie', 'Нажмите «Отправить» в почтовом приложении', 'Toca Enviar en tu app de correo'],
+    'No email app found': ['Aucune application de messagerie trouvée', 'Почтовое приложение не найдено', 'No se encontró ninguna app de correo'],
+    'Include app version and device info': ['Inclure la version de l\'app et les infos de l\'appareil', 'Добавить версию приложения и сведения об устройстве', 'Incluir versión de la app e información del dispositivo'],
+    'Device model, Android version': ['Modèle de l\'appareil, version d\'Android', 'Модель устройства, версия Android', 'Modelo del dispositivo, versión de Android'],
+    'View Privacy Policy': ['Voir la politique de confidentialité', 'Политика конфиденциальности', 'Ver la política de privacidad'],
+    'Didn\'t find your answer?': ['Vous n\'avez pas trouvé de réponse ?', 'Не нашли ответ?', '¿No encontraste tu respuesta?'],
+    'Telling us which file and what happened helps us check faster': ['Indiquer le fichier et ce qui s\'est passé nous aide à vérifier plus vite', 'Укажите файл и что произошло — так мы быстрее разберёмся', 'Indicar el archivo y lo que pasó nos ayuda a revisarlo más rápido'],
+    'Tapping [Send] opens your email app with the message filled in. Tap Send once more in the email app\nThe information you send is handled according to Section 7 of the Privacy Policy': ['Appuyer sur [Envoyer] ouvre votre application de messagerie avec le message rempli. Appuyez encore sur Envoyer dans l\'application\nLes informations envoyées sont traitées selon la section 7 de la politique de confidentialité', 'Кнопка [Отправить] откроет почтовое приложение с заполненным письмом. Нажмите «Отправить» ещё раз в приложении\nОтправленные данные обрабатываются согласно разделу 7 политики конфиденциальности', 'Al tocar [Enviar] se abre tu app de correo con el mensaje completado. Toca Enviar otra vez en la app de correo\nLa información enviada se trata según la sección 7 de la política de privacidad'],
+    'All paid features are shown during the free trial': ['Toutes les fonctions payantes sont affichées pendant l\'essai gratuit', 'Во время пробного периода все платные функции показаны', 'Durante la prueba gratuita se muestran todas las funciones de pago'],
     'Price: checking': ['Prix : vérification en cours', 'Цена: проверяется', 'Precio: comprobando'],
     'Price: could not be loaded. You can buy once the price is shown': ['Prix : impossible à charger. Vous pourrez acheter une fois le prix affiché', 'Цену не удалось загрузить. Купить можно, когда появится цена', 'Precio: no se pudo cargar. Podrás comprar cuando se muestre el precio'],
     'Checking price': ['Vérification du prix', 'Проверка цены', 'Comprobando precio'],
@@ -13,18 +31,18 @@ class I18nExtra {
     'This English translation is provided for convenience. The Korean version is the official text and prevails if there is any difference': ['Cette traduction anglaise est fournie à titre indicatif. La version coréenne fait foi et prévaut en cas de divergence', 'Этот перевод на английский предоставлен для удобства. Официальным текстом является корейская версия, и при расхождениях она имеет приоритет', 'Esta traducción al inglés se ofrece como referencia. La versión coreana es el texto oficial y prevalece en caso de diferencia'],
     'Start': ['Commencer', 'Начать', 'Empezar'],
     'You can start a free trial': ['Vous pouvez commencer un essai gratuit', 'Можно начать бесплатный пробный период', 'Puedes empezar una prueba gratuita'],
-    'All paid features are shown because you own FReader Pro': ['Toutes les fonctions payantes sont affichées car vous possédez FReader Pro', 'Все платные функции показаны, так как вы купили FReader Pro', 'Se muestran todas las funciones de pago porque tienes FReader Pro'],
+    'All paid features are shown because you own 이리ERI Pro': ['Toutes les fonctions payantes sont affichées car vous possédez 이리ERI Pro', 'Все платные функции показаны, так как вы купили 이리ERI Pro', 'Se muestran todas las funciones de pago porque tienes 이리ERI Pro'],
     'Free Trial': ['Essai gratuit', 'Бесплатно попробовать', 'Prueba gratuita'],
     'Start Free Trial': ['Commencer l\'essai gratuit', 'Начать пробный период', 'Empezar prueba gratuita'],
     'Your free trial has started': ['Votre essai gratuit a commencé', 'Бесплатный пробный период начался', 'Tu prueba gratuita ha empezado'],
     'Pro': ['Pro', 'Pro', 'Pro'],
     'Hide Paid Features': ['Masquer les fonctions payantes', 'Скрыть платные функции', 'Ocultar funciones de pago'],
     'Hides Scan, Merge PDFs and Merge Images in the Add Files menu': ['Masque Numériser, Fusionner des PDF et Fusionner des images dans le menu Ajouter des fichiers', 'Скрывает «Сканировать», «Объединить PDF» и «Объединить изображения» в меню добавления файлов', 'Oculta Escanear, Combinar PDF y Combinar imágenes en el menú Añadir archivos'],
-    'FReader Pro': ['FReader Pro', 'FReader Pro', 'FReader Pro'],
+    '이리ERI Pro': ['이리ERI Pro', '이리ERI Pro', '이리ERI Pro'],
     'Purchased': ['Acheté', 'Куплено', 'Comprado'],
     'Your free trial has ended': ['Votre essai gratuit est terminé', 'Бесплатный пробный период закончился', 'Tu prueba gratuita ha terminado'],
     'Google Play billing is not available right now\nCheck that the app was installed from the Play Store and that you are online': ['Le paiement Google Play n\'est pas disponible pour le moment\nVérifiez que l\'app a été installée depuis le Play Store et que vous êtes connecté', 'Оплата через Google Play сейчас недоступна\nПроверьте, что приложение установлено из Play Маркета и есть подключение к интернету', 'La facturación de Google Play no está disponible ahora\nComprueba que la app se instaló desde Play Store y que tienes conexión'],
-    'You purchased FReader Pro': ['Vous avez acheté FReader Pro', 'Вы купили FReader Pro', 'Has comprado FReader Pro'],
+    'You purchased 이리ERI Pro': ['Vous avez acheté 이리ERI Pro', 'Вы купили 이리ERI Pro', 'Has comprado 이리ERI Pro'],
     'Features unlock when the payment is complete': ['Les fonctions seront débloquées une fois le paiement terminé', 'Функции откроются после завершения оплаты', 'Las funciones se desbloquearán al completar el pago'],
     'The purchase could not be completed': ['L\'achat n\'a pas pu être effectué', 'Не удалось завершить покупку', 'No se pudo completar la compra'],
     'Your purchase was restored': ['Votre achat a été restauré', 'Покупка восстановлена', 'Se restauró tu compra'],
@@ -43,7 +61,7 @@ class I18nExtra {
     'Folders to Search': ['Dossiers à parcourir', 'Папки для поиска', 'Carpetas de búsqueda'],
     'Where Find Files and Find Fonts search': ['Où cherchent Trouver des fichiers et Trouver des polices', 'Где ищут «Найти файлы» и «Найти шрифты»', 'Dónde buscan Buscar archivos y Buscar fuentes'],
     'Choose folders to search': ['Choisir les dossiers à parcourir', 'Выберите папки для поиска', 'Elige carpetas para buscar'],
-    'Choose a folder to search for files\nFReader searches it and the folders inside it, and remembers it for next time\nAdd or remove folders in App Settings > Folders to Search': ['Choisissez un dossier où chercher des fichiers\nFReader le parcourt avec ses sous-dossiers et s\'en souvient\nAjoutez ou retirez des dossiers dans Réglages > Dossiers à parcourir', 'Выберите папку для поиска файлов\nFReader ищет в ней и во вложенных папках и запоминает её\nДобавляйте и удаляйте папки в Настройки > Папки для поиска', 'Elige una carpeta para buscar archivos\nFReader busca en ella y en sus subcarpetas y la recuerda\nAñade o quita carpetas en Ajustes > Carpetas de búsqueda'],
+    'Choose a folder to search for files\n이리ERI searches it and the folders inside it, and remembers it for next time\nAdd or remove folders in App Settings > Folders to Search': ['Choisissez un dossier où chercher des fichiers\n이리ERI le parcourt avec ses sous-dossiers et s\'en souvient\nAjoutez ou retirez des dossiers dans Réglages > Dossiers à parcourir', 'Выберите папку для поиска файлов\n이리ERI ищет в ней и во вложенных папках и запоминает её\nДобавляйте и удаляйте папки в Настройки > Папки для поиска', 'Elige una carpeta para buscar archivos\n이리ERI busca en ella y en sus subcarpetas y la recuerda\nAñade o quita carpetas en Ajustes > Carpetas de búsqueda'],
     'Choose Folder': ['Choisir un dossier', 'Выбрать папку', 'Elegir carpeta'],
     'Find Files and Find Fonts search only these folders and the folders inside them\nAndroid does not allow choosing the whole internal storage or the Download folder itself (folders inside Download can be chosen)': ['Trouver des fichiers et Trouver des polices ne cherchent que dans ces dossiers et leurs sous-dossiers\nAndroid ne permet pas de choisir tout le stockage interne ni le dossier Download lui-même (ses sous-dossiers, oui)', '«Найти файлы» и «Найти шрифты» ищут только в этих папках и вложенных в них\nAndroid не позволяет выбрать всю память или саму папку Download (папки внутри неё — можно)', 'Buscar archivos y Buscar fuentes solo buscan en estas carpetas y sus subcarpetas\nAndroid no permite elegir todo el almacenamiento interno ni la carpeta Download en sí (sí sus subcarpetas)'],
     'No folders yet': ['Aucun dossier pour l\'instant', 'Папок пока нет', 'Aún no hay carpetas'],
@@ -55,7 +73,7 @@ class I18nExtra {
     'Icons for find files, add files, merge PDFs, merge images and scan documents appear above it\nLong-press an icon to see its name': ['Les icônes rechercher des fichiers, ajouter des fichiers, fusionner des PDF, fusionner des images et numériser des documents apparaissent au-dessus\nAppui long sur une icône pour voir son nom', 'Над ней появляются значки: найти файлы, добавить файлы, объединить PDF, объединить изображения и сканировать документы\nДолгое нажатие на значок показывает его название', 'Encima aparecen los iconos de buscar archivos, añadir archivos, combinar PDF, combinar imágenes y escanear documentos\nMantén pulsado un icono para ver su nombre'],
     'Could not open the link': ['Impossible d\'ouvrir le lien', 'Не удалось открыть ссылку', 'No se pudo abrir el enlace'],
     'Full License': ['Licence complète', 'Полный текст лицензии', 'Licencia completa'],
-    'Open source software and fonts included in FReader\nTap a name to open its original page, or the icon on the right to read the full license': ['Logiciels open source et polices inclus dans FReader\nTouchez un nom pour ouvrir sa page d\'origine, ou l\'icône à droite pour lire la licence complète', 'Открытое ПО и шрифты в FReader\nКоснитесь названия, чтобы открыть исходную страницу, или значка справа, чтобы прочитать лицензию', 'Software de código abierto y fuentes incluidos en FReader\nToca un nombre para abrir su página original o el icono de la derecha para leer la licencia completa'],
+    'Open source software and fonts included in 이리ERI\nTap a name to open its original page, or the icon on the right to read the full license': ['Logiciels open source et polices inclus dans 이리ERI\nTouchez un nom pour ouvrir sa page d\'origine, ou l\'icône à droite pour lire la licence complète', 'Открытое ПО и шрифты в 이리ERI\nКоснитесь названия, чтобы открыть исходную страницу, или значка справа, чтобы прочитать лицензию', 'Software de código abierto y fuentes incluidos en 이리ERI\nToca un nombre para abrir su página original o el icono de la derecha para leer la licencia completa'],
     'Refresh': ['Actualiser', 'Обновить', 'Actualizar'],
     'Read the terms of service': ['Lisez les conditions d\'utilisation', 'Прочитать условия использования', 'Lee los términos de servicio'],
     'See how the app handles information': ['Voyez comment l\'app traite les informations', 'Узнайте, как приложение обращается с информацией', 'Mira cómo la app trata la información'],
@@ -157,7 +175,7 @@ class I18nExtra {
     'Lock type': ['Type de verrouillage', 'Способ блокировки', 'Tipo de bloqueo'],
     'Lock the app and files with a PIN, pattern or biometrics': ['Verrouille l\'app et les fichiers par code PIN, schéma ou biométrie', 'Блокировка приложения и файлов PIN-кодом, ключом или биометрией', 'Bloquea la app y los archivos con PIN, patrón o biometría'],
     'Lock all files': ['Verrouiller tous les fichiers', 'Блокировать все файлы', 'Bloquear todos los archivos'],
-    'It locks again when you are away from the app for over a minute\nIf you forget the PIN or pattern, you must clear the app data\nThe lock only protects viewing in FReader; it does not encrypt the files themselves': ['L\'app se reverrouille si vous la quittez plus d\'une minute\nSi vous oubliez le code PIN ou le schéma, il faut effacer les données de l\'app\nLe verrouillage ne protège que la lecture dans FReader ; il ne chiffre pas les fichiers eux-mêmes', 'Блокировка снова включается, если вы вышли из приложения больше чем на минуту\nЕсли вы забыли PIN-код или ключ, нужно очистить данные приложения\nБлокировка защищает только просмотр в FReader и не шифрует сами файлы', 'Se vuelve a bloquear si sales de la app más de un minuto\nSi olvidas el PIN o el patrón, tendrás que borrar los datos de la app\nEl bloqueo solo protege la lectura en FReader; no cifra los archivos'],
+    'It locks again when you are away from the app for over a minute\nIf you forget the PIN or pattern, you must clear the app data\nThe lock only protects viewing in 이리ERI; it does not encrypt the files themselves': ['L\'app se reverrouille si vous la quittez plus d\'une minute\nSi vous oubliez le code PIN ou le schéma, il faut effacer les données de l\'app\nLe verrouillage ne protège que la lecture dans 이리ERI ; il ne chiffre pas les fichiers eux-mêmes', 'Блокировка снова включается, если вы вышли из приложения больше чем на минуту\nЕсли вы забыли PIN-код или ключ, нужно очистить данные приложения\nБлокировка защищает только просмотр в 이리ERI и не шифрует сами файлы', 'Se vuelve a bloquear si sales de la app más de un minuto\nSi olvidas el PIN o el patrón, tendrás que borrar los datos de la app\nEl bloqueo solo protege la lectura en 이리ERI; no cifra los archivos'],
     'Enter it once more': ['Saisissez-le encore une fois', 'Введите ещё раз', 'Introdúcelo una vez más'],
     'Enter a new PIN': ['Saisissez un nouveau code PIN', 'Введите новый PIN-код', 'Introduce un PIN nuevo'],
     'Draw it once more': ['Dessinez-le encore une fois', 'Нарисуйте ещё раз', 'Dibújalo una vez más'],
@@ -486,6 +504,7 @@ class I18nExtra {
 
   /// 바뀌는 값(\$n 등)이 들어 있는 문구: [영어, 프랑스어, 러시아어, 스페인어]
   static const List<List<String>> _templates = [
+    ['Your message has been copied\nPlease send it to \${ContactScreen.supportEmail}', 'Votre message a été copié\nEnvoyez-le à \${ContactScreen.supportEmail}', 'Сообщение скопировано\nОтправьте его на \${ContactScreen.supportEmail}', 'Tu mensaje se ha copiado\nEnvíalo a \${ContactScreen.supportEmail}'],
     ['Tap [Free Trial] to try the paid features free for \$trialLen (once per device)', 'Touchez [Essai gratuit] pour essayer gratuitement les fonctions payantes pendant \$trialLen (une fois par appareil)', 'Нажмите «Бесплатно попробовать», чтобы пользоваться платными функциями бесплатно \$trialLen (один раз на устройство)', 'Toca [Prueba gratuita] para probar gratis las funciones de pago durante \$trialLen (una vez por dispositivo)'],
     ['You can try it free for \$trialLen', 'Vous pouvez l\'essayer gratuitement pendant \$trialLen', 'Можно попробовать бесплатно: \$trialLen', 'Puedes probarlo gratis durante \$trialLen'],
     ['You can use the paid features free for \$len from now\nThe free trial is available once per device', 'Vous pouvez utiliser gratuitement les fonctions payantes pendant \$len à partir de maintenant\nL\'essai gratuit n\'est possible qu\'une fois par appareil', 'С этого момента платные функции доступны бесплатно: \$len\nБесплатный пробный период доступен один раз на устройство', 'Puedes usar gratis las funciones de pago durante \$len desde ahora\nLa prueba gratuita solo está disponible una vez por dispositivo'],

@@ -1,4 +1,4 @@
-package com.freader.my_ebook_reader
+package com.dudu.eri
 
 import android.content.Context
 import android.content.pm.ActivityInfo
@@ -378,8 +378,8 @@ class MainActivity : FlutterActivity() {
         return out.absolutePath
     }
 
-    // ── FReader 프로 무료 체험 시작일: Google Play 서비스 Block Store (앱을 지웠다 다시 깔아도 같은 기기면 남음) ──
-    private val TRIAL_KEY = "com.freader.my_ebook_reader.trial_start_v2"
+    // ── 이리ERI 프로 무료 체험 시작일: Google Play 서비스 Block Store (앱을 지웠다 다시 깔아도 같은 기기면 남음) ──
+    private val TRIAL_KEY = "com.dudu.eri.trial_start_v2"
 
     private fun trialStartGet(result: MethodChannel.Result) {
         try {
@@ -409,7 +409,7 @@ class MainActivity : FlutterActivity() {
         } catch (_: Throwable) { result.success(false) }
     }
 
-    // ── FReader 프로: Google Play 결제 (1회 구매, 비소모성) ──────────────────────
+    // ── 이리ERI 프로: Google Play 결제 (1회 구매, 비소모성) ──────────────────────
     private var billingClient: com.android.billingclient.api.BillingClient? = null
     private var pendingBuyResult: MethodChannel.Result? = null
     private var pendingBuyProduct: String = ""
@@ -1214,6 +1214,37 @@ class MainActivity : FlutterActivity() {
                 } catch (e: Throwable) {
                     result.error("CAPTURE_ERR", e.message, null)
                 }
+            } else if (call.method == "sendEmail") {
+                // 문의하기: 받는 사람·제목·내용을 채운 채 메일 앱 열기 (메일 앱이 없으면 false)
+                val to = call.argument<String>("to") ?: ""
+                val subject = call.argument<String>("subject") ?: ""
+                val body = call.argument<String>("body") ?: ""
+                try {
+                    val i = android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:"))
+                    i.putExtra(android.content.Intent.EXTRA_EMAIL, arrayOf(to))
+                    i.putExtra(android.content.Intent.EXTRA_SUBJECT, subject)
+                    i.putExtra(android.content.Intent.EXTRA_TEXT, body)
+                    startActivity(i)
+                    result.success(true)
+                } catch (e: Throwable) {
+                    result.success(false)
+                }
+            } else if (call.method == "deviceInfo") {
+                // 문의하기에 함께 보낼 앱 버전·기기 정보
+                var ver = ""
+                var build = ""
+                try {
+                    val pi = packageManager.getPackageInfo(packageName, 0)
+                    ver = pi.versionName ?: ""
+                    build = if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode.toString() else @Suppress("DEPRECATION") pi.versionCode.toString()
+                } catch (_: Throwable) {}
+                result.success(mapOf(
+                    "appVersion" to ver,
+                    "appBuild" to build,
+                    "manufacturer" to android.os.Build.MANUFACTURER,
+                    "model" to android.os.Build.MODEL,
+                    "android" to android.os.Build.VERSION.RELEASE,
+                ))
             } else if (call.method == "openUrl") {
                 // 웹 주소를 기기의 브라우저로 열기 (오픈소스 라이선스의 원본 링크 등)
                 val url = call.argument<String>("url") ?: ""
@@ -1226,14 +1257,14 @@ class MainActivity : FlutterActivity() {
                     result.success(false)
                 }
             } else if (call.method == "billingQuery") {
-                // FReader 프로: 구매 여부와 가격 (Play 스토어와 연결이 안 되면 owned=null)
+                // 이리ERI 프로: 구매 여부와 가격 (Play 스토어와 연결이 안 되면 owned=null)
                 billingQuery(call.argument<String>("product") ?: "", result)
             } else if (call.method == "trialStartGet") {
                 trialStartGet(result)
             } else if (call.method == "trialStartSet") {
                 trialStartSet((call.argument<Number>("ms") ?: 0).toLong(), result)
             } else if (call.method == "billingBuy") {
-                // FReader 프로 구매 창 (결과: purchased·pending·canceled·owned·unavailable·error)
+                // 이리ERI 프로 구매 창 (결과: purchased·pending·canceled·owned·unavailable·error)
                 billingBuy(call.argument<String>("product") ?: "", result)
             } else if (call.method == "shareFile") {
                 // 파일을 형식 그대로 다른 앱으로 공유 (안드로이드 공유 창)

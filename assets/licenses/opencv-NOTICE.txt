@@ -1,6 +1,6 @@
 OpenCV 4.10.0 (org.opencv:opencv:4.10.0)
 https://opencv.org  /  https://github.com/opencv/opencv
-Used in FReader for document scan perspective correction. Unmodified.
+Used in 이리ERI for document scan perspective correction. Unmodified.
 
 COPYRIGHT file of OpenCV 4.10.0 (https://github.com/opencv/opencv/blob/4.10.0/COPYRIGHT), unchanged:
 
@@ -199,7 +199,7 @@ Licensed under the Apache License, Version 2.0:
 
 ==============================================================================
 Third-party components built into libopencv_java4.so
-(from the build configuration embedded in the OpenCV 4.10.0 Android library used by FReader).
+(from the build configuration embedded in the OpenCV 4.10.0 Android library used by 이리ERI).
 zlib is the Android system library and is not bundled. libc++_shared.so is the LLVM C++ runtime from
 the Android NDK (Apache License 2.0 with LLVM Exceptions). License texts below are copied unchanged
 from the sources referenced for each component.

@@ -5,7 +5,7 @@ Dependency version from OpenDocument.core conanfile.py at commit fae77ff7232cc79
 The license text below is copied unchanged from the official source of that version.
 
 uchardet is available under a choice of MPL 1.1, GPL 2.0 or later, or LGPL 2.1 or later.
-FReader uses it under the Mozilla Public License Version 1.1. The source code of the
+이리ERI uses it under the Mozilla Public License Version 1.1. The source code of the
 version used is available at https://gitlab.freedesktop.org/uchardet/uchardet/-/tree/v0.0.8
 
 Source file notice (e.g. src/nsUniversalDetector.cpp):

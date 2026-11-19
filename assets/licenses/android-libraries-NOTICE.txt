@@ -1,4 +1,4 @@
-Android libraries bundled in FReader (resolved release runtime dependencies of the Android app module).
+Android libraries bundled in 이리ERI (resolved release runtime dependencies of the Android app module).
 Flutter engine (io.flutter) and OpenCV are listed separately in the app's license list.
 
 == Google SDKs (not open source) ==
@@ -148,7 +148,7 @@ The Apache Software Foundation (http://www.apache.org/).
 
 (Only the notice relevant to tika-core is reproduced here. Notices in the
 Apache Tika NOTICE file that concern other Tika modules and their
-dependencies are omitted because those components are not included in FReader.)
+dependencies are omitted because those components are not included in 이리ERI.)
 
 -- Apache License, Version 2.0 (full text) --
 

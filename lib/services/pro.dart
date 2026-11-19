@@ -7,11 +7,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/pro_screen.dart';
 import 'storage_service.dart';
 
-/// FReader 프로: 유료 기능(문서 스캔·이미지 합치기·PDF 합치기, 앞으로 추가되는 유료 기능)을 여는 1회 구매
+/// 이리ERI 프로: 유료 기능(문서 스캔·이미지 합치기·PDF 합치기, 앞으로 추가되는 유료 기능)을 여는 1회 구매
 /// - Google Play 결제 (Play Console의 1회성 상품 ID: [productId])
 /// - 구매 화면의 [무료 체험] 버튼을 누른 때부터 [trialLength] 동안 무료 체험 (기기마다 한 번, 시작일은 Block Store에도 기록)
 class Pro {
-  static const String productId = 'freader_pro';
+  static const String productId = 'eri_pro';
   /// 무료 체험 기간. 출시용은 3일(Duration(days: 3)) — 지금은 체험이 끝나는 흐름을 확인하려고 30분
   static const Duration trialLength = Duration(minutes: 30);
 
@@ -129,8 +129,11 @@ class Pro {
 
   static bool get trialActive => trialLeft > Duration.zero;
 
-  /// 파일 추가 메뉴에서 유료 기능을 숨기는지 (구매한 뒤에는 숨기지 않음)
-  static bool get hidesPaid => hidePaid.value && !owned.value;
+  /// 유료 기능 숨기기를 쓸 수 있는지 (구매했거나 무료 체험 중이면 쓸 수 없음 — 유료 기능이 항상 보임)
+  static bool get canHidePaid => !owned.value && !trialActive;
+
+  /// 파일 추가 메뉴에서 유료 기능을 숨기는지
+  static bool get hidesPaid => hidePaid.value && canHidePaid;
 
   /// 기간을 '3일'·'5시간'·'20분'처럼 (남은 시간은 올림)
   static String durationText(String lang, Duration d) {
@@ -162,7 +165,7 @@ class Pro {
     return status;
   }
 
-  /// 유료 기능을 누를 때: 쓸 수 있으면 true, 아니면 FReader 프로 화면을 띄우고 사거나 무료 체험을 시작한 뒤에만 true
+  /// 유료 기능을 누를 때: 쓸 수 있으면 true, 아니면 이리ERI 프로 화면을 띄우고 사거나 무료 체험을 시작한 뒤에만 true
   static Future<bool> ensure(BuildContext context, String lang) async {
     if (canUse) return true;
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProScreen(lang: lang, fromFeature: true)));

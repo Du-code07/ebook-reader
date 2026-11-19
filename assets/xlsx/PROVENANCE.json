@@ -5,7 +5,7 @@
     "license": "MIT",
     "npmIntegrity": "sha512-t5dJ+pLGUTmjDjGNV9wE1cdRqFg5vDSVZN7I7okMSiMNnCR9tdk0P7O9yZ8EtXgtV2rToF7E4L6Lbca7yt+4+w==",
     "npmTarball": "https://registry.npmjs.org/@silurus/ooxml/-/ooxml-0.89.8.tgz",
-    "modifications": "ES module .mjs filenames/references renamed to .js for Android asset MIME handling. FReader v87 replaces merged continuation coordinate expansion in renderer-CCA_bQB8.js with the range interval index in ../merge_ranges.js. Original parsed merge rectangles, anchors and styles remain intact.",
+    "modifications": "ES module .mjs filenames/references renamed to .js for Android asset MIME handling. 이리ERI v87 replaces merged continuation coordinate expansion in renderer-CCA_bQB8.js with the range interval index in ../merge_ranges.js. Original parsed merge rectangles, anchors and styles remain intact.",
     "artifacts": {
       "abort-JztSoyw2.js": {
         "upstreamName": "abort-JztSoyw2.js",

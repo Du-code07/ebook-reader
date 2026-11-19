@@ -1,7 +1,7 @@
-FReader HWP/HWPX reader
+이리ERI HWP/HWPX reader
 
-The FReader host files (index.html, reader.css and reader.js) adapt the original
-FReader reading UI to the unmodified rhwp document engine. Documents are opened
+The 이리ERI host files (index.html, reader.css and reader.js) adapt the original
+이리ERI reading UI to the unmodified rhwp document engine. Documents are opened
 read-only. No document is uploaded for conversion or rendering.
 
 rhwp 0.8.7

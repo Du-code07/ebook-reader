@@ -1,4 +1,4 @@
-Free Korean fonts bundled with FReader (SIL Open Font License 1.1), from github.com/google/fonts (ofl/). Converted to WOFF2 without changes to the font data.
+Free Korean fonts bundled with 이리ERI (SIL Open Font License 1.1), from github.com/google/fonts (ofl/). Converted to WOFF2 without changes to the font data.
 
 == nanumgothic ==
 Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com),

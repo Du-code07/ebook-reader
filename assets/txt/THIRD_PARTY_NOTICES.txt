@@ -1,7 +1,7 @@
-FReader offline TXT support — v48
+이리ERI offline TXT support — v48
 
 TXT bytes are decoded by Dart Unicode codecs and cp949_codec 1.0.2 (BSD-3-Clause).
-FReader lays out the decoded text into fixed paper pages using the existing
+이리ERI lays out the decoded text into fixed paper pages using the existing
 Flutter text engine (TextPainter / CustomPainter). No new dependency is added.
 The bookshelf file name, file type and saved-reading identity remain TXT.
 Only private temporary UTF-8 page data is produced; no PDF or EPUB is created

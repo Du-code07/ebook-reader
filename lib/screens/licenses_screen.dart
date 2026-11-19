@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../services/asset_licenses.dart';
 import '../services/storage_service.dart';
+import '../widgets/push_aside_route.dart';
 
 /// 도움말 '오픈소스 라이선스': 이름을 누르면 원본 주소(프로젝트·패키지 페이지)로, 오른쪽 아이콘은 라이선스 전문
 class LicensesScreen extends StatefulWidget {
@@ -67,7 +68,7 @@ class _LicensesScreenState extends State<LicensesScreen> {
   }
 
   void _showText(String name, List<String> texts) {
-    Navigator.of(context).push(MaterialPageRoute(
+    Navigator.of(context).push(PushAsideRoute(
       builder: (ctx) => Scaffold(
         appBar: AppBar(title: Text(name, style: const TextStyle(fontWeight: FontWeight.w800))),
         body: SafeArea(
@@ -104,10 +105,10 @@ class _LicensesScreenState extends State<LicensesScreen> {
                     return Padding(
                       padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
                       child: Text(
-                        _tr('FReader에 들어 있는 오픈소스 소프트웨어와 글꼴이에요\n이름을 누르면 원본 페이지가 열리고, 오른쪽 아이콘으로 라이선스 전문을 볼 수 있어요',
-                            'Open source software and fonts included in FReader\nTap a name to open its original page, or the icon on the right to read the full license',
-                            'FReader 中包含的开源软件和字体\n点击名称打开原始页面，点击右侧图标查看许可全文',
-                            'FReaderに含まれるオープンソースソフトウェアとフォントです\n名前をタップすると元のページが開き、右のアイコンでライセンス全文を見られます'),
+                        _tr('이리ERI에 들어 있는 오픈소스 소프트웨어와 글꼴이에요\n이름을 누르면 원본 페이지가 열리고, 오른쪽 아이콘으로 라이선스 전문을 볼 수 있어요',
+                            'Open source software and fonts included in 이리ERI\nTap a name to open its original page, or the icon on the right to read the full license',
+                            '이리ERI 中包含的开源软件和字体\n点击名称打开原始页面，点击右侧图标查看许可全文',
+                            '이리ERIに含まれるオープンソースソフトウェアとフォントです\n名前をタップすると元のページが開き、右のアイコンでライセンス全文を見られます'),
                         style: TextStyle(fontSize: 13.5, height: 1.45, color: cs.onSurfaceVariant),
                       ),
                     );

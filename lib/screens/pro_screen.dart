@@ -4,7 +4,7 @@ import '../services/pro.dart';
 import '../services/storage_service.dart';
 import '../widgets/app_colors.dart';
 
-/// FReader 프로 구매 화면: 유료 기능, 무료 체험 상태, 구매 전 안내(청약철회 제한), 구매·구매 복원
+/// 이리ERI 프로 구매 화면: 유료 기능, 무료 체험 상태, 구매 전 안내(청약철회 제한), 구매·구매 복원
 class ProScreen extends StatefulWidget {
   const ProScreen({super.key, required this.lang, this.fromFeature = false});
   final String lang;
@@ -66,7 +66,7 @@ class _ProScreenState extends State<ProScreen> {
     switch (status) {
       case 'purchased':
       case 'owned':
-        _snack(_t('FReader 프로를 구매했어요', 'You purchased FReader Pro', '已购买 FReader 专业版', 'FReader プロを購入しました'));
+        _snack(_t('이리ERI 프로를 구매했어요', 'You purchased 이리ERI Pro', '已购买 이리ERI 专业版', '이리ERI プロを購入しました'));
         if (widget.fromFeature) Navigator.of(context).pop();
         break;
       case 'pending':
@@ -156,7 +156,7 @@ class _ProScreenState extends State<ProScreen> {
         );
 
     return Scaffold(
-      appBar: AppBar(title: Text(_t('FReader 프로', 'FReader Pro', 'FReader 专业版', 'FReader プロ'), style: const TextStyle(fontWeight: FontWeight.w800))),
+      appBar: AppBar(title: Text(_t('이리ERI 프로', '이리ERI Pro', '이리ERI 专业版', '이리ERI プロ'), style: const TextStyle(fontWeight: FontWeight.w800))),
       body: SafeArea(
         child: ValueListenableBuilder<bool>(
           valueListenable: Pro.owned,

@@ -7,10 +7,10 @@ const String _blank = legalBlankEn;
 
 const List<(String, List<String>)> termsEn = [
   ('Article 1 (Purpose)', [
-    'These Terms of Service (the "Terms") set out the rights, obligations and responsibilities between the developer of FReader (the "Operator") and users of the app (the "Users") regarding the use of the mobile app FReader (the "App").',
+    'These Terms of Service (the "Terms") set out the rights, obligations and responsibilities between the developer of 이리ERI (the "Operator") and users of the app (the "Users") regarding the use of the mobile app 이리ERI (the "App").',
   ]),
   ('Article 2 (Definitions)', [
-    '- "App" means the document viewer app "FReader" provided by the Operator through Google Play.',
+    '- "App" means the document viewer app "이리ERI" provided by the Operator through Google Play.',
     '- "User" means an individual who accesses or uses the App under these Terms.',
     '- "Paid Features" means additional or premium features that can be used, for as long as the Operator provides the App, through a one-time in-app purchase made with the Google Play billing system.',
     '- "User Files" means documents, images and other files that a User adds to or opens with the App, and the notes, annotations and bookmarks a User creates in the App.',
@@ -28,9 +28,9 @@ const List<(String, List<String>)> termsEn = [
     'To provide its core features, the App uses access to files and folders chosen by the User (through the system file picker and Folders to Search) and some optional device permissions (camera access for document scanning, biometrics for unlocking, etc.). If a User does not allow an optional permission or access is restricted by changes in Android OS policy, the related feature may not work.',
   ]),
   ('Article 5 (Payment, Restoration and Withdrawal for Paid Features)', [
-    'The basic features of the App are free, and Paid Features are provided through a one-time purchase of "FReader Pro". Paid Features include Scan Document, Merge Images and Merge PDFs, and paid features that the Operator includes in FReader Pro in the future are also provided at no additional cost to Users who have purchased FReader Pro. The Operator may sell products separate from FReader Pro, in which case they will be shown separately on the purchase screen.',
-    'The price and content of FReader Pro (a one-time purchase usable for as long as the Operator provides the App) are clearly displayed on the purchase screen (App Settings > FReader Pro) before payment.',
-    'Free trial: Users may use the Paid Features free of charge for 3 days from the time they start the free trial on the purchase screen (App Settings > FReader Pro). The free trial is offered once per device (if the trial record is moved to a new device through a device transfer or restore, the trial is treated as already used on the new device as well), and even if the App is reinstalled or its data is cleared on the same device, the trial period is counted from the day it was first started.',
+    'The basic features of the App are free, and Paid Features are provided through a one-time purchase of "이리ERI Pro". Paid Features include Scan Document, Merge Images and Merge PDFs, and paid features that the Operator includes in 이리ERI Pro in the future are also provided at no additional cost to Users who have purchased 이리ERI Pro. The Operator may sell products separate from 이리ERI Pro, in which case they will be shown separately on the purchase screen.',
+    'The price and content of 이리ERI Pro (a one-time purchase usable for as long as the Operator provides the App) are clearly displayed on the purchase screen (App Settings > 이리ERI Pro) before payment.',
+    'Free trial: Users may use the Paid Features free of charge for 3 days from the time they start the free trial on the purchase screen (App Settings > 이리ERI Pro). The free trial is offered once per device (if the trial record is moved to a new device through a device transfer or restore, the trial is treated as already used on the new device as well), and even if the App is reinstalled or its data is cleared on the same device, the trial period is counted from the day it was first started.',
     'All payments are processed through the Google Play billing system, and payment methods, receipts and payment cancellations follow Google Play policies.',
     'Restoring purchases: If a User reinstalls the App or moves to another compatible Android device, the purchased Paid Features can be restored by installing the App from the Google Play Store with the Google account used for the original purchase.',
     'Users who are minors under the laws of their place of residence must obtain the consent of a parent or legal representative to purchase Paid Features. If a minor makes a payment without such consent, the minor or the legal representative may cancel the payment in accordance with applicable law (except where the minor used deception to make others believe that the minor was an adult or had the consent of the legal representative).',
@@ -86,7 +86,6 @@ const List<(String, List<String>)> termsEn = [
     '- Business name: $_blank',
     '- Representative: $_blank',
     '- Address: $_blank',
-    '- Phone: +82-10-4531-7660',
     '- Email: $_email',
     '- Business registration number: $_blank',
     '- Mail-order business report number: $_blank',
@@ -96,7 +95,7 @@ const List<(String, List<String>)> termsEn = [
 
 const List<(String, List<String>)> privacyEn = [
   ('1. Overview', [
-    'The developer of FReader (the "Operator") values the personal information of users. FReader (the "App") requires no sign-up or login, and the Operator does not run its own servers or collect personal information directly through the App. However, information processed by the Google SDKs included in the App (Google ML Kit in Section 4 and Google Play billing in Section 5) and inquiry emails sent by users (Section 7) are handled as described in those sections.',
+    'The developer of 이리ERI (the "Operator") values the personal information of users. 이리ERI (the "App") requires no sign-up or login, and the Operator does not run its own servers or collect personal information directly through the App. However, information processed by the Google SDKs included in the App (Google ML Kit in Section 4 and Google Play billing in Section 5) and inquiry emails sent by users (Section 7) are handled as described in those sections.',
     'Viewing and converting documents, scanned images and text recognition (OCR) are processed on the user\'s device, and the App does not automatically send them to the Operator\'s servers or third parties. However, Google ML Kit included in the App may send technical information to Google as described in Section 4.',
     'When a user chooses to send files or text to another app with the Share feature, attaches files to an inquiry email, or uses the Android OS backup, the privacy policies of those apps and services apply to that transfer and storage.',
   ]),
@@ -106,7 +105,7 @@ const List<(String, List<String>)> privacyEn = [
     '- App settings and user fonts: app settings (theme, language, display style, etc.), font files imported by the user, and the list of Folders to Search registered by the user',
     '- Privacy lock data: if the lock is turned on, the password or pattern is stored only as a salted hash, not as plain text.',
     '- Temporary cache files: page preview images and table-of-contents data created to open documents quickly',
-    'The privacy lock only restricts viewing within the FReader app screens and does not encrypt the document files themselves in device storage.',
+    'The privacy lock only restricts viewing within the 이리ERI app screens and does not encrypt the document files themselves in device storage.',
     'If the Android system backup setting on the user\'s device is turned on, some app settings and library data may be included in the user\'s own Google Account backup through the Android OS.',
   ]),
   ('3. App Permissions and Purposes', [
@@ -126,7 +125,7 @@ const List<(String, List<String>)> privacyEn = [
     '- How to refuse and its effect: Users can reduce this processing by not using the features that find, copy or build tables of contents from text on image-based pages, and all other features of the App remain available.',
   ]),
   ('5. In-App Purchases', [
-    'Purchases of FReader Pro (Paid Features) are processed only through the Google Play billing system.',
+    'Purchases of 이리ERI Pro (Paid Features) are processed only through the Google Play billing system.',
     'Payment information (such as credit card numbers) is processed directly by Google, and the Operator does not receive or store it. To provide Paid Features and confirm purchases, the App processes the product ID, price, purchase state and purchase token (the purchase token is used only to ask Google Play to acknowledge the purchase and is not sent to the Operator).',
     '- Stored on the device: whether the purchase has been made (so Paid Features can be used without internet access) and the start date of the free trial. These are deleted when the data is cleared or the App is deleted, and the purchase can be restored with the same Google account.',
     '- The start date of the free trial is also recorded in the Block Store of Google Play services so that the trial is not repeated on the same device. This value contains only the start date and time and is not sent to the Operator. The App does not request a cloud backup of this value, but it may be moved to a new device if the user performs a device transfer or restore with a Google account or a manufacturer tool (e.g. Samsung Smart Switch). It may remain on the same device even if the App or its data is deleted, and it is deleted when the device is reset.',
@@ -142,7 +141,7 @@ const List<(String, List<String>)> privacyEn = [
     '  · Recipient and contact: Google LLC (1600 Amphitheatre Parkway, Mountain View, CA 94043, USA / privacy inquiries: https://support.google.com/policies/contact/general_privacy_form)',
     '  · Countries of storage: the United States and other countries where Google operates data centers (data center locations: https://datacenters.google/locations/)',
     '  · Time and method of transfer: Sent over the internet and stored when the user sends an inquiry email. Whether the transmission is encrypted may depend on the email service the user uses.',
-    '  · Items transferred: the inquiry information in Section 7 (email address, inquiry content and attached files)',
+    '  · Items transferred: the inquiry information in Section 7 (email address, inquiry subject and content, attached files, and app version and device information if the user chooses to include them)',
     '  · Purpose of use and retention period: Same as Section 7.',
     '  · How to refuse and its effect: Nothing is transferred if the user does not send an inquiry by email. In that case, however, the user cannot receive an email response.',
     '- The App contains no advertising SDKs, and the Operator does not use separate usage analytics or tracking tools.',
@@ -150,8 +149,8 @@ const List<(String, List<String>)> privacyEn = [
     '- Document screens (EPUB, etc.) do not load images, fonts, styles or other content from external internet addresses written in the document. External links in a document open in the device\'s browser or another app only when the user taps them, after which the policies of that website or app apply.',
   ]),
   ('7. Information Received by Inquiry Email', [
-    'If a user makes an inquiry by email, the Operator processes the following information.',
-    '- Items: email address, inquiry content and files attached by the user',
+    'If a user makes an inquiry by email (Help > Contact Us in the App opens the user\'s email app to send the email), the Operator processes the following information.',
+    '- Items: email address, inquiry subject and content, files attached by the user, and (if the user chooses to include them on the Contact Us screen) app version, device manufacturer and model, and Android version',
     '- Purpose: responding to inquiries and checking and fixing errors',
     '- Retention period: Destroyed after being kept for 1 year after the inquiry is resolved (3 years for records of consumer complaints and dispute handling under e-commerce and other applicable laws). If the user requests deletion, the information is destroyed without delay unless the law requires it to be kept.',
     '- Method of destruction: When the retention period ends or a deletion request is received, the Operator deletes the relevant emails from the Gmail inbox and sent folder, empties the trash, and also deletes any attachments downloaded to the Operator\'s devices. Final deletion from Google\'s internal backups may take some time according to Google\'s deletion process.',

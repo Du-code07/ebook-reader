@@ -1,6 +1,8 @@
 import 'dart:async';
 import '../services/pro.dart';
 import 'pro_screen.dart';
+import 'faq_screen.dart';
+import 'contact_screen.dart';
 import '../widgets/favorite_ribbon.dart';
 import '../widgets/file_type_icon.dart';
 import 'user_fonts_screen.dart';
@@ -16,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import '../widgets/pop_dialog.dart';
+import '../widgets/push_aside_route.dart';
 import '../widgets/app_colors.dart';
 
 import '../services/storage_service.dart';
@@ -459,7 +462,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               title: _t('사생활 보호', 'Privacy', '隐私保护', 'プライバシー保護'),
               subtitle: _t('앱·파일을 비밀번호·패턴·생체 인식으로 잠가요', 'Lock the app and files with a PIN, pattern or biometrics', '用密码·图案·生物识别锁定应用和文件', 'アプリ・ファイルを暗証番号・パターン・生体認証でロックします'),
               onTap: () async {
-                await Navigator.of(context).push(MaterialPageRoute(builder: (_) => PrivacyLockScreen(t: _t)));
+                await Navigator.of(context).push(PushAsideRoute(builder: (_) => PrivacyLockScreen(t: _t)));
                 if (mounted) setState(() {});
               },
             ),
@@ -498,7 +501,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               icon: Icons.grid_view_outlined,
               title: _t('탭 영역', 'Tap Zones', '点击区域', 'タップ領域'),
               subtitle: _t('영역별로 눌렀을 때의 동작을 정해요', 'Set what tapping each area does', '设置点击各区域时的操作', 'エリアごとのタップ時の動作を決めます'),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TapZoneScreen(t: _t))),
+              onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => TapZoneScreen(t: _t))),
             ),
             _item(
               icon: Icons.touch_app_outlined,
@@ -515,7 +518,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                   ? _t('파일 탐색·글꼴 찾기가 찾을 폴더', 'Where Find Files and Find Fonts search', '查找文件·查找字体的位置', 'ファイル検索・フォント検索が探すフォルダ')
                   : _t('폴더 $_scanFolderCount개', '$_scanFolderCount folder(s)', '$_scanFolderCount 个文件夹', 'フォルダ $_scanFolderCount 個'),
               onTap: () async {
-                await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ScanFoldersScreen(appLang: _lang)));
+                await Navigator.of(context).push(PushAsideRoute(builder: (_) => ScanFoldersScreen(appLang: _lang)));
                 _countScanFolders();
               },
             ),
@@ -526,30 +529,30 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               leading: const DocPairIcon(size: 25),
               title: _t('한글·워드 글꼴', 'HWP·Word Fonts', 'HWP·Word 字体', 'HWP・Wordフォント'),
               subtitle: _t('문서 글꼴', 'Document fonts', '文档字体', '文書フォント'),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'doc'))),
+              onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => UserFontsScreen(t: _t, category: 'doc'))),
             ),
             _item(
               icon: Icons.font_download_outlined,
               title: _t('앱 글꼴', 'App Font', '应用字体', 'アプリのフォント'),
               subtitle: _t('메뉴·목록·설정 화면 글꼴', 'Font for menus, lists and settings', '菜单、列表、设置的字体', 'メニュー・一覧・設定のフォント'),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'app'))),
+              onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => UserFontsScreen(t: _t, category: 'app'))),
             ),
             _item(
               icon: Icons.menu_book_outlined,
               leading: FileTypeIcon(ext: 'epub', size: 24, color: Theme.of(context).colorScheme.onSurface),
               title: _t('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント'),
               subtitle: _t('EPUB 책 본문 글꼴', 'Font for EPUB book text', 'EPUB正文字体', 'EPUB本文のフォント'),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'epub'))),
+              onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => UserFontsScreen(t: _t, category: 'epub'))),
             ),
             // 데이터: 캐시 지우기 · 데이터 지우기
-            // 프로: FReader 프로 구매와 유료 기능 숨기기
+            // 프로: 이리ERI 프로 구매와 유료 기능 숨기기
             _section(_t('프로', 'Pro', '专业版', 'プロ')),
-            // FReader 프로: 유료 기능 구매·복원과 무료 체험 상태
+            // 이리ERI 프로: 유료 기능 구매·복원과 무료 체험 상태
             ListenableBuilder(
               listenable: Listenable.merge([Pro.owned, Pro.trialChanged]),
               builder: (context, _) => _item(
                 icon: Icons.workspace_premium_outlined,
-                title: _t('FReader 프로', 'FReader Pro', 'FReader 专业版', 'FReader プロ'),
+                title: _t('이리ERI 프로', '이리ERI Pro', '이리ERI 专业版', '이리ERI プロ'),
                 subtitle: Pro.owned.value
                     ? _t('구매했어요', 'Purchased', '已购买', '購入済み')
                     : !Pro.trialStarted
@@ -558,26 +561,29 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                             ? _t('무료 체험 ${Pro.durationText(_lang, Pro.trialLeft)} 남음', '${Pro.durationText(_lang, Pro.trialLeft)} of free trial left', '免费试用剩 ${Pro.durationText(_lang, Pro.trialLeft)}', '無料体験 残り${Pro.durationText(_lang, Pro.trialLeft)}')
                             : _t('무료 체험이 끝났어요', 'Your free trial has ended', '免费试用已结束', '無料体験は終了しました'),
                 onTap: () async {
-                  await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProScreen(lang: _lang)));
+                  await Navigator.of(context).push(PushAsideRoute(builder: (_) => ProScreen(lang: _lang)));
                   if (mounted) setState(() {});
                 },
               ),
             ),
             // 유료 기능 숨기기: 파일 추가 메뉴에서 스캔·합치기를 감춤 (구매한 뒤에는 쓸 수 없음 — 유료 기능이 항상 보임)
             ListenableBuilder(
-              listenable: Listenable.merge([Pro.hidePaid, Pro.owned]),
+              listenable: Listenable.merge([Pro.hidePaid, Pro.owned, Pro.trialChanged]),
               builder: (context, _) {
                 final bool owned = Pro.owned.value;
-                final bool hide = Pro.hidePaid.value && !owned;
+                final bool locked = !Pro.canHidePaid;
+                final bool hide = Pro.hidesPaid;
                 return _item(
                   icon: Icons.visibility_off_outlined,
                   title: _t('유료 기능 숨기기', 'Hide Paid Features', '隐藏付费功能', '有料機能を隠す'),
                   subtitle: owned
-                      ? _t('FReader 프로를 구매해서 유료 기능이 모두 보여요', 'All paid features are shown because you own FReader Pro', '已购买 FReader 专业版，付费功能全部显示', 'FReader プロを購入済みのため、有料機能はすべて表示されます')
-                      : _t('파일 추가 메뉴에서 스캔·PDF 합치기·이미지 합치기를 숨겨요', 'Hides Scan, Merge PDFs and Merge Images in the Add Files menu',
+                      ? _t('이리ERI 프로를 구매해서 유료 기능이 모두 보여요', 'All paid features are shown because you own 이리ERI Pro', '已购买 이리ERI 专业版，付费功能全部显示', '이리ERI プロを購入済みのため、有料機能はすべて表示されます')
+                      : locked
+                          ? _t('무료 체험 중에는 유료 기능이 모두 보여요', 'All paid features are shown during the free trial', '免费试用期间付费功能全部显示', '無料体験中は有料機能がすべて表示されます')
+                          : _t('파일 추가 메뉴에서 스캔·PDF 합치기·이미지 합치기를 숨겨요', 'Hides Scan, Merge PDFs and Merge Images in the Add Files menu',
                           '在添加文件菜单中隐藏扫描、合并 PDF 和合并图片', 'ファイル追加メニューでスキャン・PDF結合・画像結合を隠します'),
-                  onTap: owned ? null : () => Pro.setHidePaid(!hide),
-                  trailing: Switch(value: hide, onChanged: owned ? null : Pro.setHidePaid),
+                  onTap: locked ? null : () => Pro.setHidePaid(!hide),
+                  trailing: Switch(value: hide, onChanged: locked ? null : Pro.setHidePaid),
                 );
               },
             ),
@@ -604,19 +610,31 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               onTap: () => widget.onOpenGuide(_lang),
             ),
             _item(
+              icon: Icons.help_outline,
+              title: _t('자주 묻는 질문', 'FAQ', '常见问题', 'よくある質問'),
+              subtitle: _t('지원 형식, 요금, 파일 추가 방식 등', 'Supported formats, pricing, how files are added and more', '支持的格式、费用、文件添加方式等', '対応形式、料金、ファイルの追加方法など'),
+              onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => FaqScreen(lang: _lang))),
+            ),
+            _item(
+              icon: Icons.mail_outline,
+              title: _t('문의하기', 'Contact Us', '联系我们', 'お問い合わせ'),
+              subtitle: ContactScreen.supportEmail,
+              onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => ContactScreen(lang: _lang))),
+            ),
+            _item(
               icon: Icons.gavel_outlined,
               title: _t('이용 약관', 'Terms of Service', '使用条款', '利用規約'),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => LegalScreen(doc: LegalDoc.terms, lang: _lang))),
+              onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => LegalScreen(doc: LegalDoc.terms, lang: _lang))),
             ),
             _item(
               icon: Icons.privacy_tip_outlined,
               title: _t('개인정보 처리방침', 'Privacy Policy', '隐私政策', 'プライバシーポリシー'),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => LegalScreen(doc: LegalDoc.privacy, lang: _lang))),
+              onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => LegalScreen(doc: LegalDoc.privacy, lang: _lang))),
             ),
             _item(
               icon: Icons.article_outlined,
               title: _t('오픈소스 라이선스', 'Open Source Licenses', '开源许可', 'オープンソースライセンス'),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => LicensesScreen(appLang: _lang))),
+              onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => LicensesScreen(appLang: _lang))),
             ),
           ],
         ),

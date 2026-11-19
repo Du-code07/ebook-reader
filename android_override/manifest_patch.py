@@ -1,4 +1,4 @@
-# FReader: 매니페스트에 카메라 권한(선택)과 연결 앱(파일 열기) 목록 등록을 넣음 (GitHub Actions에서 실행)
+# 이리ERI: 매니페스트에 카메라 권한(선택)과 연결 앱(파일 열기) 목록 등록을 넣음 (GitHub Actions에서 실행)
 import sys
 p = sys.argv[1]
 s = open(p, encoding='utf-8').read()
@@ -22,7 +22,7 @@ if 'FREADER_OPEN_WITH' not in s:
         'application/x-cbz', 'application/vnd.comicbook+zip',
     ]
     data = ''.join(f'<data android:mimeType="{m}"/>' for m in mimes)
-    f1 = ('<!-- FREADER_OPEN_WITH: 다른 앱의 연결 앱 목록에 FReader가 보이게 -->'
+    f1 = ('<!-- FREADER_OPEN_WITH: 다른 앱의 연결 앱 목록에 이리ERI가 보이게 -->'
           '<intent-filter><action android:name="android.intent.action.VIEW"/>'
           '<category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/>'
           '<data android:scheme="content"/><data android:scheme="file"/>' + data + '</intent-filter>')

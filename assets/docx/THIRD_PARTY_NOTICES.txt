@@ -1,9 +1,9 @@
-FReader DOCX reader
+이리ERI DOCX reader
 
 OpenDocument.core 7.7.0 is bundled from the official @opendocument/odr-core
 npm package. The WASM engine is unmodified. The JavaScript module was renamed
 from .mjs to .js for Android MIME compatibility; the wrapper import was adjusted.
-The original wrapper is included as engine/index.upstream.js. Its HTML output is adapted for FReader's
+The original wrapper is included as engine/index.upstream.js. Its HTML output is adapted for 이리ERI's
 existing read-only UI. No document is uploaded, edited or saved by this viewer.
 
 License: Mozilla Public License 2.0, included in engine/LICENSE.
@@ -16,7 +16,7 @@ Original package integrity and asset hashes: engine/PROVENANCE.json.
 The host reuses the Noto Sans KR, Noto Serif KR and Latin Modern Math fonts
 already bundled under assets/hwp/fonts. Their licenses and notices are included
 there and in assets/hwp/THIRD_PARTY_NOTICES.txt. Missing document fonts are
-substituted. FReader paginates the rendered content to the document's page size;
+substituted. 이리ERI paginates the rendered content to the document's page size;
 the resulting pagination and complex Word features can differ from Microsoft Word.
 
 Additional Noto Sans KR and Noto Serif KR CJK punctuation subsets are bundled
@@ -37,3 +37,15 @@ engine; substituted fonts and complex floating objects can still change pages.
 Additional unmodified Noto Sans / Noto Serif Latin TrueType fonts are bundled
 under fonts/ (SIL Open Font License 1.1). Licenses and original download URLs,
 file sizes and SHA-256 checksums: fonts/*-OFL.txt and LATIN_PROVENANCE.json.
+
+Libraries statically linked into odr-core.wasm (per the OpenDocument.core
+conanfile.py at the commit above; HTTP server and Python options are not part
+of the WebAssembly build): pugixml 1.15, Crypto++ 8.9.0, {fmt} 11.2.0,
+MD4C 0.5.2, miniz 3.1.1, nlohmann/json 3.12.0, OpenJPEG 2.5.4, uchardet 0.0.8
+(used under MPL 1.1) and utfcpp 4.0.9. Their unchanged license texts are in
+assets/licenses/ and are shown in the app under Settings > Help > Open source licenses.
+
+Source code of the modified MPL-2.0 files: the modified files are shipped in
+source form inside the app (assets/docx/engine/*.js, with the original wrapper
+as engine/index.upstream.js). A copy of these files can also be requested at
+dudu.dev.pr@gmail.com.

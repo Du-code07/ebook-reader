@@ -3,7 +3,7 @@ https://developers.google.com/ml-kit
 
 ML Kit is not open source software. It is provided by Google under the ML Kit
 Terms of Service (https://developers.google.com/ml-kit/terms) and the Google APIs
-Terms of Service. FReader uses it on the device to recognize text in image-based
+Terms of Service. 이리ERI uses it on the device to recognize text in image-based
 pages (scanned PDFs, images and image-only slides). Page images and recognized
 text are processed on the device; the
 SDK may send diagnostic and usage information to Google, as described in

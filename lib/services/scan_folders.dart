@@ -86,7 +86,7 @@ class ScanFolders {
         title: Text(tr('탐색할 폴더 고르기', 'Choose folders to search', '选择要查找的文件夹', '探すフォルダを選ぶ')),
         content: Text(tr(
           '파일을 찾을 폴더를 골라 주세요\n고른 폴더와 그 안의 폴더에서 찾고, 다음부터는 바로 찾아요\n폴더는 앱 설정 > 탐색할 폴더에서 더 넣거나 뺄 수 있어요',
-          'Choose a folder to search for files\nFReader searches it and the folders inside it, and remembers it for next time\nAdd or remove folders in App Settings > Folders to Search',
+          'Choose a folder to search for files\n이리ERI searches it and the folders inside it, and remembers it for next time\nAdd or remove folders in App Settings > Folders to Search',
           '请选择要查找文件的文件夹\n会在该文件夹及其子文件夹中查找，下次直接查找\n可在应用设置 > 要查找的文件夹中添加或移除',
           'ファイルを探すフォルダを選んでください\n選んだフォルダとその中のフォルダから探し、次からはすぐに探します\nフォルダはアプリ設定 > 探すフォルダで追加・削除できます',
         )),
