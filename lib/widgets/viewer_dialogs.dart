@@ -1904,7 +1904,7 @@ Future<bool> restoreBookmarkView(
 }
 
 /// 길게 눌러(0.5초, 거의 움직이지 않고) 끌어 옮기기: 막대가 손가락을 따라 움직이고, [sides] 가장자리 근처에서는 그 자리 모양(가로·세로)으로만 바뀜.
-/// 근처에서 놓으면 그 자리로 자석처럼 붙고([onDrop]), 아니면 원래 자리로 돌아감 ([BarDragMixin])
+/// 놓으면 가장 가까운 가장자리로 자석처럼 붙음 ([onDrop], [BarDragMixin])
 /// 제스처 경쟁에 끼지 않는 Listener로 받으므로 안의 슬라이더·단추는 그대로 동작함
 /// (안의 슬라이더가 누른 순간 값을 바꿨다면 [onHoldStart]에서 되돌림)
 class HoldToMove extends StatefulWidget {
@@ -1924,7 +1924,7 @@ class HoldToMove extends StatefulWidget {
   final String current;
   /// [side]에 놓였을 때의 막대 모양 (끄는 동안 손가락을 따라 그려짐, 누를 수 없음)
   final Widget Function(String side) feedback;
-  /// 가장자리 근처에서 놓았을 때 그 가장자리
+  /// 놓았을 때 가장 가까운 가장자리
   final ValueChanged<String> onDrop;
   final VoidCallback? onDown;
   final VoidCallback? onHoldStart;

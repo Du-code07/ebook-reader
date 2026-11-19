@@ -3734,16 +3734,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                   const SizedBox(height: 4),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    // 파일 형식 글자: 다크 테마는 어두운 바탕에 잘 보이는 밝은 회색
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF7CB342).withValues(alpha: 0.16),
+                                      color: widget.isDarkMode ? Colors.white.withValues(alpha: 0.10) : const Color(0xFF7CB342).withValues(alpha: 0.16),
                                       borderRadius: BorderRadius.circular(5),
                                     ),
                                     child: Text(
                                       lowerExt.toUpperCase(),
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
-                                        color: Color(0xFF4E7A1E),
+                                        color: widget.isDarkMode ? const Color(0xFFD7D7DC) : const Color(0xFF4E7A1E),
                                       ),
                                     ),
                                   ),

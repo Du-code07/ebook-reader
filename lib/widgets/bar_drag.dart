@@ -8,7 +8,7 @@ import 'app_colors.dart';
 /// 길게 눌러 끌어 옮기는 막대 (도구 모음·진행바·메모 도구 모음)가 함께 쓰는 끌기
 /// - 끄는 동안: 막대가 손가락을 따라 움직임 (원래 자리는 비워 둠)
 /// - 옮길 수 있는 가장자리 근처에 가면: 그 자리에 맞는 모양(가로·세로)으로만 바뀌고, 손가락은 계속 따라감
-/// - 근처에서 놓으면: 그 자리로 자석처럼 빨려 들어가 붙음. 근처가 아닌 곳에서 놓으면 원래 자리로 돌아감
+/// - 놓으면: 가장 가까운 가장자리로 자석처럼 빨려 들어가 붙음 (중간에 멈추지 않음)
 mixin BarDragMixin<T extends StatefulWidget> on State<T>, TickerProvider {
   /// 옮길 수 있는 가장자리 ('top' · 'bottom' · 'left' · 'right')
   List<String> get dragSides;
@@ -74,6 +74,16 @@ mixin BarDragMixin<T extends StatefulWidget> on State<T>, TickerProvider {
     return best;
   }
 
+  /// 손가락에서 가장 가까운 가장자리 (멀리 있어도)
+  String _closestSide(Offset p) {
+    final Size size = MediaQuery.sizeOf(context);
+    final Map<String, double> dist = {
+      for (final side in dragSides)
+        side: switch (side) { 'left' => p.dx, 'right' => size.width - p.dx, 'top' => p.dy, _ => size.height - p.dy },
+    };
+    return dist.entries.reduce((a, b) => a.value <= b.value ? a : b).key;
+  }
+
   void dragStart(Offset finger) {
     final Rect? r = _ownRect();
     if (r == null) return;
@@ -115,10 +125,10 @@ mixin BarDragMixin<T extends StatefulWidget> on State<T>, TickerProvider {
     _placeAtFinger();
   }
 
-  /// 손을 뗐을 때 (취소면 [cancel]): 근처면 그 자리로, 아니면 원래 자리로 빨려 들어감
+  /// 손을 뗐을 때 (취소면 [cancel]): 중간에서 멈추지 않고 가장 가까운 가장자리로 빨려 들어감 (취소면 원래 자리로)
   void dragEnd({bool cancel = false}) {
     if (_entry == null || _settling) return;
-    final String? side = cancel ? null : _hover;
+    final String? side = cancel ? null : (_hover ?? _closestSide(_finger));
     _settling = true;
     if (side != null && side != dragCurrent) dragDrop(side);
     // 새 자리가 그려진 뒤 그 자리를 알아내 빨려 들어감
