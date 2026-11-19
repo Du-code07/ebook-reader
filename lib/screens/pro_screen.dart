@@ -6,8 +6,11 @@ import '../widgets/app_colors.dart';
 
 /// FReader 프로 구매 화면: 유료 기능, 무료 체험 상태, 구매 전 안내(청약철회 제한), 구매·구매 복원
 class ProScreen extends StatefulWidget {
-  const ProScreen({super.key, required this.lang});
+  const ProScreen({super.key, required this.lang, this.fromFeature = false});
   final String lang;
+
+  /// 유료 기능을 누르다 열린 경우: 무료 체험을 시작하거나 사면 바로 닫고 그 기능으로 돌아감
+  final bool fromFeature;
 
   @override
   State<ProScreen> createState() => _ProScreenState();
@@ -57,6 +60,7 @@ class _ProScreenState extends State<ProScreen> {
       case 'purchased':
       case 'owned':
         _snack(_t('FReader 프로를 구매했어요', 'You purchased FReader Pro', '已购买 FReader 专业版', 'FReader プロを購入しました'));
+        if (widget.fromFeature) Navigator.of(context).pop();
         break;
       case 'pending':
         _snack(_t('결제가 끝나면 기능이 열려요', 'Features unlock when the payment is complete', '付款完成后即可使用功能', '支払いが完了すると機能が使えます'));
@@ -68,6 +72,32 @@ class _ProScreenState extends State<ProScreen> {
         break;
       default:
         _snack(_t('결제하지 못했어요', 'The purchase could not be completed', '无法完成付款', '決済できませんでした'));
+    }
+  }
+
+  Future<void> _startTrial() async {
+    final String len = Pro.durationText(widget.lang, Pro.trialLength);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_t('무료 체험 시작', 'Start Free Trial', '开始免费试用', '無料体験を開始')),
+        content: Text(_t('지금부터 $len 동안 유료 기능을 무료로 쓸 수 있어요\n무료 체험은 기기마다 한 번만 할 수 있어요',
+            'You can use the paid features free for $len from now\nThe free trial is available once per device',
+            '从现在起可免费使用付费功能 $len\n每台设备只能试用一次', '今から$lenの間、有料機能を無料で使えます\n無料体験は端末ごとに1回だけです')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('취소', 'Cancel', '取消', 'キャンセル'))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_t('시작', 'Start', '开始', '開始'))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await Pro.startTrial();
+    if (!mounted) return;
+    _snack(_t('무료 체험을 시작했어요', 'Your free trial has started', '免费试用已开始', '無料体験を開始しました'));
+    if (widget.fromFeature) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() {});
     }
   }
 
@@ -131,9 +161,12 @@ class _ProScreenState extends State<ProScreen> {
               final String trialLen = Pro.durationText(widget.lang, Pro.trialLength);
               final String status = owned
                   ? _t('구매했어요. 모든 유료 기능을 쓸 수 있어요', 'Purchased. All paid features are unlocked', '已购买，所有付费功能均可使用', '購入済みです。すべての有料機能を使えます')
-                  : trial
-                      ? _t('무료 체험이 $left 남았어요', '$left left in your free trial', '免费试用还剩 $left', '無料体験の残りは$leftです')
-                      : _t('무료 체험이 끝났어요', 'Your free trial has ended', '免费试用已结束', '無料体験は終了しました');
+                  : !Pro.trialStarted
+                      ? _t('$trialLen 동안 무료로 써 볼 수 있어요', 'You can try it free for $trialLen', '可免费试用 $trialLen', '$trialLenの間、無料で試せます')
+                      : trial
+                          ? _t('무료 체험이 $left 남았어요', '$left left in your free trial', '免费试用还剩 $left', '無料体験の残りは$leftです')
+                          : _t('무료 체험이 끝났어요', 'Your free trial has ended', '免费试用已结束', '無料体験は終了しました');
+              final bool canTrial = !owned && !Pro.trialStarted;
               return ListView(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                 children: [
@@ -160,8 +193,8 @@ class _ProScreenState extends State<ProScreen> {
                       if (price != null)
                         note(_t('가격: $price (1회 구매, 운영자가 앱을 제공하는 동안 계속 이용)', 'Price: $price (one-time purchase, usable for as long as the app is provided)',
                             '价格：$price（一次性购买，在应用提供期间可持续使用）', '価格：$price（買い切り。アプリの提供期間中ずっと利用できます）')),
-                      note(_t('설치 후 $trialLen 동안 유료 기능을 무료로 써 볼 수 있어요 (기기마다 한 번)', 'You can try the paid features free for $trialLen after installing (once per device)',
-                          '安装后 $trialLen 内可免费试用付费功能（每台设备一次）', 'インストール後$trialLenの間、有料機能を無料で試せます（端末ごとに1回）')),
+                      note(_t('[무료 체험]을 누르면 $trialLen 동안 유료 기능을 무료로 써 볼 수 있어요 (기기마다 한 번)', 'Tap [Free Trial] to try the paid features free for $trialLen (once per device)',
+                          '点击 [免费试用] 可免费试用付费功能 $trialLen（每台设备一次）', '[無料体験]を押すと$trialLenの間、有料機能を無料で試せます（端末ごとに1回）')),
                       note(_t('구매 후 7일 이내에 청약철회를 요청할 수 있어요. 다만 무료 체험을 제공하므로, 구매와 함께 유료 기능이 열리면 디지털 콘텐츠의 제공이 시작된 것으로 보아 청약철회가 제한될 수 있어요',
                           'You may request withdrawal within 7 days of purchase. However, as a free trial is provided, withdrawal may be limited once the paid features are unlocked, because supply of the digital content has begun',
                           '购买后 7 天内可申请撤销。但由于提供了免费试用，购买后付费功能一经开放即视为数字内容已开始提供，撤销可能受到限制',
@@ -176,15 +209,48 @@ class _ProScreenState extends State<ProScreen> {
                   if (!owned)
                     SizedBox(
                       height: 54,
-                      child: FilledButton(
-                        onPressed: _busy ? null : _buy,
-                        child: _busy
-                            ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
-                            : Text(price == null
-                                ? _t('구매하기', 'Buy', '购买', '購入する')
-                                : _t('$price에 구매하기', 'Buy for $price', '以 $price 购买', '$priceで購入する'),
-                                style: const TextStyle(fontSize: 16.5)),
-                      ),
+                      child: Row(children: [
+                        // 무료 체험 (기기마다 한 번, 시작 전에만)
+                        if (canTrial) ...[
+                          Expanded(
+                            flex: 2,
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: sig, width: 2),
+                                foregroundColor: cs.onSurface,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(27)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                minimumSize: const Size(0, 54),
+                              ),
+                              onPressed: _busy ? null : _startTrial,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(_t('무료 체험', 'Free Trial', '免费试用', '無料体験'),
+                                    style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w700)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        Expanded(
+                          flex: 3,
+                          child: SizedBox(
+                            height: 54,
+                            child: FilledButton(
+                              onPressed: _busy ? null : _buy,
+                              child: _busy
+                                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
+                                  : FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text(price == null
+                                          ? _t('구매하기', 'Buy', '购买', '購入する')
+                                          : _t('$price에 구매하기', 'Buy for $price', '以 $price 购买', '$priceで購入する'),
+                                          style: const TextStyle(fontSize: 16.5)),
+                                    ),
+                            ),
+                          ),
+                        ),
+                      ]),
                     ),
                   const SizedBox(height: 6),
                   Center(

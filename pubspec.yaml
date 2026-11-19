@@ -1,7 +1,7 @@
 name: my_ebook_reader
 description: Fast, lightweight Android eBook, PDF, Word, PowerPoint, Excel, HWP, TXT, and Comic Reader.
 publish_to: 'none'
-version: 3.18.32+171
+version: 3.18.33+172
 
 environment:
   sdk: '>=3.8.0 <4.0.0'
@@ -20,6 +20,11 @@ dependencies:
   # TXT: 한국어 옛 인코딩(EUC-KR/CP949) 읽기, DOCX·EPUB 구조 읽기
   cp949_codec: 1.0.2
   xml: ^6.5.0
+
+# jni 1.2.0(2026-11-19 배포)은 클래스 찾는 방식이 바뀌어 path_provider_android 2.3.1과 함께 쓰면
+# 'Didn't find class "Landroid/content/Context;"' 오류로 앱 저장소를 못 찾음 → 1.1.2로 고정
+dependency_overrides:
+  jni: 1.1.2
 
 dev_dependencies:
   flutter_test:

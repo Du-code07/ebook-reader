@@ -432,37 +432,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
           physics: widget.scrollPhysics,
           padding: const EdgeInsets.only(bottom: 16),
           children: [
-            // 프로: FReader 프로 구매와 유료 기능 숨기기
-            _section(_t('프로', 'Pro', '专业版', 'プロ')),
-            // FReader 프로: 유료 기능 구매·복원과 무료 체험 상태
-            ListenableBuilder(
-              listenable: Listenable.merge([Pro.owned, Pro.trialChanged]),
-              builder: (context, _) => _item(
-                icon: Icons.workspace_premium_outlined,
-                title: _t('FReader 프로', 'FReader Pro', 'FReader 专业版', 'FReader プロ'),
-                subtitle: Pro.owned.value
-                    ? _t('구매했어요', 'Purchased', '已购买', '購入済み')
-                    : Pro.trialActive
-                        ? _t('무료 체험 ${Pro.durationText(_lang, Pro.trialLeft)} 남음', '${Pro.durationText(_lang, Pro.trialLeft)} of free trial left', '免费试用剩 ${Pro.durationText(_lang, Pro.trialLeft)}', '無料体験 残り${Pro.durationText(_lang, Pro.trialLeft)}')
-                        : _t('무료 체험이 끝났어요', 'Your free trial has ended', '免费试用已结束', '無料体験は終了しました'),
-                onTap: () async {
-                  await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProScreen(lang: _lang)));
-                  if (mounted) setState(() {});
-                },
-              ),
-            ),
-            // 유료 기능 숨기기: 파일 추가 메뉴에서 스캔·합치기를 감춤
-            ValueListenableBuilder<bool>(
-              valueListenable: Pro.hidePaid,
-              builder: (context, hide, _) => _item(
-                icon: Icons.visibility_off_outlined,
-                title: _t('유료 기능 숨기기', 'Hide Paid Features', '隐藏付费功能', '有料機能を隠す'),
-                subtitle: _t('파일 추가 메뉴에서 스캔·PDF 합치기·이미지 합치기를 숨겨요', 'Hides Scan, Merge PDFs and Merge Images in the Add Files menu',
-                    '在添加文件菜单中隐藏扫描、合并 PDF 和合并图片', 'ファイル追加メニューでスキャン・PDF結合・画像結合を隠します'),
-                onTap: () => Pro.setHidePaid(!hide),
-                trailing: Switch(value: hide, onChanged: Pro.setHidePaid),
-              ),
-            ),
             _section(_t('일반', 'General', '通用', '一般')),
             // 앱 스타일: 기본(아래 막대) / 심플(위 막대)
             _item(
@@ -573,6 +542,45 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserFontsScreen(t: _t, category: 'epub'))),
             ),
             // 데이터: 캐시 지우기 · 데이터 지우기
+            // 프로: FReader 프로 구매와 유료 기능 숨기기
+            _section(_t('프로', 'Pro', '专业版', 'プロ')),
+            // FReader 프로: 유료 기능 구매·복원과 무료 체험 상태
+            ListenableBuilder(
+              listenable: Listenable.merge([Pro.owned, Pro.trialChanged]),
+              builder: (context, _) => _item(
+                icon: Icons.workspace_premium_outlined,
+                title: _t('FReader 프로', 'FReader Pro', 'FReader 专业版', 'FReader プロ'),
+                subtitle: Pro.owned.value
+                    ? _t('구매했어요', 'Purchased', '已购买', '購入済み')
+                    : !Pro.trialStarted
+                        ? _t('무료 체험을 시작할 수 있어요', 'You can start a free trial', '可以开始免费试用', '無料体験を始められます')
+                        : Pro.trialActive
+                            ? _t('무료 체험 ${Pro.durationText(_lang, Pro.trialLeft)} 남음', '${Pro.durationText(_lang, Pro.trialLeft)} of free trial left', '免费试用剩 ${Pro.durationText(_lang, Pro.trialLeft)}', '無料体験 残り${Pro.durationText(_lang, Pro.trialLeft)}')
+                            : _t('무료 체험이 끝났어요', 'Your free trial has ended', '免费试用已结束', '無料体験は終了しました'),
+                onTap: () async {
+                  await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProScreen(lang: _lang)));
+                  if (mounted) setState(() {});
+                },
+              ),
+            ),
+            // 유료 기능 숨기기: 파일 추가 메뉴에서 스캔·합치기를 감춤 (구매한 뒤에는 쓸 수 없음 — 유료 기능이 항상 보임)
+            ListenableBuilder(
+              listenable: Listenable.merge([Pro.hidePaid, Pro.owned]),
+              builder: (context, _) {
+                final bool owned = Pro.owned.value;
+                final bool hide = Pro.hidePaid.value && !owned;
+                return _item(
+                  icon: Icons.visibility_off_outlined,
+                  title: _t('유료 기능 숨기기', 'Hide Paid Features', '隐藏付费功能', '有料機能を隠す'),
+                  subtitle: owned
+                      ? _t('FReader 프로를 구매해서 유료 기능이 모두 보여요', 'All paid features are shown because you own FReader Pro', '已购买 FReader 专业版，付费功能全部显示', 'FReader プロを購入済みのため、有料機能はすべて表示されます')
+                      : _t('파일 추가 메뉴에서 스캔·PDF 합치기·이미지 합치기를 숨겨요', 'Hides Scan, Merge PDFs and Merge Images in the Add Files menu',
+                          '在添加文件菜单中隐藏扫描、合并 PDF 和合并图片', 'ファイル追加メニューでスキャン・PDF結合・画像結合を隠します'),
+                  onTap: owned ? null : () => Pro.setHidePaid(!hide),
+                  trailing: Switch(value: hide, onChanged: owned ? null : Pro.setHidePaid),
+                );
+              },
+            ),
             _section(_t('데이터', 'Data', '数据', 'データ')),
             _item(
               icon: Icons.cleaning_services_outlined,

@@ -5,6 +5,12 @@ class I18nExtra {
   static const List<String> langs = ['fr', 'ru', 'es'];
 
   static const Map<String, List<String>> _exact = {
+    'Start': ['Commencer', 'Начать', 'Empezar'],
+    'You can start a free trial': ['Vous pouvez commencer un essai gratuit', 'Можно начать бесплатный пробный период', 'Puedes empezar una prueba gratuita'],
+    'All paid features are shown because you own FReader Pro': ['Toutes les fonctions payantes sont affichées car vous possédez FReader Pro', 'Все платные функции показаны, так как вы купили FReader Pro', 'Se muestran todas las funciones de pago porque tienes FReader Pro'],
+    'Free Trial': ['Essai gratuit', 'Бесплатно попробовать', 'Prueba gratuita'],
+    'Start Free Trial': ['Commencer l\'essai gratuit', 'Начать пробный период', 'Empezar prueba gratuita'],
+    'Your free trial has started': ['Votre essai gratuit a commencé', 'Бесплатный пробный период начался', 'Tu prueba gratuita ha empezado'],
     'Pro': ['Pro', 'Pro', 'Pro'],
     'Hide Paid Features': ['Masquer les fonctions payantes', 'Скрыть платные функции', 'Ocultar funciones de pago'],
     'Hides Scan, Merge PDFs and Merge Images in the Add Files menu': ['Masque Numériser, Fusionner des PDF et Fusionner des images dans le menu Ajouter des fichiers', 'Скрывает «Сканировать», «Объединить PDF» и «Объединить изображения» в меню добавления файлов', 'Oculta Escanear, Combinar PDF y Combinar imágenes en el menú Añadir archivos'],
@@ -475,9 +481,11 @@ class I18nExtra {
 
   /// 바뀌는 값(\$n 등)이 들어 있는 문구: [영어, 프랑스어, 러시아어, 스페인어]
   static const List<List<String>> _templates = [
+    ['Tap [Free Trial] to try the paid features free for \$trialLen (once per device)', 'Touchez [Essai gratuit] pour essayer gratuitement les fonctions payantes pendant \$trialLen (une fois par appareil)', 'Нажмите «Бесплатно попробовать», чтобы пользоваться платными функциями бесплатно \$trialLen (один раз на устройство)', 'Toca [Prueba gratuita] para probar gratis las funciones de pago durante \$trialLen (una vez por dispositivo)'],
+    ['You can try it free for \$trialLen', 'Vous pouvez l\'essayer gratuitement pendant \$trialLen', 'Можно попробовать бесплатно: \$trialLen', 'Puedes probarlo gratis durante \$trialLen'],
+    ['You can use the paid features free for \$len from now\nThe free trial is available once per device', 'Vous pouvez utiliser gratuitement les fonctions payantes pendant \$len à partir de maintenant\nL\'essai gratuit n\'est possible qu\'une fois par appareil', 'С этого момента платные функции доступны бесплатно: \$len\nБесплатный пробный период доступен один раз на устройство', 'Puedes usar gratis las funciones de pago durante \$len desde ahora\nLa prueba gratuita solo está disponible una vez por dispositivo'],
     ['\$left left in your free trial', 'Essai gratuit : encore \$left', 'До конца пробного периода: \$left', 'Prueba gratuita: queda(n) \$left'],
     ['\${Pro.durationText(_lang, Pro.trialLeft)} of free trial left', 'Essai gratuit : encore \${Pro.durationText(_lang, Pro.trialLeft)}', 'Пробный период: осталось \${Pro.durationText(_lang, Pro.trialLeft)}', 'Prueba gratuita: queda(n) \${Pro.durationText(_lang, Pro.trialLeft)}'],
-    ['You can try the paid features free for \$trialLen after installing (once per device)', 'Vous pouvez essayer gratuitement les fonctions payantes pendant \$trialLen après l\'installation (une fois par appareil)', 'После установки платными функциями можно бесплатно пользоваться \$trialLen (один раз на устройство)', 'Puedes probar gratis las funciones de pago durante \$trialLen tras instalar (una vez por dispositivo)'],
     ['\$n day(s)', '\$n jour(s)', 'дней: \$n', '\$n día(s)'],
     ['\$n hour(s)', '\$n heure(s)', 'часов: \$n', '\$n hora(s)'],
     ['\$n min', '\$n min', '\$n мин', '\$n min'],

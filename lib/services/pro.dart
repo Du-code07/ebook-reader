@@ -9,7 +9,7 @@ import 'storage_service.dart';
 
 /// FReader 프로: 유료 기능(문서 스캔·이미지 합치기·PDF 합치기, 앞으로 추가되는 유료 기능)을 여는 1회 구매
 /// - Google Play 결제 (Play Console의 1회성 상품 ID: [productId])
-/// - 설치 후 처음 실행한 때부터 [trialLength] 동안 무료 체험 (시작일은 Block Store에도 기록)
+/// - 구매 화면의 [무료 체험] 버튼을 누른 때부터 [trialLength] 동안 무료 체험 (기기마다 한 번, 시작일은 Block Store에도 기록)
 class Pro {
   static const String productId = 'freader_pro';
   /// 무료 체험 기간. 출시용은 3일(Duration(days: 3)) — 지금은 체험이 끝나는 흐름을 확인하려고 30분
@@ -17,7 +17,7 @@ class Pro {
 
   static const _ch = MethodChannel('ebook_reader/pdf_renderer');
   static const _kOwned = 'pro_owned_v1';
-  static const _kTrialStart = 'pro_trial_start_v2';
+  static const _kTrialStart = 'pro_trial_start_v3';
   static const _kHidePaid = 'pro_hide_paid_v1';
 
   /// 앱 설정 > 유료 기능 숨기기: 파일 추가 메뉴에서 스캔·PDF 합치기·이미지 합치기를 숨김
@@ -45,35 +45,50 @@ class Pro {
       final prefs = await SharedPreferences.getInstance();
       owned.value = prefs.getBool(_kOwned) ?? false;
       hidePaid.value = prefs.getBool(_kHidePaid) ?? false;
+      // 무료 체험은 앱을 켤 때 시작하지 않음 (구매 화면의 [무료 체험] 버튼으로 시작)
       final ms = prefs.getInt(_kTrialStart);
-      if (ms == null) {
-        final now = DateTime.now();
-        await prefs.setInt(_kTrialStart, now.millisecondsSinceEpoch);
-        _trialStart = now;
-      } else {
-        _trialStart = DateTime.fromMillisecondsSinceEpoch(ms);
-      }
+      _trialStart = ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
     } catch (_) {}
     unawaited(_syncTrialStart());
     unawaited(refresh());
   }
 
-  /// 체험 시작일을 Google Play 서비스(Block Store)와 맞춤: 둘 중 더 이른 날을 씀
-  /// (앱을 지웠다 다시 깔거나 데이터를 지워도 같은 기기에서는 체험이 처음부터 다시 시작되지 않게)
+  /// 체험 시작일을 Google Play 서비스(Block Store)와 맞춤: 둘 다 있으면 더 이른 날을 씀
+  /// (앱을 지웠다 다시 깔거나 데이터를 지워도 같은 기기에서 이미 시작한 체험은 이어서 계산)
   static Future<void> _syncTrialStart() async {
     try {
-      final local = _trialStart?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch;
-      final remote = await _ch.invokeMethod<int>('trialStartGet');
-      final start = (remote != null && remote > 0 && remote < local) ? remote : local;
+      final int? local = _trialStart?.millisecondsSinceEpoch;
+      final int? remote = await _ch.invokeMethod<int>('trialStartGet');
+      final bool remoteOk = remote != null && remote > 0;
+      if (local == null && !remoteOk) return; // 아직 체험을 시작한 적 없음
+      final int start = (remoteOk && (local == null || remote < local)) ? remote : local!;
       if (start != local) {
         _trialStart = DateTime.fromMillisecondsSinceEpoch(start);
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt(_kTrialStart, start);
         trialChanged.value++;
       }
-      if (remote == null || remote != start) {
+      if (!remoteOk || remote != start) {
         await _ch.invokeMethod('trialStartSet', {'ms': start});
       }
+    } catch (_) {}
+  }
+
+  /// 무료 체험을 시작했는지 (끝난 경우 포함)
+  static bool get trialStarted => _trialStart != null;
+
+  /// 구매 화면의 [무료 체험] 버튼: 지금부터 체험 시작 (이미 시작했으면 그대로)
+  static Future<void> startTrial() async {
+    if (_trialStart != null) return;
+    final now = DateTime.now();
+    _trialStart = now;
+    trialChanged.value++;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kTrialStart, now.millisecondsSinceEpoch);
+    } catch (_) {}
+    try {
+      await _ch.invokeMethod('trialStartSet', {'ms': now.millisecondsSinceEpoch});
     } catch (_) {}
   }
 
@@ -106,13 +121,16 @@ class Pro {
   /// 무료 체험이 남은 시간 (Duration.zero면 끝남)
   static Duration get trialLeft {
     final start = _trialStart;
-    if (start == null) return trialLength;
+    if (start == null) return Duration.zero; // 시작 전
     final left = start.add(trialLength).difference(DateTime.now());
     if (left.isNegative) return Duration.zero;
     return left > trialLength ? trialLength : left;
   }
 
   static bool get trialActive => trialLeft > Duration.zero;
+
+  /// 파일 추가 메뉴에서 유료 기능을 숨기는지 (구매한 뒤에는 숨기지 않음)
+  static bool get hidesPaid => hidePaid.value && !owned.value;
 
   /// 기간을 '3일'·'5시간'·'20분'처럼 (남은 시간은 올림)
   static String durationText(String lang, Duration d) {
@@ -144,10 +162,10 @@ class Pro {
     return status;
   }
 
-  /// 유료 기능을 누를 때: 쓸 수 있으면 true, 아니면 FReader 프로 화면을 띄우고 산 뒤에만 true
+  /// 유료 기능을 누를 때: 쓸 수 있으면 true, 아니면 FReader 프로 화면을 띄우고 사거나 무료 체험을 시작한 뒤에만 true
   static Future<bool> ensure(BuildContext context, String lang) async {
     if (canUse) return true;
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProScreen(lang: lang)));
-    return owned.value;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProScreen(lang: lang, fromFeature: true)));
+    return canUse; // 산 경우뿐 아니라 그 화면에서 무료 체험을 시작한 경우도
   }
 }
