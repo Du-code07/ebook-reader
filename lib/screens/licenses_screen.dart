@@ -42,28 +42,11 @@ class _LicensesScreenState extends State<LicensesScreen> {
   }
 
   /// 라이선스 글에서 종류를 짐작해 짧게 (MIT · Apache 2.0 · BSD · Boost · MPL 2.0 · OFL 1.1 …)
+  /// 고지 모음 글은 들어 있는 라이선스를 모두 (줄바꿈·공백을 하나로 모아 비교)
   static String _kind(List<String> texts) {
     final kinds = <String>{};
     for (final t in texts) {
-      final u = t.toUpperCase();
-      // 부스트 라이선스도 'Permission is hereby granted, free of charge'로 시작해서 MIT보다 먼저 봄
-      if (u.contains('BOOST SOFTWARE LICENSE')) {
-        kinds.add('Boost 1.0');
-      } else if (u.contains('MIT LICENSE') || u.contains('PERMISSION IS HEREBY GRANTED, FREE OF CHARGE')) {
-        kinds.add('MIT');
-      } else if (u.contains('APACHE LICENSE')) {
-        kinds.add('Apache 2.0');
-      } else if (u.contains('MOZILLA PUBLIC LICENSE')) {
-        kinds.add(u.contains('VERSION 1.1') ? 'MPL 1.1' : 'MPL 2.0');
-      } else if (u.contains('OPEN FONT LICENSE')) {
-        kinds.add('OFL 1.1');
-      } else if (u.contains('GUST FONT LICENSE')) {
-        kinds.add('GUST');
-      } else if (u.contains('REDISTRIBUTION AND USE IN SOURCE AND BINARY FORMS')) {
-        kinds.add('BSD');
-      } else if (u.contains('ZLIB')) {
-        kinds.add('zlib');
-      }
+      kinds.addAll(licenseKindsOf(t));
     }
     return kinds.join(' · ');
   }
@@ -156,4 +139,29 @@ class _LicensesScreenState extends State<LicensesScreen> {
       ),
     );
   }
+}
+
+/// 라이선스 글 하나에 들어 있는 라이선스 종류들 (고지 모음 글은 여러 개)
+/// - 부스트·폰트(OFL) 라이선스에도 'Permission is hereby granted, free of charge'가 있어 MIT는 MIT 고유 문장으로만 봄
+/// - MPL 2.0 본문의 '1.1.' 같은 항 번호를 1.1판으로 오해하지 않게 판 번호까지 함께 봄
+List<String> licenseKindsOf(String text) {
+  final u = text.toUpperCase().replaceAll(RegExp(r'\s+'), ' ');
+  bool has(List<String> keys) => keys.any(u.contains);
+  final out = <String>[];
+  if (u.contains('PERMISSION IS HEREBY GRANTED, FREE OF CHARGE, TO ANY PERSON OBTAINING A COPY OF THIS SOFTWARE') || RegExp(r'\bMIT\b').hasMatch(u)) out.add('MIT');
+  if (has(['APACHE LICENSE', 'APACHE-2.0'])) out.add('Apache 2.0');
+  if (has(['REDISTRIBUTION AND USE IN SOURCE AND BINARY FORMS', 'BSD-STYLE LICENSE', 'BSD-3-CLAUSE', 'BSD-2-CLAUSE'])) out.add('BSD');
+  if (has(['BOOST SOFTWARE LICENSE', 'BSL-1.0'])) out.add('Boost 1.0');
+  if (has(['MOZILLA PUBLIC LICENSE VERSION 2.0', 'MOZILLA PUBLIC LICENSE, V. 2.0', 'MPL-2.0', 'MPL 2.0'])) out.add('MPL 2.0');
+  if (has(['MOZILLA PUBLIC LICENSE VERSION 1.1', 'MOZILLA PUBLIC LICENSE, VERSION 1.1', 'MPL-1.1', 'MPL 1.1'])) out.add('MPL 1.1');
+  if (has(['OPEN FONT LICENSE', 'SIL-OFL', 'OFL-1.1'])) out.add('OFL 1.1');
+  if (has(['GUST FONT LICENSE'])) out.add('GUST');
+  if (has(['UNICODE-3.0', 'UNICODE LICENSE']) || (u.contains('UNICODE') && u.contains('DATA FILES'))) out.add('Unicode');
+  if (has(['PERMISSION TO USE, COPY, MODIFY, AND/OR DISTRIBUTE', 'PERMISSION TO USE, COPY, MODIFY, AND DISTRIBUTE'])) out.add('ISC');
+  if (has(['PNG REFERENCE LIBRARY', 'LIBPNG LICENSE'])) out.add('libpng');
+  if (has(['ALTERED SOURCE VERSIONS MUST BE PLAINLY MARKED'])) out.add('zlib');
+  if (has(['FREETYPE PROJECT'])) out.add('FreeType');
+  if (has(['PUBLIC DOMAIN', 'DEDICATE ANY AND ALL COPYRIGHT INTEREST'])) out.add('Public Domain');
+  if (u.contains('GOOGLE') && u.contains('NOT OPEN SOURCE')) out.add('Google Terms');
+  return out;
 }
