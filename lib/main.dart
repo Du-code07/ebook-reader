@@ -397,8 +397,14 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
             final double top = px / dpr - 10;
             // 글씨를 전체적으로 약 3pt 작게 (16 → 13.6)
             final scaler = TextScaler.linear((mq.textScaler.scale(16) / 16) * 0.85);
+            // 밑에서 올라오는 창은 양옆을 살짝 띄움 (넓은 화면은 파일 추가 창처럼 최대 640)
+            final ThemeData theme = Theme.of(context);
+            final Widget gapped = Theme(
+              data: theme.copyWith(bottomSheetTheme: theme.bottomSheetTheme.copyWith(constraints: BoxConstraints(maxWidth: math.min(640.0, mq.size.width - 16)))),
+              child: child ?? const SizedBox.shrink(),
+            );
             if (!tablet || top <= mq.padding.top + 0.5) {
-              return MediaQuery(data: mq.copyWith(textScaler: scaler), child: child ?? const SizedBox.shrink());
+              return MediaQuery(data: mq.copyWith(textScaler: scaler), child: gapped);
             }
             return MediaQuery(
               data: mq.copyWith(
@@ -406,7 +412,7 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
                 padding: mq.padding.copyWith(top: top),
                 viewPadding: mq.viewPadding.copyWith(top: math.max(mq.viewPadding.top, top)),
               ),
-              child: child ?? const SizedBox.shrink(),
+              child: gapped,
             );
           },
         );
@@ -2392,17 +2398,18 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final displayName = _formatDisplayFileName(rawName);
     final ext = rawName.split('.').last.toLowerCase();
 
+    // 파일 화면이 오른쪽에서 들어오며 서재를 왼쪽으로 밀어냄 (닫으면 반대로)
     if (_readerExts.contains(ext)) {
       await Navigator.push(
         context,
-        MaterialPageRoute(
+        PushAsideRoute(
           builder: (_) => ReaderScreen(filePath: file.path, bookTitle: displayName),
         ),
       );
     } else if (ext == 'pdf') {
       await Navigator.push(
         context,
-        MaterialPageRoute(
+        PushAsideRoute(
           builder: (_) => UniversalMediaReaderScreen(
             files: [file],
             title: displayName,
@@ -2413,7 +2420,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     } else {
       await Navigator.push(
         context,
-        MaterialPageRoute(
+        PushAsideRoute(
           builder: (_) => UniversalMediaReaderScreen(
             files: [file],
             title: displayName,
@@ -3592,8 +3599,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       useSafeArea: true,
       enableDrag: false,
       clipBehavior: Clip.antiAlias,
-      // 화면 위쪽 1/5 정도만 남기고 크게 엶
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.81),
+      // 화면 위쪽 1/5 정도만 남기고 크게 엶. 양옆은 살짝 띄움 (다른 아래 창과 같게)
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.81, maxWidth: math.min(640.0, MediaQuery.of(context).size.width - 16)),
       transitionAnimationController: sheetCtrl,
       // 앱 설정에서 전체 화면을 열면 설정 창도 왼쪽으로 함께 밀려남
       builder: (sheetCtx) => PushAsideShift(child: SheetPullToClose(

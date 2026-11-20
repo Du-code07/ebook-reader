@@ -8,6 +8,7 @@ import 'app_colors.dart';
 import '../services/storage_service.dart';
 import 'pop_dialog.dart';
 import 'bar_drag.dart';
+import 'viewer_dialogs.dart' show ViewerSheetScope, showViewerDialog, viewerPanel;
 
 typedef MemoTr = String Function(String ko, String en, String zh, String ja);
 
@@ -680,14 +681,25 @@ List<MemoStroke>? eraseMemoStrokes(
   return modified ? next : null;
 }
 
+/// 메모 설정 창 바탕: 기본 스타일은 밑에서 올라오는 창(양옆 살짝 띄움), 심플 스타일은 가운데 창
+Widget _memoPanelFrame(BuildContext context, Color color, Widget content) => ViewerSheetScope.of(context)
+    ? viewerPanel(context, color: color, child: content)
+    : Dialog(
+        backgroundColor: color,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: content),
+      );
+
+/// 메모 설정 창 띄우기: 기본 스타일은 밑에서 올라옴, 심플 스타일은 누른 자리에서 커져 나옴
+Future<void> _showMemoPanel(BuildContext context, Widget panel) => StorageService.simpleStyle
+    ? showPopDialog<void>(context: context, barrierColor: Colors.black26, builder: (_) => panel)
+    : showViewerDialog<void>(context, (_) => panel);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 펜·형광펜·테이프 설정 창 (고른 도구를 한 번 더 눌렀을 때): 선 굵기 (+ 형광펜 투명도) + 직선 자동 보정 (+ 테이프 숨기기) + 색상
 Future<void> showMemoToolPanel({required BuildContext context, required String kind, required MemoTr tr}) {
-  return showPopDialog<void>(
-    context: context,
-    barrierColor: Colors.black26,
-    builder: (ctx) => _MemoToolPanel(kind: kind, tr: tr),
-  );
+  return _showMemoPanel(context, _MemoToolPanel(kind: kind, tr: tr));
 }
 
 class _MemoToolPanel extends StatefulWidget {
@@ -838,13 +850,7 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
       _ => tr('펜', 'Pen', '笔', 'ペン'),
     };
     final List<Color> colors = switch (widget.kind) { 'hl' => kMemoHighlighterColors, 'tape' => kMemoTapeColors, _ => kMemoPenColors };
-    return Dialog(
-      backgroundColor: _panelColor,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: SingleChildScrollView(
+    return _memoPanelFrame(context, _panelColor, SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(22, 14, 22, 22),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -942,9 +948,7 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
               ],
             ],
           ),
-        ),
-      ),
-    );
+        ));
   }
 }
 
@@ -958,19 +962,12 @@ class _ToolPreviewPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final double w = size.width, h = size.height;
-    final List<Offset> pts = kind == 'pen'
+    final List<Offset> pts = kind != 'tape'
         ? [
             for (int i = 0; i <= 40; i++)
               Offset(w * (0.12 + 0.76 * i / 40), h * (0.5 + 0.22 * math.sin(i / 40 * math.pi * 2.2)))
           ]
         : [Offset(w * 0.18, h * 0.5), Offset(w * 0.82, h * 0.5)];
-    // 형광펜은 글자 위에 칠한 모습이 보이게 회색 글줄을 깔아 둠
-    if (kind == 'hl') {
-      final line = Paint()..color = Colors.white38;
-      for (int i = 0; i < 9; i++) {
-        canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(w * (0.2 + i * 0.068), h * 0.5 - 6, w * 0.05, 12), const Radius.circular(2)), line);
-      }
-    }
     paintMemoLine(canvas, pts, kind: kind, color: color, width: width.clamp(0.5, h * 0.8).toDouble());
   }
 
@@ -986,11 +983,7 @@ Future<void> showEraserPanel({
   required VoidCallback onClearLines,
   required VoidCallback onClearTapes,
 }) {
-  return showPopDialog<void>(
-    context: context,
-    barrierColor: Colors.black26,
-    builder: (ctx) => _EraserPanel(tr: tr, onClearLines: onClearLines, onClearTapes: onClearTapes),
-  );
+  return _showMemoPanel(context, _EraserPanel(tr: tr, onClearLines: onClearLines, onClearTapes: onClearTapes));
 }
 
 class _EraserPanel extends StatefulWidget {
@@ -1021,12 +1014,15 @@ class _EraserPanelState extends State<_EraserPanel> {
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Row(
               children: [
-                Icon(_s.eraserType == value ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                    color: _s.eraserType == value ? AppColors.signature : Colors.white38, size: 24),
-                const SizedBox(width: 14),
                 SizedBox(width: 24, child: Center(child: icon)),
-                const SizedBox(width: 10),
-                Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 12),
+                Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600))),
+                // 고름 표시는 오른쪽 (스위치와 같은 줄)
+                Padding(
+                  padding: const EdgeInsets.only(right: 14),
+                  child: Icon(_s.eraserType == value ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                      color: _s.eraserType == value ? AppColors.signature : Colors.white38, size: 24),
+                ),
               ],
             ),
           ),
@@ -1047,13 +1043,7 @@ class _EraserPanelState extends State<_EraserPanel> {
           },
           child: Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         );
-    return Dialog(
-      backgroundColor: const Color(0xFF2B2B2E),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: SingleChildScrollView(
+    return _memoPanelFrame(context, const Color(0xFF2B2B2E), SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(22, 14, 22, 12),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1091,9 +1081,7 @@ class _EraserPanelState extends State<_EraserPanel> {
               clear(tr('테이프 모두 지우기', 'Clear All Tape', '清除全部胶带', 'テープをすべて消す'), widget.onClearTapes),
             ],
           ),
-        ),
-      ),
-    );
+        ));
   }
 }
 
@@ -1195,13 +1183,17 @@ class _EraserGlyphPainter extends CustomPainter {
       ..cubicTo(6, 6, 10, 6, 12, 12)
       ..cubicTo(14, 18, 18, 18, 21.5, 9);
     if (area) {
-      // 가운데 동그라미 안쪽만 지워짐
+      // 오른쪽 위 동그라미 안쪽만 지워짐 (획 지우개의 X 자리)
+      final areaWave = Path()
+        ..moveTo(2.5, 19)
+        ..cubicTo(6, 11, 10, 11, 12, 15)
+        ..cubicTo(14, 19, 16.5, 12, 21.5, 2.5);
       canvas.saveLayer(Offset.zero & const Size(24, 24), Paint());
-      canvas.drawPath(wave, line);
-      canvas.drawCircle(const Offset(12, 12), 4.2, Paint()..blendMode = BlendMode.clear);
+      canvas.drawPath(areaWave, line);
+      canvas.drawCircle(const Offset(18, 6.5), 4.2, Paint()..blendMode = BlendMode.clear);
       canvas.restore();
       canvas.drawCircle(
-          const Offset(12, 12),
+          const Offset(18, 6.5),
           4.2,
           Paint()
             ..color = color.withValues(alpha: 0.7)

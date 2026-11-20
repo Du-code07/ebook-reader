@@ -58,29 +58,101 @@ Future<void> waitViewerDialogsClosed() async {
 }
 
 Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) =>
-    showViewerDialog<T>(context, (ctx) => Center(child: builder(ctx)));
+    showViewerDialog<T>(context, (ctx) => ViewerSheetScope.of(ctx) ? builder(ctx) : Center(child: builder(ctx)));
 
-/// 파일 안 설정 창 (화면 회전·페이지 표시·페이지 이동·북마크·도구 모음 설정)을 띄움.
-/// 눈이 편하게: 아래쪽에서 가운데로 서서히 올라오고, 뒤 배경은 옅게 천천히 어두워짐
+/// 파일 안 설정 창이 어떻게 떠 있는지: 기본 스타일 = 밑에서 올라오는 창(양옆 살짝 띄움), 심플 스타일 = 가운데 창
+class ViewerSheetScope extends InheritedWidget {
+  const ViewerSheetScope({super.key, required this.sheet, required super.child});
+  final bool sheet;
+
+  static bool of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<ViewerSheetScope>()?.sheet ?? false;
+
+  @override
+  bool updateShouldNotify(ViewerSheetScope old) => old.sheet != sheet;
+}
+
+/// 설정 창 바탕: 가운데 창이면 둥근 카드([width]·[maxWidth]·[maxHeight]),
+/// 밑에서 올라오는 창이면 화면 아래에 붙고 위쪽만 둥근 판 (맨 위 회색 막대, 양옆 살짝 띄움, 너비는 파일 추가 창처럼 최대 640)
+Widget viewerPanel(
+  BuildContext context, {
+  required Color color,
+  required Widget child,
+  double radius = 32,
+  double? width,
+  double? maxWidth,
+  double? maxHeight,
+  double elevation = 8,
+}) {
+  final Size screen = MediaQuery.sizeOf(context);
+  if (ViewerSheetScope.of(context)) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: math.min(640.0, screen.width - 16), maxHeight: screen.height * 0.85),
+      child: Material(
+        color: color,
+        elevation: elevation,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.viewPaddingOf(context).bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [const SheetGrip(below: 4), Flexible(child: child)],
+          ),
+        ),
+      ),
+    );
+  }
+  Widget body = child;
+  if (maxHeight != null) body = ConstrainedBox(constraints: BoxConstraints(maxHeight: maxHeight), child: body);
+  if (width != null) {
+    body = SizedBox(width: width, child: body);
+  } else if (maxWidth != null) {
+    body = ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: body);
+  }
+  return Material(
+    color: color,
+    elevation: elevation,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
+    clipBehavior: Clip.antiAlias,
+    child: body,
+  );
+}
+
+/// 파일 안 설정 창 (화면 회전·페이지 표시·페이지 이동·북마크·도구 모음 설정·글자 복사, 기본 스타일은 메모 도구 설정도)을 띄움.
+/// 기본 스타일: 앱 설정 창처럼 밑에서 올라옴. 심플 스타일: 아래쪽에서 가운데로 서서히 올라옴. 뒤 배경은 옅게 천천히 어두워짐
 Future<T?> showViewerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) async {
   // 도구 모음을 누른 프레임과 겹치지 않게, 그 프레임이 끝난 뒤 창을 띄움 (뜰 때 덜 버벅임)
   await WidgetsBinding.instance.endOfFrame;
   if (!context.mounted) return null;
+  final bool sheet = !StorageService.simpleStyle;
   viewerDialogsOpen.value++;
   try {
     return await showGeneralDialog<T>(
       context: context,
       barrierDismissible: true,
       barrierLabel: 'close',
-      barrierColor: const Color(0x47000000), // 옅게 (예전 54% → 28%)
+      barrierColor: const Color(0x47000000), // 옅게
       transitionDuration: _dialogDur,
-      pageBuilder: (ctx, _, __) => SafeArea(child: builder(ctx)),
-      transitionBuilder: (ctx, anim, _, child) => _softPopTransition(ctx, anim, child),
+      pageBuilder: (ctx, _, __) => ViewerSheetScope(
+        sheet: sheet,
+        child: Builder(
+          builder: (c) => sheet ? Align(alignment: Alignment.bottomCenter, child: builder(c)) : SafeArea(child: builder(c)),
+        ),
+      ),
+      transitionBuilder: (ctx, anim, _, child) => sheet ? _sheetTransition(anim, child) : _softPopTransition(ctx, anim, child),
     );
   } finally {
     viewerDialogsOpen.value--;
   }
 }
+
+/// 밑에서 올라오는 창: 화면 아래 바깥에서 제자리로 (닫히면 아래로)
+Widget _sheetTransition(Animation<double> animation, Widget child) => SlideTransition(
+      position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+          .animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic)),
+      child: RepaintBoundary(child: child),
+    );
 
 /// 설정 창이 열리고 닫히는 움직임: 화면 아래쪽에서 가운데로 서서히 올라오고, 닫히면 아래로 내려감
 Widget _softPopTransition(BuildContext context, Animation<double> animation, Widget child) {
@@ -102,19 +174,15 @@ Future<T?> showCenterPanel<T>(BuildContext context, {required Widget Function(Bu
   return _centerDialog<T>(context, (ctx) {
     final cs = Theme.of(ctx).colorScheme;
     final Size screen = MediaQuery.sizeOf(ctx);
-    return Material(
+    return viewerPanel(
+      ctx,
       color: cs.surfaceContainerHigh,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        width: math.min(460, screen.width - 40),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: screen.height * 0.72),
-          child: Padding(
-            padding: const EdgeInsets.only(top: 16, bottom: 8),
-            child: StatefulBuilder(builder: builder),
-          ),
-        ),
+      elevation: 0,
+      width: math.min(460, screen.width - 40),
+      maxHeight: screen.height * 0.72,
+      child: Padding(
+        padding: EdgeInsets.only(top: ViewerSheetScope.of(ctx) ? 0 : 16, bottom: 8),
+        child: StatefulBuilder(builder: builder),
       ),
     );
   });
@@ -227,15 +295,15 @@ Widget _choiceDialogBody<T>(
     return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [m, extra]);
   }
 
-  final Widget dialog = Material(
+  final bool sheet = ViewerSheetScope.of(context);
+  final Widget dialog = viewerPanel(
+    context,
     color: cs.surfaceContainerHigh,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(wide ? 28 : 32)),
-    clipBehavior: Clip.antiAlias,
-    elevation: 8,
-    child: ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: math.min(wide ? 680 : 460, screen.width - 40)),
+    radius: wide ? 28 : 32,
+    maxWidth: math.min(wide ? 680 : 460, screen.width - 40),
+    child: SingleChildScrollView(
       child: Padding(
-        padding: wide ? const EdgeInsets.fromLTRB(20, 20, 20, 18) : const EdgeInsets.fromLTRB(22, 28, 22, 10),
+        padding: wide ? EdgeInsets.fromLTRB(20, sheet ? 4 : 20, 20, 18) : EdgeInsets.fromLTRB(22, sheet ? 8 : 28, 22, 10),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -273,8 +341,8 @@ Widget _choiceDialogBody<T>(
       ),
     ),
   );
-  // 그래도 화면보다 크면 창 전체를 줄여서 다 보이게
-  return FittedBox(fit: BoxFit.scaleDown, child: dialog);
+  // 가운데 창: 그래도 화면보다 크면 창 전체를 줄여서 다 보이게 (밑에서 올라오는 창은 안에서 스크롤)
+  return sheet ? dialog : FittedBox(fit: BoxFit.scaleDown, child: dialog);
 }
 
 /// 자동 (페이지 표시): 귀퉁이가 접힌 문서 + 줄 + 오른쪽 아래 톱니

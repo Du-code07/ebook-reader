@@ -1,6 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'app_colors.dart';
+
+import 'viewer_dialogs.dart' show ViewerSheetScope, showViewerDialog, viewerPanel;
 
 /// 지금 보고 있는 쪽의 글을 보여 주고, 골라서(길게 눌러) 또는 전체를 복사할 수 있게 하는 창
 Future<void> showTextCopySheet(
@@ -9,21 +12,23 @@ Future<void> showTextCopySheet(
   required String Function(String ko, String en, String zh, String ja) tr,
 }) {
   final cleaned = text.replaceAll(RegExp(r'[ \t]+\n'), '\n').replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
-  return showModalBottomSheet<void>(
-    sheetAnimationStyle: Anim.toolSheet,
-    context: context,
-    isScrollControlled: true,
-    builder: (ctx) {
+  // 다른 도구 모음 창과 같게: 기본 스타일은 밑에서 올라오는 창, 심플 스타일은 아래쪽에서 가운데로
+  return showViewerDialog<void>(
+    context,
+    (ctx) {
       final cs = Theme.of(ctx).colorScheme;
-      return SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.75),
-          child: Column(
+      final Size screen = MediaQuery.sizeOf(ctx);
+      final bool sheet = ViewerSheetScope.of(ctx);
+      final Widget panel = viewerPanel(
+        ctx,
+        color: cs.surfaceContainerLow,
+        width: math.min(560.0, screen.width - 40),
+        maxHeight: screen.height * 0.75,
+        child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 맨 위 회색 막대 + 제목까지 간격 (밑에서 올라오는 모든 창과 같게)
-              const SheetGrip(),
+              SizedBox(height: sheet ? 4 : 18),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
                 child: Row(
@@ -72,8 +77,8 @@ Future<void> showTextCopySheet(
               ),
             ],
           ),
-        ),
       );
+      return sheet ? panel : Center(child: panel);
     },
   );
 }

@@ -9,7 +9,7 @@ import 'memo_tools.dart' show MemoToolIcon;
 import 'morph_icons.dart' show MoonMorphIcon;
 import 'quick_tool_bar.dart';
 import 'ui_scale.dart';
-import 'viewer_dialogs.dart' show PageModeIcon, pageDisplayGlyph, rotationGlyph, showViewerDialog;
+import 'viewer_dialogs.dart' show PageModeIcon, ViewerSheetScope, pageDisplayGlyph, rotationGlyph, showViewerDialog, viewerPanel;
 
 /// 파일 보기 화면의 상단바·도구 모음에 어떤 아이콘을 어떤 순서로 둘지 (모든 뷰어가 함께 씀)
 /// - [top]: 상단바 (왼쪽부터, 숨기지 않은 것 최대 [maxTop]개)
@@ -378,17 +378,16 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
       rows.add(_row(i++, id));
     }
 
-    // 화면 회전 창과 같은 너비, 화면 가운데
-    return Center(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: math.min(460.0, screen.width - 40.0), maxHeight: screen.height * 0.72),
-        child: Material(
+    // 가운데 창: 화면 회전 창과 같은 너비 / 기본 스타일: 밑에서 올라오는 창
+    final bool sheet = ViewerSheetScope.of(context);
+    final Widget panel = viewerPanel(
+          context,
           color: cs.surfaceContainerHigh,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
-          clipBehavior: Clip.antiAlias,
-          elevation: 8,
+          radius: 26,
+          width: math.min(460.0, screen.width - 40.0),
+          maxHeight: screen.height * 0.72,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(0, 18, 0, 6),
+            padding: EdgeInsets.fromLTRB(0, sheet ? 4 : 18, 0, 6),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -501,8 +500,7 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
               ],
             ),
           ),
-        ),
-      ),
     );
+    return sheet ? panel : Center(child: panel);
   }
 }
