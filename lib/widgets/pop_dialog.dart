@@ -62,7 +62,7 @@ Future<T?> showPopDialog<T>({
 /// 단추 바로 아래로 펼쳐지는 작은 창 (그룹 목록과 같은 움직임: 단추에서 튀어나오고, 닫힐 때 단추 안으로 들어감)
 /// [alignRight]면 창 오른쪽 끝을 단추 오른쪽 끝에 맞춤
 class PopPanelRoute<T> extends PopupRoute<T> {
-  PopPanelRoute({required this.anchor, required this.builder, this.width = 360, this.alignRight = true, this.barrierLabel, this.fromBottom = false});
+  PopPanelRoute({required this.anchor, required this.builder, this.width = 360, this.alignRight = true, this.barrierLabel, this.fromBottom = false, this.beside = false});
 
   final Rect anchor;
   final WidgetBuilder builder;
@@ -71,6 +71,9 @@ class PopPanelRoute<T> extends PopupRoute<T> {
 
   /// 단추 아래가 아니라 화면 밑에서 위로 올라오는 창으로 (앱 스타일 '기본'의 아래 막대에서 열 때)
   final bool fromBottom;
+
+  /// 단추 오른쪽 옆으로 펼침 (심플 스타일 왼쪽 아이콘 막대에서 열 때)
+  final bool beside;
 
   @override
   final String? barrierLabel;
@@ -99,8 +102,13 @@ class PopPanelRoute<T> extends PopupRoute<T> {
       );
     }
     final double w = width.clamp(200.0, screen.width - 16).toDouble();
-    final double left = alignRight ? (anchor.right - w).clamp(8.0, screen.width - 8 - w).toDouble() : anchor.left.clamp(8.0, screen.width - 8 - w).toDouble();
-    final double top = anchor.bottom + 4;
+    final double left = beside
+        ? (anchor.right + 6).clamp(8.0, math.max(8.0, screen.width - 8 - w)).toDouble()
+        : alignRight
+            ? (anchor.right - w).clamp(8.0, screen.width - 8 - w).toDouble()
+            : anchor.left.clamp(8.0, screen.width - 8 - w).toDouble();
+    // 옆으로 펼칠 때는 단추 높이에서 (화면 아래로 넘치지 않게 위쪽 1/3 안으로)
+    final double top = beside ? anchor.top.clamp(pad.top + 8, math.max(pad.top + 8, screen.height * 0.34)).toDouble() : anchor.bottom + 4;
     final double maxH = (screen.height - pad.bottom - 12 - top).clamp(160.0, double.infinity).toDouble();
     final curved = CurvedAnimation(parent: animation, curve: popOpenCurve, reverseCurve: Curves.easeInCubic);
     final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.5), reverseCurve: const Interval(0.4, 1));

@@ -8,50 +8,6 @@ import 'app_colors.dart';
 // - 메뉴가 열리면(open) 모양이 바뀌었다가, 닫히면 되돌아옴
 // - 처음 나타날 때도 조각이 제자리로 미끄러져 들어옴
 
-/// 파일 추가 단추의 + : 열리면 두 막대가 돌아 × 로
-class PlusCloseIcon extends StatelessWidget {
-  const PlusCloseIcon({super.key, required this.open, this.size = 24, this.color});
-  final bool open;
-  final double size;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color c = color ?? IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurface;
-    return TweenAnimationBuilder<double>(
-      tween: Tween<double>(end: open ? 1.0 : 0.0),
-      duration: kIconMotion,
-      curve: kIconCurve,
-      builder: (context, t, _) => SizedBox.square(dimension: size, child: CustomPaint(painter: _PlusPainter(c, t))),
-    );
-  }
-}
-
-class _PlusPainter extends CustomPainter {
-  _PlusPainter(this.color, this.t);
-  final Color color;
-  final double t;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double s = size.shortestSide;
-    final double barH = s * 0.13, barW = s * 0.66 - s * 0.06 * t;
-    final Paint p = Paint()..color = color;
-    final Offset c = Offset(size.width / 2, size.height / 2);
-    for (final double base in [0.0, math.pi / 2]) {
-      canvas.save();
-      canvas.translate(c.dx, c.dy);
-      canvas.rotate(base + t * math.pi / 4);
-      canvas.drawRRect(
-          RRect.fromRectAndRadius(Rect.fromCenter(center: Offset.zero, width: barW, height: barH), Radius.circular(barH / 2)), p);
-      canvas.restore();
-    }
-  }
-
-  @override
-  bool shouldRepaint(_PlusPainter old) => old.color != color || old.t != t;
-}
-
 /// 다크 모드 달: 라이트일 때 테두리 달, 다크일 때 꽉 찬 노란 달.
 /// 바뀔 때와 메뉴가 열릴 때 달의 그림자(가린 원)가 미끄러지며 모양이 바뀜
 class MoonMorphIcon extends StatelessWidget {

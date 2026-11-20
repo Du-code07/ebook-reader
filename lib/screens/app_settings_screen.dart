@@ -153,7 +153,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   }
 
   String _styleLabel(String style) =>
-      style == 'simple' ? _t('심플', 'Simple', '简洁', 'シンプル') : _t('기본', 'Default', '默认', '標準');
+      style == 'simple' ? _t('와이드', 'Wide', '宽屏', 'ワイド') : _t('컴팩트', 'Compact', '紧凑', 'コンパクト');
 
   Future<void> _pickStyle() async {
     final v = await showChoiceSheet<String>(

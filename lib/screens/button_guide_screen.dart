@@ -191,7 +191,7 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           if (simple) ...[
             _settingsStep(),
             _Step('add', tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
-                tr('파일 탐색·파일 추가·PDF 합치기·이미지 합치기·문서 스캔 아이콘이 위로 나와요\n아이콘을 꾹 누르면 이름이 보여요', 'Icons for find files, add files, merge PDFs, merge images and scan documents appear above it\nLong-press an icon to see its name', '上方会出现查找文件·添加文件·合并 PDF·合并图片·扫描文档图标\n长按图标可查看名称', 'ファイル検索・ファイル追加・PDF結合・画像結合・文書スキャンのアイコンが上に出ます\nアイコンを長押しすると名前が表示されます')),
+                tr('파일 탐색·파일 추가·스캔·PDF 합치기·이미지 합치기를 골라요', 'Choose find files, add files, scan, merge PDFs or merge images', '可选择查找文件·添加文件·扫描·合并 PDF·合并图片', 'ファイル検索・ファイル追加・スキャン・PDF結合・画像結合を選びます')),
           ],
           _Step('list', tr('새로 고침', 'Refresh', '刷新', '更新'),
                 tr('목록을 맨 위에서 아래로 당기면 새로 고침 아이콘이 나오며 서재를 다시 읽어 와요', 'Pull the list down from the top to show the refresh icon and reload your library', '从顶部向下拉列表，会出现刷新图标并重新读取书架', '一覧を一番上から下に引くと更新アイコンが出て、書斎を読み込み直します')),
@@ -256,7 +256,7 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
       case _GuideKind.settings:
         return [
           _Step('style', tr('앱 스타일', 'App Style', '应用样式', 'アプリのスタイル'),
-              tr('기본(아래 막대)과 심플(위 막대와 오른쪽 아래 [+]) 중에 골라요', 'Choose Default (bottom bar) or Simple (top bar and [+] at the bottom right)', '在默认（底部栏）和简洁（顶部栏和右下角[+]）之间选择', '標準(下のバー)とシンプル(上のバーと右下の[+])から選びます')),
+              tr('컴팩트(아래 막대)와 와이드(왼쪽 아이콘 막대) 중에 골라요', 'Choose Compact (bottom bar) or Wide (icon bar on the left)', '在紧凑（底部栏）和宽屏（左侧图标栏）之间选择', 'コンパクト(下のバー)とワイド(左のアイコンバー)から選びます')),
           _Step('theme', tr('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'),
               tr('기본 시스템·라이트·다크·편안한 모드를 골라요', 'Choose system default, light, dark or comfort mode', '选择跟随系统·浅色·深色·护眼模式', 'システムのデフォルト・ライト・ダーク・目に優しいモードを選びます')),
           _Step('lang', tr('언어', 'Language', '语言', '言語'), tr('앱에 쓰는 언어를 바꿔요', 'Change the app language', '更改应用语言', 'アプリの言語を変えます')),
@@ -516,7 +516,6 @@ class _MainMock extends StatelessWidget {
       (tr('소설', 'Novel', '小说', '小説'), 'epub', '[epub] · (12%)', false),
     ];
     final title = Text(tr('내 서재', 'My Library', '我的书架', 'マイライブラリ'), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800));
-    Widget iconBtn(String id, Widget icon) => Padding(padding: const EdgeInsets.all(4), child: SizedBox.square(key: k(id), dimension: 40, child: Center(child: icon)));
     final list = ListView(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 16),
       children: [
@@ -534,60 +533,47 @@ class _MainMock extends StatelessWidget {
     );
     final groupIcon = const FolderDocsIcon(size: 20);
     final groupLabel = tr('내 서재', 'My Library', '我的书架', 'マイライブラリ');
+    // 심플: 왼쪽 아이콘 막대 (맨 아래 [+]) + 오른쪽 파일
     if (simple) {
+      Widget railItem(String id, Widget icon, String label) => SizedBox(
+            key: k(id),
+            height: 62,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(height: 26, child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: cs.onSurface), child: icon))),
+                const SizedBox(height: 3),
+                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface)),
+              ],
+            ),
+          );
       return Scaffold(
         body: SafeArea(
-          child: Stack(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Column(
-                children: [
-                  SizedBox(
-                    height: 56,
-                    child: Row(children: [
-                      const SizedBox(width: 16),
-                      title,
-                      const Spacer(),
-                      iconBtn('search', const Icon(Icons.search)),
-                      iconBtn('trash', const TrashLidIcon(open: false)),
-                      iconBtn('sort', const SortBarsIcon(flipped: false)),
-                      iconBtn('settings', const SpinGearIcon(turns: 0)),
-                      const SizedBox(width: 4),
-                    ]),
+              SizedBox(
+                width: 72,
+                child: Column(children: [
+                  const SizedBox(height: 8),
+                  railItem('group', groupIcon, groupLabel),
+                  railItem('search', const Icon(Icons.search), tr('검색', 'Search', '搜索', '検索')),
+                  railItem('trash', const TrashLidIcon(open: false), tr('휴지통', 'Trash', '回收站', 'ゴミ箱')),
+                  railItem('sort', const SortBarsIcon(flipped: false), tr('정렬', 'Sort', '排序', '並べ替え')),
+                  railItem('settings', const SpinGearIcon(turns: 0), tr('설정', 'Settings', '设置', '設定')),
+                  const Spacer(),
+                  Container(
+                    key: k('add'),
+                    width: 52,
+                    height: 52,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1))]),
+                    child: Icon(Icons.add, size: 30, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context)),
                   ),
-                  SizedBox(
-                    height: 54,
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Container(
-                          key: k('group'),
-                          padding: const EdgeInsets.fromLTRB(10, 6, 14, 6),
-                          decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(10)),
-                          child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            groupIcon,
-                            const SizedBox(width: 6),
-                            Text(groupLabel, style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context))),
-                          ]),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  Expanded(child: KeyedSubtree(key: k('list'), child: list)),
-                ],
+                ]),
               ),
-              Positioned(
-                right: 16,
-                bottom: 16,
-                child: Container(
-                  key: k('add'),
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 2))]),
-                  child: Icon(Icons.add, size: 28, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context)),
-                ),
-              ),
+              VerticalDivider(width: 1, thickness: 1, color: cs.outlineVariant.withValues(alpha: 0.6)),
+              Expanded(child: KeyedSubtree(key: k('list'), child: list)),
             ],
           ),
         ),
@@ -873,7 +859,7 @@ class _SettingsMock extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 320),
         children: [
           section(tr('일반', 'General', '通用', '一般')),
-          item('style', const Icon(Icons.dashboard_customize_outlined), tr('앱 스타일', 'App Style', '应用样式', 'アプリのスタイル'), sub: tr('기본', 'Default', '默认', '標準')),
+          item('style', const Icon(Icons.dashboard_customize_outlined), tr('앱 스타일', 'App Style', '应用样式', 'アプリのスタイル'), sub: tr('컴팩트', 'Compact', '紧凑', 'コンパクト')),
           item('theme', const Icon(Icons.brightness_auto_outlined), tr('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'), sub: tr('기본 시스템', 'System default', '跟随系统', 'システムのデフォルト')),
           item('lang', const LanguageGlyphIcon(size: 23), tr('언어', 'Language', '语言', '言語')),
           item('privacy', const Icon(Icons.lock_outline), tr('사생활 보호', 'Privacy', '隐私保护', 'プライバシー保護')),

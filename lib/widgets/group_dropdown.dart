@@ -37,10 +37,14 @@ class GroupDropdownRoute extends PopupRoute<String> {
     required this.onAdd,
     this.barrierLabel,
     this.fromBottom = false,
+    this.beside = false,
   });
 
   /// 단추 아래가 아니라 화면 밑에서 위로 올라오는 창으로 (앱 스타일 '기본'의 아래 막대에서 열 때)
   final bool fromBottom;
+
+  /// 단추 오른쪽 옆으로 펼침 (심플 스타일 왼쪽 아이콘 막대에서 열 때)
+  final bool beside;
 
   /// [☰ 그룹] 단추의 화면 위치
   final Rect anchor;
@@ -87,8 +91,8 @@ class GroupDropdownRoute extends PopupRoute<String> {
     if (fromBottom) return BottomRise(animation: animation, gripBelow: 10, child: _GroupDropdownPanel(route: this));
     final Size screen = MediaQuery.sizeOf(context);
     final EdgeInsets pad = MediaQuery.paddingOf(context);
-    final double left = math.max(8.0, anchor.left);
-    final double top = anchor.bottom + 6;
+    final double left = beside ? anchor.right + 6 : math.max(8.0, anchor.left);
+    final double top = beside ? math.max(pad.top + 8, anchor.top) : anchor.bottom + 6;
     final double maxH = math.max(160.0, screen.height - pad.bottom - 12 - top);
     final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutBack, reverseCurve: Curves.easeInCubic);
     final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.5), reverseCurve: const Interval(0.4, 1));
