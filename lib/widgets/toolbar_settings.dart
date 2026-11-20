@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'memo_tools.dart' show QuillInkIcon;
+import 'memo_tools.dart' show MemoToolIcon;
 import 'morph_icons.dart' show MoonMorphIcon;
 import 'quick_tool_bar.dart';
 import 'ui_scale.dart';
@@ -81,7 +81,7 @@ Widget toolbarCatalogIcon(String id, Color color, {double size = 20}) => switch 
       'display' => pageDisplayGlyph('auto', size: size, color: color),
       'mode' => PageModeIcon(mode: 'tap', size: size, color: color),
       'direction' => Icon(Icons.swap_horiz_rounded, color: color, size: size + 1),
-      'memo' => QuillInkIcon(color: color, size: size + 2),
+      'memo' => MemoToolIcon(kind: 'memo', color: color, size: size + 2),
       'copy' => Icon(Icons.copy_all_outlined, color: color, size: size),
       _ => Icon(Icons.bookmarks_outlined, color: color, size: size),
     };
@@ -443,9 +443,11 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
                     padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
                     child: Text(_warn!, style: TextStyle(color: cs.error, fontSize: 12.5, fontWeight: FontWeight.w600)),
                   ),
+                // 목록 높이를 미리 정해 둠: 끄는 동안 창 높이가 바뀌어 들썩이지 않게 (화면보다 크면 창 안에서 스크롤)
                 Flexible(
+                  child: SizedBox(
+                  height: (_l.top.length + _l.bar.length) * 56.0 + 3 * 42.0 + 56.0 + (widget.extra != null ? 56.0 : 0.0) + 8.0,
                   child: ReorderableListView(
-                    shrinkWrap: true,
                     buildDefaultDragHandles: false,
                     padding: EdgeInsets.zero,
                     onReorderStart: (_) => HapticFeedback.selectionClick(),
@@ -493,6 +495,7 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
                       ],
                     ),
                     children: rows,
+                  ),
                   ),
                 ),
               ],

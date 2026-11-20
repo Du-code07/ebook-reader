@@ -28,6 +28,7 @@ import 'widgets/group_dropdown.dart';
 import 'widgets/morph_icons.dart';
 import 'widgets/viewer_dialogs.dart';
 import 'widgets/toolbar_settings.dart';
+import 'widgets/memo_tools.dart' show MemoTools;
 import 'widgets/ui_scale.dart';
 import 'widgets/app_colors.dart';
 import 'services/library_nav.dart';
@@ -73,6 +74,7 @@ void main() async {
   await StorageService.loadRememberPage();
   await AppLock.init(); // 사생활 보호: 앱 잠금이면 시작할 때부터 잠금 화면
   await ToolbarLayout.load(); // 파일 보기 화면의 상단바·도구 모음 아이콘 배치
+  await MemoTools.load(); // 메모 펜·형광펜·테이프·지우개 설정
   await Pro.init(); // 이리ERI 프로: 구매 여부·무료 체험 (Play 스토어 확인은 뒤에서)
   ComfortTint.filePref = await StorageService.getDocComfort(); // 파일을 열자마자 편안한 모드인지 알게
   await StorageService.loadAppStyle(); // 앱 스타일(기본/심플): 첫 화면부터 그 모양으로
@@ -497,21 +499,25 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
 }
 
 /// 오른쪽 아래 단추가 바뀔 때: 회전·이동 없이 그 자리에서 커지며 나타나고 작아지며 사라짐
-class _InPlaceFabAnimator extends FloatingActionButtonAnimator {
-  const _InPlaceFabAnimator();
+/// 아래 오른쪽 단추 자리 (선택 모드 단추 · 심플 스타일 [+]): 바뀔 때 그 자리에서 빠르게 커지고 작아짐
+/// (Scaffold의 기본 움직임은 앞 단추가 다 사라진 뒤에 나와 느려서, 단추 자리는 늘 같은 위젯으로 두고 안에서 바꿈)
+class _FastFabSwitcher extends StatelessWidget {
+  const _FastFabSwitcher({required this.child});
+  final Widget? child;
 
   @override
-  Offset getOffset({required Offset begin, required Offset end, required double progress}) => end;
-
-  @override
-  Animation<double> getScaleAnimation({required Animation<double> parent}) =>
-      CurvedAnimation(parent: parent, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
-
-  @override
-  Animation<double> getRotationAnimation({required Animation<double> parent}) => const AlwaysStoppedAnimation<double>(1.0);
-
-  @override
-  double getAnimationRestart(double previousValue) => 0.0;
+  Widget build(BuildContext context) => AnimatedSwitcher(
+        duration: Anim.ms(160),
+        reverseDuration: Anim.ms(110),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        layoutBuilder: (current, previous) => Stack(alignment: Alignment.bottomRight, children: [...previous, if (current != null) current]),
+        transitionBuilder: (child, anim) => FadeTransition(
+          opacity: anim,
+          child: ScaleTransition(scale: anim, alignment: Alignment.bottomRight, child: child),
+        ),
+        child: child ?? const SizedBox.shrink(key: ValueKey('fab_none')),
+      );
 }
 
 /// 그리드/리스트 스크롤 시 화면 밖으로 나간 카드 위젯과 디코딩된 썸네일 GPU 텍스처가 절대 파괴되지 않도록 유지하는 KeepAlive 래퍼
@@ -4369,7 +4375,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           ],
         ),
       ),
-      floatingActionButton: _isSelectionMode
+      // 선택 모드 단추·[+]: 그 자리에서 빠르게 커지며 나타나고 작아지며 사라짐 (기본·심플 모두)
+      floatingActionButton: _FastFabSwitcher(
+        child: _isSelectionMode
           // 좁은 휴대폰에서 단추 세 개가 넘치지 않게 필요하면 살짝 줄여 맞춤
           // (키가 서로 달라야 심플 스타일의 [+] ↔ 선택 단추가 바뀔 때도 나타나고 사라지는 움직임이 생김)
           ? ConstrainedBox(
@@ -4443,8 +4451,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             )
           // 기본: [+]는 아래 막대 가운데에
           : StorageService.simpleStyle ? KeyedSubtree(key: const ValueKey('fab_add'), child: _buildAddFab()) : null,
-      // 선택 모드 단추·[+]: 돌면서 나오지 않고 그 자리에서 커지며 나타나고 작아지며 사라짐
-      floatingActionButtonAnimator: const _InPlaceFabAnimator(),
+      ),
       bottomNavigationBar: _isSelectionMode || StorageService.simpleStyle ? null : _buildBottomBar(),
       ),
     );

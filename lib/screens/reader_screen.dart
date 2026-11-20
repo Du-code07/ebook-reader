@@ -112,8 +112,9 @@ class _MemoMap {
 class _MemoPainter extends CustomPainter {
   final List<MemoStroke> strokes;
   final List<Offset> currentPoints;
-  final Color currentColor;
-  final double currentWidth;
+
+  /// 지금 긋는 획의 굵기 배율 (확대한 만큼)
+  final double activeScale;
 
   /// 저장된 획의 0~1 좌표가 가리키는 자리 (문서는 쪽들, 그 밖은 화면). 없으면 그리는 곳 전체
   final _MemoMap? map;
@@ -121,48 +122,15 @@ class _MemoPainter extends CustomPainter {
   _MemoPainter({
     required this.strokes,
     required this.currentPoints,
-    required this.currentColor,
-    required this.currentWidth,
+    this.activeScale = 1,
     this.map,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final _MemoMap m = (map != null && map!.valid) ? map! : _MemoMap.rect(Offset.zero & size);
-    for (final s in strokes) {
-      if (s.dxList.isEmpty) continue;
-      final paint = Paint()
-        ..color = Color(s.colorValue)
-        ..strokeWidth = s.widthOn(m.unit)
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = PaintingStyle.stroke;
-
-      final path = Path();
-      final first = m.toLocal(s.dxList.first, s.dyList.first);
-      path.moveTo(first.dx, first.dy);
-      for (int i = 1; i < s.dxList.length; i++) {
-        final p = m.toLocal(s.dxList[i], s.dyList[i]);
-        path.lineTo(p.dx, p.dy);
-      }
-      canvas.drawPath(path, paint);
-    }
-
-    if (currentPoints.isNotEmpty) {
-      final paint = Paint()
-        ..color = currentColor
-        ..strokeWidth = currentWidth
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = PaintingStyle.stroke;
-
-      final path = Path();
-      path.moveTo(currentPoints.first.dx, currentPoints.first.dy);
-      for (int i = 1; i < currentPoints.length; i++) {
-        path.lineTo(currentPoints[i].dx, currentPoints[i].dy);
-      }
-      canvas.drawPath(path, paint);
-    }
+    paintMemoStrokes(canvas, strokes, toLocal: m.toLocal, unit: m.unit);
+    if (currentPoints.isNotEmpty) paintMemoActive(canvas, currentPoints, scale: activeScale);
   }
 
   @override
@@ -380,12 +348,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   Future<List<MemoStroke>>? _memoLoading;
   List<MemoStroke> _memoStrokes = [];
   final List<Offset> _activeStrokePoints = [];
-  Color _penColor = kMemoPenColors.first; // 기본: 빨강
-  double _penWidth = 2.0;
 
-  // 메모: 되돌리기/다시 실행 기록(페이지 위치별), 지우개 종류, 지우개 드래그 시작 시점의 필기
+  // 메모: 되돌리기/다시 실행 기록(페이지 위치별), 지우개 드래그 시작 시점의 필기 (펜·형광펜·테이프·지우개 설정은 [MemoTools])
   final MemoHistory _memoHistory = MemoHistory();
-  String _eraserType = 'area';
   List<MemoStroke>? _eraseStartStrokes;
 
   String _progressBarPosSetting = 'bottom';
@@ -491,6 +456,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _tintHold.open(); // 파일을 보는 동안 편안한 모드 덮개를 걷음
     _epubZoomController.addListener(_onZoomMatrixChanged);
     ToolbarLayout.current.addListener(_onToolbarLayout); // 도구 모음 설정에서 아이콘 배치를 바꾸면 바로 다시 그림
+    MemoTools.changed.addListener(_onToolbarLayout); // 메모 도구 설정(테이프 숨기기 등)이 바뀌면 다시 그림
     SystemBars.enterViewer(); // 파일 열람 중에는 상태표시줄·내비게이션 바를 모두 숨김
     _activeFilePath = widget.filePath;
     _loadNeighborFiles();
@@ -740,7 +706,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final quickSide = await StorageService.getQuickMenuSide();
     final volTurn = await StorageService.getUseVolumeTurn();
     final swipeTurn = await StorageService.getUseSwipeTurn();
-    final eraserType = await StorageService.getMemoEraserType();
 
     // 문서(TXT·워드·한글)는 저장된 위치(예: txt:12) 자체가 그 쪽의 메모 열쇠, EPUB은 CFI(없으면 진행률)
     final String initLocKey = (_isOfflineDocument && savedCfi != null && savedCfi.isNotEmpty)
@@ -780,7 +745,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _useVolumeTurn = volTurn;
       // PPT는 스크롤이 없으므로, 스크롤로 설정돼 있으면 이 파일만 슬라이드로 (다른 파일은 그대로 스크롤)
       _useSwipeTurn = (swipeTurn || (_isPresentation && pageModeScroll)) && !_pageModeScroll;
-      _eraserType = eraserType;
       _memoStrokes = strokes;
       _isLoading = false;
     });
@@ -1476,15 +1440,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   // 읽기 방향 아이콘: ↔ (지금 방향 쪽 화살촉만 노란색)
   Widget _buildDualDirectionIcon() => DirectionArrowIcon(rightToLeft: _isMangaRtlMode, size: 20);
 
-  double _distToEraserSegment(Offset p, Offset a, Offset b) {
-    final ab = b - a;
-    final lenSq = ab.dx * ab.dx + ab.dy * ab.dy;
-    if (lenSq < 0.0001) return (p - a).distance;
-    final t = (((p.dx - a.dx) * ab.dx + (p.dy - a.dy) * ab.dy) / lenSq).clamp(0.0, 1.0);
-    final proj = Offset(a.dx + ab.dx * t, a.dy + ab.dy * t);
-    return (p - proj).distance;
-  }
-
   // ── 메모 되돌리기 / 다시 실행 (현재 보고 있는 페이지 위치 기준) ──
   Future<void> _applyMemoStrokes(String locKey, List<MemoStroke> strokes) async {
     final pg = RegExp(r'^pg:(\d+)$').firstMatch(locKey);
@@ -1584,12 +1539,14 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       return;
     }
     final Rect r = slot.value;
+    final st = MemoTools.s;
     final stroke = MemoStroke(
-      dxList: [for (final p in pts) (p.dx - r.left) / r.width],
-      dyList: [for (final p in pts) (p.dy - r.top) / r.height],
-      colorValue: _penColor.toARGB32(),
+      dxList: [for (final p in finishMemoPoints(pts)) (p.dx - r.left) / r.width],
+      dyList: [for (final p in finishMemoPoints(pts)) (p.dy - r.top) / r.height],
+      colorValue: st.color.toARGB32(),
       // 굵기는 쪽 너비에 대한 비율 (확대해 쓰면 그만큼 가늘게 저장 → 넘겨 보기와 같은 굵기)
-      strokeWidth: _penWidth * _hwpController.scrollZoom / r.width,
+      strokeWidth: st.width * _hwpController.scrollZoom / r.width,
+      kind: st.tool,
     );
     final before = _scrollMemos[slot.key] ?? const <MemoStroke>[];
     _memoHistory.record('pg:${slot.key}', before);
@@ -1652,25 +1609,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         active: _allowFingerDrawing,
         onTap: () => setState(() => _allowFingerDrawing = !_allowFingerDrawing),
       ),
-      // 펜: 누르면 펜 선택, 선택된 상태에서 한 번 더 누르면 선 굵기·색상 설정 창
-      MemoToolButton(
-        // 깃털 펜 + 잉크병 (잉크병 안 색 = 지금 펜 색)
-        iconBuilder: (c) => QuillInkIcon(color: c, ink: _penColor, size: 22),
-        label: _tr('펜 (한 번 더 누르면 굵기·색상)', 'Pen (tap again: size & color)', '笔 (再点一次: 粗细·颜色)', 'ペン (もう一度タップ: 太さ・色)'),
-        active: !_isEraserMode,
-        onTap: () => setState(() => _isEraserMode = false),
-        onReselect: (_) => _openPenSettings(),
-      ),
-      // 지우개: 누르면 지우개 선택, 선택된 상태에서 한 번 더 누르면 획/영역 지우개 선택
-      MemoToolButton(
-        iconBuilder: (c) => EraserIcon(color: c),
-        label: _eraserType == 'stroke'
-            ? _tr('획 지우개 (한 번 더 누르면 종류 선택)', 'Stroke Eraser (tap again: type)', '笔画橡皮擦 (再点一次: 类型)', 'ストローク消しゴム (もう一度タップ: 種類)')
-            : _tr('영역 지우개 (한 번 더 누르면 종류 선택)', 'Area Eraser (tap again: type)', '区域橡皮擦 (再点一次: 类型)', '部分消しゴム (もう一度タップ: 種類)'),
-        active: _isEraserMode,
-        onTap: () => setState(() => _isEraserMode = true),
-        onReselect: _chooseEraserType,
-      ),
+      ..._memoDrawTools(),
       // 되돌리기 / 다시 실행
       MemoToolButton(
         icon: Icons.undo,
@@ -1683,28 +1622,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         label: _tr('다시 실행', 'Redo', '重做', 'やり直し'),
         enabled: _memoHistory.canRedo(_memoHistoryKeys),
         onTap: _redoMemo,
-      ),
-      MemoToolButton(
-        icon: Icons.delete_sweep_outlined,
-        color: Colors.redAccent,
-        label: _tr('전체 지우기', 'Clear All Strokes', '清空全部手写', '手書きを全消去'),
-        onTap: () async {
-          // 스크롤 보기: 화면에 가장 많이 보이는 쪽의 메모를 지움
-          if (_docVertical) {
-            final int? p = await _hwpController.mostVisiblePage();
-            if (p == null || !mounted) return;
-            final before = _scrollMemos[p] ?? const <MemoStroke>[];
-            if (before.isEmpty) return;
-            _memoHistory.record('pg:$p', before);
-            await _setScrollPageMemo(p, []);
-            if (mounted) setState(() {});
-            return;
-          }
-          final locKey = _currentPageLocationKey;
-          if (_memoStrokes.isNotEmpty) _memoHistory.record(locKey, _memoStrokes);
-          setState(() => _memoStrokes = []);
-          await _saveMemo(locKey, []);
-        },
       ),
       MemoDoneButton(
         label: _tr('완료', 'Done', '完成', '完了'),
@@ -1818,37 +1735,75 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// 위 상황에서 진행바가 메모 도구모음 쪽에서 비켜 주는 폭 (메모 도구모음 폭 48 + 간격 8)
   static const double _memoBarSideInset = 54.0;
 
-  Future<void> _openPenSettings() {
-    return showPenSettingsPanel(
-      context: context,
-      color: _penColor,
-      width: _penWidth,
-      onColorChanged: (c) => setState(() {
-        _penColor = c;
-        _isEraserMode = false;
-      }),
-      onWidthChanged: (w) => setState(() => _penWidth = w),
-      tr: _tr,
-    );
+  /// 펜·형광펜·테이프·지우개 단추 (고른 것을 한 번 더 누르면 설정 창)
+  List<Widget> _memoDrawTools() {
+    final st = MemoTools.s;
+    Widget tool(String kind, String label) => MemoToolButton(
+          iconBuilder: (c) => MemoToolIcon(kind: kind, color: c, accent: st.colorOf(kind).withValues(alpha: 1), size: 22),
+          label: label,
+          active: !_isEraserMode && st.tool == kind,
+          onTap: () {
+            setState(() {
+              _isEraserMode = false;
+              st.tool = kind;
+            });
+            MemoTools.save();
+          },
+          onReselect: (_) => _openMemoToolPanel(kind),
+        );
+    return [
+      tool('pen', _tr('펜 (한 번 더 누르면 설정)', 'Pen (tap again: settings)', '笔 (再点一次: 设置)', 'ペン (もう一度タップ: 設定)')),
+      tool('hl', _tr('형광펜 (한 번 더 누르면 설정)', 'Highlighter (tap again: settings)', '荧光笔 (再点一次: 设置)', '蛍光ペン (もう一度タップ: 設定)')),
+      tool('tape', _tr('테이프 (한 번 더 누르면 설정)', 'Tape (tap again: settings)', '胶带 (再点一次: 设置)', 'テープ (もう一度タップ: 設定)')),
+      MemoToolButton(
+        iconBuilder: (c) => EraserIcon(color: c),
+        label: _tr('지우개 (한 번 더 누르면 설정)', 'Eraser (tap again: settings)', '橡皮擦 (再点一次: 设置)', '消しゴム (もう一度タップ: 設定)'),
+        active: _isEraserMode,
+        onTap: () => setState(() => _isEraserMode = true),
+        onReselect: (_) => _openEraserPanel(),
+      ),
+    ];
   }
 
-  Future<void> _chooseEraserType(BuildContext buttonContext) async {
-    final v = await showEraserTypeMenu(buttonContext, _eraserType, _tr, barPos: _memoToolbarPos);
-    if (v == null || !mounted) return;
-    setState(() {
-      _eraserType = v;
-      _isEraserMode = true;
-    });
-    await StorageService.setMemoEraserType(v);
+  Future<void> _openMemoToolPanel(String kind) async {
+    await showMemoToolPanel(context: context, kind: kind, tr: _tr);
+    if (mounted) setState(() => _isEraserMode = false);
   }
 
-  /// 삼성 노트 스타일 초고속 캡슐 지우개 (드래그 중 디스크 I/O 제거)
+  Future<void> _openEraserPanel() => showEraserPanel(
+        context: context,
+        tr: _tr,
+        onClearLines: () => _clearMemos((s) => s.kind != 'tape'),
+        onClearTapes: () => _clearMemos((s) => s.kind == 'tape'),
+      );
+
+  /// 보고 있는 쪽의 메모 가운데 [which]에 드는 것을 모두 지움 (되돌리기 가능)
+  Future<void> _clearMemos(bool Function(MemoStroke s) which) async {
+    // 스크롤 보기: 화면에 가장 많이 보이는 쪽
+    if (_docVertical) {
+      final int? p = await _hwpController.mostVisiblePage();
+      if (p == null || !mounted) return;
+      final before = _scrollMemos[p] ?? const <MemoStroke>[];
+      if (!before.any(which)) return;
+      _memoHistory.record('pg:$p', before);
+      await _setScrollPageMemo(p, [for (final s in before) if (!which(s)) s]);
+      if (mounted) setState(() {});
+      return;
+    }
+    if (!_memoStrokes.any(which)) return;
+    final locKey = _currentPageLocationKey;
+    _memoHistory.record(locKey, _memoStrokes);
+    final after = [for (final s in _memoStrokes) if (!which(s)) s];
+    setState(() => _memoStrokes = after);
+    await _saveMemo(locKey, after);
+  }
+
+  /// 지우개: 이전 좌표~지금 좌표를 이은 캡슐에 닿은 부분을 지움 (드래그 중에는 저장하지 않음)
   void _eraseStrokeAt(Offset localPos, _MemoMap map) {
     if (_memoStrokes.isEmpty || !map.valid) {
       _lastEraserPos = localPos;
       return;
     }
-
     final Offset prevPos = _lastEraserPos ?? localPos;
     _lastEraserPos = localPos;
     final next = _erasedStrokes(_memoStrokes, prevPos, localPos, map);
@@ -1856,104 +1811,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   /// [prevPos]→[localPos]로 문지른 지우개에 닿은 부분을 뺀 획들 (지운 게 없으면 null)
-  List<MemoStroke>? _erasedStrokes(List<MemoStroke> strokes, Offset prevPos, Offset localPos, _MemoMap map) {
-    final double hitRadius = math.max<double>(15.0, _penWidth * 3.2);
-    final double minEraserX = math.min(prevPos.dx, localPos.dx) - hitRadius;
-    final double maxEraserX = math.max(prevPos.dx, localPos.dx) + hitRadius;
-    final double minEraserY = math.min(prevPos.dy, localPos.dy) - hitRadius;
-    final double maxEraserY = math.max(prevPos.dy, localPos.dy) + hitRadius;
-
-    bool modifiedAny = false;
-    final nextStrokes = <MemoStroke>[];
-
-    for (final s in strokes) {
-      if (s.dxList.isEmpty) continue;
-
-      double sMinX = double.infinity, sMaxX = double.negativeInfinity;
-      double sMinY = double.infinity, sMaxY = double.negativeInfinity;
-      for (int i = 0; i < s.dxList.length; i++) {
-        final Offset q = map.toLocal(s.dxList[i], s.dyList[i]);
-        final px = q.dx, py = q.dy;
-        if (px < sMinX) sMinX = px;
-        if (px > sMaxX) sMaxX = px;
-        if (py < sMinY) sMinY = py;
-        if (py > sMaxY) sMaxY = py;
-      }
-      if (sMaxX < minEraserX || sMinX > maxEraserX || sMaxY < minEraserY || sMinY > maxEraserY) {
-        nextStrokes.add(s);
-        continue;
-      }
-
-      final densePts = <Offset>[];
-      for (int i = 0; i < s.dxList.length; i++) {
-        final p0 = map.toLocal(s.dxList[i], s.dyList[i]);
-        densePts.add(p0);
-        if (i + 1 < s.dxList.length) {
-          final p1 = map.toLocal(s.dxList[i + 1], s.dyList[i + 1]);
-          final dist = (p1 - p0).distance;
-          if (dist > 4.0) {
-            final steps = (dist / 4.0).ceil();
-            for (int k = 1; k < steps; k++) {
-              final t = k / steps;
-              densePts.add(Offset(p0.dx + (p1.dx - p0.dx) * t, p0.dy + (p1.dy - p0.dy) * t));
-            }
-          }
-        }
-      }
-
-      bool anyHit = false;
-      for (final pt in densePts) {
-        if (_distToEraserSegment(pt, prevPos, localPos) <= hitRadius) {
-          anyHit = true;
-          break;
-        }
-      }
-
-      if (!anyHit) {
-        nextStrokes.add(s);
-        continue;
-      }
-
-      modifiedAny = true;
-      // 획 지우개: 닿은 획은 통째로 지움
-      if (_eraserType == 'stroke') continue;
-      List<Offset> currentRun = [];
-      void flushRun() {
-        if (currentRun.isEmpty) return;
-        if (currentRun.length == 1) {
-          currentRun.add(currentRun.first + const Offset(0.2, 0.2));
-        }
-        final compact = <Offset>[currentRun.first];
-        for (int i = 1; i < currentRun.length - 1; i++) {
-          if ((currentRun[i] - compact.last).distance >= 2.2) {
-            compact.add(currentRun[i]);
-          }
-        }
-        compact.add(currentRun.last);
-        final fracs = [for (final p in compact) map.toFrac(p)];
-        nextStrokes.add(
-          MemoStroke(
-            dxList: [for (final f in fracs) f.dx],
-            dyList: [for (final f in fracs) f.dy],
-            colorValue: s.colorValue,
-            strokeWidth: s.strokeWidth,
-          ),
-        );
-        currentRun = [];
-      }
-
-      for (final pt in densePts) {
-        if (_distToEraserSegment(pt, prevPos, localPos) <= hitRadius) {
-          flushRun();
-        } else {
-          currentRun.add(pt);
-        }
-      }
-      flushRun();
-    }
-
-    return modifiedAny ? nextStrokes : null;
-  }
+  List<MemoStroke>? _erasedStrokes(List<MemoStroke> strokes, Offset prevPos, Offset localPos, _MemoMap map) => eraseMemoStrokes(
+        strokes,
+        prevPos,
+        localPos,
+        toLocal: map.toLocal,
+        toFrac: map.toFrac,
+        unit: map.unit,
+        hitRadius: math.max<double>(15.0, MemoTools.s.penWidth * 3.2),
+      );
 
   /// 탭 존 가이드라인 띄우기 (앞에 떠 있던 것은 지움)
   void _showTapGuide() {
@@ -2887,7 +2753,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     canvas.drawImage(img, Offset.zero, Paint());
     canvas.scale(img.width / stage.width, img.height / stage.height);
     if (strokes.isNotEmpty) {
-      _MemoPainter(strokes: strokes, currentPoints: const [], currentColor: _penColor, currentWidth: _penWidth, map: _memoMap(stage)).paint(canvas, stage);
+      _MemoPainter(strokes: strokes, currentPoints: const [], map: _memoMap(stage)).paint(canvas, stage);
     }
     if (ribbon) {
       final Rect page = _ribbonPage(stage);
@@ -3025,10 +2891,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     for (int i = 0; i < pages.length; i++) {
       final double w = sizes[i].width, h = sizes[i].height;
       for (final s in await StorageService.getLocationStrokes(widget.filePath, 'pg:${pages[i]}')) {
-        out.add(MemoStroke(
+        out.add(s.copyWith(
           dxList: [for (final x in s.dxList) (o + x * w) / sumW],
           dyList: [for (final y in s.dyList) y * h / maxH],
-          colorValue: s.colorValue,
           strokeWidth: s.strokeWidth < 0.5 ? s.strokeWidth * w / sumW : s.strokeWidth,
         ));
       }
@@ -3054,10 +2919,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         o += sizes[i].width;
       }
       final double w = sizes[i].width, h = sizes[i].height;
-      per[i].add(MemoStroke(
+      per[i].add(s.copyWith(
         dxList: [for (final x in s.dxList) (x * sumW - o) / w],
         dyList: [for (final y in s.dyList) y * maxH / h],
-        colorValue: s.colorValue,
         strokeWidth: s.strokeWidth < 0.5 ? s.strokeWidth * sumW / w : s.strokeWidth,
       ));
     }
@@ -3203,8 +3067,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     painter: _MemoPainter(
                       strokes: _memoStrokes,
                       currentPoints: const [],
-                      currentColor: _penColor,
-                      currentWidth: _penWidth,
                       map: _memoMap(box.biggest),
                     ),
                   ),
@@ -4030,6 +3892,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   @override
   void dispose() {
     ToolbarLayout.current.removeListener(_onToolbarLayout);
+    MemoTools.changed.removeListener(_onToolbarLayout);
     _outlineProgress.dispose();
     _framesTimer?.cancel();
     _tintHold.dispose();
@@ -4238,7 +4101,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (!_pageModeScroll || _docVertical)
       QuickToolItem(
         id: 'memo',
-        icon: QuillInkIcon(color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
+        icon: MemoToolIcon(kind: 'memo', color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
           setState(() {
@@ -4944,13 +4807,20 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                           if (_memoPageAnchored && (_pageSlots?.isEmpty ?? true)) await _refreshPageFrames();
                           if (!mounted) return;
                           final _MemoMap map = _memoMapInLayer(Size(drawWidth, drawHeight));
-                          final fracs = [for (final p in _activeStrokePoints) map.toFrac(p)];
+                          final st = MemoTools.s;
+                          final double zoom = _epubZoomController.value.getMaxScaleOnAxis();
+                          // 굵기 (화면 점): EPUB에서 글자 크기에 맞춰 두께 조절이면 글자 크기로
+                          final double widthPx = (st.fitText && !_isOfflineDocument)
+                              ? _fontSize * (st.tool == 'tape' ? 1.4 : 1.25) * zoom
+                              : st.width * zoom;
+                          final fracs = [for (final p in finishMemoPoints(_activeStrokePoints)) map.toFrac(p)];
                           final stroke = MemoStroke(
                             dxList: [for (final f in fracs) f.dx],
                             dyList: [for (final f in fracs) f.dy],
-                            colorValue: _penColor.toARGB32(),
-                            // 굵기는 쪽 너비에 대한 비율 (펜 굵기는 쪽 기준이라 확대하면 함께 굵어지고 화면을 돌려도 쪽과 같이)
-                            strokeWidth: _penWidth * _epubZoomController.value.getMaxScaleOnAxis() / map.unit,
+                            colorValue: st.color.toARGB32(),
+                            // 굵기는 쪽 너비에 대한 비율 (확대하면 함께 굵어지고 화면을 돌려도 쪽과 같이)
+                            strokeWidth: widthPx / map.unit,
+                            kind: st.tool,
                           );
                           _memoHistory.record(locKey, _memoStrokes);
                           final list = List<MemoStroke>.from(_memoStrokes)..add(stroke);
@@ -4974,9 +4844,8 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                         painter: _MemoPainter(
                           strokes: const [],
                           currentPoints: _activeStrokePoints,
-                          currentColor: _penColor,
                           // 확대한 만큼 굵게 (쪽 기준 굵기)
-                          currentWidth: _penWidth * (_docVertical ? _hwpController.scrollZoom : _epubZoomController.value.getMaxScaleOnAxis()),
+                          activeScale: _docVertical ? _hwpController.scrollZoom : _epubZoomController.value.getMaxScaleOnAxis(),
                         ),
                       ),
                     );

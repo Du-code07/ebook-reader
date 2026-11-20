@@ -73,6 +73,9 @@ class MemoStroke {
   /// 굵기: 쪽 너비에 대한 비율 (쪽이 커지거나 확대하면 같이 굵어짐). 0.5 이상이면 예전 방식(화면 점 크기)
   final double strokeWidth;
 
+  /// 종류: 'pen'(펜) · 'hl'(형광펜, 색에 투명도 포함) · 'tape'(테이프)
+  final String kind;
+
   /// 너비가 [pageWidth]인 쪽 위에 그릴 때의 굵기
   double widthOn(double pageWidth) => strokeWidth < 0.5 ? strokeWidth * pageWidth : strokeWidth;
 
@@ -81,13 +84,24 @@ class MemoStroke {
     required this.dyList,
     required this.colorValue,
     required this.strokeWidth,
+    this.kind = 'pen',
   });
+
+  /// 좌표·굵기만 바꾼 같은 종류·색의 획 (지우개로 나누거나 쪽 좌표로 옮길 때)
+  MemoStroke copyWith({List<double>? dxList, List<double>? dyList, double? strokeWidth}) => MemoStroke(
+        dxList: dxList ?? this.dxList,
+        dyList: dyList ?? this.dyList,
+        colorValue: colorValue,
+        strokeWidth: strokeWidth ?? this.strokeWidth,
+        kind: kind,
+      );
 
   Map<String, dynamic> toJson() => {
         'x': dxList,
         'y': dyList,
         'c': colorValue,
         'w': strokeWidth,
+        if (kind != 'pen') 'k': kind,
       };
 
   factory MemoStroke.fromJson(Map<String, dynamic> json) => MemoStroke(
@@ -95,6 +109,7 @@ class MemoStroke {
         dyList: (json['y'] as List).map((e) => (e as num).toDouble()).toList(),
         colorValue: (json['c'] as num?)?.toInt() ?? 0xFFFFC107,
         strokeWidth: (json['w'] as num?)?.toDouble() ?? 2.0,
+        kind: json['k'] is String ? json['k'] as String : 'pen',
       );
 }
 
@@ -570,16 +585,20 @@ class StorageService {
     await prefs.setString('page_display_v88', mode);
   }
 
-  // 메모 지우개 종류: 'area'(닿은 부분만) / 'stroke'(닿은 획 전체)
-  static Future<void> setMemoEraserType(String type) async {
+  // 메모 도구 설정 (펜·형광펜·테이프·지우개): JSON 한 덩어리
+  static Future<void> setMemoToolSettings(Map<String, dynamic> m) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('memo_eraser_type', type);
+    await prefs.setString('memo_tools_v1', jsonEncode(m));
   }
 
-  static Future<String> getMemoEraserType() async {
+  static Future<Map<String, dynamic>?> getMemoToolSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getString('memo_eraser_type');
-    return (v == 'stroke' || v == 'area') ? v! : 'area';
+    try {
+      final raw = prefs.getString('memo_tools_v1');
+      return raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
   }
 
   // 진행바 UI 하단('bottom')을 기본값으로 설정

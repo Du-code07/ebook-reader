@@ -21,7 +21,7 @@ class PdfOutlineService {
 
   /// 메모를 넣은 PDF: [src]를 [dst]로 복사하고 끝에 쪽마다 펜 자국(잉크 주석)을 덧붙인다.
   /// 원래 내용(글자·그림)은 그대로라 글자 고르기·확대도 원래처럼 됨.
-  /// [memos]: 쪽 번호(0부터) → 펜 자국들 {x, y: 쪽 안 비율(왼쪽 위 0), c: ARGB, w: 쪽 너비에 대한 굵기}.
+  /// [memos]: 쪽 번호(0부터) → 펜 자국들 {x, y: 쪽 안 비율(왼쪽 위 0), c: ARGB, w: 쪽 너비에 대한 굵기, k: 종류(형광펜·테이프)}.
   /// 읽지 못하는 PDF(암호 등)면 false (만들지 않음)
   static Future<bool> writeWithMemos(String src, String dst, Map<int, List<Map<String, Object?>>> memos) async {
     try {
@@ -353,7 +353,9 @@ class _PdfOutlineReader {
         for (final p in pts.skip(1)) {
           path.write(' ${f(p.$1)} ${f(p.$2)} l');
         }
-        final content = 'q /G0 gs ${f(r)} ${f(g)} ${f(bl)} RG ${f(lw)} w 1 J 1 j $path S Q';
+        // 형광펜·테이프는 네모난 끝 (펜은 둥근 끝)
+        final String kind = stroke['k'] is String ? stroke['k'] as String : 'pen';
+        final content = 'q /G0 gs ${f(r)} ${f(g)} ${f(bl)} RG ${f(lw)} w ${kind == 'pen' ? 1 : 2} J 1 j $path S Q';
         final int apNum = nextNum++, annotNum = nextNum++;
         // 그려 둔 모양(어느 PDF 앱에서나 같은 모양으로 보이게)
         obj(apNum, '${_ser({

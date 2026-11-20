@@ -634,7 +634,7 @@ Widget bookmarkSubtitle(BuildContext context, BookmarkItem bm, ViewerTr tr) {
   ]);
 }
 
-/// 북마크 목록 위 줄: 북마크 아이콘 + 제목, [모두 지우기], [현재 페이지 북마크] (아이콘만)
+/// 북마크 목록 위 줄: 북마크 아이콘 + 제목, [지우기](북마크가 있을 때만), [현재 페이지 북마크] (아이콘만)
 Widget bookmarkSheetHeader(BuildContext context,
     {required ViewerTr tr, required bool already, required bool canClear, required String addLabel, VoidCallback? onAdd, required VoidCallback onClearAll}) {
   return ListTile(
@@ -651,13 +651,16 @@ Widget bookmarkSheetHeader(BuildContext context,
       ),
     ]),
     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-      TextButton.icon(
-        style: TextButton.styleFrom(foregroundColor: Colors.redAccent, visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
-        icon: TrashLidIcon(open: false, size: 16, color: canClear ? Colors.redAccent : Theme.of(context).disabledColor),
-        label: Text(tr('모두 지우기', 'Clear All', '全部删除', 'すべて削除')),
-        onPressed: canClear ? onClearAll : null,
-      ),
-      const SizedBox(width: 4),
+      // 지우기: 북마크가 있을 때만 (아이콘과 글자 모두 빨강)
+      if (canClear) ...[
+        TextButton.icon(
+          style: TextButton.styleFrom(foregroundColor: Colors.redAccent, visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
+          icon: const TrashLidIcon(open: false, size: 16, color: Colors.redAccent),
+          label: Text(tr('지우기', 'Delete', '删除', '削除')),
+          onPressed: onClearAll,
+        ),
+        const SizedBox(width: 4),
+      ],
       // 같은 쪽(같은 보기 방식)은 한 번만 북마크
       Tooltip(
         message: already ? tr('북마크한 페이지예요', 'Already bookmarked', '已添加书签', 'ブックマーク済みです') : addLabel,
