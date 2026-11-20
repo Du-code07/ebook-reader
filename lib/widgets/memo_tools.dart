@@ -1111,8 +1111,8 @@ class _EraserPanelState extends State<_EraserPanel> {
               ),
               const SizedBox(height: 8),
               // 획 지우개: 닿은 획 전체 / 영역 지우개: 닿은 부분만
-              radio('stroke', const EraserGlyph(area: false), tr('획 지우개', 'Stroke Eraser', '笔画橡皮擦', 'ストローク消しゴム')),
-              radio('area', const EraserGlyph(area: true), tr('영역 지우개', 'Area Eraser', '区域橡皮擦', '部分消しゴム')),
+              radio('stroke', EraserGlyph(area: false, color: _fg(context)), tr('획 지우개', 'Stroke Eraser', '笔画橡皮擦', 'ストローク消しゴム')),
+              radio('area', EraserGlyph(area: true, color: _fg(context)), tr('영역 지우개', 'Area Eraser', '区域橡皮擦', '部分消しゴム')),
               const SizedBox(height: 6),
               toggle(MemoToolIcon(kind: 'hl', color: _fg(context), accent: _s.hlColor, size: 22), tr('형광펜만 지우기', 'Erase Highlighter Only', '仅擦除荧光笔', '蛍光ペンだけ消す'), _s.eraseOnlyHl,
                   (v) => _s.eraseOnlyHl = v),

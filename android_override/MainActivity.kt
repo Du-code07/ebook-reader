@@ -173,7 +173,8 @@ class MainActivity : FlutterActivity() {
 
     private fun showViewerStatusBar() {
         try {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            // Android 11+: 창 플래그(FLAG_FULLSCREEN)를 바꾸면 창이 다시 배치되며 화면이 한 장면 검게 깜빡임 → 막대 보이기·숨기기만
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
                 window.insetsController?.let { controller ->
@@ -203,7 +204,7 @@ class MainActivity : FlutterActivity() {
 
     private fun showLibraryBars() {
         try {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
                 window.insetsController?.let { controller ->
@@ -233,8 +234,10 @@ class MainActivity : FlutterActivity() {
             return
         }
         try {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
-            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
+                window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val lp = window.attributes
@@ -289,6 +292,18 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 노치 영역 사용 방식은 처음에 한 번만 정함: 파일을 열 때 바꾸면 창이 다시 배치되며 화면이 한 장면 검게 깜빡임
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                val lp = window.attributes
+                lp.layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                } else {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+                window.attributes = lp
+            } catch (_: Throwable) {}
+        }
         // 알림 기능은 없앴음: 예전에 만들어 둔 알림 항목(안드로이드 설정 > 알림)도 지움
         if (Build.VERSION.SDK_INT >= 26) {
             try {
@@ -1449,6 +1464,7 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         isActivityResumed = true
+        setWebViewsPaused(false)
         hideSystemStatusBar(alsoHideNavBar = true)
         mainHandler.postDelayed({ hideSystemStatusBar(alsoHideNavBar = true) }, 250L)
         scheduleStatusBarReHide()
@@ -1457,8 +1473,44 @@ class MainActivity : FlutterActivity() {
     override fun onPause() {
         isActivityResumed = false
         mainHandler.removeCallbacks(reHideStatusBarRunnable)
+        setWebViewsPaused(true)
         super.onPause()
     }
+
+    // 배터리: 앱이 뒤로 가 있는 동안 문서 화면·표지 만들기용 WebView의 자바스크립트 타이머와 그리기를 멈춤
+    // (예전에는 앱을 내려 둬도 WebView가 계속 깨어 있어 백그라운드 배터리를 썼음). 돌아오면 다시 켬
+    @Volatile private var webViewsPaused = false
+    private fun setWebViewsPaused(pause: Boolean) {
+        if (webViewsPaused == pause) return
+        webViewsPaused = pause
+        try {
+            var any: WebView? = null
+            fun walk(v: View) {
+                if (v is WebView) {
+                    any = v
+                    try { if (pause) v.onPause() else v.onResume() } catch (_: Throwable) {}
+                }
+                if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+            }
+            walk(window.decorView)
+            // 자바스크립트 타이머는 앱 전체 WebView에 한 번에 걸림 (멈췄으면 돌아올 때 꼭 다시 켬)
+            if (pause) {
+                any?.let { it.pauseTimers(); timersPaused = true }
+            } else if (timersPaused) {
+                timersPaused = false
+                val w = any
+                if (w != null) {
+                    w.resumeTimers()
+                } else {
+                    // 그사이 문서 화면이 닫혀 WebView가 없으면 잠깐 만들어서 다시 켬
+                    val tmp = WebView(this)
+                    tmp.resumeTimers()
+                    tmp.destroy()
+                }
+            }
+        } catch (_: Throwable) {}
+    }
+    private var timersPaused = false
 
     override fun onDestroy() {
         isActivityResumed = false

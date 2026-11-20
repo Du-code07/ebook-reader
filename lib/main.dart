@@ -2636,9 +2636,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       final bool showLabel = itemH >= 46;
       final Color mark = AppColors.mark(context);
 
-      // 막대 칸: 바탕색 없이, 지금 보고 있는 칸은 이름을 진하게 (표시 색)
+      // 막대 칸: 바탕색 없이, 지금 보고 있는 칸은 아이콘 왼쪽에 아이콘 높이만 한 굵은 시그니처 색 선 (그룹 목록과 같게)
+      // 문구 색은 바꾸지 않음
       Widget item({Key? key, required Widget icon, String? label, required VoidCallback onTap, bool selected = false, double? height}) {
-        final Color fg = selected ? mark : cs.onSurface;
+        final Color fg = cs.onSurface;
         return Padding(
           key: key,
           padding: const EdgeInsets.symmetric(vertical: 2),
@@ -2656,7 +2657,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          SizedBox(height: 26, child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg), child: icon))),
+                          SizedBox(
+                            height: 26,
+                            child: Row(children: [
+                              AnimatedContainer(
+                                duration: Anim.ms(160),
+                                width: 4,
+                                height: selected ? 24 : 0,
+                                decoration: BoxDecoration(color: mark, borderRadius: BorderRadius.circular(2)),
+                              ),
+                              Expanded(child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg), child: icon))),
+                              const SizedBox(width: 4),
+                            ]),
+                          ),
                           if (label != null && showLabel) ...[
                             const SizedBox(height: 3),
                             Padding(
@@ -2665,7 +2678,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w900 : FontWeight.w600, color: fg)),
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg)),
                             ),
                           ],
                         ],
@@ -2943,7 +2956,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   /// 기본 스타일 아래 막대: [그룹(지금 그룹 이름)] [검색] [+] [휴지통] [설정]
   Widget _buildBottomBar() {
     final cs = Theme.of(context).colorScheme;
-    final (groupIcon, groupLabel) = _currentGroupLook();
+    // 아래 막대의 그룹 칸은 늘 [내 서재] (고른 그룹·즐겨찾기는 위 제목 옆에 표시)
+    final Widget groupIcon = const FolderDocsIcon(size: 20);
+    final String groupLabel = _localizeGroupName('전체');
     Widget item({Key? key, required Widget icon, required String label, required VoidCallback onTap}) => Expanded(
           child: InkWell(
             key: key,
@@ -4397,7 +4412,32 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     children: [
                       FadeTransition(
                         opacity: ReverseAnimation(_searchCurve),
-                        child: Text(_tr('내 서재', 'My Library', '我的书架', 'マイライブラリ'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(_tr('내 서재', 'My Library', '我的书架', 'マイライブラリ'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                            // 다른 그룹·즐겨찾기를 보고 있으면: 내 서재 | [아이콘] 그룹 이름
+                            if (_favoritesOnly || _selectedGroup != '전체') ...[
+                              Container(
+                                width: 1.6,
+                                height: 22,
+                                margin: const EdgeInsets.symmetric(horizontal: 14),
+                                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                              ),
+                              Builder(builder: (context) {
+                                final (icon, label) = _currentGroupLook();
+                                return Row(mainAxisSize: MainAxisSize.min, children: [
+                                  SizedBox(width: 24, height: 24, child: Center(child: icon)),
+                                  const SizedBox(width: 8),
+                                  ConstrainedBox(
+                                    constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.45),
+                                    child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                                  ),
+                                ]);
+                              }),
+                            ],
+                          ],
+                        ),
                       ),
                       _buildSearchArea(),
                     ],
