@@ -626,10 +626,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ScrollThumbBar.leftHanded.value = (await StorageService.getQuickMenuSide()) == 'left';
       ScrollThumbBar.off.value = await StorageService.getScrollBarOff();
       _bookmarks = await StorageService.getBookmarks(_bookKey);
-      // 파일을 열 때마다 탭 존 가이드라인 (앱 설정에서 끌 수 있음)
-      if (!StorageService.tapGuideOff && mounted) {
-        _showTapGuide();
-      }
 
       final tempDir = await getTemporaryDirectory();
       final first = widget.files.first;
@@ -711,6 +707,13 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _syncControllerToCurrentPage(animate: false);
         });
+        // 파일을 열 때마다 탭 존 가이드라인 (앱 설정에서 끌 수 있음)
+        // 여는 중 화면 위에 먼저 떴다가 내용이 나오면서 화면이 깜빡이지 않게, 첫 쪽이 그려진 뒤에 띄움
+        if (!StorageService.tapGuideOff) {
+          Future<void>.delayed(const Duration(milliseconds: 250), () {
+            if (mounted) _showTapGuide();
+          });
+        }
       }
     }
 

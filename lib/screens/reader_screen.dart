@@ -749,9 +749,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _isLoading = false;
     });
     unawaited(_snapInit());
-    // 파일을 열 때마다 탭 존 가이드라인 (앱 설정에서 끌 수 있음)
+    // 파일을 열 때마다 탭 존 가이드라인 (앱 설정에서 끌 수 있음). 내용이 먼저 그려진 뒤에 부드럽게
     if (!StorageService.tapGuideOff) {
-      _showTapGuide();
+      Future<void>.delayed(const Duration(milliseconds: 250), () {
+        if (mounted) _showTapGuide();
+      });
     }
   }
 

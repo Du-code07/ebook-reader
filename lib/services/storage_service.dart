@@ -151,6 +151,7 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     rememberPage = prefs.getBool('remember_page_v116') ?? false;
     tapGuideOff = prefs.getBool('tap_guide_off_v104') ?? false;
+    railGroups = prefs.getStringList('rail_groups_v184') ?? <String>[];
     Anim.off.value = prefs.getBool('anim_off_v109') ?? false;
     pageCurl = prefs.getBool('page_curl_v109') ?? true;
     final zones = prefs.getString('tap_zones_v122');
@@ -182,6 +183,15 @@ class StorageService {
     Anim.off.value = off;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('anim_off_v109', off);
+  }
+
+  /// 와이드 스타일 왼쪽 막대에 꺼내 둔 그룹 (즐겨찾기 밑, 누르면 그 그룹으로)
+  static List<String> railGroups = <String>[];
+
+  static Future<void> setRailGroups(List<String> groups) async {
+    railGroups = List<String>.of(groups);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('rail_groups_v184', railGroups);
   }
 
   // 탭 존 가이드라인 끄기 (기본: 켜짐 = 파일을 열 때마다 화면 영역 안내를 보여 줌)
@@ -763,6 +773,7 @@ class StorageService {
     final groups = await getGroups();
     groups.remove(groupName);
     await prefs.setStringList('book_groups_v2', groups);
+    if (railGroups.contains(groupName)) await setRailGroups(railGroups.where((g) => g != groupName).toList());
     for (final key in prefs.getKeys().toList()) {
       if (key.startsWith('grp_') && prefs.getString(key) == groupName) {
         await prefs.setString(key, '미분류');
@@ -779,6 +790,7 @@ class StorageService {
     if (i < 0 || groups.contains(newName)) return false;
     groups[i] = newName;
     await prefs.setStringList('book_groups_v2', groups);
+    if (railGroups.contains(oldName)) await setRailGroups(railGroups.map((g) => g == oldName ? newName : g).toList());
     for (final key in prefs.getKeys().toList()) {
       if (key.startsWith('grp_') && prefs.getString(key) == oldName) {
         await prefs.setString(key, newName);

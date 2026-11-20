@@ -1825,7 +1825,12 @@ class FileLoadingView extends StatelessWidget {
     final bool onDark = bg != null ? bg.computeLuminance() < 0.4 : dark;
     final Color fg = bg != null ? (onDark ? Colors.white : Colors.black) : (dark ? Colors.white : cs.onSurface);
     final p = progress;
-    return Center(
+    // 금방 열리는 파일은 돌아가는 원이 잠깐 보였다 사라지며 깜빡이지 않게: 0.3초 뒤부터 서서히 보임
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: Anim.off.value ? Duration.zero : const Duration(milliseconds: 600),
+      builder: (context, t, child) => Opacity(opacity: Anim.off.value ? 1 : ((t - 0.5) / 0.5).clamp(0.0, 1.0), child: child),
+      child: Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1849,6 +1854,7 @@ class FileLoadingView extends StatelessWidget {
             Text(sublabel!, style: TextStyle(fontSize: 12, color: fg.withValues(alpha: 0.55))),
           ],
         ],
+      ),
       ),
     );
   }
@@ -1968,7 +1974,9 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
     // 읽기 방향(우→좌)과 상관없이 '이전' 칸은 이전, '다음' 칸은 다음
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: _closing ? 0 : 1),
-      duration: Anim.ms(180),
+      // 나타날 때는 천천히 (갑자기 어두워지며 깜빡이지 않게), 닫을 때는 빠르게
+      duration: Anim.ms(_closing ? 180 : 320),
+      curve: Curves.easeOut,
       builder: (context, t, child) => Opacity(opacity: t, child: child),
       // 화면 위에 따로 띄우는 것이라 Material로 감싸야 글자 밑에 노란 줄이 생기지 않음
       child: Material(

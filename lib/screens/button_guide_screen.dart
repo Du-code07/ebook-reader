@@ -177,6 +177,9 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           if (simple)
             _Step('fav', tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り'),
                 tr('즐겨찾기한 파일만 모아 봐요\n다시 누르면 고른 그룹으로 돌아가요', 'Shows only your favorite files\nTap again to go back to the chosen group', '只显示收藏的文件\n再次点击回到所选分组', 'お気に入りのファイルだけを表示します\nもう一度タップすると選んだグループに戻ります')),
+          if (simple)
+            _Step('pin', tr('그룹 꺼내기', 'Pin Groups', '放出分组', 'グループを置く'),
+                tr('자주 보는 그룹을 즐겨찾기 밑에 놓아요\n놓은 그룹을 누르면 그 그룹으로 바로 가요', 'Place groups you use often under Favorites\nTap a placed group to jump to it', '把常用的分组放到收藏下方\n点击放好的分组即可直接前往', 'よく見るグループをお気に入りの下に置きます\n置いたグループをタップするとすぐ移動します')),
           _Step('search', tr('검색', 'Search', '搜索', '検索'),
               tr('파일 이름으로 찾아요', 'Find files by name', '按文件名查找', 'ファイル名で探します')),
           if (!simple)
@@ -545,7 +548,7 @@ class _MainMock extends StatelessWidget {
           key: k(id),
           height: 58,
           margin: const EdgeInsets.symmetric(vertical: 2),
-          decoration: BoxDecoration(color: selected ? AppColors.of(context) : null, borderRadius: BorderRadius.circular(8)),
+          decoration: BoxDecoration(color: selected ? AppColors.of(context) : null, borderRadius: BorderRadius.circular(16)),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -567,12 +570,13 @@ class _MainMock extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(6, 10, 6, 10),
                 decoration: BoxDecoration(
                   color: dark ? cs.surfaceContainerHigh : cs.surfaceContainerLowest,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(6),
                   border: dark ? null : Border.all(color: cs.outlineVariant, width: 1.6),
                 ),
                 child: Column(children: [
                   railItem('group', groupIcon, groupLabel, selected: true),
                   railItem('fav', const FavoritesIcon(size: 22), tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り')),
+                  SizedBox(key: k('pin'), height: 44, child: Center(child: Icon(Icons.add, size: 24, color: cs.onSurfaceVariant))),
                   const Spacer(),
                   railItem('search', const Icon(Icons.search), tr('검색', 'Search', '搜索', '検索')),
                   railItem('trash', const TrashLidIcon(open: false), tr('휴지통', 'Trash', '回收站', 'ゴミ箱')),
@@ -581,7 +585,7 @@ class _MainMock extends StatelessWidget {
                     key: k('add'),
                     width: 52,
                     height: 52,
-                    margin: const EdgeInsets.only(top: 8, bottom: 4),
+                    margin: const EdgeInsets.only(top: 8, bottom: 10),
                     decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(16)),
                     child: Icon(Icons.add, size: 30, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context)),
                   ),

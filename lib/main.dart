@@ -2604,149 +2604,262 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     );
   }
 
-  /// 와이드 스타일 왼쪽 아이콘 막대
-  /// 위: [그룹(지금 그룹 이름)] [즐겨찾기] / 아래(파일 추가 위로): [검색] [휴지통] [설정] [+]
+  /// 와이드 스타일 왼쪽 아이콘 막대 (막대 자체는 스크롤 없음)
+  /// 위: [그룹(지금 그룹 이름)] [즐겨찾기]
+  /// 가운데(스크롤): 꺼내 둔 그룹들 + [+] (누르면 막대에 둘 그룹 고르기)
+  /// 아래(파일 추가 위로): [검색] [휴지통] [설정] [+ 파일 추가]
+  final GlobalKey _railAddGroupKey = GlobalKey();
+
+  Widget _groupLeading(String g, double size) {
+    if (g == '전체') return FolderDocsIcon(size: size);
+    final String ext = _groupFormatExt(g) ?? '';
+    return ext.isEmpty ? GroupFolderIcon(size: size, color: Theme.of(context).colorScheme.onSurfaceVariant) : FileTypeIcon(ext: ext, size: size);
+  }
+
   Widget _buildSimpleRail() {
     final cs = Theme.of(context).colorScheme;
     final bool dark = widget.isDarkMode;
-    // 그룹 단추: 즐겨찾기를 보고 있어도 고른 그룹 그대로 보여 줌
-    final String ext = _selectedGroup == '전체' ? '' : (_groupFormatExt(_selectedGroup) ?? '');
-    final Widget groupIcon = _selectedGroup == '전체'
-        ? const FolderDocsIcon(size: 22)
-        : ext.isEmpty
-            ? GroupFolderIcon(size: 22, color: cs.onSurfaceVariant)
-            : FileTypeIcon(ext: ext, size: 22);
-    Widget item({Key? key, required Widget icon, required String label, required VoidCallback onTap, bool selected = false}) {
-      final Color fg = selected ? AppColors.onSig(context) : cs.onSurface;
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Material(
-          key: key,
-          // 지금 보고 있는 것(그룹 / 즐겨찾기)은 둥근 네모 바탕으로
-          color: selected ? AppColors.of(context) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: SizedBox(
-              height: 58,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(height: 26, child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg, shadows: selected ? AppColors.sigShadows(context) : null), child: icon))),
-                  const SizedBox(height: 3),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 3),
-                    child: Text(label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w800 : FontWeight.w600, color: fg, shadows: selected ? AppColors.sigShadows(context) : null)),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
+    // 꺼내 둔 그룹 (지워진 그룹은 빼고)
+    final List<String> pins = StorageService.railGroups.where((g) => _groups.contains(g) && g != '전체').toList();
+    return LayoutBuilder(builder: (context, c) {
+      // 화면이 낮으면(가로 휴대폰) 칸 높이를 줄여 막대 안에 다 들어가게
+      const double addBox = 52 + 8 + 10; // [+] 파일 추가 + 위아래 여백
+      final double itemH = ((c.maxHeight - 10 - addBox - 20 - 48) / 5).clamp(40.0, 58.0).toDouble(); // 가운데 [+] 한 칸은 늘 보이게
+      final bool showLabel = itemH >= 46;
 
-    final top = [
-      item(
-        key: _allGroupChipKey,
-        icon: groupIcon,
-        label: _localizeGroupName(_selectedGroup),
-        selected: !_favoritesOnly,
-        onTap: () {
-          _closeSearch();
-          _showGroupJumpMenu();
-        },
-      ),
-      // 즐겨찾기: 그룹 목록과 따로 (누르면 즐겨찾기만 / 다시 누르면 고른 그룹으로)
-      item(
-        icon: const FavoritesIcon(size: 22),
-        label: _tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り'),
-        selected: _favoritesOnly,
-        onTap: () {
-          _closeSearch();
-          setState(() => _favoritesOnly = !_favoritesOnly);
-        },
-      ),
-    ];
-    final bottom = [
-      item(
-        icon: const Icon(Icons.search),
-        label: _tr('검색', 'Search', '搜索', '検索'),
-        onTap: _searchOpen ? _closeSearch : _openSearch,
-      ),
-      item(
-        key: _trashBtnKey,
-        icon: Badge(
-          isLabelVisible: _trashedBooks.isNotEmpty,
-          largeSize: 13,
-          padding: const EdgeInsets.symmetric(horizontal: 3.5),
-          textStyle: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, height: 1.0),
-          label: Text('${_trashedBooks.length}'),
-          child: TrashLidIcon(open: _trashPanelOpen),
-        ),
-        label: _tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
-        onTap: () {
-          _closeSearch();
-          _showTrashBinDialog();
-        },
-      ),
-      item(
-        icon: SpinGearIcon(turns: _gearTurns),
-        label: _tr('설정', 'Settings', '设置', '設定'),
-        onTap: () {
-          _closeSearch();
-          _showGlobalSettingsDialog();
-        },
-      ),
-      // 맨 아래 [+]: 파일 추가 창 (열린 동안 ×)
-      Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 4),
-        child: Center(
+      Widget item({Key? key, required Widget icon, required String label, required VoidCallback onTap, bool selected = false}) {
+        final Color fg = selected ? AppColors.onSig(context) : cs.onSurface;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
           child: Material(
-            color: AppColors.of(context),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            key: key,
+            // 지금 보고 있는 것(그룹 / 즐겨찾기)은 둥근 네모 바탕으로
+            color: selected ? AppColors.of(context) : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
-              onTap: () {
-                _closeSearch();
-                _showAddSheet();
-              },
-              child: SizedBox.square(
-                dimension: 52,
-                child: Center(child: PlusCloseIcon(open: _addOpen, size: 32, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context))),
+              onTap: onTap,
+              child: SizedBox(
+                height: itemH,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(height: 26, child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg, shadows: selected ? AppColors.sigShadows(context) : null), child: icon))),
+                    if (showLabel) ...[
+                      const SizedBox(height: 3),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: Text(label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w800 : FontWeight.w600, color: fg, shadows: selected ? AppColors.sigShadows(context) : null)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      final bool pinnedNow = !_favoritesOnly && pins.contains(_selectedGroup);
+      final top = [
+        item(
+          key: _allGroupChipKey,
+          icon: _groupLeading(_selectedGroup, 22),
+          label: _localizeGroupName(_selectedGroup),
+          // 꺼내 둔 그룹을 보고 있으면 그 그룹 칸이 표시됨
+          selected: !_favoritesOnly && !pinnedNow,
+          onTap: () {
+            _closeSearch();
+            _showGroupJumpMenu();
+          },
+        ),
+        // 즐겨찾기: 그룹 목록과 따로 (누르면 즐겨찾기만 / 다시 누르면 고른 그룹으로)
+        item(
+          icon: const FavoritesIcon(size: 22),
+          label: _tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り'),
+          selected: _favoritesOnly,
+          onTap: () {
+            _closeSearch();
+            setState(() => _favoritesOnly = !_favoritesOnly);
+          },
+        ),
+      ];
+      // 가운데: 꺼내 둔 그룹 + 맨 끝 [+]
+      final middle = [
+        for (final g in pins)
+          item(
+            icon: _groupLeading(g, 22),
+            label: _localizeGroupName(g),
+            selected: !_favoritesOnly && _selectedGroup == g,
+            onTap: () {
+              _closeSearch();
+              setState(() {
+                _favoritesOnly = false;
+                _selectedGroup = g;
+              });
+            },
+          ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Material(
+            key: _railAddGroupKey,
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: _showRailGroupPicker,
+              child: SizedBox(
+                height: 44,
+                child: Center(child: Icon(Icons.add, size: 24, color: cs.onSurfaceVariant)),
               ),
             ),
           ),
         ),
-      ),
-    ];
-    // 네모 판 (화면이 낮으면 판 안에서 스크롤)
-    return Container(
-      width: 76,
-      decoration: BoxDecoration(
-        color: dark ? cs.surfaceContainerHigh : cs.surfaceContainerLowest,
-        // 표지형 파일 카드처럼 모서리만 살짝 둥글게, 외곽선은 또렷하게
-        borderRadius: BorderRadius.circular(10),
-        border: dark ? null : Border.all(color: cs.outlineVariant, width: 1.6),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: CustomScrollView(
-        slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(6, 10, 6, 10),
-            sliver: SliverFillRemaining(
-              hasScrollBody: false,
-              child: Column(children: [...top, const Spacer(), ...bottom]),
+      ];
+      final bottom = [
+        item(
+          icon: const Icon(Icons.search),
+          label: _tr('검색', 'Search', '搜索', '検索'),
+          onTap: _searchOpen ? _closeSearch : _openSearch,
+        ),
+        item(
+          key: _trashBtnKey,
+          icon: Badge(
+            isLabelVisible: _trashedBooks.isNotEmpty,
+            largeSize: 13,
+            padding: const EdgeInsets.symmetric(horizontal: 3.5),
+            textStyle: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, height: 1.0),
+            label: Text('${_trashedBooks.length}'),
+            child: TrashLidIcon(open: _trashPanelOpen),
+          ),
+          label: _tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
+          onTap: () {
+            _closeSearch();
+            _showTrashBinDialog();
+          },
+        ),
+        item(
+          icon: SpinGearIcon(turns: _gearTurns),
+          label: _tr('설정', 'Settings', '设置', '設定'),
+          onTap: () {
+            _closeSearch();
+            _showGlobalSettingsDialog();
+          },
+        ),
+        // 맨 아래 [+]: 파일 추가 창 (열린 동안 ×). 막대 아래 끝에서 살짝 띄움
+        Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 10),
+          child: Center(
+            child: Material(
+              color: AppColors.of(context),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () {
+                  _closeSearch();
+                  _showAddSheet();
+                },
+                child: SizedBox.square(
+                  dimension: 52,
+                  child: Center(child: PlusCloseIcon(open: _addOpen, size: 32, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context))),
+                ),
+              ),
             ),
           ),
-        ],
+        ),
+      ];
+      // 네모 판: 모서리만 조금 둥글게. 판은 고정, 즐겨찾기 밑 ~ 검색 위만 스크롤
+      return Container(
+        width: 76,
+        decoration: BoxDecoration(
+          color: dark ? cs.surfaceContainerHigh : cs.surfaceContainerLowest,
+          borderRadius: BorderRadius.circular(6),
+          border: dark ? null : Border.all(color: cs.outlineVariant, width: 1.6),
+        ),
+        clipBehavior: Clip.antiAlias,
+        padding: const EdgeInsets.fromLTRB(6, 10, 6, 0),
+        child: Column(children: [
+          ...top,
+          Expanded(
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+              child: SingleChildScrollView(child: Column(children: middle)),
+            ),
+          ),
+          ...bottom,
+        ]),
+      );
+    });
+  }
+
+  /// 와이드: 막대 가운데 [+] → 막대에 둘 그룹 고르기 (누를 때마다 넣었다 뺐다)
+  Future<void> _showRailGroupPicker() async {
+    _closeSearch();
+    final box = _railAddGroupKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
+    final Rect anchor = box.localToGlobal(Offset.zero, ancestor: overlayBox) & box.size;
+    final List<String> groups = _groups.where((g) => g != '전체').toList();
+    await Navigator.of(context).push<void>(PopPanelRoute<void>(
+      anchor: anchor,
+      width: 320,
+      beside: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setPanel) {
+          final cs = Theme.of(ctx).colorScheme;
+          return ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.6),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                  child: Text(_tr('막대에 둘 그룹', 'Groups on the Bar', '放到侧栏的分组', 'バーに置くグループ'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Text(_tr('누르면 즐겨찾기 밑에 놓이고, 다시 누르면 빠져요', 'Tap to place it under Favorites, tap again to remove it', '点击放到收藏下方，再次点击移除', 'タップするとお気に入りの下に置かれ、もう一度タップすると外れます'),
+                      style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
+                ),
+                if (groups.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                    child: Text(_tr('만든 그룹이 없어요', 'No groups yet', '还没有分组', 'グループがありません'), style: TextStyle(color: cs.onSurfaceVariant)),
+                  )
+                else
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.only(bottom: 8),
+                      children: [
+                        for (final g in groups)
+                          ListTile(
+                            leading: _groupLeading(g, 22),
+                            title: Text(_localizeGroupName(g), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            trailing: StorageService.railGroups.contains(g) ? Icon(Icons.check, color: AppColors.mark(ctx)) : null,
+                            onTap: () {
+                              final List<String> next = List<String>.of(StorageService.railGroups);
+                              if (!next.remove(g)) next.add(g);
+                              StorageService.setRailGroups(next);
+                              setPanel(() {});
+                              if (mounted) setState(() {});
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
       ),
-    );
+    ));
   }
 
   /// 심플 스타일: 검색을 열면 파일 위에 펼쳐지는 검색 줄
