@@ -102,7 +102,7 @@ const List<(String, List<String>)> privacyEn = [
     '- File and folder access: The App reads only files chosen by the user in the system file picker, files that another app shares or opens with the App and grants read access to, and folders (including subfolders) registered under App Settings > Folders to Search, and uses them only to open documents and font files or add them to the library. The App does not use the storage read permission or any permission to access all storage.',
     '- Camera (optional): Used only for document scanning; the App asks for permission the first time document scanning is used. Captured images are stored on the user\'s device and are not sent outside.',
     '- Biometrics (optional): Used to unlock the privacy lock. Fingerprint and face recognition data are processed by the Android OS, and the App does not receive them.',
-    '- Internet: The App does not send the user\'s files or document content over the internet. However, the internet may be used by Google ML Kit in Section 4 to send technical information or by Google Play billing in Section 5 to check purchases. The network state permission added by Google libraries is used only for these purposes.',
+    '- Internet: The App does not send the user\'s files or document content over the internet. However, the internet may be used by Google ML Kit in Section 4 to send technical information or, after paid sales begin, by Google Play billing in Section 5 to check purchases. The network state permission added by Google libraries is used only for these purposes.',
     'The App can be used without granting optional permissions, but features related to those permissions will not be available.',
   ]),
   ('4. Third-Party SDK: Google ML Kit', [

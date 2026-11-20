@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -33,9 +34,43 @@ class PushAsideShift extends StatelessWidget {
 
 /// 밀어내며 들어오는 화면
 class PushAsideRoute<T> extends PageRoute<T> {
-  PushAsideRoute({required this.builder, super.settings});
+  PushAsideRoute({required this.builder, this.swipeBack = true, super.settings});
 
   final WidgetBuilder builder;
+
+  /// 화면을 오른쪽으로 밀어서 닫기 (설정처럼 화면을 꽉 채운 창). 파일 화면은 끔 (쪽 넘기기와 겹치지 않게)
+  final bool swipeBack;
+
+  // ── 오른쪽으로 밀어서 닫기 ──
+  bool _swiping = false;
+
+  void _swipeStart() {
+    if (!isCurrent || navigator == null || navigator!.userGestureInProgress) return;
+    _swiping = true;
+    navigator!.didStartUserGesture();
+  }
+
+  void _swipeUpdate(double fraction) {
+    if (!_swiping) return;
+    final AnimationController? c = controller;
+    if (c == null) return;
+    c.value = (c.value - fraction).clamp(0.0, 1.0);
+  }
+
+  void _swipeEnd(double velocity) {
+    if (!_swiping) return;
+    _swiping = false;
+    final AnimationController? c = controller;
+    final NavigatorState? nav = navigator;
+    if (c == null || nav == null) return;
+    // 빠르게 밀었거나 반 넘게 밀었으면 닫고, 아니면 제자리로
+    if (velocity > 600 || (velocity > -600 && c.value < 0.55)) {
+      nav.pop();
+    } else {
+      c.forward();
+    }
+    nav.didStopUserGesture();
+  }
 
   /// 바로 아래가 같은 방식의 화면이 아니면(설정 창 위에서 처음 연 화면) 아래 화면 전체를 함께 밀어냄
   bool _drivesShift = false;
@@ -114,7 +149,8 @@ class PushAsideRoute<T> extends PageRoute<T> {
   }
 
   @override
-  Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) => builder(context);
+  Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) =>
+      swipeBack ? _SwipeBack(route: this, child: builder(context)) : builder(context);
 
   @override
   Widget buildTransitions(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
@@ -137,4 +173,40 @@ class PushAsideRoute<T> extends PageRoute<T> {
   /// 아래 화면이 자기 방식의 퇴장 효과(어두워지기 등)를 따로 쓰지 않게: 밀려나는 건 [PushAsideShift]가 맡음
   @override
   bool canTransitionFrom(TransitionRoute<dynamic> previousRoute) => previousRoute is PushAsideRoute;
+}
+
+/// 화면 어디서든 오른쪽으로 밀면 따라 움직이다가 놓으면 닫히거나 제자리로
+/// (안쪽에서 가로로 끄는 것 — 밀대·가로 목록 — 이 먼저 잡으면 그쪽이 우선)
+class _SwipeBack extends StatelessWidget {
+  const _SwipeBack({required this.route, required this.child});
+  final PushAsideRoute<dynamic> route;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return RawGestureDetector(
+      behavior: HitTestBehavior.translucent,
+      gestures: {
+        HorizontalDragGestureRecognizer: GestureRecognizerFactoryWithHandlers<HorizontalDragGestureRecognizer>(
+          () => HorizontalDragGestureRecognizer(debugOwner: this),
+          (r) {
+            r.onStart = (_) {
+              route._swipeStart();
+            };
+            r.onUpdate = (d) {
+              final double w = MediaQuery.sizeOf(context).width;
+              if (w > 0) route._swipeUpdate((d.primaryDelta ?? 0) / w);
+            };
+            r.onEnd = (d) {
+              route._swipeEnd(d.primaryVelocity ?? 0);
+            };
+            r.onCancel = () {
+              route._swipeEnd(0);
+            };
+          },
+        ),
+      },
+      child: child,
+    );
+  }
 }

@@ -8,7 +8,6 @@ import 'group_jump_menu.dart';
 import 'pop_dialog.dart';
 import 'group_stack_icon.dart';
 import 'ui_scale.dart';
-import 'file_type_icon.dart';
 
 /// 그룹 목록에서 [즐겨찾기]를 고르면 돌려주는 값
 const String kFavoritesGroupKey = '__favorites__';
@@ -142,35 +141,40 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
 
   GroupDropdownRoute get r => widget.route;
 
+  /// 그룹 한 줄: [고른 표시 선] [아이콘] [이름] … [✓] [⋯]
+  /// - 고른 그룹: 바탕색 없이 아이콘 왼쪽에 굵은 시그니처 색 선 + 오른쪽 체크(시그니처 색)
+  /// - 만든 그룹은 오른쪽 끝 [⋯]로 이름 수정·삭제, 길게 눌러 끌면 순서 바꾸기
   Widget _row({
     required Key key,
     required String value,
     required Widget leading,
     required String label,
-    Widget? handle,
-    GestureLongPressCallback? onLongPress,
+    VoidCallback? onMore,
   }) {
     final cs = Theme.of(context).colorScheme;
     final bool sel = value == r.selected;
-    final Color fg = sel ? AppColors.onSig(context) : cs.onSurface;
+    final Color mark = AppColors.mark(context);
     return Padding(
       key: key,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       child: Material(
-        color: sel ? AppColors.of(context) : Colors.transparent,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(10),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: () => Navigator.of(context).pop(value),
-          // 고정된 [전체]·[즐겨찾기]는 꾹 눌러도 아무 일 없음 (고르기로 넘어가지 않게)
-          onLongPress: onLongPress ?? () {},
           child: SizedBox(
             height: 46,
             child: Row(children: [
-              // 왼쪽 손잡이(≡) 자리 (고정된 [전체]·[즐겨찾기]는 비워 둠)
-              handle ?? const SizedBox(width: 40),
-              // 고른 줄(시그니쳐 색)에서도 아이콘 안쪽은 목록 바탕색 그대로
-              SizedBox(width: 24, child: Center(child: sel ? IconInnerFill(color: cs.surfaceContainerHigh, child: leading) : leading)),
+              const SizedBox(width: 10),
+              AnimatedContainer(
+                duration: Anim.ms(160),
+                width: 4,
+                height: sel ? 22 : 0,
+                decoration: BoxDecoration(color: mark, borderRadius: BorderRadius.circular(2)),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(width: 24, child: Center(child: leading)),
               const SizedBox(width: 12),
               Expanded(
                 child: Align(
@@ -178,11 +182,18 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
                   child: Text(label,
                       overflow: TextOverflow.ellipsis,
                       // 위 그룹 이름 칸(칩)과 같은 글꼴·크기, 둘 다 굵게
-                      style: (Theme.of(context).textTheme.labelLarge ?? const TextStyle()).copyWith(color: fg, fontWeight: FontWeight.w700, shadows: sel ? AppColors.sigShadows(context) : null)),
+                      style: (Theme.of(context).textTheme.labelLarge ?? const TextStyle()).copyWith(color: cs.onSurface, fontWeight: FontWeight.w700)),
                 ),
               ),
-              if (sel) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(Icons.check, size: 18, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context))),
-              const SizedBox(width: 14),
+              if (sel) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(Icons.check, size: 20, color: mark)),
+              if (onMore != null)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(Icons.more_horiz, size: 20, color: cs.onSurfaceVariant),
+                  onPressed: onMore,
+                )
+              else
+                const SizedBox(width: 14),
             ]),
           ),
         ),
@@ -235,7 +246,12 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
       buildDefaultDragHandles: false,
       padding: EdgeInsets.zero,
       itemCount: _groups.length,
-      onReorderStart: (_) => HapticFeedback.selectionClick(),
+      onReorderStart: (_) {
+        HapticFeedback.selectionClick();
+        // 끄는 동안에는 아래에서 올라온 창이 같이 내려가지 않게
+        BottomRise.holdPull(context, true);
+      },
+      onReorderEnd: (_) => BottomRise.holdPull(context, false),
       // ignore: deprecated_member_use
       onReorder: (oldIndex, newIndex) {
         if (newIndex > oldIndex) newIndex -= 1;
@@ -263,7 +279,6 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
       ),
       itemBuilder: (context, index) {
         final g = _groups[index];
-        final bool sel = g == r.selected;
         return Builder(
           key: ValueKey('dd:$g'),
           builder: (rowCtx) => Listener(
@@ -271,26 +286,15 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
               final box = rowCtx.findRenderObject();
               if (box is RenderBox && box.hasSize) _grab = box.globalToLocal(e.position);
             },
-            child: _row(
-              key: ValueKey('ddrow:$g'),
-              value: g,
-              leading: r.leadingOf(g),
-              label: r.labelOf(g),
-              onLongPress: () => _groupMenu(rowCtx, g),
-              // 손잡이(≡)를 끌어 순서 바꾸기
-              handle: Listener(
-                // 손잡이를 끄는 동안에는 아래에서 올라온 창이 같이 내려가지 않게
-                onPointerDown: (_) => BottomRise.holdPull(context, true),
-                onPointerUp: (_) => BottomRise.holdPull(context, false),
-                onPointerCancel: (_) => BottomRise.holdPull(context, false),
-                child: ReorderableDragStartListener(
-                index: index,
-                child: SizedBox(
-                  width: 40,
-                  height: 46,
-                  child: Icon(Icons.drag_handle, size: 20, color: sel ? AppColors.onSig(context) : cs.onSurfaceVariant.withValues(alpha: 0.7), shadows: sel ? AppColors.sigShadows(context) : null),
-                ),
-              ),
+            // 길게 눌러 끌어 순서 바꾸기 (손잡이 없음)
+            child: ReorderableDelayedDragStartListener(
+              index: index,
+              child: _row(
+                key: ValueKey('ddrow:$g'),
+                value: g,
+                leading: r.leadingOf(g),
+                label: r.labelOf(g),
+                onMore: () => _groupMenu(rowCtx, g),
               ),
             ),
           ),
@@ -332,7 +336,7 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
                 child: SizedBox(
                   height: 44,
                   child: Row(children: [
-                    const SizedBox(width: 40),
+                    const SizedBox(width: 26),
                     SizedBox(width: 24, child: Icon(Icons.add, size: 20, color: cs.onSurfaceVariant)),
                     const SizedBox(width: 12),
                     Text(r.addLabel, style: TextStyle(fontSize: 15, color: cs.onSurfaceVariant, fontWeight: FontWeight.w600)),

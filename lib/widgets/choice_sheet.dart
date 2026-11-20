@@ -4,11 +4,14 @@ import 'pop_dialog.dart';
 
 /// 고르기 창의 선택지
 class ChoiceOption<T> {
-  const ChoiceOption(this.value, this.label, {this.icon});
+  const ChoiceOption(this.value, this.label, {this.icon, this.subtitle});
 
   final T value;
   final String label;
   final IconData? icon;
+
+  /// 이름 밑 작은 설명 (예: 앱 스타일 '작은 화면에 적합해요')
+  final String? subtitle;
 }
 
 /// 아래에서 올라오는 '하나 고르기' 창.
@@ -249,13 +252,24 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
                                 const SizedBox(width: 14),
                               ],
                               Expanded(
-                                child: Text(
-                                  opt.label,
-                                  style: TextStyle(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w600,
-                                    color: cs.onSurface,
-                                  ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      opt.label,
+                                      style: TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w600,
+                                        color: cs.onSurface,
+                                      ),
+                                    ),
+                                    if (opt.subtitle != null)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Text(opt.subtitle!, style: TextStyle(fontSize: 13.5, color: cs.onSurfaceVariant)),
+                                      ),
+                                  ],
                                 ),
                               ),
                               // 정렬 및 보기 창처럼: 고른 것은 채운 동그라미에 체크, 나머지는 빈 동그라미

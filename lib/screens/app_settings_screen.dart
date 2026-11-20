@@ -88,7 +88,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   late bool _hidePages = widget.hidePageCount;
   bool _rememberPage = StorageService.rememberPage;
 
-  bool _tapGuideOff = StorageService.tapGuideOff;
 
   @override
   void initState() {
@@ -103,10 +102,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     if (mounted) setState(() => _scanFolderCount = n);
   }
 
-  Future<void> _setTapGuideOff(bool v) async {
-    setState(() => _tapGuideOff = v);
-    await StorageService.setTapGuideOff(v);
-  }
 
   Future<void> _setRememberPage(bool v) async {
     setState(() => _rememberPage = v);
@@ -160,8 +155,11 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       context: context,
       title: _t('앱 스타일', 'App Style', '应用样式', 'アプリのスタイル'),
       options: [
-        ChoiceOption('basic', _styleLabel('basic'), icon: Icons.space_dashboard_outlined),
-        ChoiceOption('simple', _styleLabel('simple'), icon: Icons.crop_square_rounded),
+        // 컴팩트: 세로로 긴 네모(휴대폰) / 와이드: 네모(큰 화면)
+        ChoiceOption('basic', _styleLabel('basic'), icon: Icons.crop_portrait_rounded,
+            subtitle: _t('작은 화면에 적합해요', 'Suits small screens', '适合小屏幕', '小さい画面に向いています')),
+        ChoiceOption('simple', _styleLabel('simple'), icon: Icons.crop_square_rounded,
+            subtitle: _t('큰 화면에 적합해요', 'Suits large screens', '适合大屏幕', '大きい画面に向いています')),
       ],
       current: StorageService.appStyle.value,
       centered: StorageService.simpleStyle, // 심플: 가운데 창
@@ -508,13 +506,6 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
               title: _t('탭 영역', 'Tap Zones', '点击区域', 'タップ領域'),
               subtitle: _t('영역별로 눌렀을 때의 동작을 정해요', 'Set what tapping each area does', '设置点击各区域时的操作', 'エリアごとのタップ時の動作を決めます'),
               onTap: () => Navigator.of(context).push(PushAsideRoute(builder: (_) => TapZoneScreen(t: _t))),
-            ),
-            _item(
-              icon: Icons.touch_app_outlined,
-              title: _t('탭 가이드라인 끄기', 'Turn Off Tap Guide', '关闭点击指引', 'タップガイドをオフ'),
-              subtitle: _t('파일을 열 때마다 탭 영역 안내를 보여 주지 않아요', 'Does not show the tap zone guide each time a file opens', '每次打开文件时不显示点击区域指引', 'ファイルを開くたびにタップ領域の案内を表示しません'),
-              onTap: () => _setTapGuideOff(!_tapGuideOff),
-              trailing: Switch(value: _tapGuideOff, onChanged: _setTapGuideOff),
             ),
             // 파일 탐색·글꼴 찾기가 찾아볼 폴더 (사용자가 고른 폴더만 읽음)
             _item(

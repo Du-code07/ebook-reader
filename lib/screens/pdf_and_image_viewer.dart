@@ -374,7 +374,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     final r = await showPageModeDialog(
       context,
       tr: _tr,
-      current: (volume: _useVolumeTurn, tap: _pageModeTap, slide: _useSwipeTurn, scroll: _pageModeScroll, curl: StorageService.pageCurl, barOff: ScrollThumbBar.off.value),
+      current: (volume: _useVolumeTurn, tap: _pageModeTap, slide: _useSwipeTurn, scroll: _pageModeScroll, curl: StorageService.pageCurl, barOff: ScrollThumbBar.off.value, guideOff: StorageService.tapGuideOff),
     );
     if (r == null || !mounted) return;
     if (r.volume != _useVolumeTurn) {
@@ -399,6 +399,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ScrollThumbBar.off.value = r.barOff;
       await StorageService.setScrollBarOff(r.barOff);
     }
+    if (r.guideOff != StorageService.tapGuideOff) await StorageService.setTapGuideOff(r.guideOff);
     if (modeChanged) {
       await StorageService.setPageModeTap(_pageModeTap);
       await StorageService.setPageModeScroll(_pageModeScroll);
@@ -2052,7 +2053,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                 await reload(set);
               },
             ),
-            const Divider(height: 1),
+            // 목록 위 회색 선 없이, 북마크마다 둥근 카드 (휴지통의 파일처럼)
             if (bookmarks.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(24.0),
@@ -2062,11 +2063,12 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               Flexible(
                 child: ListView.builder(
                   shrinkWrap: true,
+                  padding: const EdgeInsets.only(top: 2, bottom: 10),
                   itemCount: bookmarks.length,
                   itemBuilder: (_, idx) {
                     final bm = bookmarks[idx];
                     final int bp = int.tryParse(bm.position) ?? 0;
-                    return ListTile(
+                    return bookmarkCard(ctx, ListTile(
                       leading: Icon(bm.spread ? Icons.menu_book : Icons.bookmark, color: Colors.amber),
                       title: Text(pagesLabel(bp + 1, bm.spread && bp + 1 < _totalPages ? bp + 2 : null, _tr)),
                       subtitle: bookmarkSubtitle(ctx, bm, _tr),
@@ -2110,7 +2112,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
                         }
                         _goToPage(target, smoothAnimation: false);
                       },
-                    );
+                    ));
                   },
                 ),
               ),

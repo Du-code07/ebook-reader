@@ -665,10 +665,10 @@ Future<void> showPageDisplayDialog(
 }
 
 /// 페이지 이동 창에서 고른 것 (창을 닫을 때 바뀌었으면 돌려줌)
-typedef PageModeChoice = ({bool volume, bool tap, bool slide, bool scroll, bool curl, bool barOff});
+typedef PageModeChoice = ({bool volume, bool tap, bool slide, bool scroll, bool curl, bool barOff, bool guideOff});
 
 /// 페이지 이동: 음량 버튼(따로 켜고 끔) / 탭 / 슬라이드 / 스크롤 (탭과 슬라이드는 함께, 스크롤은 혼자)
-/// 슬라이드를 고르면 밑에 [책처럼 넘기기], 스크롤을 고르면 밑에 [스크롤바 끄기]가 나옴.
+/// 탭을 고르면 밑에 [탭 가이드라인 끄기], 슬라이드를 고르면 밑에 [책처럼 넘기기], 스크롤을 고르면 밑에 [스크롤바 끄기]가 나옴.
 /// 누를 때는 고르기만 하고, 창을 닫을 때 바뀐 것이 있으면 돌려줌
 Future<PageModeChoice?> showPageModeDialog(
   BuildContext context, {
@@ -713,30 +713,35 @@ Future<PageModeChoice?> showPageModeDialog(
         selected: '',
         isOn: (v) => switch (v) { 'volume' => c.volume, 'tap' => c.tap, 'slide' => c.slide, _ => c.scroll },
         below: (v) {
+          // 탭: 파일을 열 때마다 뜨는 탭 영역 안내를 끄기 (앱 전체 설정)
+          if (v == 'tap' && c.tap) {
+            return sub(tr('탭 가이드라인 끄기', 'Turn Off Tap Guide', '关闭点击指引', 'タップガイドをオフ'), c.guideOff,
+                (b) => setState(() => c = (volume: c.volume, tap: c.tap, slide: c.slide, scroll: c.scroll, curl: c.curl, barOff: c.barOff, guideOff: b)));
+          }
           if (v == 'slide' && c.slide && allowCurl) {
-            return sub(tr('책처럼 넘기기', 'Book page turn', '书本翻页', '本のようにめくる'), c.curl, (b) => setState(() => c = (volume: c.volume, tap: c.tap, slide: c.slide, scroll: c.scroll, curl: b, barOff: c.barOff)));
+            return sub(tr('책처럼 넘기기', 'Book page turn', '书本翻页', '本のようにめくる'), c.curl, (b) => setState(() => c = (volume: c.volume, tap: c.tap, slide: c.slide, scroll: c.scroll, curl: b, barOff: c.barOff, guideOff: c.guideOff)));
           }
           if (v == 'scroll' && c.scroll) {
-            return sub(tr('스크롤바 끄기', 'Hide scroll bar', '隐藏滚动条', 'スクロールバーを隠す'), c.barOff, (b) => setState(() => c = (volume: c.volume, tap: c.tap, slide: c.slide, scroll: c.scroll, curl: c.curl, barOff: b)));
+            return sub(tr('스크롤바 끄기', 'Hide scroll bar', '隐藏滚动条', 'スクロールバーを隠す'), c.barOff, (b) => setState(() => c = (volume: c.volume, tap: c.tap, slide: c.slide, scroll: c.scroll, curl: c.curl, barOff: b, guideOff: c.guideOff)));
           }
           return null;
         },
         onTap: (v) => setState(() {
           switch (v) {
             case 'volume':
-              c = (volume: !c.volume, tap: c.tap, slide: c.slide, scroll: c.scroll, curl: c.curl, barOff: c.barOff);
+              c = (volume: !c.volume, tap: c.tap, slide: c.slide, scroll: c.scroll, curl: c.curl, barOff: c.barOff, guideOff: c.guideOff);
             case 'scroll':
               // 스크롤을 켜면 탭·슬라이드는 꺼짐 (끄면 탭으로)
-              c = c.scroll ? (volume: c.volume, tap: true, slide: c.slide, scroll: false, curl: c.curl, barOff: c.barOff) : (volume: c.volume, tap: false, slide: false, scroll: true, curl: c.curl, barOff: c.barOff);
+              c = c.scroll ? (volume: c.volume, tap: true, slide: c.slide, scroll: false, curl: c.curl, barOff: c.barOff, guideOff: c.guideOff) : (volume: c.volume, tap: false, slide: false, scroll: true, curl: c.curl, barOff: c.barOff, guideOff: c.guideOff);
             case 'tap':
               final bool tap = !c.tap;
               // 하나는 남겨 둠 (모두 끄면 넘길 수 없음)
               if (!tap && !c.slide && !c.scroll) return;
-              c = (volume: c.volume, tap: tap, slide: c.slide, scroll: false, curl: c.curl, barOff: c.barOff);
+              c = (volume: c.volume, tap: tap, slide: c.slide, scroll: false, curl: c.curl, barOff: c.barOff, guideOff: c.guideOff);
             default:
               final bool slide = !c.slide;
               if (!slide && !c.tap && !c.scroll) return;
-              c = (volume: c.volume, tap: c.tap, slide: slide, scroll: false, curl: c.curl, barOff: c.barOff);
+              c = (volume: c.volume, tap: c.tap, slide: slide, scroll: false, curl: c.curl, barOff: c.barOff, guideOff: c.guideOff);
           }
         }),
       );
@@ -826,6 +831,25 @@ Widget bookmarkSubtitle(BuildContext context, BookmarkItem bm, ViewerTr tr) {
     ),
     saved,
   ]);
+}
+
+/// 북마크 목록 한 줄을 휴지통의 파일처럼 둥근 카드로 (창 바탕보다 한 단계 밝게, 옅은 그림자)
+Widget bookmarkCard(BuildContext context, Widget tile) {
+  final bool dark = Theme.of(context).brightness == Brightness.dark;
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(12, 5, 12, 5),
+    child: Container(
+      decoration: BoxDecoration(
+        color: dark ? const Color(0xFF34343A) : Theme.of(context).colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: dark ? 0.28 : 0.13), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: ListTileTheme.merge(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), child: tile),
+      ),
+    ),
+  );
 }
 
 /// 북마크 목록 위 줄: 북마크 아이콘 + 제목, [지우기](북마크가 있을 때만), [현재 페이지 북마크] (아이콘만)
@@ -2000,10 +2024,10 @@ class _TapZoneGuideState extends State<TapZoneGuide> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(color: const Color(0xE6222222), borderRadius: BorderRadius.circular(14)),
                   child: Text(
-                    tr('탭 가이드라인은 앱 설정에서 끌 수 있어요\n화면을 누르면 닫혀요',
-                        'You can turn off this tap guide in app settings\nTap to close',
-                        '可在应用设置中关闭点击指引\n点击屏幕关闭',
-                        'タップガイドはアプリ設定でオフにできます\n画面をタップすると閉じます'),
+                    tr('탭 가이드라인은 페이지 이동에서 끌 수 있어요\n화면을 누르면 닫혀요',
+                        'You can turn off this tap guide in Page Turning\nTap to close',
+                        '可在翻页中关闭点击指引\n点击屏幕关闭',
+                        'タップガイドはページ移動でオフにできます\n画面をタップすると閉じます'),
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4, fontWeight: FontWeight.w600),
                   ),

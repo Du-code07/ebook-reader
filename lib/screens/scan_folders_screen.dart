@@ -53,10 +53,10 @@ class _ScanFoldersScreenState extends State<ScanFoldersScreen> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(8, 0, 8, 14),
                     child: Text(
-                      _tr('파일 탐색과 글꼴 찾기는 여기 넣은 폴더와 그 안의 폴더에서만 찾아요\n안드로이드 정책상 내장 메모리 전체와 Download 폴더 자체는 고를 수 없어요 (Download 안의 폴더는 고를 수 있어요)',
-                          'Find Files and Find Fonts search only these folders and the folders inside them\nAndroid does not allow choosing the whole internal storage or the Download folder itself (folders inside Download can be chosen)',
-                          '查找文件和查找字体只在这里添加的文件夹及其子文件夹中查找\n根据安卓政策，无法选择整个内部存储或 Download 文件夹本身（可以选择 Download 内的文件夹）',
-                          'ファイル検索とフォント検索は、ここに追加したフォルダとその中のフォルダだけを探します\nAndroidの仕様で内部ストレージ全体とDownloadフォルダ自体は選べません（Download内のフォルダは選べます）'),
+                      _tr('파일 탐색과 글꼴 찾기는 등록된 폴더에서만 찾아요\n안드로이드 정책상 내장 메모리 전체와 Download 폴더 자체는 고를 수 없어요 (Download 안의 폴더는 고를 수 있어요)',
+                          'Find Files and Find Fonts search only the registered folders\nAndroid does not allow choosing the whole internal storage or the Download folder itself (folders inside Download can be chosen)',
+                          '查找文件和查找字体只在已登记的文件夹中查找\n根据安卓政策，无法选择整个内部存储或 Download 文件夹本身（可以选择 Download 内的文件夹）',
+                          'ファイル検索とフォント検索は、登録したフォルダだけを探します\nAndroidの仕様で内部ストレージ全体とDownloadフォルダ自体は選べません（Download内のフォルダは選べます）'),
                       style: TextStyle(fontSize: 14, height: 1.45, color: cs.onSurfaceVariant),
                     ),
                   ),

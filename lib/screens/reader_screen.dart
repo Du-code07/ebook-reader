@@ -476,7 +476,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final r = await showPageModeDialog(
       context,
       tr: _tr,
-      current: (volume: _useVolumeTurn, tap: _pageModeTap, slide: _useSwipeTurn, scroll: _pageModeScroll, curl: StorageService.pageCurl, barOff: ScrollThumbBar.off.value),
+      current: (volume: _useVolumeTurn, tap: _pageModeTap, slide: _useSwipeTurn, scroll: _pageModeScroll, curl: StorageService.pageCurl, barOff: ScrollThumbBar.off.value, guideOff: StorageService.tapGuideOff),
       allowScroll: !_isPresentation, // PPT는 스크롤 보기 없음 (슬라이드 단위로 넘김)
       allowCurl: !_isPresentation && !_isSpreadsheet,
     );
@@ -503,6 +503,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       ScrollThumbBar.off.value = r.barOff;
       await StorageService.setScrollBarOff(r.barOff);
     }
+    if (r.guideOff != StorageService.tapGuideOff) await StorageService.setTapGuideOff(r.guideOff);
     if (modeChanged) {
       // 스크롤로 설정된 채 PPT를 보는 중: 여기서 바꾼 것은 이 파일에서만 (다른 파일은 다시 스크롤)
       if (!(_isPresentation && _storedPageModeScroll)) {
@@ -2066,7 +2067,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 await reload(set);
               },
             ),
-            const Divider(height: 1),
+            // 목록 위 회색 선 없이, 북마크마다 둥근 카드 (휴지통의 파일처럼)
             if (bookmarks.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(24.0),
@@ -2076,10 +2077,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               Flexible(
                 child: ListView.builder(
                   shrinkWrap: true,
+                  padding: const EdgeInsets.only(top: 2, bottom: 10),
                   itemCount: bookmarks.length,
                   itemBuilder: (_, idx) {
                     final bm = bookmarks[idx];
-                    return ListTile(
+                    return bookmarkCard(ctx, ListTile(
                       leading: Icon(bm.spread ? Icons.menu_book : Icons.bookmark, color: Colors.amber),
                       title: Text(_bookmarkTitle(bm)),
                       subtitle: bookmarkSubtitle(ctx, bm, _tr),
@@ -2094,7 +2096,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                         Navigator.pop(ctx);
                         _openBookmark(bm);
                       },
-                    );
+                    ));
                   },
                 ),
               ),
