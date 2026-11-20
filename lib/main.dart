@@ -627,13 +627,16 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   /// 검색 쪽을 다 펼친 뒤에만 검색 결과를 보여 줌 (펼치는 동안과 닫는 동안은 파일 목록 쪽이 옆으로 밀림)
   bool get _searchBody => _searchOpen && _listAnim.isCompleted;
 
-  /// 파일 목록 쪽: 검색을 열면 왼쪽으로 밀려 나가고, 닫으면 왼쪽에서 다시 밀려 들어옴 (오른쪽에서는 빈 검색 쪽이 따라옴)
+  /// 파일 목록 쪽: 검색을 열면 밀려 나가고(컴팩트는 왼쪽, 와이드는 아래), 닫으면 다시 밀려 들어옴
   Widget _searchSlide({required Widget child}) => ClipRect(
         child: AnimatedBuilder(
           animation: _listCurve,
           child: child,
-          builder: (context, child) => FractionalTranslation(
-              translation: Offset(_searchBody || StorageService.simpleStyle ? 0 : -_listCurve.value, 0), child: child),
+          // 컴팩트: 왼쪽으로 / 와이드: 검색 줄이 위에서 펼쳐지며 파일은 아래로 밀려 내려감 (왼쪽 막대는 그대로)
+          builder: (context, child) {
+            final double v = _searchBody ? 0 : _listCurve.value;
+            return FractionalTranslation(translation: StorageService.simpleStyle ? Offset(0, v) : Offset(-v, 0), child: child);
+          },
         ),
       );
 
@@ -2582,33 +2585,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     return (icon, label);
   }
 
-  /// 와이드 스타일: 왼쪽 아이콘 막대(둥근 네모 판) + 오른쪽 파일. 검색을 열면 막대는 왼쪽으로 사라짐
+  /// 와이드 스타일: 왼쪽 아이콘 막대(둥근 네모 판) + 오른쪽 파일. 검색을 열어도 막대는 그대로, 파일만 아래로 밀림
   Widget _simpleFrame(Widget content) {
     if (!StorageService.simpleStyle) return content;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AnimatedBuilder(
-          animation: _searchCurve,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
-            // 여러 개 고르는 동안에는 막대를 흐리게 (누르지 않게)
-            child: IgnorePointer(
-              ignoring: _isSelectionMode,
-              child: AnimatedOpacity(opacity: _isSelectionMode ? 0.35 : 1, duration: Anim.ms(150), child: _buildSimpleRail()),
-            ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+          // 여러 개 고르는 동안에는 막대를 흐리게 (누르지 않게)
+          child: IgnorePointer(
+            ignoring: _isSelectionMode,
+            child: AnimatedOpacity(opacity: _isSelectionMode ? 0.35 : 1, duration: Anim.ms(150), child: _buildSimpleRail()),
           ),
-          builder: (context, child) {
-            final double t = _searchCurve.value;
-            if (t >= 1) return const SizedBox.shrink();
-            return ClipRect(
-              child: Align(
-                alignment: Alignment.centerRight,
-                widthFactor: 1 - t,
-                child: IgnorePointer(ignoring: t > 0, child: child),
-              ),
-            );
-          },
         ),
         Expanded(child: content),
       ],
@@ -2635,7 +2624,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           key: key,
           // 지금 보고 있는 것(그룹 / 즐겨찾기)은 둥근 네모 바탕으로
           color: selected ? AppColors.of(context) : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(8),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onTap,
@@ -2736,13 +2725,14 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         ),
       ),
     ];
-    // 둥근 네모 판 (화면이 낮으면 판 안에서 스크롤)
+    // 네모 판 (화면이 낮으면 판 안에서 스크롤)
     return Container(
       width: 76,
       decoration: BoxDecoration(
         color: dark ? cs.surfaceContainerHigh : cs.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(26),
-        border: dark ? null : Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+        // 표지형 파일 카드처럼 모서리만 살짝 둥글게, 외곽선은 또렷하게
+        borderRadius: BorderRadius.circular(10),
+        border: dark ? null : Border.all(color: cs.outlineVariant, width: 1.6),
       ),
       clipBehavior: Clip.antiAlias,
       child: CustomScrollView(

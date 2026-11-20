@@ -328,6 +328,46 @@ const List<Color> kMemoHighlighterColors = [
   Color(0xFFB98CFF),
 ];
 
+/// 형광펜 더 많은 색상 (펜처럼 팔레트 단추로 펼침)
+const List<Color> kMemoHighlighterMoreColors = [
+  Color(0xFFFFF176),
+  Color(0xFFFFE082),
+  Color(0xFFFFCC80),
+  Color(0xFFFFAB91),
+  Color(0xFFFF8A80),
+  Color(0xFFF48FB1),
+  Color(0xFFEA80FC),
+  Color(0xFFB388FF),
+  Color(0xFF8C9EFF),
+  Color(0xFF82B1FF),
+  Color(0xFF80D8FF),
+  Color(0xFF84FFFF),
+  Color(0xFFA7FFEB),
+  Color(0xFFB9F6CA),
+  Color(0xFFCCFF90),
+  Color(0xFFF4FF81),
+];
+
+/// 테이프 더 많은 색상 (펜처럼 팔레트 단추로 펼침)
+const List<Color> kMemoTapeMoreColors = [
+  Color(0xFFFFF59D),
+  Color(0xFFFFE0B2),
+  Color(0xFFFFCCBC),
+  Color(0xFFD7CCC8),
+  Color(0xFFF8BBD0),
+  Color(0xFFE1BEE7),
+  Color(0xFFD1C4E9),
+  Color(0xFFC5CAE9),
+  Color(0xFFBBDEFB),
+  Color(0xFFB2EBF2),
+  Color(0xFFB2DFDB),
+  Color(0xFFC8E6C9),
+  Color(0xFFDCEDC8),
+  Color(0xFF8D6E63),
+  Color(0xFF455A64),
+  Color(0xFF212121),
+];
+
 /// 테이프 색 (맨 앞 노랑이 기본)
 const List<Color> kMemoTapeColors = [
   Color(0xFFFFCA28),
@@ -711,9 +751,12 @@ class _MemoToolPanel extends StatefulWidget {
 class _MemoToolPanelState extends State<_MemoToolPanel> {
   static const Color _panelColor = Color(0xFF2B2B2E);
   MemoToolSettings get _s => MemoTools.s;
-  late bool _showMore = widget.kind == 'pen' && !kMemoPenColors.any((c) => c.toARGB32() == _s.penColor.toARGB32());
+  // 지금 색이 기본 색 줄에 없으면(더 많은 색상에서 고른 색) 처음부터 펼쳐 둠
+  late bool _showMore = !_baseColors.any((c) => c.toARGB32() == _color.toARGB32());
 
-  bool get _pen => widget.kind == 'pen';
+  List<Color> get _baseColors => switch (widget.kind) { 'hl' => kMemoHighlighterColors, 'tape' => kMemoTapeColors, _ => kMemoPenColors };
+  List<Color> get _moreColors => switch (widget.kind) { 'hl' => kMemoHighlighterMoreColors, 'tape' => kMemoTapeMoreColors, _ => kMemoPenMoreColors };
+
   bool get _hl => widget.kind == 'hl';
 
   (double, double, double) get _range => switch (widget.kind) { 'hl' => (4.0, 40.0, 1.0), 'tape' => (6.0, 48.0, 1.0), _ => (0.5, 20.0, 0.5) };
@@ -846,7 +889,7 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
       'tape' => tr('테이프', 'Tape', '胶带', 'テープ'),
       _ => tr('펜', 'Pen', '笔', 'ペン'),
     };
-    final List<Color> colors = switch (widget.kind) { 'hl' => kMemoHighlighterColors, 'tape' => kMemoTapeColors, _ => kMemoPenColors };
+    final List<Color> colors = _baseColors;
     return _memoPanelFrame(context, _panelColor, SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(22, 14, 22, 22),
           child: Column(
@@ -923,9 +966,8 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   ...colors.map(_colorDot),
-                  // 펜: 더 많은 색상 펼치기
-                  if (_pen)
-                    GestureDetector(
+                  // 더 많은 색상 펼치기 (펜·형광펜·테이프)
+                  GestureDetector(
                       onTap: () => setState(() => _showMore = !_showMore),
                       child: Container(
                         width: 34,
@@ -939,9 +981,9 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
                     ),
                 ],
               ),
-              if (_pen && _showMore) ...[
+              if (_showMore) ...[
                 const SizedBox(height: 12),
-                Wrap(spacing: 10, runSpacing: 10, children: kMemoPenMoreColors.map((c) => _colorDot(c, size: 30)).toList()),
+                Wrap(spacing: 10, runSpacing: 10, children: _moreColors.map((c) => _colorDot(c, size: 30)).toList()),
               ],
             ],
           ),

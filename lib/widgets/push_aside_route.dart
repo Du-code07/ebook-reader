@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'app_colors.dart';
 
@@ -78,8 +79,34 @@ class PushAsideRoute<T> extends PageRoute<T> {
     if (_drivesShift) PushAside.shift.value = _curve!.value;
   }
 
+  /// 닫을 때: 바로 움직이지 않고 한 장면 동안 제자리에서 기다림.
+  /// 그동안 가려져 있던 아래 화면(서재)을 이 화면 뒤에서 미리 배치·그려 둠 → 움직이기 시작한 뒤 첫 장면이 건너뛰지 않음
+  bool _holding = false;
+
+  @override
+  bool didPop(T? result) {
+    final bool done = super.didPop(result); // 여기서 닫히는 움직임이 시작되고 아래 화면이 보이게 됨
+    final AnimationController? c = controller;
+    if (c != null && !Anim.off.value && c.value >= 1.0) {
+      c.stop(canceled: false);
+      _holding = true;
+      // 아래 화면을 배치·그리는 장면이 끝난 다음 장면부터 움직임
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (!_holding) return;
+          _holding = false;
+          c.reverse();
+        });
+        SchedulerBinding.instance.scheduleFrame();
+      });
+      SchedulerBinding.instance.scheduleFrame();
+    }
+    return done;
+  }
+
   @override
   void dispose() {
+    _holding = false;
     if (_drivesShift) PushAside.shift.value = 0;
     _curve?.removeListener(_sync);
     _curve?.dispose();

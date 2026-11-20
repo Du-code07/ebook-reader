@@ -545,7 +545,7 @@ class _MainMock extends StatelessWidget {
           key: k(id),
           height: 58,
           margin: const EdgeInsets.symmetric(vertical: 2),
-          decoration: BoxDecoration(color: selected ? AppColors.of(context) : null, borderRadius: BorderRadius.circular(16)),
+          decoration: BoxDecoration(color: selected ? AppColors.of(context) : null, borderRadius: BorderRadius.circular(8)),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -567,8 +567,8 @@ class _MainMock extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(6, 10, 6, 10),
                 decoration: BoxDecoration(
                   color: dark ? cs.surfaceContainerHigh : cs.surfaceContainerLowest,
-                  borderRadius: BorderRadius.circular(26),
-                  border: dark ? null : Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+                  borderRadius: BorderRadius.circular(10),
+                  border: dark ? null : Border.all(color: cs.outlineVariant, width: 1.6),
                 ),
                 child: Column(children: [
                   railItem('group', groupIcon, groupLabel, selected: true),
