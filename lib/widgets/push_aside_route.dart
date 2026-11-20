@@ -18,7 +18,8 @@ class PushAsideShift extends StatelessWidget {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<double>(
       valueListenable: PushAside.shift,
-      child: child,
+      // 밀리는 동안 화면을 매 장면 다시 그리지 않고 그려 둔 것을 옮기기만 (돌아올 때 덜 버벅임)
+      child: RepaintBoundary(child: child),
       builder: (context, t, child) {
         // 밀려나지 않을 때도 같은 모양으로 감싸 둠: 감싸는 위젯이 바뀌면 그 안 화면이 새로 만들어져
         // 설정 창의 스크롤 위치 같은 상태가 사라짐
@@ -97,7 +98,8 @@ class PushAsideRoute<T> extends PageRoute<T> {
       child: SlideTransition(
         position: Tween<Offset>(begin: Offset.zero, end: const Offset(-1, 0))
             .animate(CurvedAnimation(parent: secondaryAnimation, curve: _in, reverseCurve: _out)),
-        child: child,
+        // 움직이는 동안 파일 화면을 다시 그리지 않고 옮기기만
+        child: RepaintBoundary(child: child),
       ),
     );
   }

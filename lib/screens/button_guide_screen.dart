@@ -174,6 +174,9 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
                   'The group you are viewing\nTap to open the group list and switch groups; long-press to rename or delete, drag ≡ to reorder',
                   '当前查看的分组\n点击打开分组列表切换分组；长按可修改名称·删除，拖动≡可调整顺序',
                   '今見ているグループです\nタップでグループ一覧を開いて切り替え、長押しで名前の修正・削除、≡をドラッグで並べ替えます')),
+          if (simple)
+            _Step('fav', tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り'),
+                tr('즐겨찾기한 파일만 모아 봐요\n다시 누르면 고른 그룹으로 돌아가요', 'Shows only your favorite files\nTap again to go back to the chosen group', '只显示收藏的文件\n再次点击回到所选分组', 'お気に入りのファイルだけを表示します\nもう一度タップすると選んだグループに戻ります')),
           _Step('search', tr('검색', 'Search', '搜索', '検索'),
               tr('파일 이름으로 찾아요', 'Find files by name', '按文件名查找', 'ファイル名で探します')),
           if (!simple)
@@ -185,13 +188,13 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('trash', tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
               tr('지운 파일을 모아 둬요\n되살리거나 완전히 지울 수 있어요', 'Keeps deleted files\nRestore them or delete them for good', '存放删除的文件\n可以恢复或彻底删除', '削除したファイルを保管します\n元に戻すか完全に削除できます')),
           if (!simple) _settingsStep(),
-          if (simple)
-            _Step('sort', tr('정렬', 'Sort', '排序', '並べ替え'),
-                tr('이름이나 파일 추가 날짜 순으로 정렬하고, 정렬을 기억할 수 있어요', 'Sort by name or date added, and keep the order if you like', '按名称或添加日期排序，也可以记住排序', '名前か追加日で並べ替え、並べ替えを記憶できます')),
           if (simple) ...[
             _settingsStep(),
             _Step('add', tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
-                tr('파일 탐색·파일 추가·스캔·PDF 합치기·이미지 합치기를 골라요', 'Choose find files, add files, scan, merge PDFs or merge images', '可选择查找文件·添加文件·扫描·合并 PDF·合并图片', 'ファイル検索・ファイル追加・スキャン・PDF結合・画像結合を選びます')),
+                tr('파일 탐색·파일 추가·스캔·PDF 합치기·이미지 합치기를 골라요\n오른쪽 위 [정렬]로 이름이나 파일 추가 날짜 순으로 정렬해요',
+                    'Choose find files, add files, scan, merge PDFs or merge images\nUse [Sort] at the top right to sort by name or date added',
+                    '可选择查找文件·添加文件·扫描·合并 PDF·合并图片\n用右上角的[排序]按名称或添加日期排序',
+                    'ファイル検索・ファイル追加・スキャン・PDF結合・画像結合を選びます\n右上の[並べ替え]で名前か追加日で並べ替えます')),
           ],
           _Step('list', tr('새로 고침', 'Refresh', '刷新', '更新'),
                 tr('목록을 맨 위에서 아래로 당기면 새로 고침 아이콘이 나오며 서재를 다시 읽어 와요', 'Pull the list down from the top to show the refresh icon and reload your library', '从顶部向下拉列表，会出现刷新图标并重新读取书架', '一覧を一番上から下に引くと更新アイコンが出て、書斎を読み込み直します')),
@@ -533,46 +536,57 @@ class _MainMock extends StatelessWidget {
     );
     final groupIcon = const FolderDocsIcon(size: 20);
     final groupLabel = tr('내 서재', 'My Library', '我的书架', 'マイライブラリ');
-    // 심플: 왼쪽 아이콘 막대 (맨 아래 [+]) + 오른쪽 파일
+    // 와이드: 왼쪽 둥근 네모 아이콘 막대 (위: 그룹·즐겨찾기 / 아래: 검색·휴지통·설정·[+]) + 오른쪽 파일
     if (simple) {
-      Widget railItem(String id, Widget icon, String label) => SizedBox(
-            key: k(id),
-            height: 62,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(height: 26, child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: cs.onSurface), child: icon))),
-                const SizedBox(height: 3),
-                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface)),
-              ],
-            ),
-          );
+      final bool dark = Theme.of(context).brightness == Brightness.dark;
+      Widget railItem(String id, Widget icon, String label, {bool selected = false}) {
+        final Color fg = selected ? AppColors.onSig(context) : cs.onSurface;
+        return Container(
+          key: k(id),
+          height: 58,
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          decoration: BoxDecoration(color: selected ? AppColors.of(context) : null, borderRadius: BorderRadius.circular(16)),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(height: 26, child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg), child: icon))),
+              const SizedBox(height: 3),
+              Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg, shadows: selected ? AppColors.sigShadows(context) : null)),
+            ],
+          ),
+        );
+      }
       return Scaffold(
         body: SafeArea(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(
-                width: 72,
+              Container(
+                width: 76,
+                margin: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+                padding: const EdgeInsets.fromLTRB(6, 10, 6, 10),
+                decoration: BoxDecoration(
+                  color: dark ? cs.surfaceContainerHigh : cs.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(26),
+                  border: dark ? null : Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+                ),
                 child: Column(children: [
-                  const SizedBox(height: 8),
-                  railItem('group', groupIcon, groupLabel),
+                  railItem('group', groupIcon, groupLabel, selected: true),
+                  railItem('fav', const FavoritesIcon(size: 22), tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り')),
+                  const Spacer(),
                   railItem('search', const Icon(Icons.search), tr('검색', 'Search', '搜索', '検索')),
                   railItem('trash', const TrashLidIcon(open: false), tr('휴지통', 'Trash', '回收站', 'ゴミ箱')),
-                  railItem('sort', const SortBarsIcon(flipped: false), tr('정렬', 'Sort', '排序', '並べ替え')),
                   railItem('settings', const SpinGearIcon(turns: 0), tr('설정', 'Settings', '设置', '設定')),
-                  const Spacer(),
                   Container(
                     key: k('add'),
                     width: 52,
                     height: 52,
-                    margin: const EdgeInsets.only(bottom: 14),
-                    decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1))]),
+                    margin: const EdgeInsets.only(top: 8, bottom: 4),
+                    decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(16)),
                     child: Icon(Icons.add, size: 30, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context)),
                   ),
                 ]),
               ),
-              VerticalDivider(width: 1, thickness: 1, color: cs.outlineVariant.withValues(alpha: 0.6)),
               Expanded(child: KeyedSubtree(key: k('list'), child: list)),
             ],
           ),

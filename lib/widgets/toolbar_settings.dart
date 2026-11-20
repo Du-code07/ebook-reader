@@ -9,7 +9,7 @@ import 'memo_tools.dart' show MemoToolIcon;
 import 'morph_icons.dart' show MoonMorphIcon;
 import 'quick_tool_bar.dart';
 import 'ui_scale.dart';
-import 'viewer_dialogs.dart' show PageModeIcon, ViewerSheetScope, pageDisplayGlyph, rotationGlyph, showViewerDialog, viewerPanel;
+import 'viewer_dialogs.dart' show PageModeIcon, ViewerSheetPull, ViewerSheetScope, pageDisplayGlyph, rotationGlyph, showViewerDialog, viewerPanel;
 
 /// 파일 보기 화면의 상단바·도구 모음에 어떤 아이콘을 어떤 순서로 둘지 (모든 뷰어가 함께 씀)
 /// - [top]: 상단바 (왼쪽부터, 숨기지 않은 것 최대 [maxTop]개)
@@ -273,9 +273,15 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
             child: toolbarSettingsRow(
               context,
               // 손잡이(≡): 그룹 목록의 손잡이와 같은 모양, 끌어서 순서 바꾸기 (줄을 길게 눌러도 됨)
-              leading: ReorderableDragStartListener(
-                index: index,
-                child: SizedBox(width: 40, height: 56, child: Icon(Icons.drag_handle, size: 20, color: cs.onSurfaceVariant.withValues(alpha: 0.7))),
+              // 손잡이를 끄는 동안 밑에서 올라온 창이 같이 내려가지 않게
+              leading: Listener(
+                onPointerDown: (_) => ViewerSheetPull.hold(rowCtx, true),
+                onPointerUp: (_) => ViewerSheetPull.hold(rowCtx, false),
+                onPointerCancel: (_) => ViewerSheetPull.hold(rowCtx, false),
+                child: ReorderableDragStartListener(
+                  index: index,
+                  child: SizedBox(width: 40, height: 56, child: Icon(Icons.drag_handle, size: 20, color: cs.onSurfaceVariant.withValues(alpha: 0.7))),
+                ),
               ),
               icon: toolbarCatalogIcon(id, cs.onSurface),
               label: toolbarCatalogLabel(id, widget.tr),

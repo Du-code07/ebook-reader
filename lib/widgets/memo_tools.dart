@@ -1038,7 +1038,7 @@ class _EraserPanelState extends State<_EraserPanel> {
             onTap();
             Navigator.pop(context);
           },
-          child: Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
         );
     return _memoPanelFrame(context, const Color(0xFF2B2B2E), SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(22, 14, 22, 12),
@@ -1074,8 +1074,12 @@ class _EraserPanelState extends State<_EraserPanel> {
               const SizedBox(height: 8),
               const Divider(color: Colors.white12, height: 1),
               // 보고 있는 쪽의 선(펜·형광펜) / 테이프를 모두 지움
-              clear(tr('선 모두 지우기', 'Clear All Lines', '清除全部线条', '線をすべて消す'), widget.onClearLines),
-              clear(tr('테이프 모두 지우기', 'Clear All Tape', '清除全部胶带', 'テープをすべて消す'), widget.onClearTapes),
+              // 선 모두 지우기 | 테이프 모두 지우기 (한 줄에 나란히)
+              Row(children: [
+                Expanded(child: clear(tr('선 모두 지우기', 'Clear All Lines', '清除全部线条', '線をすべて消す'), widget.onClearLines)),
+                Container(width: 1, height: 22, color: Colors.white12),
+                Expanded(child: clear(tr('테이프 모두 지우기', 'Clear All Tape', '清除全部胶带', 'テープをすべて消す'), widget.onClearTapes)),
+              ]),
             ],
           ),
         ));

@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart' show DeviceGestureSettings, EagerGestureRecognizer;
+import 'package:flutter/gestures.dart' show DeviceGestureSettings, EagerGestureRecognizer, VelocityTracker, kTouchSlop;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'app_colors.dart';
@@ -71,6 +71,134 @@ class ViewerSheetScope extends InheritedWidget {
   bool updateShouldNotify(ViewerSheetScope old) => old.sheet != sheet;
 }
 
+/// 밑에서 올라오는 설정 창을 손가락으로 끌어 내리기 (앱 설정 창과 같은 느낌)
+/// - 맨 위 회색 막대: 어디서든 끌어 내림
+/// - 안쪽 내용: 목록이 맨 위일 때 아래로 끌면 창이 따라 내려옴 (위로 올리면 평소 스크롤)
+/// - 많이 내리거나 빠르게 내리면 닫히고, 아니면 제자리로
+class ViewerSheetPull extends StatefulWidget {
+  const ViewerSheetPull({super.key, required this.child});
+  final Widget child;
+
+  /// 안쪽에서 손가락 끌기를 따로 쓰는 동안(줄 순서 바꾸기 등) 창이 같이 내려가지 않게
+  static void hold(BuildContext context, bool hold) => context.findAncestorStateOfType<_ViewerSheetPullState>()?._hold = hold;
+
+  static Widget grip(BuildContext context, Widget child) {
+    final st = context.findAncestorStateOfType<_ViewerSheetPullState>();
+    return st == null ? child : st._grip(child);
+  }
+
+  static Widget body(BuildContext context, Widget child) {
+    final st = context.findAncestorStateOfType<_ViewerSheetPullState>();
+    return st == null ? child : st._body(child);
+  }
+
+  @override
+  State<ViewerSheetPull> createState() => _ViewerSheetPullState();
+}
+
+class _ViewerSheetPullState extends State<ViewerSheetPull> with SingleTickerProviderStateMixin {
+  final ValueNotifier<double> _drag = ValueNotifier<double>(0); // 아래로 끌어 내린 만큼
+  late final AnimationController _back = AnimationController(vsync: this, duration: Anim.ms(220))
+    ..addListener(() => _drag.value = _from * (1 - Curves.easeOutCubic.transform(_back.value)));
+  double _from = 0;
+
+  bool _innerAtTop = true;
+  bool _hold = false;
+  int? _pointer;
+  bool _pulling = false;
+  Offset _pending = Offset.zero;
+  Duration _downAt = Duration.zero;
+  VelocityTracker? _velocity;
+
+  @override
+  void dispose() {
+    _back.dispose();
+    _drag.dispose();
+    super.dispose();
+  }
+
+  double get _height {
+    final box = context.findRenderObject() as RenderBox?;
+    return box != null && box.hasSize ? box.size.height : 400;
+  }
+
+  bool _onScroll(ScrollNotification n) {
+    if (n.metrics.axis == Axis.vertical) _innerAtTop = n.metrics.pixels <= n.metrics.minScrollExtent + 0.5;
+    return false;
+  }
+
+  void _onDown(PointerDownEvent e) {
+    if (_pointer != null) return;
+    _pointer = e.pointer;
+    _pulling = false;
+    _pending = Offset.zero;
+    _downAt = e.timeStamp;
+    _velocity = VelocityTracker.withKind(e.kind)..addPosition(e.timeStamp, e.position);
+  }
+
+  void _onMove(PointerMoveEvent e) {
+    if (e.pointer != _pointer) return;
+    if (_hold) {
+      _pointer = null;
+      return;
+    }
+    _velocity?.addPosition(e.timeStamp, e.position);
+    if (!_pulling) {
+      // 길게 누른 뒤 끄는 것(글자 고르기·줄 옮기기)은 창 내리기가 아님
+      if (!_innerAtTop || e.timeStamp - _downAt > const Duration(milliseconds: 350)) {
+        _pointer = null;
+        return;
+      }
+      _pending += e.delta;
+      if (_pending.dy > kTouchSlop && _pending.dy > _pending.dx.abs() * 1.2) {
+        _pulling = true;
+        _back.stop();
+      } else if (_pending.dy < -kTouchSlop || _pending.dx.abs() > kTouchSlop) {
+        _pointer = null; // 위로 올리거나 옆으로 밀면(밀대 등) 평소대로
+      }
+      return;
+    }
+    _drag.value = math.max(0.0, _drag.value + e.delta.dy);
+  }
+
+  void _onUp(PointerEvent e) {
+    if (e.pointer != _pointer) return;
+    _pointer = null;
+    if (!_pulling) return;
+    _pulling = false;
+    _end(e is PointerUpEvent ? (_velocity?.getVelocity().pixelsPerSecond.dy ?? 0) : 0);
+  }
+
+  void _end(double v) {
+    if (_drag.value > math.min(140.0, _height * 0.25) || v > 700) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+    _from = _drag.value;
+    _back.forward(from: 0);
+  }
+
+  Widget _grip(Widget child) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onVerticalDragStart: (_) => _back.stop(),
+        onVerticalDragUpdate: (d) => _drag.value = math.max(0.0, _drag.value + d.delta.dy),
+        onVerticalDragEnd: (d) => _end(d.primaryVelocity ?? 0),
+        child: child,
+      );
+
+  Widget _body(Widget child) => NotificationListener<ScrollNotification>(
+        onNotification: _onScroll,
+        child: Listener(onPointerDown: _onDown, onPointerMove: _onMove, onPointerUp: _onUp, onPointerCancel: _onUp, child: child),
+      );
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<double>(
+        valueListenable: _drag,
+        child: widget.child,
+        builder: (context, d, child) => Transform.translate(offset: Offset(0, d), child: child),
+      );
+}
+
 /// 설정 창 바탕: 가운데 창이면 둥근 카드([width]·[maxWidth]·[maxHeight]),
 /// 밑에서 올라오는 창이면 화면 아래에 붙고 위쪽만 둥근 판 (맨 위 회색 막대, 양옆 살짝 띄움, 너비는 파일 추가 창처럼 최대 640)
 Widget viewerPanel(
@@ -87,6 +215,8 @@ Widget viewerPanel(
   if (ViewerSheetScope.of(context)) {
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: math.min(640.0, screen.width - 16), maxHeight: screen.height * 0.85),
+      // 앱 설정 창처럼: 회색 막대를 끌거나, 안쪽 내용이 맨 위일 때 아래로 끌면 창이 따라 내려오고 충분히 내리면 닫힘
+      child: ViewerSheetPull(
       child: Material(
         color: color,
         elevation: elevation,
@@ -94,12 +224,15 @@ Widget viewerPanel(
         clipBehavior: Clip.antiAlias,
         child: Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.viewPaddingOf(context).bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [const SheetGrip(below: 4), Flexible(child: child)],
+          child: Builder(
+            builder: (c) => Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [ViewerSheetPull.grip(c, const SheetGrip(below: 4)), Flexible(child: ViewerSheetPull.body(c, child))],
+            ),
           ),
         ),
+      ),
       ),
     );
   }

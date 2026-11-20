@@ -38,7 +38,11 @@ class GroupDropdownRoute extends PopupRoute<String> {
     this.barrierLabel,
     this.fromBottom = false,
     this.beside = false,
+    this.showFav = true,
   });
+
+  /// [즐겨찾기] 줄 보이기 (와이드 스타일은 왼쪽 막대에 즐겨찾기가 따로 있어 숨김)
+  final bool showFav;
 
   /// 단추 아래가 아니라 화면 밑에서 위로 올라오는 창으로 (앱 스타일 '기본'의 아래 막대에서 열 때)
   final bool fromBottom;
@@ -307,6 +311,7 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _row(key: const ValueKey('dd:all'), value: '전체', leading: r.allLeading, label: r.allLabel),
+            if (r.showFav)
             _row(
               key: const ValueKey('dd:fav'),
               value: kFavoritesGroupKey,
