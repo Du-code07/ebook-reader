@@ -12,7 +12,7 @@ const List<(String, List<String>)> termsEn = [
   ('Article 2 (Definitions)', [
     '- "App" means the document viewer app "이리ERI" provided by the Operator through Google Play.',
     '- "User" means an individual who accesses or uses the App under these Terms.',
-    '- "Paid Features" means additional or premium features that can be used, for as long as the Operator provides the App, through a one-time in-app purchase made with the Google Play billing system.',
+    '- "Paid Features" means additional or premium features that the Operator provides free of charge during the free period set out in Article 5 and intends to make available afterwards through a one-time in-app purchase made with the Google Play billing system.',
     '- "User Files" means documents, images and other files that a User adds to or opens with the App, and the notes, annotations and bookmarks a User creates in the App.',
   ]),
   ('Article 3 (Effect and Amendment of the Terms)', [
@@ -23,21 +23,15 @@ const List<(String, List<String>)> termsEn = [
   ]),
   ('Article 4 (Services and Device Permissions)', [
     'The App lets Users open and view files in many formats on their device, including PDF, Hangul (HWP, HWPX), Word, PowerPoint, Excel, EPUB, TXT and image files, and provides tools such as notes, bookmarks, scanning and file merging.',
-    'The basic features of the App are provided free of charge, and some advanced features are provided as Paid Features.',
+    'The basic features of the App are provided free of charge. Some advanced features are Paid Features, but under Article 5 the Paid Features are also provided free of charge to all Users until March 1, 2027.',
     'Because the App converts and displays documents on the User\'s device, fonts, formatting and layout may look different from the program that originally created the file.',
     'To provide its core features, the App uses access to files and folders chosen by the User (through the system file picker and Folders to Search) and some optional device permissions (camera access for document scanning, biometrics for unlocking, etc.). If a User does not allow an optional permission or access is restricted by changes in Android OS policy, the related feature may not work.',
   ]),
-  ('Article 5 (Payment, Restoration and Withdrawal for Paid Features)', [
-    'The basic features of the App are free, and Paid Features are provided through a one-time purchase of "이리ERI Pro". Paid Features include Scan Document, Merge Images and Merge PDFs, and paid features that the Operator includes in 이리ERI Pro in the future are also provided at no additional cost to Users who have purchased 이리ERI Pro. The Operator may sell products separate from 이리ERI Pro, in which case they will be shown separately on the purchase screen.',
-    'The price and content of 이리ERI Pro (a one-time purchase usable for as long as the Operator provides the App) are clearly displayed on the purchase screen (App Settings > 이리ERI Pro) before payment.',
-    'Free trial: Users may use the Paid Features free of charge for 3 days from the time they start the free trial on the purchase screen (App Settings > 이리ERI Pro). The free trial is offered once per device (if the trial record is moved to a new device through a device transfer or restore, the trial is treated as already used on the new device as well), and even if the App is reinstalled or its data is cleared on the same device, the trial period is counted from the day it was first started.',
-    'All payments are processed through the Google Play billing system, and payment methods, receipts and payment cancellations follow Google Play policies.',
-    'Restoring purchases: If a User reinstalls the App or moves to another compatible Android device, the purchased Paid Features can be restored by installing the App from the Google Play Store with the Google account used for the original purchase.',
-    'Users who are minors under the laws of their place of residence must obtain the consent of a parent or legal representative to purchase Paid Features. If a minor makes a payment without such consent, the minor or the legal representative may cancel the payment in accordance with applicable law (except where the minor used deception to make others believe that the minor was an adult or had the consent of the legal representative).',
-    'Withdrawal: Users may withdraw their purchase within the period and from the starting date set out in Article 17 of the Korean Act on the Consumer Protection in Electronic Commerce.',
-    'However, once supply of the Paid Features, which are digital content, has begun, withdrawal may be restricted under Article 17(2) of the same Act. This restriction applies only where the Operator has taken the measures required by Article 17(6) of the same Act, such as clearly displaying this fact on the purchase screen before purchase and offering a trial. The Operator offers the free trial above as the trial opportunity, and supply is deemed to have begun when the purchase is completed and the Paid Features are unlocked.',
-    'Refunds are handled in accordance with the above law and the Google Play refund policy. If the Paid Features differ from what was displayed or advertised, or are provided differently from the contract, the User may withdraw the purchase under applicable law regardless of the above restriction.',
-    'If the Paid Features become unusable for reasons attributable to the Operator, the Operator will provide a refund or appropriate compensation in accordance with applicable law.',
+  ('Article 5 (Free Provision and Future Sale of Paid Features)', [
+    'Free period: Until March 1, 2027 (through February 28, 2027), the Operator provides all Paid Features, such as Scan Document, Merge Images and Merge PDFs, free of charge to all Users. During this period the App accepts no payments, and the Operator earns no revenue of any kind, including sales, advertising or donations.',
+    'Future sale: The Operator plans to sell the Paid Features as a one-time in-app purchase of "이리ERI Pro" after March 1, 2027. When sales begin, the Operator will announce amended Terms covering the sale (price, payment and restoring purchases, free trial, withdrawal and refunds) together with the Operator (seller) information required by applicable law, from 30 days before the effective date under Article 3.',
+    'After sales begin, Users who have not purchased 이리ERI Pro may no longer be able to use the Paid Features. Even then, the basic features of the App, files created by scanning or merging during the free period, and User Files, notes and bookmarks remain available.',
+    'The Operator may postpone the start of sales or extend the free period, in which case it will announce this in the App.',
   ]),
   ('Article 6 (Intellectual Property and Third-Party Services)', [
     'All intellectual property rights in the App, including copyrights, trademarks, source code, user interface designs and logos, belong to the Operator or to those who have licensed them to the Operator.',
@@ -83,19 +77,15 @@ const List<(String, List<String>)> termsEn = [
   ]),
   ('Article 13 (Operator Information and Contact)', [
     'Questions, inquiries and requests regarding these Terms or the App can be sent to:',
-    '- Business name: $_blank',
-    '- Representative: $_blank',
-    '- Address: $_blank',
+    '- Operator: the developer of 이리ERI (individual)',
     '- Email: $_email',
-    '- Business registration number: $_blank',
-    '- Mail-order business report number: $_blank',
-    '- Mail-order business reporting authority: $_blank',
+    'Because the Operator earns no revenue from the App during the free period, it is not subject to business registration or mail-order business reporting. Before paid sales begin, the Operator will add the business information required by applicable law to this Article and announce it under Article 5.',
   ]),
 ];
 
 const List<(String, List<String>)> privacyEn = [
   ('1. Overview', [
-    'The developer of 이리ERI (the "Operator") values the personal information of users. 이리ERI (the "App") requires no sign-up or login, and the Operator does not run its own servers or collect personal information directly through the App. However, information processed by the Google SDKs included in the App (Google ML Kit in Section 4 and Google Play billing in Section 5) and inquiry emails sent by users (Section 7) are handled as described in those sections.',
+    'The developer of 이리ERI (the "Operator") values the personal information of users. 이리ERI (the "App") requires no sign-up or login, and the Operator does not run its own servers or collect personal information directly through the App. However, information processed by the Google SDKs included in the App (Google ML Kit in Section 4 and, after paid sales begin, Google Play billing in Section 5) and inquiry emails sent by users (Section 7) are handled as described in those sections.',
     'Viewing and converting documents, scanned images and text recognition (OCR) are processed on the user\'s device, and the App does not automatically send them to the Operator\'s servers or third parties. However, Google ML Kit included in the App may send technical information to Google as described in Section 4.',
     'When a user chooses to send files or text to another app with the Share feature, attaches files to an inquiry email, or uses the Android OS backup, the privacy policies of those apps and services apply to that transfer and storage.',
   ]),
@@ -125,6 +115,7 @@ const List<(String, List<String>)> privacyEn = [
     '- How to refuse and its effect: Users can reduce this processing by not using the features that find, copy or build tables of contents from text on image-based pages, and all other features of the App remain available.',
   ]),
   ('5. In-App Purchases', [
+    'Until March 1, 2027, the Paid Features are provided free of charge and no payments are made in the App, so the payment and purchase information and the free trial record in this section are not processed. Once paid sales begin, they will be processed as follows, and this policy will be announced again under Section 12 beforehand.',
     'Purchases of 이리ERI Pro (Paid Features) are processed only through the Google Play billing system.',
     'Payment information (such as credit card numbers) is processed directly by Google, and the Operator does not receive or store it. To provide Paid Features and confirm purchases, the App processes the product ID, price, purchase state and purchase token (the purchase token is used only to ask Google Play to acknowledge the purchase and is not sent to the Operator).',
     '- Stored on the device: whether the purchase has been made (so Paid Features can be used without internet access) and the start date of the free trial. These are deleted when the data is cleared or the App is deleted, and the purchase can be restored with the same Google account.',
@@ -134,7 +125,7 @@ const List<(String, List<String>)> privacyEn = [
     '- The Operator does not sell users\' personal information and does not provide it to third parties except where required by law or with the user\'s consent.',
     '- The external services used for the App and its operation are as follows. The Operator discloses this processing both in this policy and in the Google Play Data safety section.',
     '  · Google ML Kit (Google LLC): processing of the device and app information, per-installation identifier, and performance and usage information in Section 4',
-    '  · Google Play billing (Google LLC): payment and purchase status checks in Section 5',
+    '  · Google Play billing (Google LLC): payment and purchase status checks in Section 5 (only after paid sales begin)',
     '  · Inquiry email service: Gmail (Google LLC) (receiving and storing the inquiry information in Section 7)',
     '- Information through Google ML Kit and Google Play billing is processed directly by Google LLC under the terms of each service and the Google Privacy Policy (Sections 4 and 5).',
     '- Overseas storage of inquiry emails: Because the Operator uses Gmail by Google LLC to receive inquiries, the inquiry information in Section 7 is stored on Google\'s servers outside Korea. Details are as follows.',
@@ -152,7 +143,7 @@ const List<(String, List<String>)> privacyEn = [
     'If a user makes an inquiry by email (Help > Contact Us in the App opens the user\'s email app to send the email), the Operator processes the following information.',
     '- Items: email address, inquiry subject and content, files attached by the user, and (if the user chooses to include them on the Contact Us screen) app version, device manufacturer and model, and Android version',
     '- Purpose: responding to inquiries and checking and fixing errors',
-    '- Retention period: Destroyed after being kept for 1 year after the inquiry is resolved (3 years for records of consumer complaints and dispute handling under e-commerce and other applicable laws). If the user requests deletion, the information is destroyed without delay unless the law requires it to be kept.',
+    '- Retention period: Destroyed after being kept for 1 year after the inquiry is resolved (records of consumer complaints and dispute handling received after paid sales begin are kept for 3 years under the Korean Act on the Consumer Protection in Electronic Commerce). If the user requests deletion, the information is destroyed without delay unless the law requires it to be kept.',
     '- Method of destruction: When the retention period ends or a deletion request is received, the Operator deletes the relevant emails from the Gmail inbox and sent folder, empties the trash, and also deletes any attachments downloaded to the Operator\'s devices. Final deletion from Google\'s internal backups may take some time according to Google\'s deletion process.',
   ]),
   ('8. Security Measures', [
@@ -177,7 +168,7 @@ const List<(String, List<String>)> privacyEn = [
   ]),
   ('12. Changes to this Policy and Contact', [
     'If this policy changes, the effective date and the changes will be announced in the App and on the Google Play Store page from 7 days before the effective date (from 30 days before for changes that are material to users).',
-    '- Operator: $_blank',
+    '- Operator: the developer of 이리ERI (individual)',
     '- Privacy officer: $_blank',
     '- Email: $_email',
     '- Public web address: $_blank',

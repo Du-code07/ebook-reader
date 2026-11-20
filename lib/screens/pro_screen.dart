@@ -38,8 +38,12 @@ class _ProScreenState extends State<ProScreen> {
   void initState() {
     super.initState();
     Pro.trialChanged.addListener(_onTrial);
-    // 가격·구매 여부를 다시 확인 (화면에 맞는 값으로)
-    _loadPrice();
+    // 가격·구매 여부를 다시 확인 (화면에 맞는 값으로). 무료 제공 기간에는 판매하지 않으므로 결제에 묻지 않음
+    if (Pro.freePeriod) {
+      _priceLoading = false;
+    } else {
+      _loadPrice();
+    }
   }
 
   Future<void> _loadPrice() async {
@@ -174,6 +178,42 @@ class _ProScreenState extends State<ProScreen> {
                           ? _t('무료 체험이 $left 남았어요', '$left left in your free trial', '免费试用还剩 $left', '無料体験の残りは$leftです')
                           : _t('무료 체험이 끝났어요', 'Your free trial has ended', '免费试用已结束', '無料体験は終了しました');
               final bool canTrial = !owned && !Pro.trialStarted;
+              // 무료 제공 기간(2027년 3월 1일 전): 판매·체험 없이 안내만
+              if (Pro.freePeriod && !owned) {
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+                  children: [
+                    Text(
+                      _t('2027년 3월 1일까지 아래 기능을 모두 무료로 쓸 수 있어요', 'You can use all of these features free until March 1, 2027',
+                          '2027年3月1日前可免费使用以下全部功能', '2027年3月1日まで、以下の機能をすべて無料で使えます'),
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: cs.onSurface),
+                    ),
+                    const SizedBox(height: 14),
+                    feature(Icons.document_scanner_outlined, _t('문서 스캔', 'Scan Document', '扫描文档', '文書スキャン')),
+                    feature(Icons.photo_library_outlined, _t('이미지 합치기', 'Merge Images', '合并图片', '画像結合')),
+                    feature(Icons.picture_as_pdf_outlined, _t('PDF 합치기', 'Merge PDFs', '合并 PDF', 'PDF結合')),
+                    feature(Icons.add_circle_outline, _t('앞으로 추가되는 유료 기능', 'Paid features added in the future', '今后新增的付费功能', '今後追加される有料機能')),
+                    const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                      decoration: BoxDecoration(color: cs.surfaceContainerHigh, borderRadius: BorderRadius.circular(16)),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(_t('무료 제공 안내', 'About the free period', '免费提供说明', '無料提供のご案内'),
+                            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: cs.onSurface)),
+                        const SizedBox(height: 10),
+                        note(_t('지금은 판매하지 않아요. 결제 없이 모든 유료 기능을 쓸 수 있어요', 'Nothing is for sale right now. You can use all paid features without paying',
+                            '目前不出售。无需付款即可使用全部付费功能', '現在は販売していません。支払いなしで有料機能をすべて使えます')),
+                        note(_t('2027년 3월 1일부터 이리ERI 프로(1회 구매)로 판매할 예정이에요. 판매를 시작하기 전에 앱 안에서 미리 알려 드려요',
+                            '이리ERI Pro is planned to go on sale as a one-time purchase from March 1, 2027. You will be notified in the app before sales begin',
+                            '计划从2027年3月1日起以 이리ERI 专业版（一次性购买）出售。开始出售前会在应用内提前通知', '2027年3月1日から이리ERI プロ（買い切り）として販売する予定です。販売開始前にアプリ内でお知らせします')),
+                        note(_t('무료로 쓰는 동안 스캔·합치기로 만든 파일은 판매가 시작된 뒤에도 그대로 쓸 수 있어요', 'Files you create by scanning or merging during the free period stay usable after sales begin',
+                            '免费期间通过扫描·合并生成的文件，在开始出售后仍可照常使用', '無料期間中にスキャン・結合で作ったファイルは、販売開始後もそのまま使えます')),
+                        note(_t('문의: dudu.dev.pr@gmail.com', 'Contact: dudu.dev.pr@gmail.com', '咨询：dudu.dev.pr@gmail.com', 'お問い合わせ：dudu.dev.pr@gmail.com')),
+                      ]),
+                    ),
+                  ],
+                );
+              }
               return ListView(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                 children: [

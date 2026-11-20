@@ -286,7 +286,7 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
               icon: toolbarCatalogIcon(id, cs.onSurface),
               label: toolbarCatalogLabel(id, widget.tr),
               // 이 파일에서는 쓰지 않는 아이콘: 자리만 옮겨 두고 이 파일에서는 보이지 않음
-              note: here ? null : widget.tr('이 파일에서는 보이지 않아요', 'Not shown for this file', '此文件中不显示', 'このファイルでは表示されません'),
+              note: here ? null : widget.tr('이 파일 형식에서는 보이지 않아요', 'Not shown for this file type', '此文件类型中不显示', 'このファイル形式では表示されません'),
               dim: hidden,
               trailing: _hideButton(hidden: hidden, onTap: () => _toggleHidden(id)),
             ),
@@ -355,8 +355,27 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
           decoration: BoxDecoration(color: const Color(0xEE1C1C1E), borderRadius: BorderRadius.circular(22)),
           child: Row(
             children: [
-              // 도구 모음은 왼쪽부터 보임
-              Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: icons(barIds))),
+              // 도구 모음: 아이콘 수에 맞춰 막대를 꽉 채워 고르게 (다 들어가지 않으면 왼쪽부터 밀어서 보기)
+              Expanded(
+                child: LayoutBuilder(builder: (context, c) {
+                  if (barIds.isEmpty || barIds.length * 30.0 > c.maxWidth) {
+                    return SingleChildScrollView(scrollDirection: Axis.horizontal, child: icons(barIds));
+                  }
+                  return Row(children: [
+                    for (final id in barIds)
+                      Expanded(
+                        child: SizedBox(
+                          height: 36,
+                          child: Center(
+                            child: widget.items[id] != null
+                                ? IconTheme.merge(data: const IconThemeData(color: Colors.white, size: 18), child: widget.items[id]!.icon)
+                                : toolbarCatalogIcon(id, Colors.white, size: 18),
+                          ),
+                        ),
+                      ),
+                  ]);
+                }),
+              ),
               Container(width: 1, height: 20, color: Colors.white.withValues(alpha: 0.18)),
               const SizedBox(width: 30, child: Center(child: Icon(Icons.tune, color: Colors.white, size: 17))),
             ],

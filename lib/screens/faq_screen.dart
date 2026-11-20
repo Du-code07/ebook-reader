@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/pro.dart';
 import '../services/storage_service.dart';
 import '../widgets/push_aside_route.dart';
 import 'contact_screen.dart';
@@ -36,6 +37,15 @@ class FaqScreen extends StatelessWidget {
             '目前有扫描文档、合并图片和合并 PDF。今后可能会通过更新增加功能。另外，购买 이리ERI 专业版就相当于请开发者吃一顿饭！',
             '現在は文書スキャン、画像結合、PDF結合があります。今後のアップデートで機能が追加されることがあります。それに、이리ERI プロを買うと開発者にごはんを一食おごることにもなります！'),
       ),
+      // 무료 제공 기간(2027년 3월 1일 전)에만
+      if (Pro.freePeriod)
+        (
+          t('지금 유료 기능을 쓰려면 돈을 내야 하나요?', 'Do I have to pay to use the paid features now?', '现在使用付费功能需要付款吗？', '今、有料機能を使うのにお金がかかりますか？'),
+          t('아니요. 2027년 3월 1일까지는 모든 유료 기능을 무료로 쓸 수 있어요. 그 뒤에는 이리ERI 프로(1회 구매)로 판매할 예정이고, 판매를 시작하기 전에 앱 안에서 미리 알려 드려요',
+              'No. You can use all paid features free until March 1, 2027. After that, they are planned to be sold as 이리ERI Pro (a one-time purchase), and you will be notified in the app before sales begin',
+              '不需要。2027年3月1日前可免费使用全部付费功能。之后计划以 이리ERI 专业版（一次性购买）出售，开始出售前会在应用内提前通知',
+              'いいえ。2027年3月1日までは有料機能をすべて無料で使えます。その後は이리ERI プロ（買い切り）として販売する予定で、販売開始前にアプリ内でお知らせします'),
+        ),
       (
         t('파일은 어떻게 추가되나요?', 'How are files added?', '文件是如何添加的？', 'ファイルはどのように追加されますか？'),
         t('파일을 추가하면 원본은 그대로 두고 앱 안에 사본을 저장해요. 그래서 원본을 옮기거나 지워도 서재에서 계속 볼 수 있어요. 파일 추가, 파일 탐색(등록한 폴더에서 찾기), 다른 앱의 공유·열기로 추가할 수 있어요',

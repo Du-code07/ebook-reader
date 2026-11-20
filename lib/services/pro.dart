@@ -12,8 +12,14 @@ import 'storage_service.dart';
 /// - 구매 화면의 [무료 체험] 버튼을 누른 때부터 [trialLength] 동안 무료 체험 (기기마다 한 번, 시작일은 Block Store에도 기록)
 class Pro {
   static const String productId = 'eri_pro';
-  /// 무료 체험 기간. 출시용은 3일(Duration(days: 3)) — 지금은 체험이 끝나는 흐름을 확인하려고 30분
-  static const Duration trialLength = Duration(minutes: 30);
+  /// 무료 제공 기간: 이 날(2027년 3월 1일) 전까지는 유료 기능을 모두 무료로 (판매·체험 없음, 약관 제5조)
+  static final DateTime freeUntil = DateTime(2027, 3, 1);
+
+  /// 지금이 무료 제공 기간인지
+  static bool get freePeriod => DateTime.now().isBefore(freeUntil);
+
+  /// 무료 체험 기간: 3일 (가격은 Play 스토어에 등록한 값을 그대로 보여 줌 — 5,500원)
+  static const Duration trialLength = Duration(days: 3);
 
   static const _ch = MethodChannel('ebook_reader/pdf_renderer');
   static const _kOwned = 'pro_owned_v1';
@@ -130,7 +136,7 @@ class Pro {
   static bool get trialActive => trialLeft > Duration.zero;
 
   /// 유료 기능 숨기기를 쓸 수 있는지 (구매했거나 무료 체험 중이면 쓸 수 없음 — 유료 기능이 항상 보임)
-  static bool get canHidePaid => !owned.value && !trialActive;
+  static bool get canHidePaid => !freePeriod && !owned.value && !trialActive;
 
   /// 파일 추가 메뉴에서 유료 기능을 숨기는지
   static bool get hidesPaid => hidePaid.value && canHidePaid;
@@ -151,7 +157,7 @@ class Pro {
   }
 
   /// 유료 기능을 지금 쓸 수 있는지
-  static bool get canUse => owned.value || trialActive;
+  static bool get canUse => freePeriod || owned.value || trialActive;
 
   /// 구매 창을 띄움. 결과: purchased·owned·pending·canceled·unavailable·error
   static Future<String> buy() async {

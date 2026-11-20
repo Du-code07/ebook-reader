@@ -2619,43 +2619,54 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   Widget _buildSimpleRail() {
     final cs = Theme.of(context).colorScheme;
     final bool dark = widget.isDarkMode;
+    final double uiScale = UiScale.of(context);
     // 꺼내 둔 그룹 (지워진 그룹은 빼고)
     final List<String> pins = StorageService.railGroups.where((g) => _groups.contains(g) && g != '전체').toList();
     return LayoutBuilder(builder: (context, c) {
       // 화면이 낮으면(가로 휴대폰) 칸 높이를 줄여 막대 안에 다 들어가게
-      const double addBox = 52 + 8 + 10; // [+] 파일 추가 + 위아래 여백
-      final double itemH = ((c.maxHeight - 10 - addBox - 20 - 48) / 5).clamp(40.0, 58.0).toDouble(); // 가운데 [+] 한 칸은 늘 보이게
+      const double addBox = 52 + 8 + 14; // [+] 파일 추가 + 위아래 여백
+      // 이름이 있는 칸 2개(그룹·즐겨찾기) + 아이콘만 있는 칸 3개(검색·휴지통·설정) + 구분선 2개 + 가운데 [+] 한 칸
+      final double itemH = ((c.maxHeight - 10 - addBox - 2 * 4 - 3 * 48 - 2 * 13 - 48) / 2).clamp(40.0, 58.0).toDouble();
       final bool showLabel = itemH >= 46;
+      final Color mark = AppColors.mark(context);
 
-      Widget item({Key? key, required Widget icon, required String label, required VoidCallback onTap, bool selected = false}) {
-        final Color fg = selected ? AppColors.onSig(context) : cs.onSurface;
+      // 막대 칸: 바탕색 없이, 지금 보고 있는 칸은 이름을 진하게 (표시 색)
+      Widget item({Key? key, required Widget icon, String? label, required VoidCallback onTap, bool selected = false, Widget? lead, double? height}) {
+        final Color fg = selected ? mark : cs.onSurface;
         return Padding(
+          key: key,
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: Material(
-            key: key,
-            // 지금 보고 있는 것(그룹 / 즐겨찾기)은 둥근 네모 바탕으로
-            color: selected ? AppColors.of(context) : Colors.transparent,
+            color: Colors.transparent,
             borderRadius: BorderRadius.circular(16),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               onTap: onTap,
               child: SizedBox(
-                height: itemH,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                height: height ?? (label == null ? 48 : itemH),
+                child: Row(
                   children: [
-                    SizedBox(height: 26, child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg, shadows: selected ? AppColors.sigShadows(context) : null), child: icon))),
-                    if (showLabel) ...[
-                      const SizedBox(height: 3),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 3),
-                        child: Text(label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w800 : FontWeight.w600, color: fg, shadows: selected ? AppColors.sigShadows(context) : null)),
+                    if (lead != null) lead,
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(height: 26, child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg), child: icon))),
+                          if (label != null && showLabel) ...[
+                            const SizedBox(height: 3),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 2),
+                              child: Text(label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w900 : FontWeight.w600, color: fg)),
+                            ),
+                          ],
+                        ],
                       ),
-                    ],
+                    ),
+                    if (lead != null) const SizedBox(width: 10),
                   ],
                 ),
               ),
@@ -2663,6 +2674,12 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           ),
         );
       }
+
+      // 구분: 가운데 1/3 길이의 옅은 회색 선
+      Widget divider() => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Center(child: Container(width: 22, height: 1, color: cs.outlineVariant)),
+          );
 
       final bool pinnedNow = !_favoritesOnly && pins.contains(_selectedGroup);
       final top = [
@@ -2688,42 +2705,95 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           },
         ),
       ];
-      // 가운데: 꺼내 둔 그룹 + 맨 끝 [+]
-      final middle = [
-        for (final g in pins)
-          item(
-            icon: _groupLeading(g, 22),
-            label: _localizeGroupName(g),
-            selected: !_favoritesOnly && _selectedGroup == g,
-            onTap: () {
-              _closeSearch();
-              setState(() {
-                _favoritesOnly = false;
-                _selectedGroup = g;
-              });
-            },
-          ),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
-          child: Material(
-            key: _railAddGroupKey,
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: _showRailGroupPicker,
-              child: SizedBox(
-                height: 44,
-                child: Center(child: Icon(Icons.add, size: 24, color: cs.onSurfaceVariant)),
-              ),
-            ),
+      // 가운데: 꺼내 둔 그룹(왼쪽 손잡이로 순서 바꾸기) + 맨 끝 [+]
+      final Widget addPin = Padding(
+        key: _railAddGroupKey,
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: _showRailGroupPicker,
+            child: SizedBox(height: 44, child: Center(child: Icon(Icons.add, size: 24, color: cs.onSurfaceVariant))),
           ),
         ),
-      ];
+      );
+      final Widget middle = ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+        child: ReorderableListView.builder(
+          buildDefaultDragHandles: false,
+          padding: EdgeInsets.zero,
+          itemCount: pins.length,
+          footer: addPin,
+          onReorderStart: (_) => HapticFeedback.selectionClick(),
+          // ignore: deprecated_member_use
+          onReorder: (oldIndex, newIndex) {
+            if (newIndex > oldIndex) newIndex -= 1;
+            if (newIndex == oldIndex) return;
+            final List<String> next = List<String>.of(pins);
+            next.insert(newIndex, next.removeAt(oldIndex));
+            // 지워진 그룹 등 목록에 안 보이는 것은 뒤에 그대로
+            StorageService.setRailGroups([...next, ...StorageService.railGroups.where((g) => !next.contains(g))]);
+            setState(() {});
+          },
+          proxyDecorator: (child, index, animation) => Material(
+            type: MaterialType.transparency,
+            child: AnimatedBuilder(
+              animation: animation,
+              builder: (_, ch) => UiScaleDragFix(
+                scale: uiScale,
+                grab: _railGrab,
+                dropT: animation.status == AnimationStatus.reverse ? animation.value : null,
+                child: Material(
+                  color: dark ? cs.surfaceContainerHighest : cs.surfaceContainerLow,
+                  elevation: 4 * animation.value,
+                  borderRadius: BorderRadius.circular(16),
+                  child: ch!,
+                ),
+              ),
+              child: child,
+            ),
+          ),
+          itemBuilder: (context, i) {
+            final String g = pins[i];
+            return Builder(
+              key: ValueKey('rail:$g'),
+              builder: (rowCtx) => Listener(
+                onPointerDown: (e) {
+                  final box = rowCtx.findRenderObject();
+                  if (box is RenderBox && box.hasSize) _railGrab = box.globalToLocal(e.position);
+                },
+                child: item(
+                  icon: _groupLeading(g, 22),
+                  label: _localizeGroupName(g),
+                  selected: !_favoritesOnly && _selectedGroup == g,
+                  // 왼쪽 손잡이를 끌어 순서 바꾸기
+                  lead: ReorderableDragStartListener(
+                    index: i,
+                    child: SizedBox(
+                      width: 10,
+                      height: itemH,
+                      child: Center(child: Icon(Icons.drag_indicator, size: 14, color: cs.onSurfaceVariant.withValues(alpha: 0.7))),
+                    ),
+                  ),
+                  onTap: () {
+                    _closeSearch();
+                    setState(() {
+                      _favoritesOnly = false;
+                      _selectedGroup = g;
+                    });
+                  },
+                ),
+              ),
+            );
+          },
+        ),
+      );
+      // 아래: 검색·휴지통·설정은 아이콘만
       final bottom = [
         item(
           icon: const Icon(Icons.search),
-          label: _tr('검색', 'Search', '搜索', '検索'),
           onTap: _searchOpen ? _closeSearch : _openSearch,
         ),
         item(
@@ -2736,7 +2806,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             label: Text('${_trashedBooks.length}'),
             child: TrashLidIcon(open: _trashPanelOpen),
           ),
-          label: _tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
           onTap: () {
             _closeSearch();
             _showTrashBinDialog();
@@ -2744,7 +2813,6 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         ),
         item(
           icon: SpinGearIcon(turns: _gearTurns),
-          label: _tr('설정', 'Settings', '设置', '設定'),
           onTap: () {
             _closeSearch();
             _showGlobalSettingsDialog();
@@ -2752,7 +2820,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         ),
         // 맨 아래 [+]: 파일 추가 창 (열린 동안 ×). 막대 아래 끝에서 살짝 띄움
         Padding(
-          padding: const EdgeInsets.only(top: 8, bottom: 10),
+          padding: const EdgeInsets.only(top: 8, bottom: 14),
           child: Center(
             child: Material(
               color: AppColors.of(context),
@@ -2772,31 +2840,31 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           ),
         ),
       ];
-      // 네모 판: 모서리만 조금 둥글게. 판은 고정, 즐겨찾기 밑 ~ 검색 위만 스크롤
+      // 네모 판: 모서리는 목록형 파일 카드와 같게. 판은 고정, 즐겨찾기 밑 ~ 검색 위만 스크롤
       return Container(
         width: 76,
         decoration: BoxDecoration(
           color: dark ? cs.surfaceContainerHigh : cs.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(14),
           border: dark ? null : Border.all(color: cs.outlineVariant, width: 1.6),
         ),
         clipBehavior: Clip.antiAlias,
         padding: const EdgeInsets.fromLTRB(6, 10, 6, 0),
         child: Column(children: [
           ...top,
-          Expanded(
-            child: ScrollConfiguration(
-              behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
-              child: SingleChildScrollView(child: Column(children: middle)),
-            ),
-          ),
+          divider(),
+          Expanded(child: middle),
+          divider(),
           ...bottom,
         ]),
       );
     });
   }
 
-  /// 와이드: 막대 가운데 [+] → 막대에 둘 그룹 고르기 (누를 때마다 넣었다 뺐다)
+  /// 막대의 꺼내 둔 그룹을 끌 때 손가락이 잡은 자리 (화면 크기 조절 중에도 끄는 칸이 손가락을 따라오게)
+  Offset _railGrab = Offset.zero;
+
+  /// 와이드: 막대 가운데 [+] → 그룹 꺼내기 (누를 때마다 넣었다 뺐다)
   Future<void> _showRailGroupPicker() async {
     _closeSearch();
     final box = _railAddGroupKey.currentContext?.findRenderObject() as RenderBox?;
@@ -2820,11 +2888,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                  child: Text(_tr('막대에 둘 그룹', 'Groups on the Bar', '放到侧栏的分组', 'バーに置くグループ'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                  child: Text(_tr('그룹 꺼내기', 'Pin Groups', '放出分组', 'グループを置く'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                  child: Text(_tr('누르면 즐겨찾기 밑에 놓이고, 다시 누르면 빠져요', 'Tap to place it under Favorites, tap again to remove it', '点击放到收藏下方，再次点击移除', 'タップするとお気に入りの下に置かれ、もう一度タップすると外れます'),
+                  child: Text(_tr('누르면 줄에 놓고, 다시 누르면 빠져요', 'Tap to place it on the bar, tap again to remove it', '点击放到栏中，再次点击移除', 'タップするとバーに置き、もう一度タップすると外れます'),
                       style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
                 ),
                 if (groups.isEmpty)
@@ -3081,6 +3149,30 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     }
     if (!mounted || picked == null) return;
     picked();
+  }
+
+  /// 서재의 설정 창 띄우기: 컴팩트는 밑에서 위로, 와이드는 화면 가운데에서 커지며 (회색 막대 없이)
+  Future<T?> _showMainSheet<T>(WidgetBuilder builder, {double maxWidth = 480}) {
+    if (!StorageService.simpleStyle) {
+      return showModalBottomSheet<T>(
+        sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
+        context: context,
+        builder: builder,
+      );
+    }
+    return showViewerDialog<T>(
+      context,
+      (ctx) => Center(
+        child: viewerPanel(
+          ctx,
+          color: Theme.of(ctx).colorScheme.surfaceContainerLow,
+          elevation: 6,
+          width: math.min(maxWidth, MediaQuery.sizeOf(ctx).width - 40),
+          maxHeight: MediaQuery.sizeOf(ctx).height * 0.8,
+          child: builder(ctx),
+        ),
+      ),
+    );
   }
 
   /// 와이드: 파일 추가 창이 열려 있는 동안 왼쪽 막대의 [+]가 ×로
@@ -3399,10 +3491,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       if (!_groups.contains('미분류')) '미분류',
     ];
 
-    final chosenGroup = await showModalBottomSheet<String>(
-      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
-      context: context,
-      builder: (ctx) => SafeArea(
+    final chosenGroup = await _showMainSheet<String>(
+      (ctx) => SafeArea(
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -3410,6 +3500,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               // 맨 위 회색 막대 + 제목까지 간격 (제목 줄 위 여백만큼 덜어 냄)
               const SheetGrip(below: 26),
               ListTile(
+                leading: const Icon(Icons.drive_file_move_outline),
                 title: Text(
                   _tr(
                     '선택한 ${_selectedFilePaths.length}개 파일 그룹 이동',
@@ -3421,8 +3512,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                 ),
               ),
               const Divider(height: 1),
+              // 그룹 이름 앞에 아이콘 (파일 형식 그룹은 형식 아이콘)
               ...candidateGroups.map((g) => ListTile(
-                    leading: const Icon(Icons.folder_outlined),
+                    leading: _groupLeading(g, 22),
                     title: Text(_localizeGroupName(g)),
                     onTap: () => Navigator.pop(ctx, g),
                   )),
@@ -3703,10 +3795,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       ..._groups.where((g) => g != '전체'),
       if (!_groups.contains('미분류')) '미분류',
     ];
-    await showModalBottomSheet(
-      sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
-      context: context,
-      builder: (ctx) => SafeArea(
+    await _showMainSheet<void>(
+      (ctx) => SafeArea(
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -3714,11 +3804,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
               // 맨 위 회색 막대 + 제목까지 간격 (제목 줄 위 여백만큼 덜어 냄)
               const SheetGrip(below: 26),
               ListTile(
+                leading: const Icon(Icons.drive_file_move_outline),
                 title: Text(_tr('파일 그룹 이동', 'Move to Group', '移动分组', 'グループ移動'), style: const TextStyle(fontWeight: FontWeight.w800)),
               ),
               const Divider(height: 1),
+              // 그룹 이름 앞에 아이콘 (파일 형식 그룹은 형식 아이콘)
               ...candidateGroups.map((g) => ListTile(
-                    leading: const Icon(Icons.folder_outlined),
+                    leading: _groupLeading(g, 22),
                     title: Text(_localizeGroupName(g)),
                     onTap: () async {
                       await StorageService.setBookGroup(file.path, g);
@@ -3746,6 +3838,71 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   }
 
   Future<void> _showGlobalSettingsDialogInner() async {
+    // 앱 설정 내용 (스크롤 컨트롤러·스크롤 방식은 창 모양에 따라)
+    Widget settings(ScrollController? scroll, ScrollPhysics? physics) => AppSettingsScreen(
+      asSheet: true,
+      scrollController: scroll,
+      scrollPhysics: physics,
+      appLang: widget.appLang,
+      themeMode: widget.themeMode,
+      onChangeThemeMode: widget.onChangeThemeMode,
+      viewMode: _bookshelfViewMode,
+      hideExtension: _hideFileExtension,
+      hideGroupName: _hideGroupName,
+      hideThumbnails: _hideThumbnails,
+      onChangeHideThumbnails: (hide) async {
+        await StorageService.setHideThumbnails(hide);
+        _afterToggle(() => _hideThumbnails = hide);
+      },
+      onChangeHideGroupName: (hide) async {
+        await StorageService.setHideGroupName(hide);
+        _afterToggle(() => _hideGroupName = hide);
+      },
+      hidePageCount: _hidePageCount,
+      onChangeHidePageCount: (hide) async {
+        await StorageService.setHidePageCount(hide);
+        _afterToggle(() => _hidePageCount = hide);
+      },
+      onChangeLanguage: widget.onChangeLanguage,
+      onChangeViewMode: (mode) async {
+        await StorageService.setBookshelfViewMode(mode);
+        _afterToggle(() => _bookshelfViewMode = mode);
+        // 표지형으로 바꾸면 아직 표지가 없는 한글·워드 문서의 첫 페이지를 만든다
+        if (mode == 'grid') {
+          for (final f in _allBooks) {
+            if (!_globalThumbMemoryCache.containsKey(f.path) || _wantsSharpDocThumb(f.path)) _ensureBookThumbnail(f);
+          }
+        }
+      },
+      onChangeHideExtension: (hide) async {
+        await StorageService.setHideFileExtension(hide);
+        _afterToggle(() => _hideFileExtension = hide);
+      },
+      onOpenGuide: (lang) => Navigator.push(
+        context,
+        PushAsideRoute(builder: (_) => ButtonGuideScreen(appLang: lang)),
+      ),
+    );
+
+    if (StorageService.simpleStyle) {
+      // 와이드: 화면 가운데에서 커지며 (회색 막대 없이)
+      await showViewerDialog<void>(
+        context,
+        (ctx) {
+          final Size size = MediaQuery.sizeOf(ctx);
+          return Center(
+            child: viewerPanel(
+              ctx,
+              color: Theme.of(ctx).colorScheme.surface,
+              elevation: 6,
+              width: math.min(560, size.width - 40),
+              child: SizedBox(height: math.min(size.height * 0.82, 760), child: PushAsideShift(child: settings(null, null))),
+            ),
+          );
+        },
+      );
+      return;
+    }
     final sheetCtrl = BottomSheet.createAnimationController(this);
     await showModalBottomSheet(
       sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
@@ -3760,50 +3917,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       // 앱 설정에서 전체 화면을 열면 설정 창도 왼쪽으로 함께 밀려남
       builder: (sheetCtx) => PushAsideShift(child: SheetPullToClose(
         controller: sheetCtrl,
-        builder: (ctx, scroll, physics) => AppSettingsScreen(
-          asSheet: true,
-          scrollController: scroll,
-          scrollPhysics: physics,
-          appLang: widget.appLang,
-          themeMode: widget.themeMode,
-          onChangeThemeMode: widget.onChangeThemeMode,
-          viewMode: _bookshelfViewMode,
-          hideExtension: _hideFileExtension,
-          hideGroupName: _hideGroupName,
-          hideThumbnails: _hideThumbnails,
-          onChangeHideThumbnails: (hide) async {
-            await StorageService.setHideThumbnails(hide);
-            _afterToggle(() => _hideThumbnails = hide);
-          },
-          onChangeHideGroupName: (hide) async {
-            await StorageService.setHideGroupName(hide);
-            _afterToggle(() => _hideGroupName = hide);
-          },
-          hidePageCount: _hidePageCount,
-          onChangeHidePageCount: (hide) async {
-            await StorageService.setHidePageCount(hide);
-            _afterToggle(() => _hidePageCount = hide);
-          },
-          onChangeLanguage: widget.onChangeLanguage,
-          onChangeViewMode: (mode) async {
-            await StorageService.setBookshelfViewMode(mode);
-            _afterToggle(() => _bookshelfViewMode = mode);
-            // 표지형으로 바꾸면 아직 표지가 없는 한글·워드 문서의 첫 페이지를 만든다
-            if (mode == 'grid') {
-              for (final f in _allBooks) {
-                if (!_globalThumbMemoryCache.containsKey(f.path) || _wantsSharpDocThumb(f.path)) _ensureBookThumbnail(f);
-              }
-            }
-          },
-          onChangeHideExtension: (hide) async {
-            await StorageService.setHideFileExtension(hide);
-            _afterToggle(() => _hideFileExtension = hide);
-          },
-          onOpenGuide: (lang) => Navigator.push(
-            context,
-            PushAsideRoute(builder: (_) => ButtonGuideScreen(appLang: lang)),
-          ),
-        ),
+        builder: (ctx, scroll, physics) => settings(scroll, physics),
       )),
     );
     disposeSheetControllerWhenDone(sheetCtrl);

@@ -248,7 +248,8 @@ Widget viewerPanel(
     elevation: elevation,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
     clipBehavior: Clip.antiAlias,
-    child: body,
+    // 밑에서 올라오는 창과 같은 내용을 가운데 창으로 띄우면 회색 막대는 빼고 여백만
+    child: SheetGripOff(child: body),
   );
 }
 

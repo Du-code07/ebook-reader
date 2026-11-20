@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../services/pro.dart';
 import '../services/storage_service.dart';
 import '../widgets/app_colors.dart';
 import '../widgets/direction_arrow_icon.dart';
@@ -287,7 +288,9 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('epubfont', tr('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント'),
               tr('EPUB 책 본문 글꼴을 바꿔요', 'Change the font for EPUB book text', '更改 EPUB 正文字体', 'EPUB本文のフォントを変えます')),
           _Step('pro', tr('이리ERI 프로', '이리ERI Pro', '이리ERI 专业版', '이리ERI プロ'),
-              tr('유료 기능을 사거나 무료 체험을 시작해요', 'Buy the paid features or start the free trial', '购买付费功能或开始免费试用', '有料機能を購入するか無料体験を始めます')),
+              Pro.freePeriod
+                  ? tr('유료 기능과 무료 제공 기간(2027년 3월 1일까지)을 확인해요', 'See the paid features and the free period (until March 1, 2027)', '查看付费功能和免费提供期间（至2027年3月1日）', '有料機能と無料提供期間（2027年3月1日まで）を確認します')
+                  : tr('유료 기능을 사거나 무료 체험을 시작해요', 'Buy the paid features or start the free trial', '购买付费功能或开始免费试用', '有料機能を購入するか無料体験を始めます')),
           _Step('hidepaid', tr('유료 기능 숨기기', 'Hide Paid Features', '隐藏付费功能', '有料機能を隠す'),
               tr('사지 않은 유료 기능을 메뉴에서 숨겨요', 'Hides paid features you have not bought from the menus', '在菜单中隐藏未购买的付费功能', '購入していない有料機能をメニューから隠します')),
           _Step('cache', tr('캐시 지우기', 'Clear Cache', '清除缓存', 'キャッシュを削除'),
@@ -542,23 +545,36 @@ class _MainMock extends StatelessWidget {
     // 와이드: 왼쪽 둥근 네모 아이콘 막대 (위: 그룹·즐겨찾기 / 아래: 검색·휴지통·설정·[+]) + 오른쪽 파일
     if (simple) {
       final bool dark = Theme.of(context).brightness == Brightness.dark;
-      Widget railItem(String id, Widget icon, String label, {bool selected = false}) {
-        final Color fg = selected ? AppColors.onSig(context) : cs.onSurface;
+      // 고른 칸: 아이콘 왼쪽에 굵은 시그니처 색 선 (바탕색 없음)
+      Widget railItem(String id, Widget icon, String? label, {bool selected = false}) {
+        final Color fg = cs.onSurface;
         return Container(
           key: k(id),
-          height: 58,
+          height: label == null ? 48 : 58,
           margin: const EdgeInsets.symmetric(vertical: 2),
-          decoration: BoxDecoration(color: selected ? AppColors.of(context) : null, borderRadius: BorderRadius.circular(16)),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(height: 26, child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg), child: icon))),
-              const SizedBox(height: 3),
-              Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg, shadows: selected ? AppColors.sigShadows(context) : null)),
+              SizedBox(
+                height: 26,
+                child: Row(children: [
+                  Container(width: 4, height: selected ? 24 : 0, decoration: BoxDecoration(color: AppColors.mark(context), borderRadius: BorderRadius.circular(2))),
+                  Expanded(child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg), child: icon))),
+                  const SizedBox(width: 4),
+                ]),
+              ),
+              if (label != null) ...[
+                const SizedBox(height: 3),
+                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w800 : FontWeight.w600, color: fg)),
+              ],
             ],
           ),
         );
       }
+      Widget divider() => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Center(child: Container(width: 22, height: 1, color: cs.outlineVariant)),
+          );
       return Scaffold(
         body: SafeArea(
           child: Row(
@@ -567,25 +583,27 @@ class _MainMock extends StatelessWidget {
               Container(
                 width: 76,
                 margin: const EdgeInsets.fromLTRB(10, 10, 6, 10),
-                padding: const EdgeInsets.fromLTRB(6, 10, 6, 10),
+                padding: const EdgeInsets.fromLTRB(6, 10, 6, 0),
                 decoration: BoxDecoration(
                   color: dark ? cs.surfaceContainerHigh : cs.surfaceContainerLowest,
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(14),
                   border: dark ? null : Border.all(color: cs.outlineVariant, width: 1.6),
                 ),
                 child: Column(children: [
                   railItem('group', groupIcon, groupLabel, selected: true),
                   railItem('fav', const FavoritesIcon(size: 22), tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り')),
+                  divider(),
                   SizedBox(key: k('pin'), height: 44, child: Center(child: Icon(Icons.add, size: 24, color: cs.onSurfaceVariant))),
                   const Spacer(),
-                  railItem('search', const Icon(Icons.search), tr('검색', 'Search', '搜索', '検索')),
-                  railItem('trash', const TrashLidIcon(open: false), tr('휴지통', 'Trash', '回收站', 'ゴミ箱')),
-                  railItem('settings', const SpinGearIcon(turns: 0), tr('설정', 'Settings', '设置', '設定')),
+                  divider(),
+                  railItem('search', const Icon(Icons.search), null),
+                  railItem('trash', const TrashLidIcon(open: false), null),
+                  railItem('settings', const SpinGearIcon(turns: 0), null),
                   Container(
                     key: k('add'),
                     width: 52,
                     height: 52,
-                    margin: const EdgeInsets.only(top: 8, bottom: 10),
+                    margin: const EdgeInsets.only(top: 8, bottom: 14),
                     decoration: BoxDecoration(color: AppColors.of(context), borderRadius: BorderRadius.circular(16)),
                     child: Icon(Icons.add, size: 30, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context)),
                   ),

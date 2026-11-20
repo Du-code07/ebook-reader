@@ -5,7 +5,7 @@ import '../services/storage_service.dart';
 import '../widgets/push_aside_route.dart';
 import 'legal_screen.dart';
 
-/// 도움말 > 문의하기: 답장받을 이메일·제목·내용을 적고 [보내기]를 누르면
+/// 도움말 > 문의하기: 본인 이메일·제목·내용을 적고 [보내기]를 누르면
 /// 메일 앱이 받는 사람·제목·내용이 채워진 채로 열림 (앱이 직접 메일 서버로 보내지는 않음)
 class ContactScreen extends StatefulWidget {
   const ContactScreen({super.key, required this.lang});
@@ -43,7 +43,7 @@ class _ContactScreenState extends State<ContactScreen> {
     if (!_emailOk || _subject.text.trim().isEmpty || _body.text.trim().isEmpty) return;
     final b = StringBuffer(_body.text.trim());
     b.write('\n\n---\n');
-    b.write('${_t('답장받을 이메일', 'Reply-to email', '回复邮箱', '返信先メール')}: ${_email.text.trim()}\n');
+    b.write('${_t('본인 이메일', 'Your email', '您的邮箱', 'ご自身のメール')}: ${_email.text.trim()}\n');
     if (_withDeviceInfo) {
       try {
         final info = await _ch.invokeMapMethod<String, Object?>('deviceInfo');
@@ -103,7 +103,7 @@ class _ContactScreenState extends State<ContactScreen> {
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               onChanged: (_) => _tried ? setState(() {}) : null,
-              decoration: deco(_t('답장받을 이메일', 'Reply-to email', '回复邮箱', '返信先メール'),
+              decoration: deco(_t('본인 이메일', 'Your email', '您的邮箱', 'ご自身のメール'),
                   error: _tried && !_emailOk ? _t('이메일 주소를 확인해 주세요', 'Please check the email address', '请检查邮箱地址', 'メールアドレスを確認してください') : null),
             ),
             const SizedBox(height: 14),

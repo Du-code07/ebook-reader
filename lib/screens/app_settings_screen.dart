@@ -561,6 +561,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                 title: _t('이리ERI 프로', '이리ERI Pro', '이리ERI 专业版', '이리ERI プロ'),
                 subtitle: Pro.owned.value
                     ? _t('구매했어요', 'Purchased', '已购买', '購入済み')
+                    : Pro.freePeriod
+                        ? _t('2027년 3월 1일까지 무료로 쓸 수 있어요', 'Free to use until March 1, 2027', '2027年3月1日前可免费使用', '2027年3月1日まで無料で使えます')
                     : !Pro.trialStarted
                         ? _t('무료 체험을 시작할 수 있어요', 'You can start a free trial', '可以开始免费试用', '無料体験を始められます')
                         : Pro.trialActive
@@ -584,6 +586,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                   title: _t('유료 기능 숨기기', 'Hide Paid Features', '隐藏付费功能', '有料機能を隠す'),
                   subtitle: owned
                       ? _t('이리ERI 프로를 구매해서 유료 기능이 모두 보여요', 'All paid features are shown because you own 이리ERI Pro', '已购买 이리ERI 专业版，付费功能全部显示', '이리ERI プロを購入済みのため、有料機能はすべて表示されます')
+                      : Pro.freePeriod
+                          ? _t('무료 제공 기간에는 유료 기능이 모두 보여요', 'All paid features are shown during the free period', '免费提供期间付费功能全部显示', '無料提供期間中は有料機能がすべて表示されます')
                       : locked
                           ? _t('무료 체험 중에는 유료 기능이 모두 보여요', 'All paid features are shown during the free trial', '免费试用期间付费功能全部显示', '無料体験中は有料機能がすべて表示されます')
                           : _t('파일 추가 메뉴에서 스캔·PDF 합치기·이미지 합치기를 숨겨요', 'Hides Scan, Merge PDFs and Merge Images in the Add Files menu',

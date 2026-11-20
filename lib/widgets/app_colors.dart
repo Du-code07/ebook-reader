@@ -176,6 +176,16 @@ class Anim {
 
 /// 밑에서 올라오는 창 맨 위: 가운데 회색 막대 + 그 아래 제목까지의 간격
 /// (밑에서 올라오는 모든 창이 같은 간격이 되게 함께 씀)
+/// 이 안의 [SheetGrip]은 회색 막대 없이 여백만 (같은 내용을 화면 가운데 창으로 띄울 때)
+class SheetGripOff extends InheritedWidget {
+  const SheetGripOff({super.key, required super.child});
+
+  static bool of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<SheetGripOff>() != null;
+
+  @override
+  bool updateShouldNotify(SheetGripOff old) => false;
+}
+
 class SheetGrip extends StatelessWidget {
   const SheetGrip({super.key, this.below = 34});
 
@@ -184,6 +194,8 @@ class SheetGrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 가운데 창: 막대는 없이 위 여백만
+    if (SheetGripOff.of(context)) return SizedBox(height: 6 + below);
     return Padding(
       padding: EdgeInsets.only(top: 10, bottom: below),
       child: Center(
