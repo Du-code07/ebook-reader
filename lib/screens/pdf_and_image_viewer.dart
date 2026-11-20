@@ -1795,7 +1795,6 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
             _eraseStartStrokes = _memoStrokesByPage[pageIndex] ?? const <MemoStroke>[];
             _eraseStrokeAt(pageIndex, event.localPosition, drawWidth, drawHeight);
           } else {
-            if (MemoTools.s.fitText) MemoTextFit.prefetch(_imagePages[pageIndex].path);
             setState(() {
               _activeDrawingPageIndex = pageIndex;
               _activeStrokePoints
@@ -1828,20 +1827,11 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
               drawHeight > 0) {
             final st = MemoTools.s;
             // 직선 자동 보정 → 쪽 좌표(0~1)
-            List<Offset> frac = [
+            final List<Offset> frac = [
               for (final p in finishMemoPoints(_activeStrokePoints))
                 Offset((p.dx / drawWidth).clamp(0.0, 1.0), (p.dy / drawHeight).clamp(0.0, 1.0)),
             ];
-            double width = st.width / drawWidth; // 쪽 너비에 대한 비율 (확대·화면 회전에도 쪽과 같이)
-            // 글자 크기에 맞춰 두께 조절: 쪽 그림에서 글줄 높이를 찾아 그 높이로, 글줄 가운데에
-            if (st.fitText) {
-              final fit = await MemoTextFit.fit(_imagePages[pageIndex].path, frac);
-              if (!mounted) return;
-              if (fit != null) {
-                frac = fit.pts;
-                width = fit.height * drawHeight * (st.tool == 'tape' ? 1.45 : 1.3) / drawWidth;
-              }
-            }
+            final double width = st.width / drawWidth; // 쪽 너비에 대한 비율 (확대·화면 회전에도 쪽과 같이)
             final stroke = MemoStroke(
               dxList: [for (final f in frac) f.dx],
               dyList: [for (final f in frac) f.dy],

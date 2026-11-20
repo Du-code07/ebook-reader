@@ -1,7 +1,4 @@
-import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -110,10 +107,13 @@ class MemoToolButton extends StatelessWidget {
   /// 기본(흰색) 대신 쓸 아이콘 색 (예: 필기 전체 지우기 = 빨강)
   final Color? color;
 
+  /// 고른 도구의 아이콘 색: 시그니처 색 바탕 위에서 잘 보이게 진한 초록
+  static const Color activeIconColor = Color(0xFF1E3A1E);
+
   @override
   Widget build(BuildContext context) {
-    // 고른 도구: 시그니쳐 색 바탕 + 진한 초록 아이콘
-    final Color color = !enabled ? Colors.white30 : (active ? AppColors.onSignature : (this.color ?? Colors.white));
+    final Color color = !enabled ? Colors.white30 : (active ? activeIconColor : (this.color ?? Colors.white));
+    final Widget glyph = iconBuilder != null ? iconBuilder!(color) : Icon(icon, color: color, size: 16);
     return Semantics(
       button: true,
       label: label,
@@ -134,32 +134,46 @@ class MemoToolButton extends StatelessWidget {
         child: SizedBox(
           width: kMemoToolExtent,
           height: kMemoToolExtent,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              if (active && enabled)
-                AnimatedContainer(
-                  duration: Anim.ms(150),
-                  width: kMemoToolExtent - 8,
-                  height: kMemoToolExtent - 8,
-                  decoration: BoxDecoration(color: AppColors.signature, borderRadius: BorderRadius.circular(10)),
-                ),
-              iconBuilder != null ? iconBuilder!(color) : Icon(icon, color: color, size: 16, shadows: active ? AppColors.sigShadows(context) : null),
-              // 펜 색: 펜 몸통 왼쪽에 살짝 띄워서
-              if (dotColor != null)
-                Positioned(
-                  left: 3,
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: dotColor,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white70, width: 0.8),
+          // 고르는 순간: 바탕이 톡 커지며 나오고, 아이콘이 살짝 들렸다 기울며 내려앉음
+          child: TweenAnimationBuilder<double>(
+            key: ValueKey(active && enabled),
+            tween: Tween(begin: active && enabled ? 0.0 : 1.0, end: 1.0),
+            duration: Anim.ms(320),
+            builder: (context, t, _) {
+              final double pop = math.sin(t * math.pi);
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  if (active && enabled)
+                    Transform.scale(
+                      scale: 0.5 + 0.5 * Curves.easeOutBack.transform(t),
+                      child: Container(
+                        width: kMemoToolExtent - 8,
+                        height: kMemoToolExtent - 8,
+                        decoration: BoxDecoration(color: AppColors.signature, borderRadius: BorderRadius.circular(10)),
+                      ),
                     ),
+                  Transform.translate(
+                    offset: Offset(0, -2.5 * pop),
+                    child: Transform.rotate(angle: -0.14 * pop, child: Transform.scale(scale: 1 + 0.14 * pop, child: glyph)),
                   ),
-                ),
-            ],
+                  // 펜 색: 펜 몸통 왼쪽에 살짝 띄워서
+                  if (dotColor != null)
+                    Positioned(
+                      left: 3,
+                      child: Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: dotColor,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white70, width: 0.8),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -314,10 +328,10 @@ const List<Color> kMemoHighlighterColors = [
   Color(0xFFB98CFF),
 ];
 
-/// 테이프 색 (맨 앞 주황이 기본)
+/// 테이프 색 (맨 앞 노랑이 기본)
 const List<Color> kMemoTapeColors = [
-  Color(0xFFFF7043),
   Color(0xFFFFCA28),
+  Color(0xFFFF7043),
   Color(0xFF9CCC65),
   Color(0xFF4FC3F7),
   Color(0xFFBA68C8),
@@ -338,12 +352,10 @@ class MemoToolSettings {
   double hlWidth = 16.0;
   int hlOpacity = 45; // %
   bool hlStraight = false;
-  bool hlFit = false;
 
   Color tapeColor = kMemoTapeColors.first;
   double tapeWidth = 22.0;
   bool tapeStraight = false;
-  bool tapeFit = false;
 
   /// 테이프 숨기기: 테이프는 테두리만 남고 안쪽은 비쳐 보임
   bool tapeHidden = false;
@@ -368,9 +380,6 @@ class MemoToolSettings {
 
   bool get straight => switch (tool) { 'hl' => hlStraight, 'tape' => tapeStraight, _ => penStraight };
 
-  /// 글자 크기에 맞춰 두께 조절 (형광펜·테이프)
-  bool get fitText => switch (tool) { 'hl' => hlFit, 'tape' => tapeFit, _ => false };
-
   /// 지우개가 이 획을 지우는지 (형광펜만·테이프만 지우기)
   bool erases(MemoStroke s) {
     if (!eraseOnlyHl && !eraseOnlyTape) return true;
@@ -386,11 +395,9 @@ class MemoToolSettings {
         'hw': hlWidth,
         'ho': hlOpacity,
         'hs': hlStraight,
-        'hf': hlFit,
         'tc': tapeColor.toARGB32(),
         'tw': tapeWidth,
         'ts': tapeStraight,
-        'tf': tapeFit,
         'th': tapeHidden,
         'et': eraserType,
         'eh': eraseOnlyHl,
@@ -409,11 +416,9 @@ class MemoToolSettings {
     hlWidth = n('hw', hlWidth).clamp(4.0, 40.0).toDouble();
     hlOpacity = n('ho', hlOpacity.toDouble()).round().clamp(10, 100);
     hlStraight = v('hs', false);
-    hlFit = v('hf', false);
     tapeColor = Color(v('tc', tapeColor.toARGB32()));
     tapeWidth = n('tw', tapeWidth).clamp(6.0, 48.0).toDouble();
     tapeStraight = v('ts', false);
-    tapeFit = v('tf', false);
     tapeHidden = v('th', false);
     final String e = v('et', 'area');
     eraserType = e == 'stroke' ? 'stroke' : 'area';
@@ -461,28 +466,80 @@ void paintMemoLine(Canvas canvas, List<Offset> pts, {required String kind, requi
     case 'hl':
       canvas.drawPath(path, paint..strokeCap = StrokeCap.square);
     case 'tape':
-      paint.strokeCap = StrokeCap.square;
-      if (!MemoTools.s.tapeHidden) {
-        canvas.drawPath(path, paint);
-      } else {
-        // 숨긴 테이프: 바깥 테두리만 남기고 안쪽은 비워 아래가 보이게
-        final double border = math.max(1.6, width * 0.09);
-        canvas.saveLayer(path.getBounds().inflate(width), Paint());
-        canvas.drawPath(path, paint);
-        canvas.drawPath(
-          path,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = math.max(0.0, width - border * 2)
-            ..strokeCap = StrokeCap.square
-            ..strokeJoin = StrokeJoin.round
-            ..blendMode = BlendMode.clear,
-        );
-        canvas.restore();
-      }
+      _paintTape(canvas, pts, path, color, width);
     default:
       canvas.drawPath(path, paint..strokeCap = StrokeCap.round);
   }
+}
+
+/// 테이프: 끝을 손으로 뜯은 것처럼 뾰족뾰족하게. 숨기면 테두리만 또렷하고 안쪽은 아주 옅게 비침
+void _paintTape(Canvas canvas, List<Offset> pts, Path body, Color color, double width) {
+  // 양끝 방향 (같은 점이 겹치면 건너뜀)
+  Offset dirAt(bool start) {
+    final Offset end = start ? pts.first : pts.last;
+    for (int i = 1; i < pts.length; i++) {
+      final Offset o = start ? pts[i] : pts[pts.length - 1 - i];
+      final Offset d = end - o;
+      if (d.distance > 0.5) return d / d.distance;
+    }
+    return start ? const Offset(-1, 0) : const Offset(1, 0);
+  }
+
+  /// 끝 [p]에서 바깥 [d] 쪽으로 톱니 (몸통과 살짝 겹치게)
+  Path teeth(Offset p, Offset d) {
+    final Offset n = Offset(-d.dy, d.dx);
+    final double half = width / 2;
+    final int count = math.max(3, (width / 7).round());
+    final double depth = math.min(width * 0.22, 6.0);
+    final Offset back = p - d * 0.6;
+    final t = Path()..moveTo(back.dx + n.dx * half, back.dy + n.dy * half);
+    for (int i = 0; i < count; i++) {
+      final double a0 = half - (2 * half) * i / count;
+      final double mid = a0 - half / count;
+      final Offset peak = p + d * depth + n * mid;
+      final Offset valley = p + n * (a0 - 2 * half / count);
+      t
+        ..lineTo(peak.dx, peak.dy)
+        ..lineTo(valley.dx, valley.dy);
+    }
+    final Offset backEnd = back - n * half;
+    t
+      ..lineTo(backEnd.dx, backEnd.dy)
+      ..close();
+    return t;
+  }
+
+  final Paint bodyPaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = width
+    ..strokeCap = StrokeCap.butt
+    ..strokeJoin = StrokeJoin.round;
+  final List<Path> ends = [teeth(pts.first, dirAt(true)), teeth(pts.last, dirAt(false))];
+  void shape(Paint fill) {
+    canvas.drawPath(body, bodyPaint..color = fill.color);
+    for (final e in ends) {
+      canvas.drawPath(e, fill);
+    }
+  }
+
+  final Rect bounds = body.getBounds().inflate(width + 8);
+  if (!MemoTools.s.tapeHidden) {
+    shape(Paint()..color = color);
+    return;
+  }
+  // 숨긴 테이프: 테두리 = 모양에서 안쪽(깎아 낸 모양)을 뺀 것, 안쪽은 아주 옅게
+  final double border = math.max(1.6, width * 0.09);
+  canvas.saveLayer(bounds, Paint());
+  shape(Paint()..color = color.withValues(alpha: 1));
+  canvas.saveLayer(bounds, Paint()
+    ..blendMode = BlendMode.dstOut
+    ..imageFilter = ui.ImageFilter.erode(radiusX: border, radiusY: border));
+  shape(Paint()..color = const Color(0xFF000000));
+  canvas.restore();
+  canvas.restore();
+  canvas.saveLayer(bounds, Paint()..color = const Color(0x24000000));
+  shape(Paint()..color = color.withValues(alpha: 1));
+  canvas.restore();
 }
 
 /// 저장된 획들을 그림 ([toLocal]: 0~1 좌표 → 화면, [unit]: 굵기 기준 너비). 형광펜은 글씨 밑에 깔리게 먼저
@@ -624,132 +681,7 @@ List<MemoStroke>? eraseMemoStrokes(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 글자 크기에 맞춰 두께 조절: 쪽 그림에서 획 아래 글줄의 높이를 찾아 그 높이로, 글줄 가운데에 맞춤
-
-class _InkGray {
-  _InkGray(this.w, this.h, this.lum);
-  final int w, h;
-  final Uint8List lum;
-}
-
-class MemoTextFit {
-  static final Map<String, Future<_InkGray?>> _cache = {};
-
-  /// 쪽 그림을 작게 줄여 밝기만 읽어 둠 (최근 6쪽)
-  static Future<_InkGray?> _gray(String path) {
-    final hit = _cache.remove(path);
-    if (hit != null) return _cache[path] = hit;
-    final f = _decode(path);
-    _cache[path] = f;
-    while (_cache.length > 6) {
-      _cache.remove(_cache.keys.first);
-    }
-    return f;
-  }
-
-  static Future<_InkGray?> _decode(String path) async {
-    try {
-      final bytes = await File(path).readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes, targetWidth: 480);
-      final frame = await codec.getNextFrame();
-      final img = frame.image;
-      final data = await img.toByteData(format: ui.ImageByteFormat.rawRgba);
-      final int w = img.width, h = img.height;
-      img.dispose();
-      if (data == null) return null;
-      final lum = Uint8List(w * h);
-      for (int i = 0; i < w * h; i++) {
-        final int o = i * 4;
-        lum[i] = ((data.getUint8(o) * 299 + data.getUint8(o + 1) * 587 + data.getUint8(o + 2) * 114) ~/ 1000);
-      }
-      return _InkGray(w, h, lum);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// 쓰기 시작할 때 미리 읽어 둠
-  static void prefetch(String path) => unawaited(_gray(path));
-
-  /// [pts]: 쪽 안 0~1 좌표. 글줄을 찾으면 (가운데로 옮긴 점들, 글줄 높이(쪽 높이 비율)), 못 찾으면 null
-  static Future<({List<Offset> pts, double height})?> fit(String imagePath, List<Offset> pts) async {
-    if (pts.isEmpty) return null;
-    final g = await _gray(imagePath);
-    if (g == null) return null;
-    double minX = 1, maxX = 0, sumY = 0, minY = 1, maxY = 0;
-    for (final p in pts) {
-      minX = math.min(minX, p.dx);
-      maxX = math.max(maxX, p.dx);
-      minY = math.min(minY, p.dy);
-      maxY = math.max(maxY, p.dy);
-      sumY += p.dy;
-    }
-    int x0 = (minX * g.w).floor(), x1 = (maxX * g.w).ceil();
-    if (x1 - x0 < 6) {
-      x0 -= 3;
-      x1 += 3;
-    }
-    x0 = x0.clamp(0, g.w - 1);
-    x1 = x1.clamp(0, g.w - 1);
-    final int yc = ((sumY / pts.length) * g.h).round().clamp(0, g.h - 1);
-    final int range = math.max(4, (g.h * 0.06).round());
-    final int ya = math.max(0, yc - range), yb = math.min(g.h - 1, yc + range);
-    // 바탕 밝기: 그 둘레에서 밝은 쪽(85%)
-    final sample = <int>[];
-    final int stepY = math.max(1, (yb - ya) ~/ 40), stepX = math.max(1, (x1 - x0) ~/ 60);
-    for (int y = ya; y <= yb; y += stepY) {
-      for (int x = x0; x <= x1; x += stepX) {
-        sample.add(g.lum[y * g.w + x]);
-      }
-    }
-    if (sample.isEmpty) return null;
-    sample.sort();
-    final int bg = sample[(sample.length * 0.85).floor().clamp(0, sample.length - 1)];
-    final int thr = bg - 55;
-    if (thr <= 0) return null;
-    final int cols = x1 - x0 + 1;
-    double inkAt(int y) {
-      int c = 0;
-      for (int x = x0; x <= x1; x++) {
-        if (g.lum[y * g.w + x] < thr) c++;
-      }
-      return c / cols;
-    }
-
-    final rows = <int, double>{for (int y = ya; y <= yb; y++) y: inkAt(y)};
-    // 획 가까이에서 글씨가 있는 줄
-    final int near = math.max(2, (g.h * 0.025).round());
-    int? start;
-    for (int d = 0; d <= near && start == null; d++) {
-      for (final y in [yc - d, yc + d]) {
-        if ((rows[y] ?? 0) >= 0.03) {
-          start = y;
-          break;
-        }
-      }
-    }
-    if (start == null) return null;
-    bool ink(int y) => (rows[y] ?? 0) >= 0.01;
-    int top = start, bottom = start;
-    while (top - 1 >= ya && (ink(top - 1) || ink(top - 2))) {
-      top--;
-    }
-    while (bottom + 1 <= yb && (ink(bottom + 1) || ink(bottom + 2))) {
-      bottom++;
-    }
-    final int hpx = bottom - top + 1;
-    if (hpx < 2 || hpx > g.h * 0.08) return null;
-    final double height = hpx / g.h;
-    final double center = (top + bottom + 1) / 2 / g.h;
-    // 가로로 그은 획이면 글줄 가운데로 옮김
-    final bool flat = (maxY - minY) < math.max(height * 1.5, 0.02);
-    final double shift = flat ? center - sumY / pts.length : 0;
-    return (pts: [for (final p in pts) Offset(p.dx, (p.dy + shift).clamp(0.0, 1.0))], height: height);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 펜·형광펜·테이프 설정 창 (고른 도구를 한 번 더 눌렀을 때): 선 굵기 (+ 형광펜 투명도) + 직선 자동 보정 (+ 글자 크기에 맞춰 두께 조절) + 색상
+// 펜·형광펜·테이프 설정 창 (고른 도구를 한 번 더 눌렀을 때): 선 굵기 (+ 형광펜 투명도) + 직선 자동 보정 (+ 테이프 숨기기) + 색상
 Future<void> showMemoToolPanel({required BuildContext context, required String kind, required MemoTr tr}) {
   return showPopDialog<void>(
     context: context,
@@ -976,12 +908,6 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
                 switch (widget.kind) { 'hl' => _s.hlStraight, 'tape' => _s.tapeStraight, _ => _s.penStraight },
                 (v) => switch (widget.kind) { 'hl' => _s.hlStraight = v, 'tape' => _s.tapeStraight = v, _ => _s.penStraight = v },
               ),
-              if (!_pen)
-                _toggle(
-                  tr('글자 크기에 맞춰 두께 조절', 'Match Thickness to Text Size', '按文字大小调整粗细', '文字サイズに合わせて太さを調整'),
-                  _hl ? _s.hlFit : _s.tapeFit,
-                  (v) => _hl ? _s.hlFit = v : _s.tapeFit = v,
-                ),
               // 테이프: 숨기기 (테두리만 남기고 안쪽은 비쳐 보이게)
               if (widget.kind == 'tape')
                 _toggle(tr('테이프 숨기기', 'Hide Tape', '隐藏胶带', 'テープを隠す'), _s.tapeHidden, (v) => _s.tapeHidden = v),
@@ -1039,7 +965,7 @@ class _ToolPreviewPainter extends CustomPainter {
           ]
         : [Offset(w * 0.18, h * 0.5), Offset(w * 0.82, h * 0.5)];
     // 형광펜은 글자 위에 칠한 모습이 보이게 회색 글줄을 깔아 둠
-    if (kind != 'pen') {
+    if (kind == 'hl') {
       final line = Paint()..color = Colors.white38;
       for (int i = 0; i < 9; i++) {
         canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(w * (0.2 + i * 0.068), h * 0.5 - 6, w * 0.05, 12), const Radius.circular(2)), line);
@@ -1088,7 +1014,7 @@ class _EraserPanelState extends State<_EraserPanel> {
   @override
   Widget build(BuildContext context) {
     final tr = widget.tr;
-    Widget radio(String value, String label) => InkWell(
+    Widget radio(String value, Widget icon, String label) => InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: () => _changed(() => _s.eraserType = value),
           child: Padding(
@@ -1097,14 +1023,18 @@ class _EraserPanelState extends State<_EraserPanel> {
               children: [
                 Icon(_s.eraserType == value ? Icons.radio_button_checked : Icons.radio_button_unchecked,
                     color: _s.eraserType == value ? AppColors.signature : Colors.white38, size: 24),
-                const SizedBox(width: 16),
+                const SizedBox(width: 14),
+                SizedBox(width: 24, child: Center(child: icon)),
+                const SizedBox(width: 10),
                 Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
         );
-    Widget toggle(String label, bool value, ValueChanged<bool> onChanged) => Row(
+    Widget toggle(Widget icon, String label, bool value, ValueChanged<bool> onChanged) => Row(
           children: [
+            SizedBox(width: 24, child: Center(child: icon)),
+            const SizedBox(width: 12),
             Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600))),
             Switch(value: value, activeTrackColor: AppColors.signature, onChanged: (v) => _changed(() => onChanged(v))),
           ],
@@ -1146,11 +1076,14 @@ class _EraserPanelState extends State<_EraserPanel> {
                 ],
               ),
               const SizedBox(height: 8),
-              radio('stroke', tr('획 지우개', 'Stroke Eraser', '笔画橡皮擦', 'ストローク消しゴム')),
-              radio('area', tr('영역 지우개', 'Area Eraser', '区域橡皮擦', '部分消しゴム')),
+              // 획 지우개: 닿은 획 전체 / 영역 지우개: 닿은 부분만
+              radio('stroke', const EraserGlyph(area: false), tr('획 지우개', 'Stroke Eraser', '笔画橡皮擦', 'ストローク消しゴム')),
+              radio('area', const EraserGlyph(area: true), tr('영역 지우개', 'Area Eraser', '区域橡皮擦', '部分消しゴム')),
               const SizedBox(height: 6),
-              toggle(tr('형광펜만 지우기', 'Erase Highlighter Only', '仅擦除荧光笔', '蛍光ペンだけ消す'), _s.eraseOnlyHl, (v) => _s.eraseOnlyHl = v),
-              toggle(tr('테이프만 지우기', 'Erase Tape Only', '仅擦除胶带', 'テープだけ消す'), _s.eraseOnlyTape, (v) => _s.eraseOnlyTape = v),
+              toggle(MemoToolIcon(kind: 'hl', color: Colors.white, accent: _s.hlColor, size: 22), tr('형광펜만 지우기', 'Erase Highlighter Only', '仅擦除荧光笔', '蛍光ペンだけ消す'), _s.eraseOnlyHl,
+                  (v) => _s.eraseOnlyHl = v),
+              toggle(MemoToolIcon(kind: 'tape', color: Colors.white, accent: _s.tapeColor, size: 22), tr('테이프만 지우기', 'Erase Tape Only', '仅擦除胶带', 'テープだけ消す'), _s.eraseOnlyTape,
+                  (v) => _s.eraseOnlyTape = v),
               const SizedBox(height: 8),
               const Divider(color: Colors.white12, height: 1),
               // 보고 있는 쪽의 선(펜·형광펜) / 테이프를 모두 지움
@@ -1232,6 +1165,64 @@ class _NumberThumbShape extends SliderComponentShape {
   }
 }
 
+/// 지우개 종류 아이콘: 획 지우개 = 곡선 한 줄이 통째로 흐림 / 영역 지우개 = 곡선 가운데만 끊김
+class EraserGlyph extends StatelessWidget {
+  const EraserGlyph({super.key, required this.area, this.color = Colors.white, this.size = 22});
+  final bool area;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(dimension: size, child: CustomPaint(painter: _EraserGlyphPainter(area, color)));
+}
+
+class _EraserGlyphPainter extends CustomPainter {
+  _EraserGlyphPainter(this.area, this.color);
+  final bool area;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double u = size.width / 24;
+    canvas.scale(u);
+    final line = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    final wave = Path()
+      ..moveTo(2.5, 15)
+      ..cubicTo(6, 6, 10, 6, 12, 12)
+      ..cubicTo(14, 18, 18, 18, 21.5, 9);
+    if (area) {
+      // 가운데 동그라미 안쪽만 지워짐
+      canvas.saveLayer(Offset.zero & const Size(24, 24), Paint());
+      canvas.drawPath(wave, line);
+      canvas.drawCircle(const Offset(12, 12), 4.2, Paint()..blendMode = BlendMode.clear);
+      canvas.restore();
+      canvas.drawCircle(
+          const Offset(12, 12),
+          4.2,
+          Paint()
+            ..color = color.withValues(alpha: 0.7)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.2);
+    } else {
+      // 획 전체가 흐려짐 + 지우개 표시 X
+      canvas.drawPath(wave, line..color = color.withValues(alpha: 0.35));
+      final x = Paint()
+        ..color = color
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round;
+      canvas.drawLine(const Offset(15.5, 2.5), const Offset(21.5, 8.5), x);
+      canvas.drawLine(const Offset(21.5, 2.5), const Offset(15.5, 8.5), x);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_EraserGlyphPainter old) => old.area != area || old.color != color;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 지우개 모양 아이콘 (비스듬한 지우개 + 고무 부분 채움 + 바닥 선)
 class EraserIcon extends StatelessWidget {
@@ -1283,7 +1274,7 @@ class _EraserIconPainter extends CustomPainter {
 
 /// 메모 도구 아이콘 (24칸 기준으로 그림)
 /// - 'memo': 무색 연필 + 밑줄 (파일 화면 도구 모음의 메모 단추)
-/// - 'pen': 연필 + 끝마개·밑줄이 고른 색 [accent]
+/// - 'pen': 연필 + 펜촉·밑줄이 고른 색 [accent]
 /// - 'hl': 형광펜 (납작한 펜촉) + 굵은 밑줄이 고른 색
 /// - 'tape': 비스듬한 테이프 조각 (양끝 톱니), 안쪽이 고른 색
 class MemoToolIcon extends StatelessWidget {
@@ -1370,20 +1361,18 @@ class _MemoToolIconPainter extends CustomPainter {
       ..lineTo(7.6, hh)
       ..close();
     if (kind != 'memo') {
-      // 끝마개 (형광펜은 몸통 띠) = 고른 색
-      canvas.drawRect(Rect.fromLTRB(hl ? 1.6 : 4.4, -hh, hl ? 4.4 : 7.6, hh), fillAccent);
-      if (hl) {
-        // 형광펜 펜촉도 고른 색
-        canvas.drawPath(
-          Path()
-            ..moveTo(-5.6, -hh)
-            ..lineTo(-9.0, -1.0)
-            ..lineTo(-9.0, 1.0)
-            ..lineTo(-5.6, hh)
-            ..close(),
-          fillAccent,
-        );
-      }
+      // 형광펜은 몸통 띠도 고른 색
+      if (hl) canvas.drawRect(Rect.fromLTRB(1.6, -hh, 4.4, hh), fillAccent);
+      // 펜촉 = 고른 색
+      canvas.drawPath(
+        Path()
+          ..moveTo(-5.6, -hh)
+          ..lineTo(hl ? -9.0 : -10.4, hl ? -1.0 : 0)
+          ..lineTo(hl ? -9.0 : -10.4, hl ? 1.0 : 0)
+          ..lineTo(-5.6, hh)
+          ..close(),
+        fillAccent,
+      );
     }
     canvas.drawPath(body, line);
     // 펜촉과 몸통 사이 줄, 끝마개 줄

@@ -39,7 +39,7 @@ TapZone tapZoneAt(Offset local, Size size) {
 
 /// 가운데에 뜨는 둥근 창 (페이지 표시·화면 회전 등 짧은 고르기)
 /// 파일 안 설정 창이 열리고 닫히는 시간 (모든 설정 창이 같음: 갑자기 나타나지 않게 서서히)
-Duration get _dialogDur => Anim.ms(240);
+Duration get _dialogDur => Anim.ms(280);
 
 /// 바꾼 것이 있을 때만: 닫히는 움직임이 끝난 뒤에 적용 (화면 회전·쪽 다시 배치가 닫히는 움직임과 겹쳐 끊기지 않게)
 Future<void> _afterDialogClosed() async {
@@ -61,9 +61,8 @@ Future<T?> _centerDialog<T>(BuildContext context, Widget Function(BuildContext) 
     showViewerDialog<T>(context, (ctx) => Center(child: builder(ctx)));
 
 /// 파일 안 설정 창 (화면 회전·페이지 표시·페이지 이동·북마크·도구 모음 설정)을 띄움.
-/// 눈이 편하게: 누른 자리 쪽에서 살짝 커지며 서서히 나타나고, 뒤 배경은 옅게 천천히 어두워짐
+/// 눈이 편하게: 아래쪽에서 가운데로 서서히 올라오고, 뒤 배경은 옅게 천천히 어두워짐
 Future<T?> showViewerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) async {
-  final Offset? popFrom = TapOrigin.last; // 연 자리 (그쪽에서 나오고, 닫힐 때 그쪽으로 들어감)
   // 도구 모음을 누른 프레임과 겹치지 않게, 그 프레임이 끝난 뒤 창을 띄움 (뜰 때 덜 버벅임)
   await WidgetsBinding.instance.endOfFrame;
   if (!context.mounted) return null;
@@ -76,26 +75,24 @@ Future<T?> showViewerDialog<T>(BuildContext context, Widget Function(BuildContex
       barrierColor: const Color(0x47000000), // 옅게 (예전 54% → 28%)
       transitionDuration: _dialogDur,
       pageBuilder: (ctx, _, __) => SafeArea(child: builder(ctx)),
-      transitionBuilder: (ctx, anim, _, child) => _softPopTransition(ctx, anim, child, popFrom),
+      transitionBuilder: (ctx, anim, _, child) => _softPopTransition(ctx, anim, child),
     );
   } finally {
     viewerDialogsOpen.value--;
   }
 }
 
-/// 설정 창이 열리고 닫히는 움직임: 튀지 않고 서서히. 누른 자리 쪽에서 조금 작게 시작해 제자리로
-Widget _softPopTransition(BuildContext context, Animation<double> animation, Widget child, Offset? from) {
-  final grow = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
-  final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.8, curve: Curves.easeOut), reverseCurve: Curves.easeIn);
-  final Size screen = MediaQuery.sizeOf(context);
-  final Offset center = screen.center(Offset.zero);
-  final Offset origin = ((from ?? center) - center) * 0.5;
+/// 설정 창이 열리고 닫히는 움직임: 화면 아래쪽에서 가운데로 서서히 올라오고, 닫히면 아래로 내려감
+Widget _softPopTransition(BuildContext context, Animation<double> animation, Widget child) {
+  final rise = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+  final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.7, curve: Curves.easeOut), reverseCurve: Curves.easeIn);
+  final double travel = MediaQuery.sizeOf(context).height * 0.32;
   return FadeTransition(
     opacity: fade,
     child: AnimatedBuilder(
-      animation: grow,
+      animation: rise,
       child: RepaintBoundary(child: child),
-      builder: (context, child) => Transform.scale(scale: 0.88 + 0.12 * grow.value, origin: origin, child: child),
+      builder: (context, child) => Transform.translate(offset: Offset(0, travel * (1 - rise.value)), child: child),
     ),
   );
 }

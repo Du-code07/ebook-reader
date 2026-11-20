@@ -408,7 +408,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: widget.asSheet
-          // 창으로 띄울 때: 맨 위 회색 막대 + 제목까지 간격 (밑에서 올라오는 모든 창과 같게), 그 아래 [∨ 앱 설정]
+          // 창으로 띄울 때: 맨 위 회색 막대 + 제목까지 간격 (밑에서 올라오는 모든 창과 같게), 그 아래 [설정 아이콘 앱 설정]
           ? PreferredSize(
               preferredSize: const Size.fromHeight(10 + 4 + 22 + 48),
               child: Material(
@@ -419,14 +419,11 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                     const SheetGrip(below: 22),
                     SizedBox(
                       height: 48,
+                      // 설정 아이콘 + 앱 설정 (창은 끌어 내리거나 뒤로 가기로 닫음). 아이콘·제목은 아래 줄들과 같은 자리
                       child: Row(children: [
-                        const SizedBox(width: 4),
-                        IconButton(
-                          icon: const Icon(Icons.keyboard_arrow_down),
-                          tooltip: _t('닫기', 'Close', '关闭', '閉じる'),
-                          onPressed: () => Navigator.maybePop(context),
-                        ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 24),
+                        Icon(Icons.settings_outlined, size: 23, color: cs.onSurface),
+                        const SizedBox(width: 17),
                         Text(_t('앱 설정', 'App Settings', '应用设置', 'アプリ設定'),
                             style: (Theme.of(context).textTheme.titleLarge ?? const TextStyle()).copyWith(fontWeight: FontWeight.w800)),
                       ]),

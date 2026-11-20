@@ -4809,10 +4809,7 @@ Offstage(offstage: _tocFreeze != null, child: EpubViewer(
                           final _MemoMap map = _memoMapInLayer(Size(drawWidth, drawHeight));
                           final st = MemoTools.s;
                           final double zoom = _epubZoomController.value.getMaxScaleOnAxis();
-                          // 굵기 (화면 점): EPUB에서 글자 크기에 맞춰 두께 조절이면 글자 크기로
-                          final double widthPx = (st.fitText && !_isOfflineDocument)
-                              ? _fontSize * (st.tool == 'tape' ? 1.4 : 1.25) * zoom
-                              : st.width * zoom;
+                          final double widthPx = st.width * zoom; // 굵기 (화면 점)
                           final fracs = [for (final p in finishMemoPoints(_activeStrokePoints)) map.toFrac(p)];
                           final stroke = MemoStroke(
                             dxList: [for (final f in fracs) f.dx],

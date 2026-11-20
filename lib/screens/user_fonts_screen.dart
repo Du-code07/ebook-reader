@@ -240,9 +240,11 @@ class _UserFontsScreenState extends State<UserFontsScreen> {
         title: Text(_title),
         actions: [
           // 초기화: 넣어 둔 글꼴을 모두 빼고 기본 글꼴로
-          TextButton(
+          TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: cs.onSurface),
             onPressed: _busy ? null : _resetAll,
-            child: Text(_t('초기화', 'Reset', '重置', 'リセット'), style: TextStyle(color: cs.onSurface, fontWeight: FontWeight.w600)),
+            icon: const Icon(Icons.restart_alt_rounded, size: 20),
+            label: Text(_t('초기화', 'Reset', '重置', 'リセット'), style: const TextStyle(fontWeight: FontWeight.w600)),
           ),
           const SizedBox(width: 6),
         ],

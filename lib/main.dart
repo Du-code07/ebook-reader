@@ -287,6 +287,8 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
             })
           : null,
       extensions: [SigColors(sig: sig, mark: mark)],
+      // 태블릿에서 S펜·마우스를 화면 위에 띄워 둔 자리의 줄이 고른 것처럼 칠해지지 않게 (올려 두기 표시 끔)
+      hoverColor: Colors.transparent,
       // 애니메이션 멈추기: 누를 때 퍼지는 물결·단추 색 바뀜도 바로
       splashFactory: Anim.off.value ? NoSplash.splashFactory : null,
       iconButtonTheme: Anim.off.value ? IconButtonThemeData(style: IconButton.styleFrom(animationDuration: Duration.zero, splashFactory: NoSplash.splashFactory)) : null,
@@ -499,6 +501,30 @@ class _MyEbookAppState extends State<MyEbookApp> with SingleTickerProviderStateM
 }
 
 /// 오른쪽 아래 단추가 바뀔 때: 회전·이동 없이 그 자리에서 커지며 나타나고 작아지며 사라짐
+/// 아래 오른쪽 단추 자리: 제스처 내비게이션의 아래 막대(얇은 인디케이터)는 단추 자리에 영향을 주지 않음
+/// (인디케이터가 나타났다 사라질 때 단추가 오르내리지 않게). 세 버튼 내비게이션처럼 두꺼운 막대는 피해서 둠
+class _StableEndFloat extends StandardFabLocation with FabEndOffsetX {
+  const _StableEndFloat();
+
+  @override
+  double getOffsetY(ScaffoldPrelayoutGeometry g, double adjustment) {
+    final double contentBottom = g.contentBottom;
+    final double bottomContentHeight = g.scaffoldSize.height - contentBottom;
+    final double fabHeight = g.floatingActionButtonSize.height;
+    final double pad = g.minViewPadding.bottom;
+    final double inset = pad > 32 ? pad : 0; // 제스처 인디케이터(얇음)는 무시
+    final double margin = math.max(kFloatingActionButtonMargin, inset - bottomContentHeight + kFloatingActionButtonMargin);
+    double y = contentBottom - fabHeight - margin;
+    if (g.snackBarSize.height > 0) {
+      y = math.min(y, contentBottom - g.snackBarSize.height - fabHeight - kFloatingActionButtonMargin);
+    }
+    if (g.bottomSheetSize.height > 0) {
+      y = math.min(y, contentBottom - g.bottomSheetSize.height - fabHeight / 2.0);
+    }
+    return y + adjustment;
+  }
+}
+
 /// 아래 오른쪽 단추 자리 (선택 모드 단추 · 심플 스타일 [+]): 바뀔 때 그 자리에서 빠르게 커지고 작아짐
 /// (Scaffold의 기본 움직임은 앞 단추가 다 사라진 뒤에 나와 느려서, 단추 자리는 늘 같은 위젯으로 두고 안에서 바꿈)
 class _FastFabSwitcher extends StatelessWidget {
@@ -761,17 +787,17 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       await StorageService.setLibrarySort(_sortBy, _sortAsc, _sortRemember);
     }
 
-    final box = _sortBtnKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return;
-    final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
-    final Rect anchor = box.localToGlobal(Offset.zero, ancestor: overlayBox) & box.size;
-    setState(() => _sortPanelOpen = true);
-    await Navigator.of(context).push<void>(PopPanelRoute<void>(
-      anchor: anchor,
-      width: 380,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
+    void reset(StateSetter setSheet) {
+      setSheet(() {
+        _sortBy = 'name';
+        _sortAsc = true;
+        _sortRemember = true;
+      });
+      apply();
+    }
+
+    // 정렬 창 내용 ([basic]: 기본 스타일 = 밑에서 올라오는 창, 초기화는 오른쪽 위)
+    Widget sheet(BuildContext ctx, StateSetter setSheet, bool basic) {
           final cs = Theme.of(ctx).colorScheme;
           final bool byName = _sortBy == 'name';
           Widget byRow(String value, String text) => InkWell(
@@ -825,12 +851,23 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                       ),
               );
           return Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+            padding: basic ? const EdgeInsets.fromLTRB(20, 0, 20, 14) : const EdgeInsets.fromLTRB(20, 16, 20, 14),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(_tr('정렬', 'Sort', '排序', '並べ替え'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
+                if (basic) const SheetGrip(),
+                Row(children: [
+                  Expanded(child: Text(_tr('정렬', 'Sort', '排序', '並べ替え'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800))),
+                  // 기본 스타일: 초기화는 오른쪽 위 (바탕 없이 아이콘과 글자만)
+                  if (basic)
+                    TextButton.icon(
+                      style: TextButton.styleFrom(foregroundColor: cs.onSurface, padding: const EdgeInsets.symmetric(horizontal: 10)),
+                      icon: const Icon(Icons.restart_alt_rounded, size: 20),
+                      onPressed: () => reset(setSheet),
+                      label: Text(_tr('초기화', 'Reset', '重置', 'リセット'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                    ),
+                ]),
                 const SizedBox(height: 10),
                 byRow('name', _tr('이름', 'Name', '名称', '名前')),
                 orders(true),
@@ -857,24 +894,43 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                     apply();
                   },
                 ),
-                // 초기화: 이름 오름차순, 정렬 기억하기 켜짐
-                SettingDoneButton(
-                  label: _tr('초기화', 'Reset', '重置', 'リセット'),
-                  onPressed: () {
-                    setSheet(() {
-                      _sortBy = 'name';
-                      _sortAsc = true;
-                      _sortRemember = true;
-                    });
-                    apply();
-                  },
-                ),
+                // 초기화: 이름 오름차순, 정렬 기억하기 켜짐 (심플 스타일은 맨 아래)
+                if (!basic)
+                  SettingDoneButton(
+                    label: _tr('초기화', 'Reset', '重置', 'リセット'),
+                    onPressed: () => reset(setSheet),
+                  ),
               ],
             ),
           );
-        },
-      ),
-    ));
+    }
+
+    setState(() => _sortPanelOpen = true);
+    if (!StorageService.simpleStyle) {
+      // 기본 스타일: 밑에서 올라오는 창
+      await showModalBottomSheet<void>(
+        sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (ctx) => SafeArea(top: false, child: StatefulBuilder(builder: (ctx, setSheet) => sheet(ctx, setSheet, true))),
+      );
+    } else {
+      // 심플 스타일: 정렬 단추 자리에서 펼쳐지는 창
+      final box = _sortBtnKey.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) {
+        setState(() => _sortPanelOpen = false);
+        return;
+      }
+      final RenderObject? overlayBox = Navigator.of(context).overlay?.context.findRenderObject();
+      final Rect anchor = box.localToGlobal(Offset.zero, ancestor: overlayBox) & box.size;
+      await Navigator.of(context).push<void>(PopPanelRoute<void>(
+        anchor: anchor,
+        width: 380,
+        barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+        builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) => sheet(ctx, setSheet, false)),
+      ));
+    }
     if (mounted) setState(() => _sortPanelOpen = false);
   }
 
@@ -2483,6 +2539,21 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     );
   }
 
+  /// 파일 탐색을 지금 쓸 수 없는 이유 (찾는 중이거나, 그룹 이름이 파일 형식 이름이 아님)
+  Future<void> _explainScanOff(BuildContext ctx) => showPopDialog<void>(
+        context: ctx,
+        builder: (dctx) => AlertDialog(
+          title: Text(_tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索')),
+          content: Text(_groupScanBusy
+              ? _tr('지금 파일을 찾고 있어요\n다 찾은 뒤에 다시 쓸 수 있어요', 'Already searching for files\nYou can use it again when it finishes', '正在查找文件\n查找完成后可再次使用', 'いまファイルを探しています\n終わったらまた使えます')
+              : _tr('그룹 이름이 파일 형식(예: PDF, EPUB, HWP)인 그룹에서 쓸 수 있어요\n그 형식의 파일을 기기에서 찾아 그룹에 넣어요',
+                  'Available in groups named after a file type (e.g. PDF, EPUB, HWP)\nIt finds files of that type on the device and adds them to the group',
+                  '可在以文件格式命名的分组（如 PDF、EPUB、HWP）中使用\n会在设备中查找该格式的文件并加入分组',
+                  'グループ名がファイル形式(例: PDF、EPUB、HWP)のグループで使えます\nその形式のファイルを端末から探してグループに入れます')),
+          actions: [TextButton(onPressed: () => Navigator.pop(dctx), child: Text(_tr('확인', 'OK', '确定', 'OK')))],
+        ),
+      );
+
   Widget _buildAddFab() {
     final cs = Theme.of(context).colorScheme;
     // 아이콘만 있는 둥근 단추 ([+] 위에 세로로). [onTap]이 없으면 흐리게 (누를 수 없음). 이름은 꾹 누르면 보임
@@ -2492,7 +2563,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
     final Color actFg = AppColors.onSig(context);
     final Color actRing = dark ? cs.outline : Color.lerp(actBg, Colors.black, 0.22)!;
     final List<Shadow>? actShadows = AppColors.sigShadows(context);
-    Widget action(String tag, Widget icon, String label, VoidCallback? onTap) => Padding(
+    Widget action(String tag, Widget icon, String label, VoidCallback? onTap, {VoidCallback? whyOff}) => Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: SizedBox(
             width: 56,
@@ -2506,8 +2577,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   shape: CircleBorder(side: BorderSide(color: actRing, width: 2)),
                   backgroundColor: actBg,
                   foregroundColor: actFg,
+                  // 흐린 단추를 누르면 왜 못 쓰는지 알려 줌
                   onPressed: onTap == null
-                      ? null
+                      ? whyOff
                       : () {
                           setState(() => _fabOpen = false);
                           _closeSearch();
@@ -2540,7 +2612,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                       ? SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: actFg))
                       : FolderSearchIcon(size: 22, color: actFg),
                   _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'),
-                  scanExt == null || _groupScanBusy ? null : () => _scanFilesIntoGroup(_selectedGroup, scanExt)),
+                  scanExt == null || _groupScanBusy ? null : () => _scanFilesIntoGroup(_selectedGroup, scanExt),
+                  whyOff: () => _explainScanOff(context)),
               // 그룹 이동 아이콘(폴더)에서 화살표 대신 +
               action('fab_add_plain', Icon(Icons.create_new_folder_outlined, size: 22, shadows: actShadows), _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
               // 유료 기능 (앱 설정 > 유료 기능 숨기기를 켜면 감춤)
@@ -2653,8 +2726,9 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       color: cs.surfaceContainerLow,
       child: Container(
         decoration: BoxDecoration(border: Border(top: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.6)))),
-        child: SafeArea(
-          top: false,
+        // 제스처 내비게이션의 얇은 인디케이터가 나타났다 사라져도 아이콘 자리는 그대로 (세 버튼 막대처럼 두꺼우면 비켜 둠)
+        child: Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.viewPaddingOf(context).bottom > 32 ? MediaQuery.viewPaddingOf(context).bottom : 0),
           child: SizedBox(
             height: 66,
             child: Row(
@@ -2742,7 +2816,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       builder: (ctx) {
         final cs = Theme.of(ctx).colorScheme;
         // [onTap]이 없으면 흐리게 (누를 수 없음)
-        Widget tile(Widget icon, String label, VoidCallback? onTap) => Expanded(
+        Widget tile(Widget icon, String label, VoidCallback? onTap, {VoidCallback? whyOff}) => Expanded(
               child: Opacity(
                 opacity: onTap == null ? 0.45 : 1,
                 child: Material(
@@ -2750,7 +2824,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   borderRadius: BorderRadius.circular(18),
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
-                    onTap: onTap == null ? null : () => Navigator.pop(ctx, onTap),
+                    // 흐린 칸을 누르면 왜 못 쓰는지 알려 줌 (창은 그대로)
+                    onTap: onTap == null ? whyOff : () => Navigator.pop(ctx, onTap),
                     child: SizedBox(
                       height: 96,
                       child: Column(
@@ -2779,10 +2854,19 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                 const SheetGrip(),
                 Padding(
                   padding: const EdgeInsets.only(left: 4, bottom: 16),
-                  child: Text(_tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
+                  child: Row(children: [
+                    Expanded(child: Text(_tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800))),
+                    // 오른쪽 위: 정렬 (누르면 이 창을 닫고 정렬 창)
+                    TextButton.icon(
+                      style: TextButton.styleFrom(foregroundColor: cs.onSurface, padding: const EdgeInsets.symmetric(horizontal: 10)),
+                      icon: SortBarsIcon(flipped: false, color: cs.onSurface),
+                      onPressed: () => Navigator.pop(ctx, _showSortSheet),
+                      label: Text(_tr('정렬', 'Sort', '排序', '並べ替え'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                    ),
+                  ]),
                 ),
                 Row(children: [
-                  tile(FolderSearchIcon(size: 28, color: ic), _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'), scan),
+                  tile(FolderSearchIcon(size: 28, color: ic), _tr('파일 탐색', 'Find Files', '查找文件', 'ファイル検索'), scan, whyOff: () => _explainScanOff(ctx)),
                   const SizedBox(width: 10),
                   tile(Icon(Icons.create_new_folder_outlined, size: 28, color: ic), _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'), _pickAndImportFiles),
                   // 유료 기능 (앱 설정 > 유료 기능 숨기기를 켜면 감춤)
@@ -4005,6 +4089,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                   },
                 ),
                 ],
+                // 기본 스타일은 파일 추가 창 오른쪽 위에 [정렬]
+                if (StorageService.simpleStyle)
                 IconButton(
                   key: _sortBtnKey,
                   // 정렬 창을 열고 닫을 때 막대가 위아래로 자리를 바꿈
@@ -4375,6 +4461,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           ],
         ),
       ),
+      // 제스처 내비게이션의 아래 막대(인디케이터)가 보이든 말든 단추 자리는 그대로
+      floatingActionButtonLocation: const _StableEndFloat(),
       // 선택 모드 단추·[+]: 그 자리에서 빠르게 커지며 나타나고 작아지며 사라짐 (기본·심플 모두)
       floatingActionButton: _FastFabSwitcher(
         child: _isSelectionMode

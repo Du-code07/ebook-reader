@@ -178,12 +178,16 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
               tr('파일 이름으로 찾아요', 'Find files by name', '按文件名查找', 'ファイル名で探します')),
           if (!simple)
             _Step('add', tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
-                tr('파일 탐색·파일 추가·스캔·PDF 합치기·이미지 합치기를 골라요', 'Choose find files, add files, scan, merge PDFs or merge images', '可选择查找文件·添加文件·扫描·合并 PDF·合并图片', 'ファイル検索・ファイル追加・スキャン・PDF結合・画像結合を選びます')),
+                tr('파일 탐색·파일 추가·스캔·PDF 합치기·이미지 합치기를 골라요\n오른쪽 위 [정렬]로 이름이나 파일 추가 날짜 순으로 정렬해요',
+                    'Choose find files, add files, scan, merge PDFs or merge images\nUse [Sort] at the top right to sort by name or date added',
+                    '可选择查找文件·添加文件·扫描·合并 PDF·合并图片\n用右上角的[排序]按名称或添加日期排序',
+                    'ファイル検索・ファイル追加・スキャン・PDF結合・画像結合を選びます\n右上の[並べ替え]で名前か追加日で並べ替えます')),
           _Step('trash', tr('휴지통', 'Trash', '回收站', 'ゴミ箱'),
               tr('지운 파일을 모아 둬요\n되살리거나 완전히 지울 수 있어요', 'Keeps deleted files\nRestore them or delete them for good', '存放删除的文件\n可以恢复或彻底删除', '削除したファイルを保管します\n元に戻すか完全に削除できます')),
           if (!simple) _settingsStep(),
-          _Step('sort', tr('정렬', 'Sort', '排序', '並べ替え'),
-              tr('이름이나 파일 추가 날짜 순으로 정렬하고, 정렬을 기억할 수 있어요', 'Sort by name or date added, and keep the order if you like', '按名称或添加日期排序，也可以记住排序', '名前か追加日で並べ替え、並べ替えを記憶できます')),
+          if (simple)
+            _Step('sort', tr('정렬', 'Sort', '排序', '並べ替え'),
+                tr('이름이나 파일 추가 날짜 순으로 정렬하고, 정렬을 기억할 수 있어요', 'Sort by name or date added, and keep the order if you like', '按名称或添加日期排序，也可以记住排序', '名前か追加日で並べ替え、並べ替えを記憶できます')),
           if (simple) ...[
             _settingsStep(),
             _Step('add', tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
@@ -239,7 +243,7 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('pen', tr('펜', 'Pen', '笔', 'ペン'),
               tr('펜으로 써요\n한 번 더 누르면 굵기·색상·직선 자동 보정을 정해요', 'Write with the pen\nTap again to set thickness, color and auto-straighten', '用笔书写\n再点一次可设置粗细·颜色·自动拉直', 'ペンで書きます\nもう一度タップで太さ・色・直線補正を設定します')),
           _Step('hl', tr('형광펜', 'Highlighter', '荧光笔', '蛍光ペン'),
-              tr('글자 위에 비치게 칠해요\n한 번 더 누르면 굵기·투명도·색상과 글자 크기에 맞춘 두께를 정해요', 'Color over text so it shows through\nTap again to set thickness, opacity, color and text-size thickness', '在文字上涂上透明的颜色\n再点一次可设置粗细·不透明度·颜色和按文字大小调整粗细', '文字の上に透けるように塗ります\nもう一度タップで太さ・不透明度・色と文字サイズに合わせた太さを設定します')),
+              tr('글자 위에 비치게 칠해요\n한 번 더 누르면 굵기·투명도·색상·직선 자동 보정을 정해요', 'Color over text so it shows through\nTap again to set thickness, opacity, color and auto-straighten', '在文字上涂上透明的颜色\n再点一次可设置粗细·不透明度·颜色·自动拉直', '文字の上に透けるように塗ります\nもう一度タップで太さ・不透明度・色・直線補正を設定します')),
           _Step('tape', tr('테이프', 'Tape', '胶带', 'テープ'),
               tr('가리고 싶은 곳에 붙여요\n한 번 더 누르면 굵기·색상을 정하고, 테이프 숨기기로 테두리만 남겨 아래를 볼 수 있어요', 'Stick it over what you want to cover\nTap again to set thickness and color, or hide tape to leave only its outline', '贴在想遮住的地方\n再点一次可设置粗细·颜色，隐藏胶带后只留边框，可看到下面的内容', '隠したいところに貼ります\nもう一度タップで太さ・色を設定し、テープを隠すと枠だけ残して下が見えます')),
           _Step('eraser', tr('지우개', 'Eraser', '橡皮擦', '消しゴム'),
@@ -610,8 +614,6 @@ class _MainMock extends StatelessWidget {
                 const SizedBox(width: 16),
                 title,
                 const Spacer(),
-                iconBtn('sort', const SortBarsIcon(flipped: false)),
-                const SizedBox(width: 4),
               ]),
             ),
             Expanded(child: KeyedSubtree(key: k('list'), child: list)),
@@ -806,7 +808,7 @@ class _MemoMock extends StatelessWidget {
                 height: kMemoToolExtent - 8,
                 decoration: BoxDecoration(color: AppColors.signature, borderRadius: BorderRadius.circular(10)),
               ),
-            icon(active ? AppColors.onSignature : (color ?? Colors.white)),
+            icon(active ? MemoToolButton.activeIconColor : (color ?? Colors.white)),
           ]),
         );
     return Stack(

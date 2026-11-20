@@ -208,9 +208,21 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
         children: [
           // 밑에서 올라오는 창: 맨 위 회색 막대 + 제목까지 간격 (가운데 창은 위 여백만)
           if (widget.centered) const SizedBox(height: 22) else const SheetGrip(),
+          // 제목 (+ 오른쪽 위 초기화: 바탕 없이 글자색만 테마에 맞춤)
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 14),
-            child: Text(widget.title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
+            padding: EdgeInsets.fromLTRB(24, 0, widget.resetLabel != null ? 12 : 24, 14),
+            child: Row(
+              children: [
+                Expanded(child: Text(widget.title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800))),
+                if (widget.resetLabel != null)
+                  TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: cs.onSurface, padding: const EdgeInsets.symmetric(horizontal: 10)),
+                    icon: const Icon(Icons.restart_alt_rounded, size: 20),
+                    onPressed: _reset,
+                    label: Text(widget.resetLabel!, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  ),
+              ],
+            ),
           ),
           Flexible(
             child: SingleChildScrollView(
@@ -307,26 +319,8 @@ class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
               ),
             ),
           ),
-          // 초기화: 고르기와 스위치를 모두 기본값으로 (바로 적용, 창은 열린 채)
-          if (widget.resetLabel != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
-              child: SizedBox(
-                height: 52,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: cs.onSurface,
-                    foregroundColor: cs.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  ),
-                  icon: const Icon(Icons.refresh_rounded),
-                  onPressed: _reset,
-                  label: Text(widget.resetLabel!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                ),
-              ),
-            )
-          // 스위치가 함께 있는 창은 맨 아래 '완료'로 닫음
-          else if (widget.toggleLabel != null)
+          // 스위치가 함께 있는 창은 맨 아래 '완료'로 닫음 (초기화가 있는 창은 오른쪽 위 초기화만, 바로 적용)
+          if (widget.resetLabel == null && widget.toggleLabel != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
               child: SizedBox(
