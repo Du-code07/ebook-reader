@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'app_colors.dart';
 
 import '../services/storage_service.dart';
-import 'pop_dialog.dart';
 import 'bar_drag.dart';
 import 'viewer_dialogs.dart' show ViewerSheetScope, showViewerDialog, viewerPanel;
 
@@ -691,10 +690,8 @@ Widget _memoPanelFrame(BuildContext context, Color color, Widget content) => Vie
         child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: content),
       );
 
-/// 메모 설정 창 띄우기: 기본 스타일은 밑에서 올라옴, 심플 스타일은 누른 자리에서 커져 나옴
-Future<void> _showMemoPanel(BuildContext context, Widget panel) => StorageService.simpleStyle
-    ? showPopDialog<void>(context: context, barrierColor: Colors.black26, builder: (_) => panel)
-    : showViewerDialog<void>(context, (_) => panel);
+/// 메모 설정 창 띄우기: 기본 스타일은 밑에서 올라옴, 심플 스타일은 화면 가운데에서 커지며 나타남 (다른 설정 창과 같게)
+Future<void> _showMemoPanel(BuildContext context, Widget panel) => showViewerDialog<void>(context, (_) => panel);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 펜·형광펜·테이프 설정 창 (고른 도구를 한 번 더 눌렀을 때): 선 굵기 (+ 형광펜 투명도) + 직선 자동 보정 (+ 테이프 숨기기) + 색상

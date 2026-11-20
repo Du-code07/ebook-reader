@@ -120,7 +120,7 @@ Widget viewerPanel(
 }
 
 /// 파일 안 설정 창 (화면 회전·페이지 표시·페이지 이동·북마크·도구 모음 설정·글자 복사, 기본 스타일은 메모 도구 설정도)을 띄움.
-/// 기본 스타일: 앱 설정 창처럼 밑에서 올라옴. 심플 스타일: 아래쪽에서 가운데로 서서히 올라옴. 뒤 배경은 옅게 천천히 어두워짐
+/// 기본 스타일: 앱 설정 창처럼 밑에서 올라옴. 심플 스타일: 화면 가운데에서 커지며 나타남. 뒤 배경은 옅게 천천히 어두워짐
 Future<T?> showViewerDialog<T>(BuildContext context, Widget Function(BuildContext) builder) async {
   // 도구 모음을 누른 프레임과 겹치지 않게, 그 프레임이 끝난 뒤 창을 띄움 (뜰 때 덜 버벅임)
   await WidgetsBinding.instance.endOfFrame;
@@ -154,18 +154,13 @@ Widget _sheetTransition(Animation<double> animation, Widget child) => SlideTrans
       child: RepaintBoundary(child: child),
     );
 
-/// 설정 창이 열리고 닫히는 움직임: 화면 아래쪽에서 가운데로 서서히 올라오고, 닫히면 아래로 내려감
+/// 가운데 창(심플 스타일)이 열리고 닫히는 움직임: 화면 가운데에서 커지며 나타나고, 닫히면 가운데로 작아지며 사라짐
 Widget _softPopTransition(BuildContext context, Animation<double> animation, Widget child) {
-  final rise = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
-  final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.7, curve: Curves.easeOut), reverseCurve: Curves.easeIn);
-  final double travel = MediaQuery.sizeOf(context).height * 0.32;
+  final grow = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+  final fade = CurvedAnimation(parent: animation, curve: const Interval(0, 0.6, curve: Curves.easeOut), reverseCurve: Curves.easeIn);
   return FadeTransition(
     opacity: fade,
-    child: AnimatedBuilder(
-      animation: rise,
-      child: RepaintBoundary(child: child),
-      builder: (context, child) => Transform.translate(offset: Offset(0, travel * (1 - rise.value)), child: child),
-    ),
+    child: ScaleTransition(scale: Tween<double>(begin: 0.85, end: 1).animate(grow), child: RepaintBoundary(child: child)),
   );
 }
 
