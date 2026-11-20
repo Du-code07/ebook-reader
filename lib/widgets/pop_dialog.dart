@@ -239,10 +239,11 @@ class _BottomRiseState extends State<BottomRise> with SingleTickerProviderStateM
         child: Transform.translate(
           offset: Offset(0, _drag),
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: screen.height * 0.85, maxWidth: 640),
+            // 양옆 간격·모서리를 앱 설정 창과 같게
+            constraints: BoxConstraints(maxHeight: screen.height * 0.85, maxWidth: math.min(640.0, screen.width - 16)),
             child: Material(
               color: Theme.of(context).colorScheme.surfaceContainerHigh,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
               clipBehavior: Clip.antiAlias,
               child: Column(
                 mainAxisSize: MainAxisSize.min,

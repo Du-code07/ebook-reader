@@ -910,12 +910,15 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
     if (!StorageService.simpleStyle) {
       // 기본 스타일: 밑에서 올라오는 창
-      await showModalBottomSheet<void>(
+      // 앱 설정 창처럼 아래로 끌어 내릴 수 있음
+      await showPullSheet<void>(
+        context,
         sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        builder: (ctx) => SafeArea(top: false, child: StatefulBuilder(builder: (ctx, setSheet) => sheet(ctx, setSheet, true))),
+        builder: (ctx, scroll, physics) => SingleChildScrollView(
+          controller: scroll,
+          physics: physics,
+          child: SafeArea(top: false, child: StatefulBuilder(builder: (ctx, setSheet) => sheet(ctx, setSheet, true))),
+        ),
       );
     } else {
       // 와이드 스타일: 컴팩트와 같은 내용을 화면 가운데 창으로
@@ -2788,8 +2791,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       );
       // 아래: 검색·휴지통·설정은 아이콘만
       final bottom = [
+        // 검색·휴지통·설정도 열려 있는 동안 왼쪽에 시그니처 색 선
         item(
           icon: const Icon(Icons.search),
+          selected: _searchOpen,
           onTap: _searchOpen ? _closeSearch : _openSearch,
         ),
         item(
@@ -2802,6 +2807,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             label: Text('${_trashedBooks.length}'),
             child: TrashLidIcon(open: _trashPanelOpen),
           ),
+          selected: _trashPanelOpen,
           onTap: () {
             _closeSearch();
             _showTrashBinDialog();
@@ -2809,6 +2815,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
         ),
         item(
           icon: SpinGearIcon(turns: _gearTurns),
+          selected: _settingsOpen,
           onTap: () {
             _closeSearch();
             _showGlobalSettingsDialog();
@@ -3123,12 +3130,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
     final VoidCallback? picked;
     if (!wide) {
-      picked = await showModalBottomSheet<VoidCallback>(
+      picked = await showPullSheet<VoidCallback>(
+        context,
         sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        builder: content,
+        builder: (ctx, scroll, physics) => SingleChildScrollView(controller: scroll, physics: physics, child: content(ctx)),
       );
     } else {
       setState(() => _addOpen = true);
@@ -3166,10 +3171,11 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
   /// 서재의 설정 창 띄우기: 컴팩트는 밑에서 위로, 와이드는 화면 가운데에서 커지며 (회색 막대 없이)
   Future<T?> _showMainSheet<T>(WidgetBuilder builder, {double maxWidth = 480}) {
     if (!StorageService.simpleStyle) {
-      return showModalBottomSheet<T>(
+      // 앱 설정 창처럼 아래로 끌어 내릴 수 있음 (안쪽 스크롤이 맨 위일 때)
+      return showPullSheet<T>(
+        context,
         sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
-        context: context,
-        builder: builder,
+        builder: (ctx, scroll, physics) => pullSheetScope(scroll, physics, builder(ctx)),
       );
     }
     return showViewerDialog<T>(
@@ -3848,13 +3854,24 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
 
   /// 우측 상단 톱니바퀴 '앱 설정' 화면 (항목을 누르면 아래에서 고르기 창이 올라옴)
   /// 화면 전체 높이의 창으로 띄워서, 맨 위에서 아래로 끌면 내려가며 닫힌다.
+  /// 앱 설정 창이 열려 있는지 (와이드 막대의 설정 칸 표시)
+  bool _settingsOpen = false;
+
   Future<void> _showGlobalSettingsDialog() async {
     if (!mounted) return;
-    setState(() => _gearTurns += 0.5);
+    setState(() {
+      _gearTurns += 0.5;
+      _settingsOpen = true;
+    });
     try {
       await _showGlobalSettingsDialogInner();
     } finally {
-      if (mounted) setState(() => _gearTurns -= 0.5);
+      if (mounted) {
+        setState(() {
+          _gearTurns -= 0.5;
+          _settingsOpen = false;
+        });
+      }
     }
   }
 
@@ -5179,3 +5196,4 @@ class _NoPageTransition extends PageTransitionsBuilder {
   @override
   Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) => child;
 }
+

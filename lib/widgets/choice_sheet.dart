@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
 import 'pop_dialog.dart';
+import 'sheet_pull_to_close.dart';
 
 /// 고르기 창의 선택지
 class ChoiceOption<T> {
@@ -47,12 +48,11 @@ Future<R?> _showChoice<R>(BuildContext context, bool centered, WidgetBuilder bui
       ),
     );
   }
-  return showModalBottomSheet<R>(
+  // 앱 설정 창처럼 아래로 끌어 내릴 수 있음 (안쪽 목록이 맨 위일 때)
+  return showPullSheet<R>(
+    context,
     sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: builder,
+    builder: (ctx, scroll, physics) => pullSheetScope(scroll, physics, builder(ctx)),
   );
 }
 

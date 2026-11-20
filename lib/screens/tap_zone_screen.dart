@@ -94,7 +94,19 @@ class _TapZoneScreenState extends State<TapZoneScreen> {
     final double phoneW = phoneH * ratio;
     final bool isDefault = _zones == StorageService.tapZonesDefault;
     return Scaffold(
-      appBar: AppBar(title: Text(_t('탭 영역', 'Tap Zones', '点击区域', 'タップ領域'))),
+      appBar: AppBar(
+        title: Text(_t('탭 영역', 'Tap Zones', '点击区域', 'タップ領域')),
+        // 초기화: 오른쪽 위, 바탕 없이 아이콘과 글자만 (기본값이면 흐리게)
+        actions: [
+          TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: cs.onSurface, padding: const EdgeInsets.symmetric(horizontal: 12)),
+            onPressed: isDefault ? null : () => _save(StorageService.tapZonesDefault),
+            icon: const Icon(Icons.restart_alt_rounded, size: 20),
+            label: Text(_t('초기화', 'Reset', '重置', 'リセット'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
       // 설정이 화면 가운데에 오게 (화면이 낮으면 밀어서 보기)
       body: SafeArea(
         child: LayoutBuilder(
@@ -149,19 +161,6 @@ class _TapZoneScreenState extends State<TapZoneScreen> {
                   'マスを押すたびに 前へ → 次へ → メニュー → なし の順に変わります'),
               textAlign: TextAlign.center,
               style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
-            ),
-            const SizedBox(height: 20),
-            Center(
-              child: OutlinedButton.icon(
-                onPressed: isDefault ? null : () => _save(StorageService.tapZonesDefault),
-                icon: const Icon(Icons.refresh_rounded),
-                label: Text(_t('초기화', 'Reset', '重置', 'リセット')),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: cs.onSurface,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: const StadiumBorder(),
-                ),
-              ),
             ),
           ],
         ),

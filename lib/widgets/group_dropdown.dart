@@ -141,8 +141,8 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
 
   GroupDropdownRoute get r => widget.route;
 
-  /// 그룹 한 줄: [고른 표시 선] [아이콘] [이름] … [✓] [⋯]
-  /// - 고른 그룹: 바탕색 없이 아이콘 왼쪽에 굵은 시그니처 색 선 + 오른쪽 체크(시그니처 색)
+  /// 그룹 한 줄: [고른 표시 선] [아이콘] [이름] … [⋯]
+  /// - 고른 그룹: 바탕색 없이 아이콘 왼쪽에 굵은 시그니처 색 선
   /// - 만든 그룹은 오른쪽 끝 [⋯]로 이름 수정·삭제, 길게 눌러 끌면 순서 바꾸기
   Widget _row({
     required Key key,
@@ -185,7 +185,6 @@ class _GroupDropdownPanelState extends State<_GroupDropdownPanel> {
                       style: (Theme.of(context).textTheme.labelLarge ?? const TextStyle()).copyWith(color: cs.onSurface, fontWeight: FontWeight.w700)),
                 ),
               ),
-              if (sel) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(Icons.check, size: 20, color: mark)),
               if (onMore != null)
                 IconButton(
                   visualDensity: VisualDensity.compact,

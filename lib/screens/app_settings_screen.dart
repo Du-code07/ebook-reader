@@ -155,10 +155,10 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       context: context,
       title: _t('앱 스타일', 'App Style', '应用样式', 'アプリのスタイル'),
       options: [
-        // 컴팩트: 세로로 긴 네모(휴대폰) / 와이드: 네모(큰 화면)
-        ChoiceOption('basic', _styleLabel('basic'), icon: Icons.crop_portrait_rounded,
+        // 컴팩트: 휴대폰 / 와이드: 태블릿
+        ChoiceOption('basic', _styleLabel('basic'), icon: Icons.smartphone_rounded,
             subtitle: _t('작은 화면에 적합해요', 'Suits small screens', '适合小屏幕', '小さい画面に向いています')),
-        ChoiceOption('simple', _styleLabel('simple'), icon: Icons.crop_square_rounded,
+        ChoiceOption('simple', _styleLabel('simple'), icon: Icons.tablet_android_rounded,
             subtitle: _t('큰 화면에 적합해요', 'Suits large screens', '适合大屏幕', '大きい画面に向いています')),
       ],
       current: StorageService.appStyle.value,

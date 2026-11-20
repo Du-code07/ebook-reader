@@ -131,11 +131,16 @@ class FaqScreen extends StatelessWidget {
                 child: ExpansionTile(
                   tilePadding: const EdgeInsets.symmetric(horizontal: 12),
                   childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+                  // 짧은 대답도 가운데가 아니라 왼쪽부터
+                  expandedAlignment: Alignment.centerLeft,
                   expandedCrossAxisAlignment: CrossAxisAlignment.start,
                   title: Text(q, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
                   children: [
-                    // 대답은 앞에 한 칸 띄우고 시작
-                    Text(' $a', style: TextStyle(fontSize: 14.5, height: 1.55, color: cs.onSurface.withValues(alpha: 0.86))),
+                    // 대답은 모든 줄을 질문보다 조금 안쪽에서 시작 (두 번째 줄부터도 같은 자리)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: Text(a, style: TextStyle(fontSize: 14.5, height: 1.55, color: cs.onSurface.withValues(alpha: 0.86))),
+                    ),
                   ],
                 ),
               ),

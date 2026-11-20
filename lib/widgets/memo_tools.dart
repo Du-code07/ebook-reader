@@ -721,6 +721,11 @@ List<MemoStroke>? eraseMemoStrokes(
 }
 
 /// 메모 설정 창 바탕: 기본 스타일은 밑에서 올라오는 창(양옆 살짝 띄움), 심플 스타일은 가운데 창
+/// 메모 설정 창 색: 앱 테마를 따름 (글자·선은 테마의 글자색)
+Color _memoPanelColor(BuildContext c) => Theme.of(c).colorScheme.surfaceContainerHigh;
+Color _fg(BuildContext c) => Theme.of(c).colorScheme.onSurface;
+Color _fg2(BuildContext c) => Theme.of(c).colorScheme.onSurfaceVariant;
+
 Widget _memoPanelFrame(BuildContext context, Color color, Widget content) => ViewerSheetScope.of(context)
     ? viewerPanel(context, color: color, child: content)
     : Dialog(
@@ -749,7 +754,6 @@ class _MemoToolPanel extends StatefulWidget {
 }
 
 class _MemoToolPanelState extends State<_MemoToolPanel> {
-  static const Color _panelColor = Color(0xFF2B2B2E);
   MemoToolSettings get _s => MemoTools.s;
   // 지금 색이 기본 색 줄에 없으면(더 많은 색상에서 고른 색) 처음부터 펼쳐 둠
   late bool _showMore = !_baseColors.any((c) => c.toARGB32() == _color.toARGB32());
@@ -816,7 +820,7 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
         decoration: BoxDecoration(
           color: c,
           shape: BoxShape.circle,
-          border: Border.all(color: selected ? Colors.white : Colors.white24, width: selected ? 2.4 : 1.0),
+          border: Border.all(color: selected ? _fg(context) : _fg(context).withValues(alpha: 0.24), width: selected ? 2.4 : 1.0),
         ),
         child: selected ? Icon(Icons.check, size: size * 0.55, color: light ? Colors.black : Colors.white) : null,
       ),
@@ -840,26 +844,26 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        Text(label, style: TextStyle(color: _fg2(context), fontSize: 13)),
         const SizedBox(height: 4),
         Row(
           children: [
-            IconButton(icon: const Icon(Icons.remove, color: Colors.white), tooltip: tr('줄이기', 'Less', '减少', '減らす'), onPressed: onMinus),
+            IconButton(icon: Icon(Icons.remove, color: _fg(context)), tooltip: tr('줄이기', 'Less', '减少', '減らす'), onPressed: onMinus),
             Expanded(
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
                   trackHeight: 22,
-                  activeTrackColor: fill ?? Colors.white24,
-                  inactiveTrackColor: Colors.white12,
+                  activeTrackColor: fill ?? _fg(context).withValues(alpha: 0.24),
+                  inactiveTrackColor: _fg(context).withValues(alpha: 0.12),
                   thumbColor: const Color(0xFF6E6E73),
-                  overlayColor: Colors.white10,
+                  overlayColor: _fg(context).withValues(alpha: 0.10),
                   thumbShape: _NumberThumbShape(label: shown),
                   trackShape: const RoundedRectSliderTrackShape(),
                 ),
                 child: Slider(value: value, min: min, max: max, divisions: divisions, onChanged: onChanged),
               ),
             ),
-            IconButton(icon: const Icon(Icons.add, color: Colors.white), tooltip: tr('늘리기', 'More', '增加', '増やす'), onPressed: onPlus),
+            IconButton(icon: Icon(Icons.add, color: _fg(context)), tooltip: tr('늘리기', 'More', '增加', '増やす'), onPressed: onPlus),
           ],
         ),
       ],
@@ -870,7 +874,7 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
         padding: const EdgeInsets.symmetric(vertical: 2),
         child: Row(
           children: [
-            Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600))),
+            Expanded(child: Text(label, style: TextStyle(color: _fg(context), fontSize: 15, fontWeight: FontWeight.w600))),
             Switch(
               value: value,
               activeTrackColor: AppColors.signature,
@@ -890,7 +894,7 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
       _ => tr('펜', 'Pen', '笔', 'ペン'),
     };
     final List<Color> colors = _baseColors;
-    return _memoPanelFrame(context, _panelColor, SingleChildScrollView(
+    return _memoPanelFrame(context, _memoPanelColor(context), SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(22, 14, 22, 22),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -899,14 +903,14 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
               // 머리줄: 도구 아이콘 + 제목 + 닫기
               Row(
                 children: [
-                  MemoToolIcon(kind: widget.kind, color: Colors.white, accent: _color, size: 22),
+                  MemoToolIcon(kind: widget.kind, color: _fg(context), accent: _color, size: 22),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600))),
+                  Expanded(child: Text(title, style: TextStyle(color: _fg(context), fontSize: 16, fontWeight: FontWeight.w600))),
                   Material(
-                    color: Colors.white12,
+                    color: _fg(context).withValues(alpha: 0.12),
                     shape: const CircleBorder(),
                     child: IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white, size: 19),
+                      icon: Icon(Icons.close, color: _fg(context), size: 19),
                       tooltip: tr('닫기', 'Close', '关闭', '閉じる'),
                       onPressed: () => Navigator.pop(context),
                     ),
@@ -917,7 +921,8 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
               // 미리보기
               Container(
                 height: 64,
-                decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(14)),
+                // 종이처럼: 앱 테마의 가장 밝은(다크는 가장 어두운) 바탕
+                decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerLowest, borderRadius: BorderRadius.circular(14)),
                 child: CustomPaint(painter: _ToolPreviewPainter(kind: widget.kind, color: MemoTools.s.colorOf(widget.kind), width: _width, hidden: _s.tapeHidden)),
               ),
               const SizedBox(height: 16),
@@ -958,7 +963,7 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
               if (widget.kind == 'tape')
                 _toggle(tr('테이프 숨기기', 'Hide Tape', '隐藏胶带', 'テープを隠す'), _s.tapeHidden, (v) => _s.tapeHidden = v),
               const SizedBox(height: 12),
-              Text(tr('색상', 'Color', '颜色', '色'), style: const TextStyle(color: Colors.white70, fontSize: 13)),
+              Text(tr('색상', 'Color', '颜色', '色'), style: TextStyle(color: _fg2(context), fontSize: 13)),
               const SizedBox(height: 10),
               Wrap(
                 spacing: 10,
@@ -974,7 +979,7 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
                         height: 34,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: _showMore ? Colors.white : Colors.white38, width: 1.4),
+                          border: Border.all(color: _showMore ? _fg(context) : _fg(context).withValues(alpha: 0.38), width: 1.4),
                         ),
                         child: const _PaletteDots(),
                       ),
@@ -1055,12 +1060,12 @@ class _EraserPanelState extends State<_EraserPanel> {
               children: [
                 SizedBox(width: 24, child: Center(child: icon)),
                 const SizedBox(width: 12),
-                Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600))),
+                Expanded(child: Text(label, style: TextStyle(color: _fg(context), fontSize: 16, fontWeight: FontWeight.w600))),
                 // 고름 표시는 오른쪽 (스위치와 같은 줄)
                 Padding(
                   padding: const EdgeInsets.only(right: 14),
                   child: Icon(_s.eraserType == value ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                      color: _s.eraserType == value ? AppColors.signature : Colors.white38, size: 24),
+                      color: _s.eraserType == value ? AppColors.mark(context) : _fg(context).withValues(alpha: 0.38), size: 24),
                 ),
               ],
             ),
@@ -1070,19 +1075,19 @@ class _EraserPanelState extends State<_EraserPanel> {
           children: [
             SizedBox(width: 24, child: Center(child: icon)),
             const SizedBox(width: 12),
-            Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600))),
+            Expanded(child: Text(label, style: TextStyle(color: _fg(context), fontSize: 15, fontWeight: FontWeight.w600))),
             Switch(value: value, activeTrackColor: AppColors.signature, onChanged: (v) => _changed(() => onChanged(v))),
           ],
         );
     Widget clear(String label, VoidCallback onTap) => TextButton(
-          style: TextButton.styleFrom(foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+          style: TextButton.styleFrom(foregroundColor: _fg(context), padding: const EdgeInsets.symmetric(vertical: 14)),
           onPressed: () {
             onTap();
             Navigator.pop(context);
           },
           child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
         );
-    return _memoPanelFrame(context, const Color(0xFF2B2B2E), SingleChildScrollView(
+    return _memoPanelFrame(context, _memoPanelColor(context), SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(22, 14, 22, 12),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1090,14 +1095,14 @@ class _EraserPanelState extends State<_EraserPanel> {
             children: [
               Row(
                 children: [
-                  const EraserIcon(color: Colors.white, size: 20),
+                  EraserIcon(color: _fg(context), size: 20),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(tr('지우개', 'Eraser', '橡皮擦', '消しゴム'), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600))),
+                  Expanded(child: Text(tr('지우개', 'Eraser', '橡皮擦', '消しゴム'), style: TextStyle(color: _fg(context), fontSize: 16, fontWeight: FontWeight.w600))),
                   Material(
-                    color: Colors.white12,
+                    color: _fg(context).withValues(alpha: 0.12),
                     shape: const CircleBorder(),
                     child: IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white, size: 19),
+                      icon: Icon(Icons.close, color: _fg(context), size: 19),
                       tooltip: tr('닫기', 'Close', '关闭', '閉じる'),
                       onPressed: () => Navigator.pop(context),
                     ),
@@ -1109,17 +1114,17 @@ class _EraserPanelState extends State<_EraserPanel> {
               radio('stroke', const EraserGlyph(area: false), tr('획 지우개', 'Stroke Eraser', '笔画橡皮擦', 'ストローク消しゴム')),
               radio('area', const EraserGlyph(area: true), tr('영역 지우개', 'Area Eraser', '区域橡皮擦', '部分消しゴム')),
               const SizedBox(height: 6),
-              toggle(MemoToolIcon(kind: 'hl', color: Colors.white, accent: _s.hlColor, size: 22), tr('형광펜만 지우기', 'Erase Highlighter Only', '仅擦除荧光笔', '蛍光ペンだけ消す'), _s.eraseOnlyHl,
+              toggle(MemoToolIcon(kind: 'hl', color: _fg(context), accent: _s.hlColor, size: 22), tr('형광펜만 지우기', 'Erase Highlighter Only', '仅擦除荧光笔', '蛍光ペンだけ消す'), _s.eraseOnlyHl,
                   (v) => _s.eraseOnlyHl = v),
-              toggle(MemoToolIcon(kind: 'tape', color: Colors.white, accent: _s.tapeColor, size: 22), tr('테이프만 지우기', 'Erase Tape Only', '仅擦除胶带', 'テープだけ消す'), _s.eraseOnlyTape,
+              toggle(MemoToolIcon(kind: 'tape', color: _fg(context), accent: _s.tapeColor, size: 22), tr('테이프만 지우기', 'Erase Tape Only', '仅擦除胶带', 'テープだけ消す'), _s.eraseOnlyTape,
                   (v) => _s.eraseOnlyTape = v),
               const SizedBox(height: 8),
-              const Divider(color: Colors.white12, height: 1),
+              Divider(color: _fg(context).withValues(alpha: 0.12), height: 1),
               // 보고 있는 쪽의 선(펜·형광펜) / 테이프를 모두 지움
               // 선 모두 지우기 | 테이프 모두 지우기 (한 줄에 나란히)
               Row(children: [
                 Expanded(child: clear(tr('선 모두 지우기', 'Clear All Lines', '清除全部线条', '線をすべて消す'), widget.onClearLines)),
-                Container(width: 1, height: 22, color: Colors.white12),
+                Container(width: 1, height: 22, color: _fg(context).withValues(alpha: 0.12)),
                 Expanded(child: clear(tr('테이프 모두 지우기', 'Clear All Tape', '清除全部胶带', 'テープをすべて消す'), widget.onClearTapes)),
               ]),
             ],

@@ -63,14 +63,34 @@ class PushAsideRoute<T> extends PageRoute<T> {
     final AnimationController? c = controller;
     final NavigatorState? nav = navigator;
     if (c == null || nav == null) return;
-    // 빠르게 밀었거나 반 넘게 밀었으면 닫고, 아니면 제자리로
-    if (velocity > 600 || (velocity > -600 && c.value < 0.55)) {
+    // 빠르게 밀었으면 민 방향대로, 아니면 반 넘게 밀었는지로 닫기·제자리 정함
+    final bool close = velocity.abs() >= 600 ? velocity > 0 : c.value < 0.5;
+    // 손을 뗀 자리에서 남은 거리만큼만, 처음엔 빠르게 끝엔 천천히 (손가락 속도를 이어받는 느낌)
+    if (close) {
       nav.pop();
+      if (c.isAnimating) {
+        c.animateBack(0.0, duration: Duration(milliseconds: (320 * c.value).clamp(90, 320).round()), curve: Curves.fastLinearToSlowEaseIn);
+      }
     } else {
-      c.forward();
+      c.animateTo(1.0, duration: Duration(milliseconds: (320 * (1 - c.value)).clamp(90, 320).round()), curve: Curves.fastLinearToSlowEaseIn);
     }
-    nav.didStopUserGesture();
+    // 움직임이 끝날 때까지는 손으로 끄는 중으로 둠 (그동안 곡선 없이 그대로 따라감 → 손을 떼는 순간 튀지 않음)
+    if (c.isAnimating) {
+      late final AnimationStatusListener done;
+      done = (status) {
+        if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
+          c.removeStatusListener(done);
+          nav.didStopUserGesture();
+        }
+      };
+      c.addStatusListener(done);
+    } else {
+      nav.didStopUserGesture();
+    }
   }
+
+  /// 손으로 끄는 중(놓은 뒤 움직임 포함)에는 곡선 없이 손가락 위치 그대로
+  bool get _linear => navigator?.userGestureInProgress ?? false;
 
   /// 바로 아래가 같은 방식의 화면이 아니면(설정 창 위에서 처음 연 화면) 아래 화면 전체를 함께 밀어냄
   bool _drivesShift = false;
@@ -111,7 +131,7 @@ class PushAsideRoute<T> extends PageRoute<T> {
   }
 
   void _sync() {
-    if (_drivesShift) PushAside.shift.value = _curve!.value;
+    if (_drivesShift) PushAside.shift.value = _linear ? animation!.value : _curve!.value;
   }
 
   /// 닫을 때: 바로 움직이지 않고 한 장면 동안 제자리에서 기다림.
@@ -122,7 +142,7 @@ class PushAsideRoute<T> extends PageRoute<T> {
   bool didPop(T? result) {
     final bool done = super.didPop(result); // 여기서 닫히는 움직임이 시작되고 아래 화면이 보이게 됨
     final AnimationController? c = controller;
-    if (c != null && !Anim.off.value && c.value >= 1.0) {
+    if (c != null && !Anim.off.value && c.value >= 1.0 && !_linear) {
       c.stop(canceled: false);
       _holding = true;
       // 아래 화면을 배치·그리는 장면이 끝난 다음 장면부터 움직임
@@ -155,12 +175,14 @@ class PushAsideRoute<T> extends PageRoute<T> {
   @override
   Widget buildTransitions(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
     // 들어올 때: 오른쪽 → 제자리, 위에 같은 방식의 화면이 열리면: 제자리 → 왼쪽
+    // 손으로 끄는 중에는 곡선 없이 (손가락 위치 = 화면 위치)
+    final bool linear = _linear;
     return SlideTransition(
       position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
-          .animate(CurvedAnimation(parent: animation, curve: _in, reverseCurve: _out)),
+          .animate(linear ? animation : CurvedAnimation(parent: animation, curve: _in, reverseCurve: _out)),
       child: SlideTransition(
         position: Tween<Offset>(begin: Offset.zero, end: const Offset(-1, 0))
-            .animate(CurvedAnimation(parent: secondaryAnimation, curve: _in, reverseCurve: _out)),
+            .animate(linear ? secondaryAnimation : CurvedAnimation(parent: secondaryAnimation, curve: _in, reverseCurve: _out)),
         // 움직이는 동안 파일 화면을 다시 그리지 않고 옮기기만
         child: RepaintBoundary(child: child),
       ),

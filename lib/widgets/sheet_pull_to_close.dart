@@ -162,3 +162,44 @@ void disposeSheetControllerWhenDone(AnimationController c) {
   };
   c.addStatusListener(listener);
 }
+
+/// 밑에서 올라오는 창을 앱 설정 창처럼 띄움: 내용이 맨 위일 때 아래로 끌면 창째 내려오고, 충분히 내리면 닫힘.
+/// [builder]는 받은 스크롤 컨트롤러·스크롤 방식을 창 안의 스크롤(없으면 SingleChildScrollView)에 넘길 것
+Future<T?> showPullSheet<T>(
+  BuildContext context, {
+  required Widget Function(BuildContext context, ScrollController scrollController, ScrollPhysics physics) builder,
+  AnimationStyle? sheetAnimationStyle,
+}) async {
+  final AnimationController ctrl = BottomSheet.createAnimationController(Navigator.of(context));
+  try {
+    return await showModalBottomSheet<T>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      enableDrag: false,
+      sheetAnimationStyle: sheetAnimationStyle,
+      transitionAnimationController: ctrl,
+      builder: (ctx) => SheetPullToClose(controller: ctrl, builder: builder),
+    );
+  } finally {
+    disposeSheetControllerWhenDone(ctrl);
+  }
+}
+
+/// 창 안의 스크롤(따로 컨트롤러를 받지 않는 SingleChildScrollView·ListView)이 창 끌어 내리기와 함께 움직이게:
+/// 받은 컨트롤러를 기본 컨트롤러로, 받은 스크롤 방식을 안쪽 스크롤 모두에 씌움
+Widget pullSheetScope(ScrollController scroll, ScrollPhysics physics, Widget child) => PrimaryScrollController(
+      controller: scroll,
+      child: ScrollConfiguration(behavior: _PullPhysicsBehavior(physics), child: child),
+    );
+
+class _PullPhysicsBehavior extends ScrollBehavior {
+  const _PullPhysicsBehavior(this.physics);
+  final ScrollPhysics physics;
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) => physics;
+
+  @override
+  Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) => child;
+}
