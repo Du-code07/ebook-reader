@@ -110,7 +110,7 @@ class MemoToolButton extends StatelessWidget {
   /// 고른 도구 표시: 바탕색 없이 아이콘 왼쪽에 시그니처 색 세로 선 (와이드 메인 바와 같은 모양)
   static Widget activeBar([double t = 1]) => Container(
         width: 3.5,
-        height: 22 * t,
+        height: 16.5 * t,
         decoration: BoxDecoration(color: AppColors.signature, borderRadius: BorderRadius.circular(2)),
       );
 

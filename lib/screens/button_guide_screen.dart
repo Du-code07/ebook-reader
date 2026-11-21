@@ -170,17 +170,22 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
       case _GuideKind.main:
         final simple = StorageService.simpleStyle;
         return [
-          _Step('group', tr('그룹', 'Group', '分组', 'グループ'),
-              tr('지금 보고 있는 그룹이에요\n누르면 그룹 목록이 나와 다른 그룹으로 가고, 꾹 누르면 이름 수정·삭제, ≡를 끌면 순서를 바꿔요',
-                  'The group you are viewing\nTap to open the group list and switch groups; long-press to rename or delete, drag ≡ to reorder',
-                  '当前查看的分组\n点击打开分组列表切换分组；长按可修改名称·删除，拖动≡可调整顺序',
-                  '今見ているグループです\nタップでグループ一覧を開いて切り替え、長押しで名前の修正・削除、≡をドラッグで並べ替えます')),
+          _Step('group', tr('내 서재', 'My Library', '我的书架', 'マイ書斎'),
+              simple
+                  ? tr('누르면 그룹 목록이 나와 다른 그룹으로 가요\n꺼내 두지 않은 그룹을 보고 있으면 이 칸이 그 그룹의 아이콘·이름으로 바뀌어요\n목록에서 꾹 눌러 끌면 순서를 바꾸고, ⋯를 누르면 이름 수정·삭제를 해요',
+                      'Tap to open the group list and switch groups\nWhile viewing a group that is not pinned, this item shows that group\'s icon and name\nIn the list, long-press and drag to reorder, or tap ⋯ to rename or delete',
+                      '点击打开分组列表切换分组\n查看未放出的分组时，此处会显示该分组的图标·名称\n在列表中长按拖动可调整顺序，点击⋯可修改名称·删除',
+                      'タップでグループ一覧を開いて切り替えます\n置いていないグループを見ているときは、ここがそのグループのアイコン・名前に変わります\n一覧で長押ししてドラッグすると並べ替え、⋯をタップすると名前の修正・削除ができます')
+                  : tr('누르면 그룹 목록이 나와 다른 그룹으로 가요\n지금 보고 있는 그룹은 맨 위 제목에 보여요\n목록에서 꾹 눌러 끌면 순서를 바꾸고, ⋯를 누르면 이름 수정·삭제를 해요',
+                      'Tap to open the group list and switch groups\nThe group you are viewing is shown in the title at the top\nIn the list, long-press and drag to reorder, or tap ⋯ to rename or delete',
+                      '点击打开分组列表切换分组\n当前查看的分组显示在顶部标题中\n在列表中长按拖动可调整顺序，点击⋯可修改名称·删除',
+                      'タップでグループ一覧を開いて切り替えます\n今見ているグループは上のタイトルに表示されます\n一覧で長押ししてドラッグすると並べ替え、⋯をタップすると名前の修正・削除ができます')),
           if (simple)
             _Step('fav', tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り'),
                 tr('즐겨찾기한 파일만 모아 봐요\n다시 누르면 고른 그룹으로 돌아가요', 'Shows only your favorite files\nTap again to go back to the chosen group', '只显示收藏的文件\n再次点击回到所选分组', 'お気に入りのファイルだけを表示します\nもう一度タップすると選んだグループに戻ります')),
           if (simple)
             _Step('pin', tr('그룹 꺼내기', 'Pin Groups', '放出分组', 'グループを置く'),
-                tr('자주 보는 그룹을 즐겨찾기 밑에 놓아요\n놓은 그룹을 누르면 그 그룹으로 바로 가요', 'Place groups you use often under Favorites\nTap a placed group to jump to it', '把常用的分组放到收藏下方\n点击放好的分组即可直接前往', 'よく見るグループをお気に入りの下に置きます\n置いたグループをタップするとすぐ移動します')),
+                tr('자주 보는 그룹을 즐겨찾기 밑에 놓아요\n놓은 그룹을 누르면 그 그룹으로 바로 가고, 꾹 눌러 끌면 순서를 바꿔요\n지금 보고 있는 칸은 왼쪽에 시그니처 색 선으로 표시돼요', 'Place groups you use often under Favorites\nTap a placed group to jump to it, or long-press and drag to reorder\nThe item you are viewing is marked with a signature-color line on its left', '把常用的分组放到收藏下方\n点击放好的分组即可直接前往，长按拖动可调整顺序\n当前查看的项目左侧会显示主题色竖线', 'よく見るグループをお気に入りの下に置きます\n置いたグループをタップするとすぐ移動し、長押ししてドラッグすると並べ替えます\n今見ている項目は左側にシグネチャーカラーの線で示されます')),
           _Step('search', tr('검색', 'Search', '搜索', '検索'),
               tr('파일 이름으로 찾아요', 'Find files by name', '按文件名查找', 'ファイル名で探します')),
           if (!simple)
@@ -231,7 +236,7 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('mode', tr('페이지 이동', 'Page Turning', '翻页', 'ページ移動'),
               tr('탭·슬라이드·스크롤·음량 버튼 중 넘기는 방식을 골라요\n창을 닫을 때 적용돼요', 'Choose how pages turn: tap, slide, scroll or volume keys\nApplies when the window closes', '选择翻页方式：点击·滑动·滚动·音量键\n关闭窗口时生效', 'タップ・スライド・スクロール・音量ボタンからめくり方を選びます\nウィンドウを閉じると適用されます')),
           _Step('direction', tr('읽기 방향', 'Reading Direction', '阅读方向', '読む方向'),
-              tr('좌→우·우→좌를 바꿔요 (파일마다 기억)', 'Switch left-to-right or right-to-left (remembered per file)', '切换左→右·右→左（按文件记忆）', '左→右・右→左を切り替えます(ファイルごとに記憶)')),
+              tr('좌→우·우→좌를 바꿔요 (파일마다 기억)\n지금 읽는 방향의 화살표가 시그니처 색으로 보여요', 'Switch left-to-right or right-to-left (remembered per file)\nThe arrow for the current direction is shown in the signature color', '切换左→右·右→左（按文件记忆）\n当前阅读方向的箭头显示为主题色', '左→右・右→左を切り替えます(ファイルごとに記憶)\n今読んでいる方向の矢印がシグネチャーカラーで表示されます')),
           _Step('memo', tr('메모', 'Memo', '笔记', 'メモ'), tr('쪽 위에 S펜이나 손가락으로 메모해요', 'Write on the page with the S Pen or your finger', '用 S Pen 或手指在页面上写笔记', 'Sペンや指でページにメモします')),
           _Step('copy', tr('글자 복사', 'Copy Text', '复制文字', '文字をコピー'), tr('쪽의 글자를 골라 복사해요', 'Select and copy text on the page', '选择并复制页面上的文字', 'ページの文字を選んでコピーします')),
           _Step('bookmark', tr('북마크', 'Bookmarks', '书签', 'ブックマーク'), tr('지금 쪽을 북마크하고 북마크 목록을 봐요', 'Bookmark this page and see your bookmarks', '为当前页添加书签并查看书签列表', '今のページをブックマークし、一覧を見ます')),
@@ -246,9 +251,9 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('page', tr('쪽 위에 쓰기', 'Writing on the Page', '在页面上书写', 'ページに書く'),
               tr('S펜으로 바로 써요\n메모는 쪽에 붙어 확대·이동해도 함께 움직여요', 'Write right away with the S Pen\nMemos stay on the page when you zoom or move', '用 S Pen 直接书写\n笔记贴在页面上，放大·移动时一起移动', 'Sペンですぐ書けます\nメモはページに付いて、拡大・移動しても一緒に動きます')),
           _Step('finger', tr('손으로 그리기', 'Finger Writing', '手指书写', '指で手書き'),
-              tr('켜면 손가락으로도 써요\n꺼 두면 손가락으로는 쪽을 넘기고 S펜으로만 써요', 'Turn on to write with your finger too\nWhen off, your finger turns pages and only the S Pen writes', '开启后也可用手指书写\n关闭时手指用于翻页，只用 S Pen 书写', 'オンにすると指でも書けます\nオフのときは指でページをめくり、Sペンだけで書きます')),
+              tr('켜면 손가락으로도 써요\n꺼 두면 손가락으로는 쪽을 넘기고 S펜으로만 써요\n켜져 있으면 아이콘 왼쪽에 시그니처 색 선이 보여요', 'Turn on to write with your finger too\nWhen off, your finger turns pages and only the S Pen writes\nWhen on, a signature-color line shows to the left of the icon', '开启后也可用手指书写\n关闭时手指用于翻页，只用 S Pen 书写\n开启时图标左侧会显示主题色竖线', 'オンにすると指でも書けます\nオフのときは指でページをめくり、Sペンだけで書きます\nオンのときはアイコンの左にシグネチャーカラーの線が表示されます')),
           _Step('pen', tr('펜', 'Pen', '笔', 'ペン'),
-              tr('펜으로 써요\n한 번 더 누르면 굵기·색상·직선 자동 보정을 정해요', 'Write with the pen\nTap again to set thickness, color and auto-straighten', '用笔书写\n再点一次可设置粗细·颜色·自动拉直', 'ペンで書きます\nもう一度タップで太さ・色・直線補正を設定します')),
+              tr('펜으로 써요\n고른 도구는 아이콘 왼쪽에 시그니처 색 선으로 표시돼요\n한 번 더 누르면 굵기·색상·직선 자동 보정을 정해요', 'Write with the pen\nThe chosen tool is marked with a signature-color line to the left of its icon\nTap again to set thickness, color and auto-straighten', '用笔书写\n选中的工具会在图标左侧显示主题色竖线\n再点一次可设置粗细·颜色·自动拉直', 'ペンで書きます\n選んだツールはアイコンの左にシグネチャーカラーの線で示されます\nもう一度タップで太さ・色・直線補正を設定します')),
           _Step('hl', tr('형광펜', 'Highlighter', '荧光笔', '蛍光ペン'),
               tr('글자 위에 비치게 칠해요\n한 번 더 누르면 굵기·투명도·색상·직선 자동 보정을 정해요', 'Color over text so it shows through\nTap again to set thickness, opacity, color and auto-straighten', '在文字上涂上透明的颜色\n再点一次可设置粗细·不透明度·颜色·自动拉直', '文字の上に透けるように塗ります\nもう一度タップで太さ・不透明度・色・直線補正を設定します')),
           _Step('tape', tr('테이프', 'Tape', '胶带', 'テープ'),
