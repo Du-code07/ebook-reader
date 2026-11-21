@@ -504,7 +504,7 @@ class _ToolbarSettingsState extends State<_ToolbarSettings> {
                         toolbarSettingsRow(
                           context,
                           icon: Icon(Icons.linear_scale, color: cs.onSurface, size: 20),
-                          label: tr('진행바', 'Progress Bar', '进度条', '進行度バー'),
+                          label: tr('페이지 막대', 'Page Bar', '页面条', 'ページバー'),
                           dim: _progressHidden,
                           trailing: _hideButton(
                             hidden: _progressHidden,
