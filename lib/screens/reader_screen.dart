@@ -4105,7 +4105,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       if (!_pageModeScroll || _docVertical)
       QuickToolItem(
         id: 'memo',
-        icon: MemoToolIcon(kind: 'memo', color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
+        icon: MemoToolIcon(kind: 'memo', color: _isMemoMode ? AppColors.signature : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
           setState(() {

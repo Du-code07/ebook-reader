@@ -107,12 +107,16 @@ class MemoToolButton extends StatelessWidget {
   /// 기본(흰색) 대신 쓸 아이콘 색 (예: 필기 전체 지우기 = 빨강)
   final Color? color;
 
-  /// 고른 도구의 아이콘 색: 시그니처 색 바탕 위에서 잘 보이게 진한 초록
-  static const Color activeIconColor = Color(0xFF1E3A1E);
+  /// 고른 도구 표시: 바탕색 없이 아이콘 왼쪽에 시그니처 색 세로 선 (와이드 메인 바와 같은 모양)
+  static Widget activeBar([double t = 1]) => Container(
+        width: 3.5,
+        height: 22 * t,
+        decoration: BoxDecoration(color: AppColors.signature, borderRadius: BorderRadius.circular(2)),
+      );
 
   @override
   Widget build(BuildContext context) {
-    final Color color = !enabled ? Colors.white30 : (active ? activeIconColor : (this.color ?? Colors.white));
+    final Color color = !enabled ? Colors.white30 : (this.color ?? Colors.white);
     final Widget glyph = iconBuilder != null ? iconBuilder!(color) : Icon(icon, color: color, size: 16);
     return Semantics(
       button: true,
@@ -134,7 +138,7 @@ class MemoToolButton extends StatelessWidget {
         child: SizedBox(
           width: kMemoToolExtent,
           height: kMemoToolExtent,
-          // 고르는 순간: 바탕이 톡 커지며 나오고, 아이콘이 살짝 들렸다 기울며 내려앉음
+          // 고르는 순간: 왼쪽 선이 위아래로 자라 나오고, 아이콘이 살짝 들렸다 기울며 내려앉음
           child: TweenAnimationBuilder<double>(
             key: ValueKey(active && enabled),
             tween: Tween(begin: active && enabled ? 0.0 : 1.0, end: 1.0),
@@ -144,15 +148,7 @@ class MemoToolButton extends StatelessWidget {
               return Stack(
                 alignment: Alignment.center,
                 children: [
-                  if (active && enabled)
-                    Transform.scale(
-                      scale: 0.5 + 0.5 * Curves.easeOutBack.transform(t),
-                      child: Container(
-                        width: kMemoToolExtent - 8,
-                        height: kMemoToolExtent - 8,
-                        decoration: BoxDecoration(color: AppColors.signature, borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
+                  if (active && enabled) Positioned(left: 2.5, child: activeBar(Curves.easeOutCubic.transform(t))),
                   Transform.translate(
                     offset: Offset(0, -2.5 * pop),
                     child: Transform.rotate(angle: -0.14 * pop, child: Transform.scale(scale: 1 + 0.14 * pop, child: glyph)),
@@ -204,7 +200,7 @@ class MemoDoneButton extends StatelessWidget {
             child: Center(
               widthFactor: 1,
               heightFactor: 1,
-              child: Text(label, style: const TextStyle(color: Colors.amber, fontSize: 14, fontWeight: FontWeight.w600)),
+              child: Text(label, style: const TextStyle(color: AppColors.signature, fontSize: 14, fontWeight: FontWeight.w600)),
             ),
           ),
         ),

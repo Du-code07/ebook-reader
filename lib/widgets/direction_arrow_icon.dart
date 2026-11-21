@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+import 'app_colors.dart';
+
 /// 읽기 방향 아이콘: 엇갈린 두 화살표(⇄). 위는 →(좌→우), 아래는 ←(우→좌).
-/// 지금 읽는 방향의 화살표만 노란색.
+/// 지금 읽는 방향의 화살표만 시그니처 색
 class DirectionArrowIcon extends StatelessWidget {
   const DirectionArrowIcon({super.key, required this.rightToLeft, this.size = 22});
 
@@ -26,7 +28,7 @@ class _ArrowPainter extends CustomPainter {
     final double w = size.width, h = size.height;
     final double stroke = math.max(1.6, w * 0.095);
     final double head = w * 0.2;
-    const Color active = Colors.amber, idle = Colors.white;
+    const Color active = AppColors.signature, idle = Colors.white;
     void arrow(double y, double from, double to, Color color) {
       final paint = Paint()
         ..color = color

@@ -2576,7 +2576,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
       ),
       QuickToolItem(
         id: 'memo',
-        icon: MemoToolIcon(kind: 'memo', color: _isMemoMode ? Colors.amber : Colors.white, size: 22),
+        icon: MemoToolIcon(kind: 'memo', color: _isMemoMode ? AppColors.signature : Colors.white, size: 22),
         tooltip: _tr('메모', 'Memo', '笔记', 'メモ'),
         onTap: () {
           // 스크롤 모드에서도 쪽마다 같은 메모 (넘겨 보기와 함께 씀)

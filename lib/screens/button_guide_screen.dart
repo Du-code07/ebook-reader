@@ -822,13 +822,8 @@ class _MemoMock extends StatelessWidget {
           width: kMemoToolExtent,
           height: kMemoToolExtent,
           child: Stack(alignment: Alignment.center, children: [
-            if (active)
-              Container(
-                width: kMemoToolExtent - 8,
-                height: kMemoToolExtent - 8,
-                decoration: BoxDecoration(color: AppColors.signature, borderRadius: BorderRadius.circular(10)),
-              ),
-            icon(active ? MemoToolButton.activeIconColor : (color ?? Colors.white)),
+            if (active) Positioned(left: 2.5, child: MemoToolButton.activeBar()),
+            icon(color ?? Colors.white),
           ]),
         );
     return Stack(
@@ -855,7 +850,7 @@ class _MemoMock extends StatelessWidget {
                   height: kMemoToolExtent,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 11),
-                    child: Center(child: Text(tr('완료', 'Done', '完成', '完了'), style: const TextStyle(color: Colors.amber, fontSize: 14, fontWeight: FontWeight.w600))),
+                    child: Center(child: Text(tr('완료', 'Done', '完成', '完了'), style: const TextStyle(color: AppColors.signature, fontSize: 14, fontWeight: FontWeight.w600))),
                   ),
                 ),
               ]),
