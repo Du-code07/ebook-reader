@@ -259,18 +259,18 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           ],
           _Step('list', tr('새로 고침', 'Refresh', '刷新', '更新'),
               tr('목록을 맨 위에서 아래로 당기면 새로 고침 아이콘이 나오며 서재를 다시 읽어 와요', 'Pull the list down from the top to show the refresh icon and reload your library', '从顶部向下拉列表，会出现刷新图标并重新读取书架', '一覧を一番上から下に引くと更新アイコンが出て、書斎を読み込み直します')),
-          _Step('ribbon', tr('즐겨찾기', 'Favorites', '收藏', 'お気に入り'),
-              tr('누르거나 아래로 당기면 즐겨찾기가 켜지고 꺼져요', 'Tap or pull it down to add or remove a favorite', '点击或向下拉即可收藏或取消收藏', 'タップするか下に引くとお気に入りのオン・オフが切り替わります')),
+          _Step('ribbon', tr('즐겨찾기 띠', 'Favorite Ribbon', '收藏书签', 'お気に入りリボン'),
+              tr('누르거나 아래로 당기면 즐겨찾기에 넣거나 뺄 수 있어요', 'Tap or pull down to add or remove from favorites', '点击或向下拉即可加入或移出收藏', 'タップするか下に引くとお気に入りに入れたり外したりできます')),
           _Step('card', tr('파일', 'File', '文件', 'ファイル'),
-              tr('오른쪽으로 밀면 즐겨찾기, 왼쪽으로 밀면 휴지통으로 가요\n파일을 길게 눌러 여러 개를 고른 뒤, 한 번에 [즐겨찾기]·[그룹 이동]·[휴지통]으로 보낼 수 있어요',
-                  'Swipe right to favorite, swipe left to move to trash\nLong-press to select multiple files and apply [Favorites], [Move to Group], or [Trash] at once',
-                  '向右滑收藏，向左滑移至回收站\n长按可多选文件，一次性执行[收藏]·[移动分组]·[移至回收站]',
-                  '右にスワイプでお気に入り、左にスワイプでゴミ箱へ\n長押しで複数のファイルを選び、まとめて[お気に入り]・[グループ移動]・[ゴミ箱]に送れます')),
+              tr('파일을 길게 눌러 여러 개를 고른 뒤 한꺼번에 옮길 수 있어요',
+                  'Long-press to select multiple files and move them all at once',
+                  '长按选择多个文件后可一次性移动',
+                  'ファイルを長押しして複数選び、まとめて移動できます')),
           _Step('more', tr('파일 메뉴', 'File Menu', '文件菜单', 'ファイルメニュー'),
-              tr('[파일 정보]·[공유]·[이름 수정]·[그룹 이동]·[표지 변경]·[휴지통]을 골라요',
-                  'Choose [File Info], [Share], [Rename], [Move to Group], [Change Cover], or [Trash]',
-                  '选择[文件信息]·[分享]·[重命名]·[移动分组]·[更换封面]·[回收站]',
-                  '[ファイル情報]・[共有]・[名前の変更]・[グループ移動]・[表紙を変更]・[ゴミ箱]を選びます')),
+              tr('파일을 관리하는 여러 메뉴를 열 수 있어요',
+                  'Open various menus to manage the file',
+                  '可以打开管理文件的多项菜单',
+                  'ファイルを管理するさまざまなメニューを開けます')),
         ];
       case _GuideKind.viewer:
         return [
@@ -353,9 +353,9 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
       case _GuideKind.settings:
         return [
           _Step('style', tr('앱 스타일', 'App Style', '应用样式', 'アプリのスタイル'),
-              tr('앱 스타일을 고를 수 있어요', 'Choose the app style', '可以选择应用样式', 'アプリのスタイルを選べます')),
+              tr('앱의 메인 화면 배치를 바꿀 수 있어요', 'Change the layout of the app\'s main screen', '可以更改应用主界面的布局', 'アプリのメイン画面の配置を変えられます')),
           _Step('theme', tr('앱 테마', 'App Theme', '应用主题', 'アプリのテーマ'),
-              tr('앱 테마를 고를 수 있어요', 'Choose the app theme', '可以选择应用主题', 'アプリのテーマを選べます')),
+              tr('앱의 화면 색상과 밝기 테마를 바꿀 수 있어요', 'Change the app\'s screen color and brightness theme', '可以更改应用的屏幕颜色和亮度主题', 'アプリの画面の色と明るさテーマを変えられます')),
           _Step('lang', tr('언어', 'Language', '语言', '言語'),
               tr('앱에 쓰는 언어를 바꿀 수 있어요', 'Change the app language', '可以更改应用语言', 'アプリで使う言語を変えられます')),
           _Step('privacy', tr('사생활 보호', 'Privacy', '隐私保护', 'プライバシー保護'),
@@ -371,7 +371,7 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('folders', tr('탐색할 폴더', 'Folders to Search', '要查找的文件夹', '探すフォルダ'),
               tr('파일과 글꼴을 찾아올 폴더를 등록해 둘 수 있어요', 'Register folders to search for files and fonts', '可以登记查找文件和字体的文件夹', 'ファイルやフォントを探すフォルダを登録できます')),
           _Step('docfont', tr('한글·워드 글꼴', 'HWP·Word Fonts', 'HWP·Word 字体', 'HWP・Wordフォント'),
-              tr('문서에 쓰인 글꼴이 기기에 없을 때 대신 쓸 글꼴 파일을 넣어요', 'Add font files to stand in for ones a document uses but your device lacks', '添加字体文件，代替文档中设备没有的字体', '文書で使われていて端末にないフォントの代わりになるフォントファイルを追加します')),
+              tr('파일에 쓰인 글꼴이 기기에 없을 때 대신 쓸 글꼴 파일을 넣어요', 'Add replacement font files when fonts used in a file are missing on your device', '当文件使用的字体在设备上缺失时，可添加替代字体文件', 'ファイルで使われているフォントが端末にないときに代わりに使うフォントファイルを追加します')),
           _Step('appfont', tr('앱 글꼴', 'App Font', '应用字体', 'アプリのフォント'),
               tr('파일 외 모든 글꼴을 바꿔요', 'Change all app fonts outside of documents', '更改文件以外的所有应用字体', '文書以外のすべてのアプリフォントを変えます')),
           _Step('epubfont', tr('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント'),
@@ -387,11 +387,11 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('data', tr('데이터 지우기', 'Clear Data', '清除数据', 'データを削除'),
               tr('앱을 처음 설치한 상태로 되돌려요', 'Resets the app to how it was when first installed', '将应用恢复到刚安装时的状态', 'アプリをインストール直後の状態に戻します')),
           _Step('guide', tr('가이드', 'Guide', '指南', 'ガイド'),
-              tr('앱에 포함된 기능에 대한 설명을 볼 수 있어요', 'See explanations of the features included in the app', '可以查看应用包含的功能说明', 'アプリに含まれる機能の説明を見られます')),
+              tr('앱의 모든 설명을 볼 수 있어요', 'View all explanations for the app', '可以查看应用的全部说明', 'アプリのすべての説明を見られます')),
           _Step('faq', tr('자주 묻는 질문', 'FAQ', '常见问题', 'よくある質問'),
               tr('자주 묻는 질문과 답을 볼 수 있어요', 'See frequently asked questions and answers', '可以查看常见问题及解答', 'よくある質問と回答を見られます')),
           _Step('contact', tr('문의하기', 'Contact Us', '联系我们', 'お問い合わせ'),
-              tr('이메일·제목·내용을 적어 개발자에게 문의해요', 'Write your email, subject and message to contact the developer', '填写邮箱·标题·内容联系开发者', 'メール・件名・内容を書いて開発者に問い合わせます')),
+              tr('오류나 개선할 점을 개발자에게 직접 문의할 수 있어요', 'Contact the developer directly about bugs or suggestions', '可以直接向开发者反馈错误或改进建议', '不具合や改善点について開発者に直接問い合わせられます')),
           _Step('review', tr('리뷰 남기기', 'Write a Review', '撰写评价', 'レビューを書く'),
               tr('Google Play 스토어에 리뷰를 남겨요', 'Leave a review on the Google Play Store', '在 Google Play 商店留下评价', 'Google Play ストアにレビューを書きます')),
           _Step('terms', tr('이용 약관', 'Terms of Service', '使用条款', '利用規約'), tr('앱 이용 약관을 봐요', 'Read the terms of service', '查看使用条款', '利用規約を見ます')),
@@ -442,6 +442,9 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
     final Size size = MediaQuery.sizeOf(context);
     final Rect hole = _to ?? _hole!;
     final EdgeInsets pad = MediaQuery.paddingOf(context);
+    final double spaceAbove = hole.top - pad.top;
+    final double spaceBelow = size.height - hole.bottom - pad.bottom;
+    final bool tallHole = hole.height > size.height * 0.45 || (spaceAbove < 220 && spaceBelow < 220);
     final bool below = hole.center.dy < size.height * 0.5;
     final card = Material(
       color: cs.surfaceContainerHigh,
@@ -497,13 +500,26 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
         ),
       ),
     );
+    // 새로 고침처럼 비추는 영역이 화면 대부분을 차지하면 위·아래가 아니라 화면 안쪽 안전한 위치에 띄움
+    final double? topPos;
+    final double? bottomPos;
+    if (tallHole) {
+      topPos = null;
+      bottomPos = math.max(pad.bottom + 96, size.height * 0.18);
+    } else if (below) {
+      topPos = (hole.bottom + 14).clamp(pad.top + 16, math.max(pad.top + 16, size.height - pad.bottom - 240));
+      bottomPos = null;
+    } else {
+      topPos = null;
+      bottomPos = (size.height - hole.top + 14).clamp(pad.bottom + 16, math.max(pad.bottom + 16, size.height - pad.top - 240));
+    }
     return AnimatedPositioned(
       duration: Anim.ms(260),
       curve: Curves.easeOutCubic,
       left: 16,
       right: 16,
-      top: below ? math.min(hole.bottom + 14, size.height - 260) : null,
-      bottom: below ? null : math.max(size.height - hole.top + 14, pad.bottom + 16),
+      top: topPos,
+      bottom: bottomPos,
       child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 480), child: card)),
     );
   }
@@ -642,21 +658,26 @@ class _MainMock extends StatelessWidget {
           key: k(id),
           height: label == null ? 48 : 58,
           margin: const EdgeInsets.symmetric(vertical: 2),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              SizedBox(
-                height: 26,
-                child: Row(children: [
-                  Container(width: 4, height: selected ? 24 : 0, decoration: BoxDecoration(color: AppColors.mark(context), borderRadius: BorderRadius.circular(2))),
-                  Expanded(child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg), child: icon))),
-                  const SizedBox(width: 4),
-                ]),
+              Container(width: 4, height: selected ? 26 : 0, decoration: BoxDecoration(color: AppColors.mark(context), borderRadius: BorderRadius.circular(2))),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      height: 26,
+                      child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg), child: icon)),
+                    ),
+                    if (label != null) ...[
+                      const SizedBox(height: 3),
+                      Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w800 : FontWeight.w600, color: fg)),
+                    ],
+                  ],
+                ),
               ),
-              if (label != null) ...[
-                const SizedBox(height: 3),
-                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w800 : FontWeight.w600, color: fg)),
-              ],
+              const SizedBox(width: 4),
             ],
           ),
         );
@@ -706,14 +727,20 @@ class _MainMock extends StatelessWidget {
       );
     }
     Widget barItem(String id, Widget icon, String label) => Expanded(
-          child: Column(
-            key: k(id),
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              SizedBox(height: 26, child: Center(child: icon)),
-              const SizedBox(height: 3),
-              Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface)),
-            ],
+          child: Center(
+            child: Padding(
+              key: k(id),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(height: 26, child: Center(child: icon)),
+                  const SizedBox(height: 3),
+                  Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface)),
+                ],
+              ),
+            ),
           ),
         );
     return Scaffold(
@@ -739,10 +766,10 @@ class _MainMock extends StatelessWidget {
                   child: Center(
                     child: Container(
                       key: k('add'),
-                      width: 52,
-                      height: 52,
+                      width: 44,
+                      height: 44,
                       decoration: BoxDecoration(color: AppColors.of(context), shape: BoxShape.circle, boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1))]),
-                      child: Icon(Icons.add, size: 30, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context)),
+                      child: Icon(Icons.add, size: 26, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context)),
                     ),
                   ),
                 ),

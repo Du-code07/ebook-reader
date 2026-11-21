@@ -3017,10 +3017,10 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                           _showAddSheet();
                         },
                         child: SizedBox.square(
-                          dimension: 52,
+                          dimension: 44,
                           child: Tooltip(
                             message: _tr('파일 추가', 'Add Files', '添加文件', 'ファイル追加'),
-                            child: Icon(Icons.add, size: 30, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context)),
+                            child: Icon(Icons.add, size: 26, color: AppColors.onSig(context), shadows: AppColors.sigShadows(context)),
                           ),
                         ),
                       ),
