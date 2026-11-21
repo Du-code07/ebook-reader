@@ -5,16 +5,6 @@ class I18nExtra {
   static const List<String> langs = ['fr', 'ru', 'es'];
 
   static const Map<String, List<String>> _exact = {
-    // 가이드 v196 추가 문구
-    'Tap or pull down to add or remove from favorites': ['Appuyez ou tirez vers le bas pour ajouter ou retirer des favoris', 'Нажмите или потяните вниз, чтобы добавить в избранное или убрать из него', 'Pulsa o tira hacia abajo para añadir o quitar de favoritos'],
-    'Long-press to select multiple files and move them all at once': ['Appuyez longuement pour sélectionner plusieurs fichiers et les déplacer en une fois', 'Удерживайте, чтобы выбрать несколько файлов и переместить их сразу', 'Mantén pulsado para seleccionar varios archivos y moverlos a la vez'],
-    'Open various menus to manage the file': ['Ouvre plusieurs menus pour gérer le fichier', 'Открывает различные меню для управления файлом', 'Abre varios menús para gestionar el archivo'],
-    'Change the layout of the app\'s main screen': ['Modifiez la disposition de l\'écran principal de l\'app', 'Измените расположение главного экрана приложения', 'Cambia la disposición de la pantalla principal de la app'],
-    'Change the app\'s screen color and brightness theme': ['Modifiez la couleur et le thème de luminosité de l\'app', 'Измените цвет экрана и тему яркости приложения', 'Cambia el color de pantalla y el tema de brillo de la app'],
-    'Add replacement font files when fonts used in a file are missing on your device': ['Ajoutez des fichiers de police de remplacement si celles du fichier manquent sur votre appareil', 'Добавьте файлы шрифтов для замены, если шрифтов из файла нет на устройстве', 'Añade archivos de fuente de reemplazo cuando falten las fuentes usadas en un archivo'],
-    'View all explanations for the app': ['Consultez toutes les explications de l\'application', 'Просмотрите все пояснения по приложению', 'Consulta todas las explicaciones de la aplicación'],
-    'Contact the developer directly about bugs or suggestions': ['Contactez directement le développeur pour signaler un bug ou faire une suggestion', 'Напишите разработчику напрямую об ошибках или предложениях', 'Contacta directamente al desarrollador por errores o sugerencias'],
-
     // 가이드 문구 업데이트 (v195)
     'File Top & Tool Bar': ['Barre supérieure et barre d\'outils', 'Верхняя панель и панель инструментов', 'Barra superior y barra de herramientas'],
     'Memo Tool Bar': ['Barre d\'outils de notes', 'Панель инструментов заметок', 'Barra de herramientas de notas'],
@@ -493,6 +483,7 @@ class I18nExtra {
     'Choose the app language': ['Choisissez la langue de l\'app', 'Выберите язык приложения', 'Elige el idioma de la app'],
     'You can change it later in App Settings': ['Vous pourrez la changer plus tard dans les réglages', 'Это можно изменить позже в настройках', 'Puedes cambiarlo más tarde en los ajustes'],
     'Continue': ['Continuer', 'Продолжить', 'Continuar'],
+    'Choose the app theme': ['Choisissez le thème de l\'app', 'Выберите тему приложения', 'Elige el tema de la app'],
     'Timed out while displaying the document': ['Délai dépassé lors de l\'affichage du document', 'Время ожидания показа документа истекло', 'Se agotó el tiempo al mostrar el documento'],
     'Could not display the document': ['Impossible d\'afficher le document', 'Не удалось показать документ', 'No se pudo mostrar el documento'],
     'Scroll cannot be combined with Tap or Slide\nTap and Slide can be used together': ['Le défilement ne peut pas être combiné avec Toucher ou Glisser\nToucher et Glisser peuvent être utilisés ensemble', 'Прокрутку нельзя сочетать с касанием или листанием\nКасание и листание можно использовать вместе', 'El desplazamiento no se puede combinar con Toque ni Deslizar\nToque y Deslizar se pueden usar juntos'],
