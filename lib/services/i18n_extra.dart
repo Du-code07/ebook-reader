@@ -480,7 +480,6 @@ class I18nExtra {
     'Regular': ['Normal', 'Обычный', 'Normal'],
     'Italic': ['Italique', 'Курсив', 'Cursiva'],
     'No fonts added': ['Aucune police ajoutée', 'Шрифты не добавлены', 'No hay fuentes añadidas'],
-    'Choose the app language': ['Choisissez la langue de l\'app', 'Выберите язык приложения', 'Elige el idioma de la app'],
     'You can change it later in App Settings': ['Vous pourrez la changer plus tard dans les réglages', 'Это можно изменить позже в настройках', 'Puedes cambiarlo más tarde en los ajustes'],
     'Continue': ['Continuer', 'Продолжить', 'Continuar'],
     'Choose the app theme': ['Choisissez le thème de l\'app', 'Выберите тему приложения', 'Elige el tema de la app'],
