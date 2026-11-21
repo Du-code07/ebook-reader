@@ -45,6 +45,8 @@ void registerAssetLicenses() {
     (['base64-arraybuffer'], 'assets/licenses/base64-arraybuffer-LICENSE.txt'),
     (['OpenCV'], 'assets/licenses/opencv-NOTICE.txt'),
     (['Google ML Kit (not open source)'], 'assets/licenses/mlkit-NOTICE.txt'),
+    // 안드로이드 쪽 라이브러리 (AndroidX·Kotlin·Play 서비스 등)
+    (['Android libraries (AndroidX, Kotlin, Google Play services)'], 'assets/licenses/android-libraries-NOTICE.txt'),
     (['epub.js·cp949_codec notices'], 'assets/txt/THIRD_PARTY_NOTICES.txt'),
   ];
   LicenseRegistry.addLicense(() async* {

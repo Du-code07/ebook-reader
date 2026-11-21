@@ -75,7 +75,7 @@ void main() async {
   await AppLock.init(); // 사생활 보호: 앱 잠금이면 시작할 때부터 잠금 화면
   await ToolbarLayout.load(); // 파일 보기 화면의 상단바·도구 모음 아이콘 배치
   await MemoTools.load(); // 메모 펜·형광펜·테이프·지우개 설정
-  await Pro.init(); // 이리ERI 프로: 구매 여부·무료 체험 (Play 스토어 확인은 뒤에서)
+  await Pro.init(); // 이리ERI 프로: 유료 기능 숨기기 설정
   ComfortTint.filePref = await StorageService.getDocComfort(); // 파일을 열자마자 편안한 모드인지 알게
   await StorageService.loadAppStyle(); // 앱 스타일(기본/심플): 첫 화면부터 그 모양으로
   final initialThemeMode = await StorageService.getAppThemeMode();

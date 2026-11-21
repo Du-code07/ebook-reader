@@ -76,10 +76,10 @@ class FaqScreen extends StatelessWidget {
       ),
       (
         t('인터넷이 필요한가요?', 'Do I need an internet connection?', '需要联网吗？', 'インターネットは必要ですか？'),
-        t('파일을 보는 데는 인터넷이 필요 없어요. 구매·구매 복원과 일부 Google 기능에만 인터넷이 쓰여요',
-            'No internet is needed to view files. The internet is used only for purchases, restoring purchases and some Google features',
-            '查看文件不需要联网。只有购买、恢复购买和部分 Google 功能会使用网络',
-            'ファイルを見るのにインターネットは不要です。購入・購入の復元と一部の Google 機能にだけ使われます'),
+        t('파일을 보는 데는 인터넷이 필요 없어요. 일부 Google 기능에만 인터넷이 쓰여요',
+            'No internet is needed to view files. The internet is used only for some Google features',
+            '查看文件不需要联网。只有部分 Google 功能会使用网络',
+            'ファイルを見るのにインターネットは不要です。一部の Google 機能にだけ使われます'),
       ),
       (
         t('내 문서가 서버로 전송되나요?', 'Are my documents sent to a server?', '我的文档会被传到服务器吗？', '文書がサーバーに送られますか？'),
@@ -90,17 +90,10 @@ class FaqScreen extends StatelessWidget {
       ),
       (
         t('휴대폰을 바꾸면 서재가 옮겨지나요?', 'Is my library moved when I change phones?', '换手机后书架会转移吗？', '機種変更すると本棚は移りますか？'),
-        t('서재와 메모는 기기 안에 저장돼서 기기 백업 설정에 따라 일부만 옮겨지거나 옮겨지지 않을 수 있어요. 중요한 파일은 공유 기능으로 따로 보관해 주세요. 이리ERI 프로 구매는 같은 Google 계정으로 복원할 수 있어요',
-            'Your library and notes are stored on the device, so depending on your device backup settings they may be moved only partly or not at all. Please keep important files separately with the Share feature. 이리ERI Pro purchases can be restored with the same Google account',
-            '书架和笔记保存在设备上，根据设备的备份设置，可能只转移一部分或无法转移。重要文件请用分享功能另行保存。이리ERI 专业版的购买可以用同一 Google 账号恢复',
-            '本棚とメモは端末内に保存されるため、端末のバックアップ設定によっては一部しか移らない、または移らないことがあります。大切なファイルは共有機能で別に保管してください。이리ERI プロの購入は同じ Google アカウントで復元できます'),
-      ),
-      (
-        t('앱을 다시 설치하면 구매가 사라지나요?', 'Will I lose my purchase if I reinstall the app?', '重新安装应用后购买会消失吗？', 'アプリを再インストールすると購入は消えますか？'),
-        t('같은 Google 계정으로 Play 스토어에서 설치하면 복원돼요. 바로 복원되지 않으면 앱 설정 > 이리ERI 프로 > 구매 복원을 눌러 주세요',
-            'It is restored when you install from the Play Store with the same Google account. If it is not restored right away, tap App Settings > 이리ERI Pro > Restore Purchase',
-            '用同一 Google 账号从 Play 商店安装即可恢复。如果没有立即恢复，请点 应用设置 > 이리ERI 专业版 > 恢复购买',
-            '同じ Google アカウントで Play ストアからインストールすると復元されます。すぐに復元されない場合は アプリ設定 > 이리ERI プロ > 購入を復元 を押してください'),
+        t('서재와 메모는 기기 안에 저장돼서 기기 백업 설정에 따라 일부만 옮겨지거나 옮겨지지 않을 수 있어요. 중요한 파일은 공유 기능으로 따로 보관해 주세요',
+            'Your library and notes are stored on the device, so depending on your device backup settings they may be moved only partly or not at all. Please keep important files separately with the Share feature',
+            '书架和笔记保存在设备上，根据设备的备份设置，可能只转移一部分或无法转移。重要文件请用分享功能另行保存',
+            '本棚とメモは端末内に保存されるため、端末のバックアップ設定によっては一部しか移らない、または移らないことがあります。大切なファイルは共有機能で別に保管してください'),
       ),
       (
         t('잠금 비밀번호를 잊었어요', 'I forgot my lock password', '忘记了锁定密码', 'ロックのパスワードを忘れました'),

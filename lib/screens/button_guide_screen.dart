@@ -288,9 +288,9 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
           _Step('pro', tr('이리ERI 프로', '이리ERI Pro', '이리ERI 专业版', '이리ERI プロ'),
               Pro.freePeriod
                   ? tr('유료 기능과 무료 제공 기간(2027년 3월 1일까지)을 확인해요', 'See the paid features and the free period (until March 1, 2027)', '查看付费功能和免费提供期间（至2027年3月1日）', '有料機能と無料提供期間（2027年3月1日まで）を確認します')
-                  : tr('유료 기능을 사거나 무료 체험을 시작해요', 'Buy the paid features or start the free trial', '购买付费功能或开始免费试用', '有料機能を購入するか無料体験を始めます')),
+                  : tr('유료 기능과 업데이트 안내를 확인해요', 'See the paid features and how to update', '查看付费功能和更新说明', '有料機能とアップデートの案内を確認します')),
           _Step('hidepaid', tr('유료 기능 숨기기', 'Hide Paid Features', '隐藏付费功能', '有料機能を隠す'),
-              tr('사지 않은 유료 기능을 메뉴에서 숨겨요', 'Hides paid features you have not bought from the menus', '在菜单中隐藏未购买的付费功能', '購入していない有料機能をメニューから隠します')),
+              tr('쓸 수 없는 유료 기능을 메뉴에서 숨겨요', 'Hides paid features you cannot use from the menus', '在菜单中隐藏无法使用的付费功能', '使えない有料機能をメニューから隠します')),
           _Step('cache', tr('캐시 지우기', 'Clear Cache', '清除缓存', 'キャッシュを削除'),
               tr('다시 만들 수 있는 임시 파일만 지워요', 'Deletes only temporary files that can be rebuilt', '只删除可以重新生成的临时文件', '作り直せる一時ファイルだけを削除します')),
           _Step('data', tr('데이터 지우기', 'Clear Data', '清除数据', 'データを削除'),

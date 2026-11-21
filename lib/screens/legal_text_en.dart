@@ -19,7 +19,7 @@ const List<(String, List<String>)> termsEn = [
     'These Terms are posted in the help and settings screens of the App and take effect when a User installs, accesses or uses the App.',
     'The Operator may amend these Terms to the extent permitted by applicable law. When amending the Terms, the Operator will announce the effective date and the changes in the App and on the Google Play Store page from 7 days before the effective date.',
     'Changes that are unfavorable or material to Users will be announced from 30 days before the effective date and individually notified in a way Users can actually notice, such as a separate notice when the App is launched, and the Operator will obtain Users\' consent where required by applicable law.',
-    'A User who does not agree to the amended Terms may stop using and delete the App. If a User does not agree to an unfavorable change, the previous Terms continue to apply to Paid Features already purchased.',
+    'A User who does not agree to the amended Terms may stop using and delete the App. If a User does not agree to an unfavorable change, the previous Terms continue to apply to Paid Features already purchased after paid sales begin under Article 5.',
   ]),
   ('Article 4 (Services and Device Permissions)', [
     'The App lets Users open and view files in many formats on their device, including PDF, Hangul (HWP, HWPX), Word, PowerPoint, Excel, EPUB, TXT and image files, and provides tools such as notes, bookmarks, scanning and file merging.',
@@ -36,7 +36,7 @@ const List<(String, List<String>)> termsEn = [
   ('Article 6 (Intellectual Property and Third-Party Services)', [
     'All intellectual property rights in the App, including copyrights, trademarks, source code, user interface designs and logos, belong to the Operator or to those who have licensed them to the Operator.',
     'The Operator grants Users a limited, non-exclusive, non-transferable and revocable right to install and use the App on their own devices solely for lawful personal or internal business purposes.',
-    'The App uses third-party services (such as Google Play billing and Google ML Kit for text recognition) and open-source software libraries. These third-party services and open-source components are subject to their own terms and licenses, and Google ML Kit is not open source but an SDK subject to Google\'s separate terms of service. Licenses and notices can be found in the App under Settings > Help > Open Source Licenses.',
+    'The App uses third-party services (such as Google ML Kit for text recognition and, after paid sales begin, Google Play billing) and open-source software libraries. These third-party services and open-source components are subject to their own terms and licenses, and Google ML Kit is not open source but an SDK subject to Google\'s separate terms of service. Licenses and notices can be found in the App under Settings > Help > Open Source Licenses.',
   ]),
   ('Article 7 (User Files and Personal Information)', [
     'All rights and ownership in User Files belong to the User or the original rights holder.',
@@ -56,12 +56,12 @@ const List<(String, List<String>)> termsEn = [
   ]),
   ('Article 9 (Termination of Use)', [
     'Users may stop using the App at any time by deleting it from their device.',
-    'If a User violates these Terms, the Operator may, with prior notice where possible, revoke the right of use granted under Article 6 and restrict or terminate the use of Paid Features through Google Play. In this case, matters relating to Paid Features are handled in accordance with applicable law.',
+    'If a User violates these Terms, the Operator may, with prior notice where possible, revoke the right of use granted under Article 6 and, after paid sales begin under Article 5, restrict or terminate the use of Paid Features through Google Play. In this case, matters relating to Paid Features are handled in accordance with applicable law.',
   ]),
   ('Article 10 (Changes to and Discontinuation of the Service)', [
-    'The Operator may change or improve the App\'s features through App updates. Removing Paid Features already purchased or changing them to the disadvantage of Users follows the procedure in Article 3.',
+    'The Operator may change or improve the App\'s features through App updates. Removing Paid Features already purchased after paid sales begin under Article 5 or changing them to the disadvantage of Users follows the procedure in Article 3.',
     'If the Operator permanently discontinues the App, it will announce this in the App and on the Google Play Store page at least 30 days in advance.',
-    'Even after discontinuation, the Operator will make efforts so that purchased Paid Features can continue to be used in already installed copies of the App, and if use of Paid Features or restoration of purchases becomes impossible, the Operator will provide a refund or compensation in accordance with applicable law.',
+    'If the App is discontinued after paid sales begin under Article 5, even after discontinuation the Operator will make efforts so that purchased Paid Features can continue to be used in already installed copies of the App, and if use of Paid Features or restoration of purchases becomes impossible, the Operator will provide a refund or compensation in accordance with applicable law.',
   ]),
   ('Article 11 (Scope of Liability)', [
     'Because the App converts and displays documents on the device, fonts, formatting and layout may look different from the original program, and text recognition results may contain errors depending on the shooting conditions.',
@@ -154,7 +154,7 @@ const List<(String, List<String>)> privacyEn = [
     'The Operator does not store app usage data such as documents, notes and settings on its servers. Information received by inquiry email is handled according to Section 7. Data on the device is kept until the user deletes it, and what is deleted depends on how it is deleted.',
     '- Clear cache (App Settings): Deletes only temporary files such as page previews and tables of contents. The library, notes, bookmarks and settings remain.',
     '- Clear data (App Settings or device settings) or uninstalling the App: Permanently deletes the library list, document copies, PDFs created by merging or scanning, notes, bookmarks, settings and lock data in the App\'s private storage.',
-    '- Not deleted by the above: original files in shared storage such as the Download folder, copies sent to other apps with the Share feature, Google Account backups managed by Android, and the free trial start record in Section 5 (Google Play services Block Store, deleted when the device is reset). These must be deleted directly in the relevant app, file manager or the device\'s backup settings.',
+    '- Not deleted by the above: original files in shared storage such as the Download folder, copies sent to other apps with the Share feature, Google Account backups managed by Android, and the free trial start record in Section 5 (only after paid sales begin; Google Play services Block Store, deleted when the device is reset). These must be deleted directly in the relevant app, file manager or the device\'s backup settings.',
   ]),
   ('10. Children\'s Personal Information', [
     'The Operator does not collect personal information through the App. However, if a child under 14 provides personal information, such as through an email inquiry, the Operator obtains and verifies the consent of the legal representative in accordance with the Korean Personal Information Protection Act.',
@@ -169,7 +169,7 @@ const List<(String, List<String>)> privacyEn = [
   ('12. Changes to this Policy and Contact', [
     'If this policy changes, the effective date and the changes will be announced in the App and on the Google Play Store page from 7 days before the effective date (from 30 days before for changes that are material to users).',
     '- Operator: the developer of 이리ERI (individual)',
-    '- Privacy officer: $_blank',
+    '- Privacy officer: the developer of 이리ERI',
     '- Email: $_email',
     '- Public web address: $_blank',
   ]),
