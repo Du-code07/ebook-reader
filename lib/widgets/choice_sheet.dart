@@ -1,0 +1,359 @@
+import 'package:flutter/material.dart';
+import 'app_colors.dart';
+import 'pop_dialog.dart';
+import 'sheet_pull_to_close.dart';
+
+/// 고르기 창의 선택지
+class ChoiceOption<T> {
+  const ChoiceOption(this.value, this.label, {this.icon, this.subtitle});
+
+  final T value;
+  final String label;
+  final IconData? icon;
+
+  /// 이름 밑 작은 설명 (예: 앱 스타일 '작은 화면에 적합해요')
+  final String? subtitle;
+}
+
+/// 아래에서 올라오는 '하나 고르기' 창.
+/// 제목 + 선택지 목록(고른 줄은 강조, 오른쪽 동그라미) + 아래 '확인' 버튼.
+/// '확인'을 눌러야 고른 값이 돌아오고, 그냥 닫으면 null.
+/// [centered]면 화면 가운데에 뜨는 창으로 (앱 스타일 '심플')
+Future<T?> showChoiceSheet<T>({
+  required BuildContext context,
+  required String title,
+  required List<ChoiceOption<T>> options,
+  required T current,
+  String confirmLabel = '',
+  bool centered = false,
+}) async {
+  final r = await _showChoice<(T, bool)>(
+    context,
+    centered,
+    (ctx) => _ChoiceSheet<T>(title: title, options: options, current: current, confirmLabel: confirmLabel, centered: centered),
+  );
+  return r?.$1;
+}
+
+/// 고르기 창 띄우기: 밑에서 위로(기본) 또는 화면 가운데(심플)
+Future<R?> _showChoice<R>(BuildContext context, bool centered, WidgetBuilder builder) {
+  if (centered) {
+    return showPopDialog<R>(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        clipBehavior: Clip.antiAlias,
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 440), child: builder(ctx)),
+      ),
+    );
+  }
+  // 앱 설정 창처럼 아래로 끌어 내릴 수 있음 (안쪽 목록이 맨 위일 때)
+  return showPullSheet<R>(
+    context,
+    sheetAnimationStyle: Anim.off.value ? AnimationStyle.noAnimation : null,
+    builder: (ctx, scroll, physics) => pullSheetScope(scroll, physics, builder(ctx)),
+  );
+}
+
+/// 하나 고르기 + 아래에 켜기/끄기 스위치 한 줄이 함께 있는 창.
+/// '확인'을 누르면 (고른 값, 스위치 값)을 돌려준다. 그냥 닫으면 null.
+/// 고르기 창 아래에 붙는 스위치 하나 (켜고 끌 때마다 [onChanged]가 바로 불림)
+class SheetToggle {
+  const SheetToggle({required this.label, this.subtitle, this.icon, required this.value, required this.onChanged, this.onlyFor, this.defaultValue = false});
+
+  /// [초기화]를 누르면 돌아가는 값
+  final bool defaultValue;
+
+  final String label;
+  final String? subtitle;
+  final IconData? icon;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  /// 이 값이 골라져 있을 때만 보임 (예: '표지형'일 때만 '표지 그림 끄기')
+  final Object? onlyFor;
+}
+
+Future<(T, bool)?> showChoiceSheetWithToggle<T>({
+  required BuildContext context,
+  required String title,
+  required List<ChoiceOption<T>> options,
+  required T current,
+  required String toggleLabel,
+  String? toggleSubtitle,
+  IconData? toggleIcon,
+  required bool toggleValue,
+  String confirmLabel = '',
+  /// 고르거나 스위치를 바꿀 때마다 바로 불림 (확인 버튼 없이 바로 적용)
+  ValueChanged<(T, bool)>? onChanged,
+  /// 첫 스위치 아래에 더 붙일 스위치들
+  List<SheetToggle> moreToggles = const [],
+  bool centered = false,
+  /// 있으면 맨 아래 [완료] 대신 [초기화]: 누르면 고르기는 [resetTo], 스위치는 모두 기본값으로 (창은 열린 채)
+  String? resetLabel,
+  T? resetTo,
+}) {
+  return _showChoice<(T, bool)>(
+    context,
+    centered,
+    (ctx) => _ChoiceSheet<T>(
+      centered: centered,
+      title: title,
+      options: options,
+      current: current,
+      confirmLabel: confirmLabel,
+      toggleLabel: toggleLabel,
+      toggleSubtitle: toggleSubtitle,
+      toggleIcon: toggleIcon,
+      toggleValue: toggleValue,
+      onChanged: onChanged,
+      moreToggles: moreToggles,
+      resetLabel: resetLabel,
+      resetTo: resetTo,
+    ),
+  );
+}
+
+class _ChoiceSheet<T> extends StatefulWidget {
+  const _ChoiceSheet({
+    required this.title,
+    required this.options,
+    required this.current,
+    required this.confirmLabel,
+    this.toggleLabel,
+    this.toggleSubtitle,
+    this.toggleIcon,
+    this.toggleValue = false,
+    this.onChanged,
+    this.moreToggles = const [],
+    this.centered = false,
+    this.resetLabel,
+    this.resetTo,
+  });
+
+  final String? resetLabel;
+  final T? resetTo;
+
+  /// 가운데 창으로 띄웠는지 (아래 여백을 위아래 같게)
+  final bool centered;
+  final String title;
+  final List<ChoiceOption<T>> options;
+  final T current;
+  final String confirmLabel;
+  final String? toggleLabel;
+  final String? toggleSubtitle;
+  final IconData? toggleIcon;
+  final bool toggleValue;
+  final ValueChanged<(T, bool)>? onChanged;
+  final List<SheetToggle> moreToggles;
+
+  @override
+  State<_ChoiceSheet<T>> createState() => _ChoiceSheetState<T>();
+}
+
+class _ChoiceSheetState<T> extends State<_ChoiceSheet<T>> {
+  late T _selected = widget.current;
+  late bool _toggle = widget.toggleValue;
+  late final List<bool> _more = [for (final t in widget.moreToggles) t.value];
+
+  void _reset() {
+    setState(() {
+      if (widget.resetTo != null) _selected = widget.resetTo as T;
+      _toggle = false;
+    });
+    widget.onChanged?.call((_selected, _toggle));
+    for (int i = 0; i < widget.moreToggles.length; i++) {
+      final t = widget.moreToggles[i];
+      if (_more[i] != t.defaultValue) {
+        setState(() => _more[i] = t.defaultValue);
+        t.onChanged(t.defaultValue);
+      }
+    }
+  }
+
+  Widget _toggleRow(ColorScheme cs, {IconData? icon, required String label, String? subtitle, required bool value, required ValueChanged<bool> onChanged}) {
+    return InkWell(
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 16, 8),
+        child: Row(
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 19, color: cs.onSurfaceVariant),
+              const SizedBox(width: 14),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  if (subtitle != null) Text(subtitle, style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                ],
+              ),
+            ),
+            Switch(value: value, onChanged: onChanged),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SafeArea(
+      top: false,
+      bottom: !widget.centered,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 밑에서 올라오는 창: 맨 위 회색 막대 + 제목까지 간격 (가운데 창은 위 여백만)
+          if (widget.centered) const SizedBox(height: 22) else const SheetGrip(),
+          // 제목 (+ 오른쪽 위 초기화: 바탕 없이 글자색만 테마에 맞춤)
+          Padding(
+            padding: EdgeInsets.fromLTRB(24, 0, widget.resetLabel != null ? 12 : 24, 14),
+            child: Row(
+              children: [
+                Expanded(child: Text(widget.title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800))),
+                if (widget.resetLabel != null)
+                  TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: cs.onSurface, padding: const EdgeInsets.symmetric(horizontal: 10)),
+                    icon: const Icon(Icons.restart_alt_rounded, size: 20),
+                    onPressed: _reset,
+                    label: Text(widget.resetLabel!, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final opt in widget.options) ...[
+                    if (opt != widget.options.first) Divider(height: 1, indent: 24, endIndent: 24, color: cs.outlineVariant.withValues(alpha: 0.5)),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        // 누르면 바로 적용: 고르기만 있는 창은 바로 닫히고, 스위치가 함께 있는 창은 열린 채로 적용
+                        onTap: () {
+                          setState(() => _selected = opt.value);
+                          widget.onChanged?.call((_selected, _toggle));
+                          if (widget.toggleLabel == null) Navigator.pop(context, (_selected, _toggle));
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                          child: Row(
+                            children: [
+                              if (opt.icon != null) ...[
+                                Icon(opt.icon, size: 19, color: opt.value == _selected ? cs.onSurface : cs.onSurfaceVariant),
+                                const SizedBox(width: 14),
+                              ],
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      opt.label,
+                                      style: TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w600,
+                                        color: cs.onSurface,
+                                      ),
+                                    ),
+                                    if (opt.subtitle != null)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Text(opt.subtitle!, style: TextStyle(fontSize: 13.5, color: cs.onSurfaceVariant)),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              // 정렬 및 보기 창처럼: 고른 것은 채운 동그라미에 체크, 나머지는 빈 동그라미
+                              Icon(
+                                opt.value == _selected ? Icons.check_circle : Icons.circle_outlined,
+                                size: 23,
+                                color: opt.value == _selected ? AppColors.mark(context) : cs.outline,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 이 선택지를 골랐을 때만 쓰는 스위치는 그 선택지 바로 밑에 (예: 표지형 → 표지 그림 끄기)
+                    if (opt.value == _selected)
+                      for (int i = 0; i < widget.moreToggles.length; i++)
+                        if (widget.moreToggles[i].onlyFor != null && widget.moreToggles[i].onlyFor == opt.value)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 20),
+                            child: _toggleRow(
+                              cs,
+                              icon: widget.moreToggles[i].icon,
+                              label: widget.moreToggles[i].label,
+                              subtitle: widget.moreToggles[i].subtitle,
+                              value: _more[i],
+                              onChanged: (v) {
+                                setState(() => _more[i] = v);
+                                widget.moreToggles[i].onChanged(v);
+                              },
+                            ),
+                          ),
+                  ],
+                  if (widget.toggleLabel != null) ...[
+                    const Divider(height: 16, indent: 24, endIndent: 24),
+                    _toggleRow(
+                      cs,
+                      icon: widget.toggleIcon,
+                      label: widget.toggleLabel!,
+                      subtitle: widget.toggleSubtitle,
+                      value: _toggle,
+                      onChanged: (v) {
+                        setState(() => _toggle = v);
+                        widget.onChanged?.call((_selected, _toggle));
+                      },
+                    ),
+                    for (int i = 0; i < widget.moreToggles.length; i++)
+                      if (widget.moreToggles[i].onlyFor == null)
+                      _toggleRow(
+                        cs,
+                        icon: widget.moreToggles[i].icon,
+                        label: widget.moreToggles[i].label,
+                        subtitle: widget.moreToggles[i].subtitle,
+                        value: _more[i],
+                        onChanged: (v) {
+                          setState(() => _more[i] = v);
+                          widget.moreToggles[i].onChanged(v);
+                        },
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          // 스위치가 함께 있는 창은 맨 아래 '완료'로 닫음 (초기화가 있는 창은 오른쪽 위 초기화만, 바로 적용)
+          if (widget.resetLabel == null && widget.toggleLabel != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+              child: SizedBox(
+                height: 52,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: cs.onSurface,
+                    foregroundColor: cs.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: () => Navigator.pop(context, (_selected, _toggle)),
+                  child: Text(widget.confirmLabel.isNotEmpty ? widget.confirmLabel : MaterialLocalizations.of(context).okButtonLabel,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
+          SizedBox(height: widget.centered ? 18 : 16),
+        ],
+      ),
+    );
+  }
+}

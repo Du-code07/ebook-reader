@@ -1,0 +1,352 @@
+import 'dart:io';
+import 'dart:async';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import '../widgets/app_colors.dart';
+import '../widgets/morph_icons.dart';
+import '../widgets/pop_dialog.dart';
+
+import '../services/user_fonts.dart';
+import '../services/scan_folders.dart';
+
+typedef FontsTr = String Function(String ko, String en, String zh, String ja);
+
+/// 문서 글꼴: 한글·워드 문서에 쓰인 글꼴이 기기에 없을 때 대신 쓸 글꼴을 사용자가 직접 넣는 화면.
+/// 앱은 글꼴을 함께 배포하지 않으며, 넣은 글꼴 파일은 이 기기 안에서만 쓰인다.
+class UserFontsScreen extends StatefulWidget {
+  const UserFontsScreen({super.key, required this.t, this.category = 'doc'});
+  final FontsTr t;
+
+  /// 'doc'(한글·워드·PDF 문서) / 'app'(앱 글꼴) / 'epub'(EPUB 글꼴)
+  final String category;
+
+  @override
+  State<UserFontsScreen> createState() => _UserFontsScreenState();
+}
+
+class _UserFontsScreenState extends State<UserFontsScreen> {
+  List<UserFontEntry> _fonts = const [];
+  bool _busy = false;
+  String _active = ''; // 앱·EPUB: 지금 쓰는 글꼴 ('' = 기본 글꼴)
+  bool get _pickable => widget.category != 'doc';
+
+  FontsTr get _t => widget.t;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final all = await UserFonts.listOf(widget.category);
+    all.sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+    final active = _pickable ? await UserFonts.activeLabel(widget.category) : '';
+    if (mounted) {
+      setState(() {
+        _fonts = all;
+        _active = active;
+      });
+    }
+  }
+
+  /// 앱·EPUB: 넣어 둔 글꼴을 눌러 그 글꼴로 바꿈 ('' = 기본 글꼴)
+  Future<void> _use(String family) async {
+    if (family == _active) return;
+    await UserFonts.setActive(widget.category, family);
+    if (widget.category == 'app') await UserFonts.loadAppFont();
+    await _reload();
+    if (!mounted) return;
+    _snack(widget.category == 'epub'
+        ? _t('EPUB 글꼴을 바꿨어요\n책을 다시 열면 적용돼요', 'EPUB font changed\nReopen books to apply', '已更换EPUB字体，重新打开书籍后生效', 'EPUBのフォントを変更しました\n本を開き直すと反映されます')
+        : _t('앱 글꼴을 바꿨어요', 'App font changed', '已更换应用字体', 'アプリのフォントを変更しました'));
+  }
+
+  Future<void> _add() async {
+    if (_busy) return;
+    final res = await FilePicker.platform.pickFiles(allowMultiple: true, type: FileType.any);
+    final paths = [
+      for (final f in res?.files ?? const <PlatformFile>[])
+        if (f.path != null && RegExp(r'\.(ttf|otf|ttc)$', caseSensitive: false).hasMatch(f.name)) f.path!,
+    ];
+    if (res != null && paths.isEmpty && mounted) {
+      _snack(_t('글꼴 파일(.ttf, .otf, .ttc)을 골라 주세요', 'Please choose font files (.ttf, .otf, .ttc)', '请选择字体文件（.ttf、.otf、.ttc）', 'フォントファイル（.ttf・.otf・.ttc）を選んでください'));
+      return;
+    }
+    if (paths.isEmpty) return;
+    setState(() => _busy = true);
+    final n = await UserFonts.add(paths, category: widget.category);
+    if (widget.category == 'app') await UserFonts.loadAppFont();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await _reload();
+    _snack(n > 0
+        ? (widget.category == 'app'
+            ? _t('앱 글꼴을 바꿨어요', 'App font changed', '已更换应用字体', 'アプリのフォントを変更しました')
+            : widget.category == 'epub'
+                ? _t('EPUB 글꼴을 바꿨어요\n책을 다시 열면 적용돼요', 'EPUB font changed\nReopen books to apply', '已更换EPUB字体，重新打开书籍后生效', 'EPUBのフォントを変更しました\n本を開き直すと反映されます')
+                : _t('글꼴 $n개를 넣었어요\n문서를 다시 열면 적용돼요', 'Added $n font(s)\nReopen documents to apply', '已添加 $n 个字体\n重新打开文档后生效', '$n 個のフォントを追加しました\n文書を開き直すと反映されます'))
+        : _t('글꼴을 읽지 못했어요', 'Could not read the font', '无法读取字体', 'フォントを読み込めませんでした'));
+  }
+
+
+  /// 글꼴 찾기: 탐색할 폴더(앱 설정에서 등록, 파일 탐색과 같은 목록)에 있는 글꼴 파일을 찾아 자동으로 넣음
+  Future<void> _scan() async {
+    if (_busy) return;
+    final folders = await ScanFolders.ensure(context, _t);
+    if (folders.isEmpty || !mounted) return;
+    setState(() => _busy = true);
+    _snack(_t('폴더에서 글꼴을 찾는 중이에요…', 'Searching for fonts…', '正在查找字体…', 'フォントを探しています…'));
+    int n = 0;
+    try {
+      final found = await ScanFolders.scan(folders, const ['ttf', 'otf', 'ttc'], minSize: 1024, maxSize: 80 << 20);
+      if (found.isNotEmpty) {
+        // 앱 임시 폴더로 복사한 뒤 넣고, 복사본은 지움
+        final tmp = Directory('${(await getTemporaryDirectory()).path}/fontscan');
+        await tmp.create(recursive: true);
+        final paths = <String>[];
+        for (final f in found) {
+          final dest = '${tmp.path}/${f.name}';
+          if (await ScanFolders.copyTo(f, dest)) paths.add(dest);
+        }
+        if (paths.isNotEmpty) n = await UserFonts.add(paths, category: widget.category, activate: false, skipExisting: true);
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await _reload();
+    _snack(n > 0
+        ? _t('글꼴 $n개를 찾아 넣었어요', 'Found and added $n font(s)', '已找到并添加 $n 个字体', '$n 個のフォントを見つけて追加しました')
+        : _t('새로 넣을 글꼴을 찾지 못했어요', 'No new fonts found', '没有找到新的字体', '新しいフォントは見つかりませんでした'));
+  }
+
+  /// 초기화: 이 화면에 넣어 둔 글꼴을 모두 빼고 기본 글꼴로 되돌림 (먼저 물어봄)
+  Future<void> _resetAll() async {
+    final ok = await showPopDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_t('글꼴 초기화', 'Reset fonts', '重置字体', 'フォントをリセット')),
+        content: Text(_t('넣어 둔 글꼴을 모두 빼고 기본 글꼴로 되돌릴까요?\n기기에 있는 원래 글꼴 파일은 지워지지 않아요',
+            'Remove all added fonts and go back to the default font?\nThe original font files on your device are not deleted',
+            '要移除所有已添加的字体并恢复默认字体吗？\n设备中的原字体文件不会被删除',
+            '追加したフォントをすべて外して既定のフォントに戻しますか？\n端末にある元のフォントファイルは削除されません')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('취소', 'Cancel', '取消', 'キャンセル'))),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: Text(_t('초기화', 'Reset', '重置', 'リセット'))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    for (final family in {for (final e in _fonts) UserFonts.familyOf(e)}) {
+      await UserFonts.removeFamily(widget.category, family);
+    }
+    if (_pickable) await UserFonts.setActive(widget.category, '');
+    if (widget.category == 'app') await UserFonts.loadAppFont();
+    await _reload();
+    if (mounted) _snack(_t('기본 글꼴로 되돌렸어요', 'Reset to the default font', '已恢复默认字体', '既定のフォントに戻しました'));
+  }
+
+  Future<void> _remove(UserFontEntry e) async {
+    await UserFonts.remove(e);
+    if (widget.category == 'app') await UserFonts.loadAppFont();
+    await _reload();
+  }
+
+  Future<void> _removeFamily(String family) async {
+    await UserFonts.removeFamily(widget.category, family);
+    if (widget.category == 'app') await UserFonts.loadAppFont();
+    await _reload();
+  }
+
+  /// 한글·워드: 따로 넣지 않아도 앱에 들어 있어 바로 보이는 글꼴
+  List<(String, String)> get _builtIn => [
+        ('나눔고딕 · 나눔명조 · 나눔고딕코딩', _t('원래 글꼴 그대로', 'Shown as the original font', '按原字体显示', '元のフォントのまま')),
+        ('고운바탕 · 고운돋움', _t('원래 글꼴 그대로', 'Shown as the original font', '按原字体显示', '元のフォントのまま')),
+        ('Arial · Times New Roman · Courier New', _t('글자 폭이 같은 글꼴로', 'Replaced by free fonts of the same widths', '换成字宽相同的免费字体', '文字幅が同じ無料フォントで')),
+        ('Calibri · Cambria', _t('글자 폭이 같은 글꼴로', 'Replaced by free fonts of the same widths', '换成字宽相同的免费字体', '文字幅が同じ無料フォントで')),
+        (_t('그 밖의 한글 글꼴 (맑은 고딕, 바탕, 굴림, 돋움 등)', 'Other Korean fonts (Malgun Gothic, Batang, Gulim, Dotum, …)', '其他韩文字体（Malgun Gothic、Batang、Gulim、Dotum 等）', 'その他の韓国語フォント（Malgun Gothic・Batang・Gulim・Dotum など）'),
+            _t('본고딕·본명조로 대신 보여 줘요 (글꼴을 넣으면 그 글꼴로)', 'Shown in Noto Sans/Serif KR (or the font you add)', '用 Noto Sans/Serif KR 代替显示（添加字体后使用该字体）', 'Noto Sans/Serif KR で代わりに表示（追加するとそのフォントで）')),
+      ];
+
+  void _snack(String text) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(text), duration: const Duration(milliseconds: 1800)));
+  }
+
+  String get _title => switch (widget.category) {
+        'app' => _t('앱 글꼴', 'App Font', '应用字体', 'アプリのフォント'),
+        'epub' => _t('EPUB 글꼴', 'EPUB Font', 'EPUB字体', 'EPUBフォント'),
+        _ => _t('한글·워드 글꼴', 'HWP·Word Fonts', 'HWP·Word 字体', 'HWP・Wordフォント'),
+      };
+
+  String get _description => switch (widget.category) {
+        'app' => _t('글꼴 파일(.ttf, .otf)을 여러 개 넣어 두고, 누르면 앱의 메뉴·목록·설정 화면이 그 글꼴로 바뀌어요\n같은 글꼴의 보통·굵게 파일을 함께 넣으면 굵은 글씨도 그 글꼴로 보여 줘요',
+            'Add several font files (.ttf, .otf) and tap one to use it for the app\'s menus, lists and settings\nAdd the regular and bold files of a font together to show bold text in it too',
+            '可添加多个字体文件（.ttf、.otf），点击即可用于应用菜单、列表和设置\n同时添加常规和粗体文件，粗体文字也会使用该字体',
+            'フォントファイル（.ttf・.otf）を複数追加し、タップするとアプリのメニュー・一覧・設定がそのフォントになります\n標準と太字のファイルを一緒に追加すると太字もそのフォントで表示します'),
+        'epub' => _t('글꼴 파일을 여러 개 넣어 두고, 누르면 EPUB 책 본문이 그 글꼴로 바뀌어요\n\'기본 글꼴\'은 책에 들어 있는 원래 글꼴이에요',
+            'Add several font files and tap one to show EPUB book text in it\n\'Default font\' uses the book\'s own fonts',
+            '可添加多个字体文件，点击即可用该字体显示EPUB正文\n“默认字体”使用书中自带的字体',
+            'フォントファイルを複数追加し、タップするとEPUB本文がそのフォントになります\n「既定のフォント」は本に含まれる元のフォントです'),
+        _ => _t(
+            '한글·워드 문서에 쓰인 글꼴(예: 맑은 고딕, 함초롬바탕)이 휴대폰에 없으면 다른 글꼴로 바뀌어 글과 사진 배치가 밀릴 수 있어요. '
+                '가지고 있는 글꼴 파일을 넣으면 같은 이름의 글꼴 대신 그 파일로 보여 줘요\n넣은 글꼴은 이 기기 안에서만 쓰여요\n'
+                'Arial·Times New Roman·Courier New·Calibri·Cambria는 글자 폭이 같은 글꼴로 자동으로 바꿔 보여 줘요',
+            'If a font used in a document (e.g. Malgun Gothic) is missing on this phone, another font is used and text or pictures may shift. '
+                'Add font files you own and they will be used for fonts with the same name. Added fonts stay on this device.\n'
+                'Arial, Times New Roman, Courier New, Calibri and Cambria are automatically replaced with free fonts of the same widths.',
+            '如果文档中使用的字体（如 Malgun Gothic）在手机上没有，会换成其他字体，文字和图片位置可能偏移。添加您拥有的字体文件后，将用于同名字体。添加的字体只在本机使用。\n'
+                'Arial、Times New Roman、Courier New、Calibri、Cambria 会自动换成字宽相同的免费字体。',
+            '文書で使われたフォント（例: Malgun Gothic）が端末にないと別のフォントになり、文字や画像の配置がずれることがあります。お持ちのフォントファイルを追加すると、同じ名前のフォントの代わりに使います。追加したフォントはこの端末内だけで使われます。\n'
+                'Arial・Times New Roman・Courier New・Calibri・Cambria は文字幅が同じ無料フォントに自動で置き換えます。'),
+      };
+
+  Widget _sectionLabel(ColorScheme cs, String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
+        child: Text(text, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: cs.onSurfaceVariant)),
+      );
+
+  /// 앱·EPUB 글꼴 한 줄: 누르면 그 글꼴로 바꿈 (지금 쓰는 글꼴은 체크 표시)
+  Widget _fontChoice(ColorScheme cs, String family, String title, String subtitle, {VoidCallback? onDelete}) {
+    final bool on = _active == family;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
+      leading: Icon(on ? Icons.radio_button_checked : Icons.radio_button_off, color: on ? AppColors.mark(context) : cs.onSurfaceVariant),
+      title: Text(title, style: TextStyle(fontWeight: on ? FontWeight.w800 : FontWeight.w600)),
+      subtitle: subtitle.isEmpty ? null : Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+      selected: on,
+      onTap: () => _use(family),
+      trailing: onDelete == null
+          ? null
+          : IconButton(
+              icon: const TrashLidIcon(open: false),
+              tooltip: _t('삭제', 'Delete', '删除', '削除'),
+              onPressed: onDelete,
+            ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_title),
+        actions: [
+          // 초기화: 넣어 둔 글꼴을 모두 빼고 기본 글꼴로
+          TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: cs.onSurface),
+            onPressed: _busy ? null : _resetAll,
+            icon: const Icon(Icons.restart_alt_rounded, size: 20),
+            label: Text(_t('초기화', 'Reset', '重置', 'リセット'), style: const TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 6),
+        ],
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // 글꼴 찾기: 탐색할 폴더에 있는 글꼴을 찾아 한꺼번에 넣음
+          FloatingActionButton.extended(
+            heroTag: 'font_scan',
+            elevation: 2,
+            backgroundColor: cs.surfaceContainerHighest,
+            foregroundColor: cs.onSurface,
+            onPressed: _busy ? null : _scan,
+            icon: const Icon(Icons.manage_search),
+            // 회색 바탕 위 진한 글씨라 대표 색 단추용 그림자를 끔 (그림자 때문에 글씨가 번져 보였음)
+            label: Text(_t('글꼴 찾기', 'Find Fonts', '查找字体', 'フォント検索'), style: const TextStyle(fontWeight: FontWeight.w700, shadows: [])),
+          ),
+          const SizedBox(height: 10),
+          FloatingActionButton.extended(
+            heroTag: 'font_add',
+            onPressed: _busy ? null : _add,
+            icon: _busy
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.add),
+            label: Text(_t('글꼴 추가', 'Add Font', '添加字体', 'フォント追加'), style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.only(bottom: 160),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+            child: Text(
+              _description,
+              style: TextStyle(fontSize: 14, height: 1.45, color: cs.onSurfaceVariant),
+            ),
+          ),
+          if (widget.category == 'doc') ...[
+            _sectionLabel(cs, _t('지금 볼 수 있는 글꼴', 'Fonts available now', '目前可显示的字体', '今表示できるフォント')),
+            for (final (name, note) in _builtIn)
+              ListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                leading: Icon(Icons.check_circle_outline, color: AppColors.mark(context), size: 20),
+                title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text(note),
+              ),
+            _sectionLabel(cs, _t('내가 넣은 글꼴', 'Fonts you added', '我添加的字体', '追加したフォント')),
+          ],
+          if (_pickable) ...[
+            // 앱·EPUB: 눌러서 바로 그 글꼴로
+            _fontChoice(cs, '', _t('기본 글꼴', 'Default font', '默认字体', '既定のフォント'),
+                widget.category == 'epub'
+                    ? _t('책에 들어 있는 원래 글꼴', 'The book\'s own fonts', '书中自带的字体', '本に含まれる元のフォント')
+                    : _t('앱 기본 글꼴', 'App default font', '应用默认字体', 'アプリの既定フォント')),
+            for (final family in {for (final e in _fonts) UserFonts.familyOf(e)})
+              _fontChoice(
+                cs,
+                family,
+                family,
+                [
+                  for (final e in _fonts)
+                    if (UserFonts.familyOf(e) == family)
+                      [e.weight >= 700 ? _t('굵게', 'Bold', '粗体', '太字') : _t('보통', 'Regular', '常规', '標準'), if (e.italic) _t('기울임', 'Italic', '斜体', '斜体')].join(' '),
+                ].join(' · '),
+                onDelete: () => _removeFamily(family),
+              ),
+          ] else ...[
+          if (_fonts.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(32),
+              child: Center(
+                child: Text(_t('넣은 글꼴이 없어요', 'No fonts added', '尚未添加字体', '追加したフォントはありません'),
+                    style: TextStyle(color: cs.onSurfaceVariant)),
+              ),
+            ),
+          for (final e in _fonts)
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
+              leading: Icon(Icons.font_download_outlined, color: cs.onSurface),
+              title: Text(e.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                [
+                  e.names.join(', '),
+                  if (e.weight >= 700) _t('굵게', 'Bold', '粗体', '太字'),
+                  if (e.italic) _t('기울임', 'Italic', '斜体', '斜体'),
+                ].join(' · '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: IconButton(
+                icon: const TrashLidIcon(open: false),
+                tooltip: _t('삭제', 'Delete', '删除', '削除'),
+                onPressed: () => _remove(e),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
