@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -563,17 +562,8 @@ void _paintTape(Canvas canvas, List<Offset> pts, Path body, Color color, double 
     shape(Paint()..color = color);
     return;
   }
-  // 숨긴 테이프: 테두리 = 모양에서 안쪽(깎아 낸 모양)을 뺀 것, 안쪽은 아주 옅게
-  final double border = math.max(1.6, width * 0.09);
-  canvas.saveLayer(bounds, Paint());
-  shape(Paint()..color = color.withValues(alpha: 1));
-  canvas.saveLayer(bounds, Paint()
-    ..blendMode = BlendMode.dstOut
-    ..imageFilter = ui.ImageFilter.erode(radiusX: border, radiusY: border));
-  shape(Paint()..color = const Color(0xFF000000));
-  canvas.restore();
-  canvas.restore();
-  canvas.saveLayer(bounds, Paint()..color = const Color(0x24000000));
+  // 뗀 스티커: 테두리 없이 그 색으로 반투명하게만 (겹치는 끝부분이 진해지지 않게 한 층으로)
+  canvas.saveLayer(bounds, Paint()..color = const Color(0x4D000000));
   shape(Paint()..color = color.withValues(alpha: 1));
   canvas.restore();
 }
@@ -886,7 +876,7 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
     final (min, max, step) = _range;
     final String title = switch (widget.kind) {
       'hl' => tr('형광펜', 'Highlighter', '荧光笔', '蛍光ペン'),
-      'tape' => tr('테이프', 'Tape', '胶带', 'テープ'),
+      'tape' => tr('스티커', 'Sticker', '贴纸', 'ステッカー'),
       _ => tr('펜', 'Pen', '笔', 'ペン'),
     };
     final List<Color> colors = _baseColors;
@@ -957,7 +947,7 @@ class _MemoToolPanelState extends State<_MemoToolPanel> {
               ),
               // 테이프: 숨기기 (테두리만 남기고 안쪽은 비쳐 보이게)
               if (widget.kind == 'tape')
-                _toggle(tr('테이프 숨기기', 'Hide Tape', '隐藏胶带', 'テープを隠す'), _s.tapeHidden, (v) => _s.tapeHidden = v),
+                _toggle(tr('스티커 떼기', 'Peel Stickers', '揭下贴纸', 'ステッカーをはがす'), _s.tapeHidden, (v) => _s.tapeHidden = v),
               const SizedBox(height: 12),
               Text(tr('색상', 'Color', '颜色', '色'), style: TextStyle(color: _fg2(context), fontSize: 13)),
               const SizedBox(height: 10),
@@ -1112,7 +1102,7 @@ class _EraserPanelState extends State<_EraserPanel> {
               const SizedBox(height: 6),
               toggle(MemoToolIcon(kind: 'hl', color: _fg(context), accent: _s.hlColor, size: 22), tr('형광펜만 지우기', 'Erase Highlighter Only', '仅擦除荧光笔', '蛍光ペンだけ消す'), _s.eraseOnlyHl,
                   (v) => _s.eraseOnlyHl = v),
-              toggle(MemoToolIcon(kind: 'tape', color: _fg(context), accent: _s.tapeColor, size: 22), tr('테이프만 지우기', 'Erase Tape Only', '仅擦除胶带', 'テープだけ消す'), _s.eraseOnlyTape,
+              toggle(MemoToolIcon(kind: 'tape', color: _fg(context), accent: _s.tapeColor, size: 22), tr('스티커만 지우기', 'Erase Stickers Only', '仅擦除贴纸', 'ステッカーだけ消す'), _s.eraseOnlyTape,
                   (v) => _s.eraseOnlyTape = v),
               const SizedBox(height: 8),
               Divider(color: _fg(context).withValues(alpha: 0.12), height: 1),
@@ -1121,7 +1111,7 @@ class _EraserPanelState extends State<_EraserPanel> {
               Row(children: [
                 Expanded(child: clear(tr('선 모두 지우기', 'Clear All Lines', '清除全部线条', '線をすべて消す'), widget.onClearLines)),
                 Container(width: 1, height: 22, color: _fg(context).withValues(alpha: 0.12)),
-                Expanded(child: clear(tr('테이프 모두 지우기', 'Clear All Tape', '清除全部胶带', 'テープをすべて消す'), widget.onClearTapes)),
+                Expanded(child: clear(tr('스티커 모두 지우기', 'Clear All Stickers', '清除全部贴纸', 'ステッカーをすべて消す'), widget.onClearTapes)),
               ]),
             ],
           ),

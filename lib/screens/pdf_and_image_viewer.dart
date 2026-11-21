@@ -1375,7 +1375,7 @@ class _UniversalMediaReaderScreenState extends State<UniversalMediaReaderScreen>
     return [
       tool('pen', _tr('펜 (한 번 더 누르면 설정)', 'Pen (tap again: settings)', '笔 (再点一次: 设置)', 'ペン (もう一度タップ: 設定)')),
       tool('hl', _tr('형광펜 (한 번 더 누르면 설정)', 'Highlighter (tap again: settings)', '荧光笔 (再点一次: 设置)', '蛍光ペン (もう一度タップ: 設定)')),
-      tool('tape', _tr('테이프 (한 번 더 누르면 설정)', 'Tape (tap again: settings)', '胶带 (再点一次: 设置)', 'テープ (もう一度タップ: 設定)')),
+      tool('tape', _tr('스티커 (한 번 더 누르면 설정)', 'Sticker (tap again: settings)', '贴纸 (再点一次: 设置)', 'ステッカー (もう一度タップ: 設定)')),
       MemoToolButton(
         iconBuilder: (c) => EraserIcon(color: c),
         label: _tr('지우개 (한 번 더 누르면 설정)', 'Eraser (tap again: settings)', '橡皮擦 (再点一次: 设置)', '消しゴム (もう一度タップ: 設定)'),

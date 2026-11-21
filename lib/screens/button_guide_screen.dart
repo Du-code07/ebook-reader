@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../services/pro.dart';
 import '../services/storage_service.dart';
@@ -143,14 +144,62 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
     final box = ctx.findRenderObject() as RenderBox?;
     final stage = _stageKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || stage == null || !box.hasSize) return;
-    final Offset tl = stage.globalToLocal(box.localToGlobal(Offset.zero));
-    final Offset br = stage.globalToLocal(box.localToGlobal(box.size.bottomRight(Offset.zero)));
-    final Rect r = Rect.fromPoints(tl, br).inflate(6);
+    final Rect r = _spotRect(box, stage);
     setState(() {
       _from = _hole ?? r;
       _to = r;
     });
     _move.forward(from: 0);
+  }
+
+  /// 비출 자리: 작은 단추는 그림(아이콘·글자) 크기에 맞춘 네모로 그림이 정가운데 오게,
+  /// 넓은 자리(목록·쪽 등)는 그 자리 그대로. 어느 쪽이든 화면 밖으로 나가 잘리지 않게 맞춤
+  Rect _spotRect(RenderBox box, RenderBox stage) {
+    Rect toStage(RenderBox b) => MatrixUtils.transformRect(b.getTransformTo(stage), Offset.zero & b.size);
+    final Rect whole = toStage(box);
+    final Rect bounds = (Offset.zero & stage.size).deflate(6);
+    Rect spot;
+    if (whole.longestSide <= 96) {
+      // 단추 안에서 눈에 보이는 그림만 모음. 선택 표시 선처럼 가는 장식은 가운데를 정할 때 빼고, 비추는 네모 안에는 들어가게
+      Rect? art;
+      final List<Rect> thin = [];
+      void visit(RenderObject o) {
+        if (o is RenderBox && o.hasSize && o.size.shortestSide > 0) {
+          final bool painted = o is RenderDecoratedBox && o.decoration is BoxDecoration &&
+              ((o.decoration as BoxDecoration).color != null || (o.decoration as BoxDecoration).border != null);
+          if (painted && o.size.shortestSide < 12) thin.add(toStage(o));
+          final bool decorated = painted && o.size.shortestSide >= 12;
+          if (o is RenderParagraph || o is RenderImage || decorated || (o is RenderCustomPaint && (o.painter != null || o.foregroundPainter != null))) {
+            final Rect rr = toStage(o);
+            art = art == null ? rr : art!.expandToInclude(rr);
+            if (!decorated) return;
+          }
+        }
+        o.visitChildren(visit);
+      }
+      visit(box);
+      final Rect a = art ?? whole;
+      final double ratio = a.width / math.max(1.0, a.height);
+      spot = ratio >= 0.5 && ratio <= 2
+          ? Rect.fromCenter(center: a.center, width: math.max(a.width, a.height) + 16, height: math.max(a.width, a.height) + 16)
+          : a.inflate(8);
+      for (final t in thin) {
+        final double hx = math.max(spot.width / 2, math.max((t.left - spot.center.dx).abs(), (t.right - spot.center.dx).abs()) + 5);
+        final double hy = math.max(spot.height / 2, math.max((t.top - spot.center.dy).abs(), (t.bottom - spot.center.dy).abs()) + 5);
+        spot = Rect.fromCenter(center: spot.center, width: hx * 2, height: hy * 2);
+      }
+      // 화면 끝에 닿으면 가운데는 그대로 두고 크기만 줄여 맞춤 (그래도 넘치면 안으로 밀기)
+      final Offset c = spot.center;
+      final double hw = math.max(math.min(spot.width / 2, math.min(c.dx - bounds.left, bounds.right - c.dx)), a.width / 2 + 3);
+      final double hh = math.max(math.min(spot.height / 2, math.min(c.dy - bounds.top, bounds.bottom - c.dy)), a.height / 2 + 3);
+      spot = Rect.fromCenter(center: c, width: hw * 2, height: hh * 2);
+      final double dx = spot.left < bounds.left ? bounds.left - spot.left : (spot.right > bounds.right ? bounds.right - spot.right : 0);
+      final double dy = spot.top < bounds.top ? bounds.top - spot.top : (spot.bottom > bounds.bottom ? bounds.bottom - spot.bottom : 0);
+      spot = spot.shift(Offset(dx, dy));
+    } else {
+      spot = whole.inflate(6).intersect(bounds);
+    }
+    return spot;
   }
 
   void _go(int d) {
@@ -256,10 +305,10 @@ class _GuideRunnerState extends State<_GuideRunner> with TickerProviderStateMixi
               tr('펜으로 써요\n고른 도구는 아이콘 왼쪽에 시그니처 색 선으로 표시돼요\n한 번 더 누르면 굵기·색상·직선 자동 보정을 정해요', 'Write with the pen\nThe chosen tool is marked with a signature-color line to the left of its icon\nTap again to set thickness, color and auto-straighten', '用笔书写\n选中的工具会在图标左侧显示主题色竖线\n再点一次可设置粗细·颜色·自动拉直', 'ペンで書きます\n選んだツールはアイコンの左にシグネチャーカラーの線で示されます\nもう一度タップで太さ・色・直線補正を設定します')),
           _Step('hl', tr('형광펜', 'Highlighter', '荧光笔', '蛍光ペン'),
               tr('글자 위에 비치게 칠해요\n한 번 더 누르면 굵기·투명도·색상·직선 자동 보정을 정해요', 'Color over text so it shows through\nTap again to set thickness, opacity, color and auto-straighten', '在文字上涂上透明的颜色\n再点一次可设置粗细·不透明度·颜色·自动拉直', '文字の上に透けるように塗ります\nもう一度タップで太さ・不透明度・色・直線補正を設定します')),
-          _Step('tape', tr('테이프', 'Tape', '胶带', 'テープ'),
-              tr('가리고 싶은 곳에 붙여요\n한 번 더 누르면 굵기·색상을 정하고, 테이프 숨기기로 테두리만 남겨 아래를 볼 수 있어요', 'Stick it over what you want to cover\nTap again to set thickness and color, or hide tape to leave only its outline', '贴在想遮住的地方\n再点一次可设置粗细·颜色，隐藏胶带后只留边框，可看到下面的内容', '隠したいところに貼ります\nもう一度タップで太さ・色を設定し、テープを隠すと枠だけ残して下が見えます')),
+          _Step('tape', tr('스티커', 'Sticker', '贴纸', 'ステッカー'),
+              tr('가리고 싶은 곳에 붙여요\n한 번 더 누르면 굵기·색상을 정하고, 스티커 떼기로 반투명하게 만들어 아래를 볼 수 있어요', 'Stick it over what you want to cover\nTap again to set thickness and color, or peel stickers to make them see-through', '贴在想遮住的地方\n再点一次可设置粗细·颜色，揭下贴纸后变为半透明，可看到下面的内容', '隠したいところに貼ります\nもう一度タップで太さ・色を設定し、ステッカーをはがすと半透明になって下が見えます')),
           _Step('eraser', tr('지우개', 'Eraser', '橡皮擦', '消しゴム'),
-              tr('문질러 지워요\n한 번 더 누르면 지우개 종류, 형광펜만·테이프만 지우기를 고르고 선·테이프를 모두 지울 수 있어요', 'Rub to erase\nTap again to choose the eraser type, erase only highlighter or tape, or clear all lines or tape', '擦拭即可擦除\n再点一次可选择橡皮擦类型、仅擦除荧光笔或胶带，或清除全部线条·胶带', 'こすって消します\nもう一度タップで消しゴムの種類や蛍光ペンだけ・テープだけ消すを選び、線・テープをすべて消せます')),
+              tr('문질러 지워요\n한 번 더 누르면 지우개 종류, 형광펜만·스티커만 지우기를 고르고 선·스티커를 모두 지울 수 있어요', 'Rub to erase\nTap again to choose the eraser type, erase only highlighter or stickers, or clear all lines or stickers', '擦拭即可擦除\n再点一次可选择橡皮擦类型、仅擦除荧光笔或贴纸，或清除全部线条·贴纸', 'こすって消します\nもう一度タップで消しゴムの種類や蛍光ペンだけ・ステッカーだけ消すを選び、線・ステッカーをすべて消せます')),
           _Step('undo', tr('되돌리기', 'Undo', '撤销', '元に戻す'), tr('방금 한 것을 되돌려요', 'Undo the last change', '撤销上一步', '直前の操作を元に戻します')),
           _Step('redo', tr('다시 실행', 'Redo', '重做', 'やり直し'), tr('되돌린 것을 다시 해요', 'Redo what you undid', '恢复已撤销的操作', '元に戻した操作をやり直します')),
           _Step('done', tr('완료', 'Done', '完成', '完了'),
