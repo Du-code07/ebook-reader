@@ -2640,6 +2640,8 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
       // 문구 색은 바꾸지 않음
       Widget item({Key? key, required Widget icon, String? label, required VoidCallback onTap, bool selected = false, double? height}) {
         final Color fg = cs.onSurface;
+        final bool withLabel = label != null && showLabel;
+        final double cellH = height ?? (label == null ? 48 : itemH);
         return Padding(
           key: key,
           padding: const EdgeInsets.symmetric(vertical: 2),
@@ -2650,27 +2652,25 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
             child: InkWell(
               onTap: onTap,
               child: SizedBox(
-                height: height ?? (label == null ? 48 : itemH),
+                height: cellH,
                 child: Row(
                   children: [
+                    // 선: 아이콘과 문구를 합친 높이의 가운데에 (칸 높이 안에서 잘리지 않게, 너무 길지 않게)
+                    AnimatedContainer(
+                      duration: Anim.ms(160),
+                      width: 4,
+                      height: selected ? (withLabel ? (cellH - 12).clamp(24.0, 34.0).toDouble() : 24) : 0,
+                      decoration: BoxDecoration(color: mark, borderRadius: BorderRadius.circular(2)),
+                    ),
                     Expanded(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           SizedBox(
                             height: 26,
-                            child: Row(children: [
-                              AnimatedContainer(
-                                duration: Anim.ms(160),
-                                width: 4,
-                                height: selected ? 24 : 0,
-                                decoration: BoxDecoration(color: mark, borderRadius: BorderRadius.circular(2)),
-                              ),
-                              Expanded(child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg), child: icon))),
-                              const SizedBox(width: 4),
-                            ]),
+                            child: Center(child: IconTheme.merge(data: IconThemeData(size: 24, color: fg), child: icon)),
                           ),
-                          if (label != null && showLabel) ...[
+                          if (withLabel) ...[
                             const SizedBox(height: 3),
                             Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 2),
@@ -2684,6 +2684,7 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
                         ],
                       ),
                     ),
+                    const SizedBox(width: 4),
                   ],
                 ),
               ),
@@ -2699,12 +2700,13 @@ class _BookshelfScreenState extends State<BookshelfScreen> with TickerProviderSt
           );
 
       final bool pinnedNow = !_favoritesOnly && pins.contains(_selectedGroup);
+      // 맨 위 칸 (누르면 그룹 목록): 꺼내 두지 않은 그룹을 보고 있으면 그 그룹의 아이콘·이름으로, 아니면 [내 서재]
+      final String topGroup = pins.contains(_selectedGroup) || !_groups.contains(_selectedGroup) ? '전체' : _selectedGroup;
       final top = [
         item(
           key: _allGroupChipKey,
-          // 맨 위는 늘 [내 서재] (누르면 그룹 목록). 꺼내 두지 않은 그룹을 보고 있을 때 이 칸에 표시
-          icon: _groupLeading('전체', 22),
-          label: _localizeGroupName('전체'),
+          icon: _groupLeading(topGroup, 22),
+          label: _localizeGroupName(topGroup),
           // 꺼내 둔 그룹을 보고 있으면 그 그룹 칸이 표시됨
           selected: !_favoritesOnly && !pinnedNow,
           onTap: () {

@@ -140,8 +140,9 @@ class FavoritesIcon extends StatelessWidget {
     return SizedBox.square(
       dimension: size,
       child: Stack(alignment: Alignment.center, children: [
-        Icon(Icons.bookmarks, size: size, color: const Color(0xFFFFC107)),
-        Icon(Icons.bookmarks_outlined, size: size, color: const Color(0xFFB07800)),
+        // 책갈피 하나 (뒤에 겹친 ㄱ자 선 없이)
+        Icon(Icons.bookmark, size: size, color: const Color(0xFFFFC107)),
+        Icon(Icons.bookmark_border, size: size, color: const Color(0xFFB07800)),
       ]),
     );
   }
