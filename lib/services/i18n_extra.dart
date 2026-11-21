@@ -483,7 +483,6 @@ class I18nExtra {
     'Choose the app language': ['Choisissez la langue de l\'app', 'Выберите язык приложения', 'Elige el idioma de la app'],
     'You can change it later in App Settings': ['Vous pourrez la changer plus tard dans les réglages', 'Это можно изменить позже в настройках', 'Puedes cambiarlo más tarde en los ajustes'],
     'Continue': ['Continuer', 'Продолжить', 'Continuar'],
-    'Choose the app theme': ['Choisissez le thème de l\'app', 'Выберите тему приложения', 'Elige el tema de la app'],
     'Timed out while displaying the document': ['Délai dépassé lors de l\'affichage du document', 'Время ожидания показа документа истекло', 'Se agotó el tiempo al mostrar el documento'],
     'Could not display the document': ['Impossible d\'afficher le document', 'Не удалось показать документ', 'No se pudo mostrar el documento'],
     'Scroll cannot be combined with Tap or Slide\nTap and Slide can be used together': ['Le défilement ne peut pas être combiné avec Toucher ou Glisser\nToucher et Glisser peuvent être utilisés ensemble', 'Прокрутку нельзя сочетать с касанием или листанием\nКасание и листание можно использовать вместе', 'El desplazamiento no se puede combinar con Toque ni Deslizar\nToque y Deslizar se pueden usar juntos'],
